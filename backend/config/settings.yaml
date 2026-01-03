@@ -1,0 +1,53 @@
+force_rewrite: true
+coingecko_api_keys:
+  - "CG-Ydr9kjJkbYfWrrzBXCwQ4ksz"
+  - "CG-2RyujkgD3R6kKz4oaKmJLyVr"
+base_currency: "EUR"
+
+source_base: "data/input"
+export_base: "data/output"
+database_path: "data/trades.db"
+
+log_level_root: "WARNING"
+log_level_trade_exporter: "DEBUG"
+
+# Grouping Engine Configuration
+grouping_engine:
+  # Time windows (in seconds)
+  transfer_time_window: 300 # 5 minutes - max time between outflow and inflow for transfers
+  swap_time_window: 60 # 1 minute - max time between legs of a swap
+  bridge_time_window: 60 # 1 minute - max time for cross-chain bridge transactions
+
+  # Tolerances (as decimals, e.g., 0.05 = 5%)
+  quantity_tolerance: 0.10 # Max quantity difference ratio for matching transfers/bridges
+  value_tolerance: 0.10 # Max value difference ratio for high-confidence swap detection
+
+  # Confidence thresholds
+  exact_match_confidence: 1.0 # Network TX hash exact match
+  high_confidence: 0.95 # Strong match criteria met
+  medium_confidence: 0.85 # Moderate match criteria
+  low_confidence: 0.70 # Time-only match (no value confirmation)
+
+# Web3 Wallets Configuration
+web3_wallets:
+  etherscan_api_key: "REDACTED_ETHERSCAN_KEY" # Etherscan API key for all EVM chains
+  request_delay: 1.25 # seconds between API calls to respect rate limits
+  max_retries: 7 # retry attempts if free-tier temporarily unavailable
+  addresses:
+    - wallet_address: "0x1111111111111111111111111111111111111111"
+      chain_name: "ethereum"
+      scanner: "blockscout" #"etherscan-api"
+    - wallet_address: "0x1111111111111111111111111111111111111111"
+      chain_name: "base"
+      scanner: "blockscout"
+      # Scanner type to use for this address
+    # - wallet_address: "0x1111111111111111111111111111111111111111"
+    #   chain_name: "Base"
+    #   native_token: "ETH"
+    #   scanner: "basescan-api"
+    #   scanner_chain_id: 8453
+    # - wallet_address: "0x1111111111111111111111111111111111111111"
+    #   chain_name: "BSC"
+    #   native_token: "BNB"
+    #   scanner: "bscscan-api"
+    #   scanner_chain_id: 56

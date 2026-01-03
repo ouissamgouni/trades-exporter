@@ -1,0 +1,114 @@
+USDT:
+  id: tether
+  name: Crypto Tether
+USDC:
+  id: usd-coin
+  name: Crypto USD Coin
+BTC:
+  id: bitcoin
+  name: Crypto Bitcoin
+ETH:
+  id: ethereum
+  name: Crypto Ethereum
+AAVE:
+  id: aave
+  name: Crypto Aave
+ALGO:
+  id: algorand
+  name: Crypto Algorand
+IOTX:
+  id: iotex
+  name: Crypto IoTeX
+ZEC:
+  id: zcash
+  name: Crypto Zcash
+TAO:
+  id: bittensor
+  name: Crypto Bittensor
+UNI:
+  id: uniswap
+  name: Crypto Uniswap
+PEAQ:
+  id: peaq-2
+  name: Crypto Peaq
+CCD:
+  id: concordium
+  name: Crypto Concordium
+POL:
+  id: polygon-ecosystem-token
+  name: Crypto Polygon
+ONDO:
+  id: ondo-finance
+  name: Crypto Ondo Finance
+PLAY:
+  id: playsout
+  name: Crypto Playsout
+LMTS:
+  id: limitless-3
+  name: Crypto Limitless
+PUMP:
+  id: pump-fun
+  name: Crypto Pump.fun
+VIRTUAL:
+  id: virtual-protocol
+  name: Crypto Virtuals Protocol
+ASTER:
+  id: aster-2
+  name: Crypto Aster
+BNB:
+  id: binancecoin
+  name: Crypto BNB
+RENDER:
+  id: render-token
+  name: Crypto RENDER
+LINK:
+  id: chainlink
+  name: Crypto LINK
+WLD:
+  id: worldcoin-wld
+  name: Crypto Worldcoin
+XRP:
+  id: ripple
+  name: Crypto XRP
+NEAR:
+  id: near
+  name: Crypto NEAR
+ADA:
+  id: cardano
+  name: Crypto ADA
+CRO:
+  id: crypto-com-chain
+  name: Crypto Cronos
+SOL:
+  id: solana
+  name: Crypto SOL
+SUI:
+  id: sui
+  name: Crypto SUI
+GRT:
+  id: the-graph
+  name: Crypto TheGraph
+RING:
+  id: ringfence
+  name: Crypto Ringfence
+ODOS:
+  id: odos
+  name: Crypto Odos
+HYPE:
+  id: hyperliquid
+  name: Crypto HyperLiquid
+KITE:
+  id: kite-2
+  name: Crypto Kite
+TEL:
+  id: telcoin
+  name: Crypto Telcoin
+KTA:
+  id: keeta
+  name: Crypto KTA
+PLUME:
+  id: plume
+  name: Crypto Plume
+XPL: 
+  id: plasma
+  name: Crypto Plasma

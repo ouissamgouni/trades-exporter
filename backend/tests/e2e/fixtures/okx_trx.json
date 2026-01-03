@@ -1,0 +1,104 @@
+[
+  {
+    "info": {
+      "fillSz": "116.9997",
+      "fillPxVol": "",
+      "fillFwdPx": "",
+      "fee": "-0.2339994",
+      "tradeQuoteCcy": "EUR",
+      "ordId": "2915992488950964224",
+      "feeRate": "-0.002",
+      "clOrdId": "",
+      "posSide": "net",
+      "fillMarkVol": "",
+      "tag": "",
+      "execType": "M",
+      "fillIdxPx": "0.8533",
+      "side": "buy",
+      "fillPx": "0.7275",
+      "fillPnl": "0",
+      "instType": "SPOT",
+      "fillPxUsd": "",
+      "instId": "ADA-EUR",
+      "billId": "2916006194694922241",
+      "subType": "1",
+      "fillTime": "1759406156697",
+      "tradeId": "737058",
+      "fillMarkPx": "",
+      "feeCcy": "ADA",
+      "ts": "1759406156698"
+    },
+    "timestamp": 1759406156698,
+    "datetime": "2025-10-02T11:55:56.698Z",
+    "symbol": "ADA/EUR",
+    "id": "737058",
+    "order": "2915992488950964224",
+    "type": null,
+    "takerOrMaker": "maker",
+    "side": "buy",
+    "price": 0.7275,
+    "amount": 116.9997,
+    "cost": 85.11728175,
+    "fee": {
+      "currency": "ADA",
+      "cost": 0.2339994
+    },
+    "fees": [
+      {
+        "currency": "ADA",
+        "cost": 0.2339994
+      }
+    ]
+  },
+  {
+    "info": {
+      "fillSz": "82.0263",
+      "fillPxVol": "",
+      "fillFwdPx": "",
+      "fee": "-0.28709205",
+      "tradeQuoteCcy": "EUR",
+      "ordId": "2916163766005604352",
+      "feeRate": "-0.0035",
+      "clOrdId": "",
+      "posSide": "net",
+      "fillMarkVol": "",
+      "tag": "",
+      "execType": "T",
+      "fillIdxPx": "3.574",
+      "side": "buy",
+      "fillPx": "3.0475",
+      "fillPnl": "0",
+      "instType": "SPOT",
+      "fillPxUsd": "",
+      "instId": "SUI-EUR",
+      "billId": "2916163766039158785",
+      "subType": "1",
+      "fillTime": "1759410852690",
+      "tradeId": "637368",
+      "fillMarkPx": "",
+      "feeCcy": "SUI",
+      "ts": "1759410852690"
+    },
+    "timestamp": 1759410852690,
+    "datetime": "2025-10-02T13:14:12.690Z",
+    "symbol": "SUI/EUR",
+    "id": "637368",
+    "order": "2916163766005604352",
+    "type": null,
+    "takerOrMaker": "taker",
+    "side": "buy",
+    "price": 3.0475,
+    "amount": 82.0263,
+    "cost": 249.97514925,
+    "fee": {
+      "currency": "SUI",
+      "cost": 0.28709205
+    },
+    "fees": [
+      {
+        "currency": "SUI",
+        "cost": 0.28709205
+      }
+    ]
+  }
+]

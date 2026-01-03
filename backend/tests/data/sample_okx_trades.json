@@ -1,0 +1,26 @@
+[
+  {
+    "info": {
+      "clTReqId": "3f8522dc9bae4624821ebab333e56bf2",
+      "instId": "BTC-EUR",
+      "side": "buy",
+      "fillPx": "101852.81713905",
+      "baseCcy": "BTC",
+      "quoteCcy": "EUR",
+      "fillBaseSz": "0.012272610960711",
+      "state": "fullyFilled",
+      "tradeId": "tradernexteea17593615399545106",
+      "fillQuoteSz": "1249.999999999998227",
+      "ts": "1759361539975"
+    },
+    "timestamp": 1759361539975,
+    "datetime": "2025-10-01T23:32:19.975Z",
+    "id": "tradernexteea17593615399545106",
+    "fromCurrency": "BTC",
+    "fromAmount": 0.012272610960711,
+    "toCurrency": "EUR",
+    "toAmount": 1249.9999999999982,
+    "price": 101852.81713905,
+    "fee": null
+  }
+]
