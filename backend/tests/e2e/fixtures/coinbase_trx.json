@@ -1,0 +1,102 @@
+[
+  {
+    "info": {
+      "entry_id": "f0e88ba5133ed55a07d5f237f3e0d3287136b874de6e556054ae941eb13f612e",
+      "trade_id": "3adb8957-7c95-4295-8c30-98cd212c096d",
+      "order_id": "1b0883ca-2232-461d-be96-b45f67c0b0bf",
+      "trade_time": "2025-11-05T18:47:06.491048Z",
+      "trade_type": "FILL",
+      "price": "397.53",
+      "size": "0.1357",
+      "commission": "0.647337852",
+      "product_id": "TAO-USDC",
+      "sequence_timestamp": "2025-11-05T18:47:06.493674Z",
+      "liquidity_indicator": "TAKER",
+      "size_in_quote": false,
+      "user_id": "269b15e1-dcdf-57de-a05d-f758484849a5",
+      "side": "BUY",
+      "retail_portfolio_id": "269b15e1-dcdf-57de-a05d-f758484849a5",
+      "fillSource": "FILL_SOURCE_CLOB",
+      "commission_detail_total": {
+        "total_commission": "0.647337852",
+        "gst_commission": "0",
+        "withholding_commission": "0",
+        "client_commission": "0.647337852",
+        "venue_commission": "",
+        "regulatory_commission": "",
+        "clearing_commission": ""
+      }
+    },
+    "id": "3adb8957-7c95-4295-8c30-98cd212c096d",
+    "order": "1b0883ca-2232-461d-be96-b45f67c0b0bf",
+    "timestamp": 1762368426491,
+    "datetime": "2025-11-05T18:47:06.491048Z",
+    "symbol": "TAO/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 397.53,
+    "amount": 0.1357,
+    "cost": 53.944821,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.647337852
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.647337852
+      }
+    ]
+  },
+  {
+    "info": {
+      "entry_id": "919ee27daea18e84c486a054e8eae6216e1305127072037ef85ba062e0fbaf3f",
+      "trade_id": "3eda8fca-bfd7-4e06-8953-3e4135555768",
+      "order_id": "1b0883ca-2232-461d-be96-b45f67c0b0bf",
+      "trade_time": "2025-11-05T18:47:07.078901Z",
+      "trade_type": "FILL",
+      "price": "397.56",
+      "size": "0.2874",
+      "commission": "0.685552464",
+      "product_id": "TAO-USDC",
+      "sequence_timestamp": "2025-11-05T18:47:07.081269Z",
+      "liquidity_indicator": "MAKER",
+      "size_in_quote": false,
+      "user_id": "269b15e1-dcdf-57de-a05d-f758484849a5",
+      "side": "BUY",
+      "retail_portfolio_id": "269b15e1-dcdf-57de-a05d-f758484849a5",
+      "fillSource": "FILL_SOURCE_CLOB",
+      "commission_detail_total": {
+        "total_commission": "0.685552464",
+        "gst_commission": "0",
+        "withholding_commission": "0",
+        "client_commission": "0.685552464",
+        "venue_commission": "",
+        "regulatory_commission": "",
+        "clearing_commission": ""
+      }
+    },
+    "id": "3eda8fca-bfd7-4e06-8953-3e4135555768",
+    "order": "1b0883ca-2232-461d-be96-b45f67c0b0bf",
+    "timestamp": 1762368427078,
+    "datetime": "2025-11-05T18:47:07.078901Z",
+    "symbol": "TAO/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 397.56,
+    "amount": 0.2874,
+    "cost": 114.258744,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.685552464
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.685552464
+      }
+    ]
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "619674348571074560X1",
+    "order": "C02__619674348571074560095",
+    "timestamp": 1763524114000,
+    "datetime": "2025-11-19T03:48:34.000Z",
+    "symbol": "SOL/USDT",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 139.77,
+    "amount": 0.926,
+    "cost": 129.42702,
+    "fee": {
+      "currency": "USDT",
+      "cost": 0.06471351
+    },
+    "info": {
+      "symbol": "SOLUSDT",
+      "id": "619674348571074560X1",
+      "orderId": "C02__619674348571074560095",
+      "orderListId": "-1",
+      "price": "139.77",
+      "qty": "0.926",
+      "quoteQty": "129.42702",
+      "commission": "0.06471351",
+      "commissionAsset": "USDT",
+      "time": "1763524114000",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDT",
+        "cost": 0.06471351
+      }
+    ]
+  }
+]

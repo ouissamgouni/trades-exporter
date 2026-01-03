@@ -1,0 +1,30 @@
+[
+    {
+        "tx_id": "12345678",
+        "exchange": "binance",
+        "transaction_type": "trade",
+        "timestamp": "2024-01-01T12:00:00Z",
+        "base_asset": "BTC",
+        "quote_asset": "USDT",
+        "quantity": 0.5,
+        "price": 45000.0,
+        "total_value": 22500.0,
+        "fee": 0.0005,
+        "fee_asset": "BTC",
+        "side": "buy"
+    },
+    {
+        "tx_id": "12345679",
+        "exchange": "binance",
+        "transaction_type": "trade",
+        "timestamp": "2024-01-02T12:00:00Z",
+        "base_asset": "ETH",
+        "quote_asset": "USDT",
+        "quantity": 2.0,
+        "price": 3000.0,
+        "total_value": 6000.0,
+        "fee": 6.0,
+        "fee_asset": "USDT",
+        "side": "sell"
+    }
+]

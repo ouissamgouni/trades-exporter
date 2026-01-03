@@ -1,0 +1,1218 @@
+[
+  {
+    "info": {
+      "symbol": "BNBEUR",
+      "id": "39140965",
+      "orderId": "871903330",
+      "orderListId": "-1",
+      "price": "895.00000000",
+      "qty": "0.33700000",
+      "quoteQty": "301.61500000",
+      "commission": "0.00025275",
+      "commissionAsset": "BNB",
+      "time": "1759407223344",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759407223344,
+    "datetime": "2025-10-02T12:13:43.344Z",
+    "symbol": "BNB/EUR",
+    "id": "39140965",
+    "order": "871903330",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 895.0,
+    "amount": 0.337,
+    "cost": 301.615,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00025275
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00025275
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "BTCEUR",
+      "id": "157887492",
+      "orderId": "4852220080",
+      "orderListId": "-1",
+      "price": "100724.82000000",
+      "qty": "0.00008000",
+      "quoteQty": "8.05798560",
+      "commission": "0.00000008",
+      "commissionAsset": "BTC",
+      "time": "1759361959406",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1759361959406,
+    "datetime": "2025-10-01T23:39:19.406Z",
+    "symbol": "BTC/EUR",
+    "id": "157887492",
+    "order": "4852220080",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 100724.82,
+    "amount": 8e-05,
+    "cost": 8.0579856,
+    "fee": {
+      "currency": "BTC",
+      "cost": 8e-08
+    },
+    "fees": [
+      {
+        "currency": "BTC",
+        "cost": 8e-08
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "BTCEUR",
+      "id": "157887585",
+      "orderId": "4852227934",
+      "orderListId": "-1",
+      "price": "100840.72000000",
+      "qty": "0.00485000",
+      "quoteQty": "489.07749200",
+      "commission": "0.00000485",
+      "commissionAsset": "BTC",
+      "time": "1759362250634",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759362250634,
+    "datetime": "2025-10-01T23:44:10.634Z",
+    "symbol": "BTC/EUR",
+    "id": "157887585",
+    "order": "4852227934",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 100840.72,
+    "amount": 0.00485,
+    "cost": 489.077492,
+    "fee": {
+      "currency": "BTC",
+      "cost": 4.85e-06
+    },
+    "fees": [
+      {
+        "currency": "BTC",
+        "cost": 4.85e-06
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "BTCEUR",
+      "id": "157887586",
+      "orderId": "4852227934",
+      "orderListId": "-1",
+      "price": "100840.72000000",
+      "qty": "0.00001000",
+      "quoteQty": "1.00840720",
+      "commission": "0.00000001",
+      "commissionAsset": "BTC",
+      "time": "1759362250635",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759362250635,
+    "datetime": "2025-10-01T23:44:10.635Z",
+    "symbol": "BTC/EUR",
+    "id": "157887586",
+    "order": "4852227934",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 100840.72,
+    "amount": 1e-05,
+    "cost": 1.0084072,
+    "fee": {
+      "currency": "BTC",
+      "cost": 1e-08
+    },
+    "fees": [
+      {
+        "currency": "BTC",
+        "cost": 1e-08
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "BTCEUR",
+      "id": "158296739",
+      "orderId": "4864232859",
+      "orderListId": "-1",
+      "price": "106625.30000000",
+      "qty": "0.01406000",
+      "quoteQty": "1499.15171800",
+      "commission": "0.00102663",
+      "commissionAsset": "BNB",
+      "time": "1759782249027",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1759782249027,
+    "datetime": "2025-10-06T20:24:09.027Z",
+    "symbol": "BTC/EUR",
+    "id": "158296739",
+    "order": "4864232859",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 106625.3,
+    "amount": 0.01406,
+    "cost": 1499.151718,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00102663
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00102663
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "ETHEUR",
+      "id": "115619603",
+      "orderId": "4122799744",
+      "orderListId": "-1",
+      "price": "3734.02000000",
+      "qty": "0.03910000",
+      "quoteQty": "146.00018200",
+      "commission": "0.00003715",
+      "commissionAsset": "ETH",
+      "time": "1759405083742",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1759405083742,
+    "datetime": "2025-10-02T11:38:03.742Z",
+    "symbol": "ETH/EUR",
+    "id": "115619603",
+    "order": "4122799744",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 3734.02,
+    "amount": 0.0391,
+    "cost": 146.000182,
+    "fee": {
+      "currency": "ETH",
+      "cost": 3.715e-05
+    },
+    "fees": [
+      {
+        "currency": "ETH",
+        "cost": 3.715e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "ETHEUR",
+      "id": "115619604",
+      "orderId": "4122799744",
+      "orderListId": "-1",
+      "price": "3734.02000000",
+      "qty": "0.09480000",
+      "quoteQty": "353.98509600",
+      "commission": "0.00009006",
+      "commissionAsset": "ETH",
+      "time": "1759405083742",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1759405083742,
+    "datetime": "2025-10-02T11:38:03.742Z",
+    "symbol": "ETH/EUR",
+    "id": "115619604",
+    "order": "4122799744",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 3734.02,
+    "amount": 0.0948,
+    "cost": 353.985096,
+    "fee": {
+      "currency": "ETH",
+      "cost": 9.006e-05
+    },
+    "fees": [
+      {
+        "currency": "ETH",
+        "cost": 9.006e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "ETHEUR",
+      "id": "121144001",
+      "orderId": "4228369036",
+      "orderListId": "-1",
+      "price": "3528.43000000",
+      "qty": "0.11570000",
+      "quoteQty": "408.23935100",
+      "commission": "0.00031440",
+      "commissionAsset": "BNB",
+      "time": "1761649515489",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761649515489,
+    "datetime": "2025-10-28T11:05:15.489Z",
+    "symbol": "ETH/EUR",
+    "id": "121144001",
+    "order": "4228369036",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 3528.43,
+    "amount": 0.1157,
+    "cost": 408.239351,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.0003144
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.0003144
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "ETHEUR",
+      "id": "121144002",
+      "orderId": "4228369036",
+      "orderListId": "-1",
+      "price": "3528.43000000",
+      "qty": "0.01130000",
+      "quoteQty": "39.87125900",
+      "commission": "0.00003070",
+      "commissionAsset": "BNB",
+      "time": "1761649515489",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761649515489,
+    "datetime": "2025-10-28T11:05:15.489Z",
+    "symbol": "ETH/EUR",
+    "id": "121144002",
+    "order": "4228369036",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 3528.43,
+    "amount": 0.0113,
+    "cost": 39.871259,
+    "fee": {
+      "currency": "BNB",
+      "cost": 3.07e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 3.07e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "ETHEUR",
+      "id": "126655339",
+      "orderId": "4330792396",
+      "orderListId": "-1",
+      "price": "2632.75000000",
+      "qty": "0.04250000",
+      "quoteQty": "111.89187500",
+      "commission": "0.00010703",
+      "commissionAsset": "BNB",
+      "time": "1763601141506",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1763601141506,
+    "datetime": "2025-11-20T01:12:21.506Z",
+    "symbol": "ETH/EUR",
+    "id": "126655339",
+    "order": "4330792396",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 2632.75,
+    "amount": 0.0425,
+    "cost": 111.891875,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00010703
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00010703
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "16217340",
+      "orderId": "73118402",
+      "orderListId": "-1",
+      "price": "1.15920000",
+      "qty": "250.00000000",
+      "quoteQty": "289.80000000",
+      "commission": "0.00017077",
+      "commissionAsset": "BNB",
+      "time": "1760472851431",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1760472851431,
+    "datetime": "2025-10-14T20:14:11.431Z",
+    "symbol": "EUR/USDC",
+    "id": "16217340",
+    "order": "73118402",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1592,
+    "amount": 250.0,
+    "cost": 289.8,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00017077
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00017077
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "16926185",
+      "orderId": "75163548",
+      "orderListId": "-1",
+      "price": "1.16380000",
+      "qty": "6.20000000",
+      "quoteQty": "7.21556000",
+      "commission": "0.00000472",
+      "commissionAsset": "BNB",
+      "time": "1761659541396",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761659541396,
+    "datetime": "2025-10-28T13:52:21.396Z",
+    "symbol": "EUR/USDC",
+    "id": "16926185",
+    "order": "75163548",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1638,
+    "amount": 6.2,
+    "cost": 7.21556,
+    "fee": {
+      "currency": "BNB",
+      "cost": 4.72e-06
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 4.72e-06
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "16926186",
+      "orderId": "75163548",
+      "orderListId": "-1",
+      "price": "1.16380000",
+      "qty": "44.80000000",
+      "quoteQty": "52.13824000",
+      "commission": "0.00003415",
+      "commissionAsset": "BNB",
+      "time": "1761659541399",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761659541399,
+    "datetime": "2025-10-28T13:52:21.399Z",
+    "symbol": "EUR/USDC",
+    "id": "16926186",
+    "order": "75163548",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1638,
+    "amount": 44.8,
+    "cost": 52.13824,
+    "fee": {
+      "currency": "BNB",
+      "cost": 3.415e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 3.415e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "16926716",
+      "orderId": "75165036",
+      "orderListId": "-1",
+      "price": "1.16380000",
+      "qty": "50.00000000",
+      "quoteQty": "58.19000000",
+      "commission": "0.00003623",
+      "commissionAsset": "BNB",
+      "time": "1761660091255",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1761660091255,
+    "datetime": "2025-10-28T14:01:31.255Z",
+    "symbol": "EUR/USDC",
+    "id": "16926716",
+    "order": "75165036",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1638,
+    "amount": 50.0,
+    "cost": 58.19,
+    "fee": {
+      "currency": "BNB",
+      "cost": 3.623e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 3.623e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17044236",
+      "orderId": "75580067",
+      "orderListId": "-1",
+      "price": "1.15700000",
+      "qty": "50.00000000",
+      "quoteQty": "57.85000000",
+      "commission": "0.00003991",
+      "commissionAsset": "BNB",
+      "time": "1761836648459",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761836648459,
+    "datetime": "2025-10-30T15:04:08.459Z",
+    "symbol": "EUR/USDC",
+    "id": "17044236",
+    "order": "75580067",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.157,
+    "amount": 50.0,
+    "cost": 57.85,
+    "fee": {
+      "currency": "BNB",
+      "cost": 3.991e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 3.991e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17044301",
+      "orderId": "75580342",
+      "orderListId": "-1",
+      "price": "1.15690000",
+      "qty": "50.00000000",
+      "quoteQty": "57.84500000",
+      "commission": "0.00003987",
+      "commissionAsset": "BNB",
+      "time": "1761836753681",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1761836753681,
+    "datetime": "2025-10-30T15:05:53.681Z",
+    "symbol": "EUR/USDC",
+    "id": "17044301",
+    "order": "75580342",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1569,
+    "amount": 50.0,
+    "cost": 57.845,
+    "fee": {
+      "currency": "BNB",
+      "cost": 3.987e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 3.987e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17110394",
+      "orderId": "75804759",
+      "orderListId": "-1",
+      "price": "1.15400000",
+      "qty": "298.20000000",
+      "quoteQty": "344.12280000",
+      "commission": "0.00022587",
+      "commissionAsset": "BNB",
+      "time": "1761944034038",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1761944034038,
+    "datetime": "2025-10-31T20:53:54.038Z",
+    "symbol": "EUR/USDC",
+    "id": "17110394",
+    "order": "75804759",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.154,
+    "amount": 298.2,
+    "cost": 344.1228,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00022587
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00022587
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17127589",
+      "orderId": "75887576",
+      "orderListId": "-1",
+      "price": "1.15450000",
+      "qty": "499.00000000",
+      "quoteQty": "576.09550000",
+      "commission": "0.00039642",
+      "commissionAsset": "BNB",
+      "time": "1762000633638",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1762000633638,
+    "datetime": "2025-11-01T12:37:13.638Z",
+    "symbol": "EUR/USDC",
+    "id": "17127589",
+    "order": "75887576",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1545,
+    "amount": 499.0,
+    "cost": 576.0955,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00039642
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00039642
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17365498",
+      "orderId": "76655961",
+      "orderListId": "-1",
+      "price": "1.14810000",
+      "qty": "100.00000000",
+      "quoteQty": "114.81000000",
+      "commission": "0.00008493",
+      "commissionAsset": "BNB",
+      "time": "1762366765150",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1762366765150,
+    "datetime": "2025-11-05T18:19:25.150Z",
+    "symbol": "EUR/USDC",
+    "id": "17365498",
+    "order": "76655961",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1481,
+    "amount": 100.0,
+    "cost": 114.81,
+    "fee": {
+      "currency": "BNB",
+      "cost": 8.493e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 8.493e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17374127",
+      "orderId": "76678910",
+      "orderListId": "-1",
+      "price": "1.14920000",
+      "qty": "100.00000000",
+      "quoteQty": "114.92000000",
+      "commission": "0.00008577",
+      "commissionAsset": "BNB",
+      "time": "1762381540988",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1762381540988,
+    "datetime": "2025-11-05T22:25:40.988Z",
+    "symbol": "EUR/USDC",
+    "id": "17374127",
+    "order": "76678910",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1492,
+    "amount": 100.0,
+    "cost": 114.92,
+    "fee": {
+      "currency": "BNB",
+      "cost": 8.577e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 8.577e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17487696",
+      "orderId": "77012819",
+      "orderListId": "-1",
+      "price": "1.15730000",
+      "qty": "101.00000000",
+      "quoteQty": "116.88730000",
+      "commission": "0.00009231",
+      "commissionAsset": "BNB",
+      "time": "1762535285971",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1762535285971,
+    "datetime": "2025-11-07T17:08:05.971Z",
+    "symbol": "EUR/USDC",
+    "id": "17487696",
+    "order": "77012819",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1573,
+    "amount": 101.0,
+    "cost": 116.8873,
+    "fee": {
+      "currency": "BNB",
+      "cost": 9.231e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 9.231e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17489150",
+      "orderId": "77015911",
+      "orderListId": "-1",
+      "price": "1.15720000",
+      "qty": "100.00000000",
+      "quoteQty": "115.72000000",
+      "commission": "0.00008541",
+      "commissionAsset": "BNB",
+      "time": "1762536277023",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1762536277023,
+    "datetime": "2025-11-07T17:24:37.023Z",
+    "symbol": "EUR/USDC",
+    "id": "17489150",
+    "order": "77015911",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1572,
+    "amount": 100.0,
+    "cost": 115.72,
+    "fee": {
+      "currency": "BNB",
+      "cost": 8.541e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 8.541e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17572889",
+      "orderId": "77319242",
+      "orderListId": "-1",
+      "price": "1.15630000",
+      "qty": "99.00000000",
+      "quoteQty": "114.47370000",
+      "commission": "0.00008486",
+      "commissionAsset": "BNB",
+      "time": "1762737615491",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1762737615491,
+    "datetime": "2025-11-10T01:20:15.491Z",
+    "symbol": "EUR/USDC",
+    "id": "17572889",
+    "order": "77319242",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1563,
+    "amount": 99.0,
+    "cost": 114.4737,
+    "fee": {
+      "currency": "BNB",
+      "cost": 8.486e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 8.486e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17573715",
+      "orderId": "77322699",
+      "orderListId": "-1",
+      "price": "1.15660000",
+      "qty": "250.00000000",
+      "quoteQty": "289.15000000",
+      "commission": "0.00021469",
+      "commissionAsset": "BNB",
+      "time": "1762740224070",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1762740224070,
+    "datetime": "2025-11-10T02:03:44.070Z",
+    "symbol": "EUR/USDC",
+    "id": "17573715",
+    "order": "77322699",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1566,
+    "amount": 250.0,
+    "cost": 289.15,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00021469
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00021469
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17604289",
+      "orderId": "77431662",
+      "orderListId": "-1",
+      "price": "1.15610000",
+      "qty": "250.00000000",
+      "quoteQty": "289.02500000",
+      "commission": "0.00020872",
+      "commissionAsset": "BNB",
+      "time": "1762797622706",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1762797622706,
+    "datetime": "2025-11-10T18:00:22.706Z",
+    "symbol": "EUR/USDC",
+    "id": "17604289",
+    "order": "77431662",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1561,
+    "amount": 250.0,
+    "cost": 289.025,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00020872
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00020872
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17696509",
+      "orderId": "77794237",
+      "orderListId": "-1",
+      "price": "1.15820000",
+      "qty": "350.20000000",
+      "quoteQty": "405.60164000",
+      "commission": "0.00030125",
+      "commissionAsset": "BNB",
+      "time": "1762998267753",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1762998267753,
+    "datetime": "2025-11-13T01:44:27.753Z",
+    "symbol": "EUR/USDC",
+    "id": "17696509",
+    "order": "77794237",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1582,
+    "amount": 350.2,
+    "cost": 405.60164,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00030125
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00030125
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "17711868",
+      "orderId": "77867771",
+      "orderListId": "-1",
+      "price": "1.16150000",
+      "qty": "100.00000000",
+      "quoteQty": "116.15000000",
+      "commission": "0.00008589",
+      "commissionAsset": "BNB",
+      "time": "1763031519200",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1763031519200,
+    "datetime": "2025-11-13T10:58:39.200Z",
+    "symbol": "EUR/USDC",
+    "id": "17711868",
+    "order": "77867771",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1615,
+    "amount": 100.0,
+    "cost": 116.15,
+    "fee": {
+      "currency": "BNB",
+      "cost": 8.589e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 8.589e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "18069796",
+      "orderId": "78785671",
+      "orderListId": "-1",
+      "price": "1.15830000",
+      "qty": "225.00000000",
+      "quoteQty": "260.61750000",
+      "commission": "0.00019842",
+      "commissionAsset": "BNB",
+      "time": "1763521649836",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1763521649836,
+    "datetime": "2025-11-19T03:07:29.836Z",
+    "symbol": "EUR/USDC",
+    "id": "18069796",
+    "order": "78785671",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1583,
+    "amount": 225.0,
+    "cost": 260.6175,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00019842
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00019842
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "18136118",
+      "orderId": "78928953",
+      "orderListId": "-1",
+      "price": "1.15330000",
+      "qty": "332.50000000",
+      "quoteQty": "383.47225000",
+      "commission": "0.00030209",
+      "commissionAsset": "BNB",
+      "time": "1763598838816",
+      "isBuyer": false,
+      "isMaker": false,
+      "isBestMatch": true
+    },
+    "timestamp": 1763598838816,
+    "datetime": "2025-11-20T00:33:58.816Z",
+    "symbol": "EUR/USDC",
+    "id": "18136118",
+    "order": "78928953",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "taker",
+    "price": 1.1533,
+    "amount": 332.5,
+    "cost": 383.47225,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00030209
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00030209
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "EURUSDC",
+      "id": "18285168",
+      "orderId": "79232081",
+      "orderListId": "-1",
+      "price": "1.15150000",
+      "qty": "115.30000000",
+      "quoteQty": "132.76795000",
+      "commission": "0.00011935",
+      "commissionAsset": "BNB",
+      "time": "1763761751142",
+      "isBuyer": false,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1763761751142,
+    "datetime": "2025-11-21T21:49:11.142Z",
+    "symbol": "EUR/USDC",
+    "id": "18285168",
+    "order": "79232081",
+    "type": null,
+    "side": "sell",
+    "takerOrMaker": "maker",
+    "price": 1.1515,
+    "amount": 115.3,
+    "cost": 132.76795,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00011935
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00011935
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "GRTEUR",
+      "id": "2729084",
+      "orderId": "142985122",
+      "orderListId": "-1",
+      "price": "0.07230000",
+      "qty": "1021.00000000",
+      "quoteQty": "73.81830000",
+      "commission": "0.00005079",
+      "commissionAsset": "BNB",
+      "time": "1759829054119",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759829054119,
+    "datetime": "2025-10-07T09:24:14.119Z",
+    "symbol": "GRT/EUR",
+    "id": "2729084",
+    "order": "142985122",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 0.0723,
+    "amount": 1021.0,
+    "cost": 73.8183,
+    "fee": {
+      "currency": "BNB",
+      "cost": 5.079e-05
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 5.079e-05
+      }
+    ]
+  },
+  {
+    "info": {
+      "symbol": "GRTEUR",
+      "id": "2729085",
+      "orderId": "142985122",
+      "orderListId": "-1",
+      "price": "0.07230000",
+      "qty": "3128.00000000",
+      "quoteQty": "226.15440000",
+      "commission": "0.00015490",
+      "commissionAsset": "BNB",
+      "time": "1759829380379",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759829380379,
+    "datetime": "2025-10-07T09:29:40.379Z",
+    "symbol": "GRT/EUR",
+    "id": "2729085",
+    "order": "142985122",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 0.0723,
+    "amount": 3128.0,
+    "cost": 226.1544,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.0001549
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.0001549
+      }
+    ]
+  }
+]

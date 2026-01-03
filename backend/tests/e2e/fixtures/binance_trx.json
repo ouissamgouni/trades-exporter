@@ -1,0 +1,40 @@
+[
+  {
+    "info": {
+      "symbol": "BNBEUR",
+      "id": "39140965",
+      "orderId": "871903330",
+      "orderListId": "-1",
+      "price": "895.00000000",
+      "qty": "0.33700000",
+      "quoteQty": "301.61500000",
+      "commission": "0.00025275",
+      "commissionAsset": "BNB",
+      "time": "1759407223344",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true
+    },
+    "timestamp": 1759407223344,
+    "datetime": "2025-10-02T12:13:43.344Z",
+    "symbol": "BNB/EUR",
+    "id": "39140965",
+    "order": "871903330",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 895.0,
+    "amount": 0.337,
+    "cost": 301.615,
+    "fee": {
+      "currency": "BNB",
+      "cost": 0.00025275
+    },
+    "fees": [
+      {
+        "currency": "BNB",
+        "cost": 0.00025275
+      }
+    ]
+  }
+]

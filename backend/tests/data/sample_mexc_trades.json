@@ -1,0 +1,362 @@
+[
+  {
+    "id": "616396095815294977X1",
+    "order": "C02__616396095815294977095",
+    "timestamp": 1762742517000,
+    "datetime": "2025-11-10T02:41:57.000Z",
+    "symbol": "AAVE/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 219.1082,
+    "amount": 0.006,
+    "cost": 1.3146492,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "AAVEUSDC",
+      "id": "616396095815294977X1",
+      "orderId": "C02__616396095815294977095",
+      "orderListId": "-1",
+      "price": "219.1082",
+      "qty": "0.006",
+      "quoteQty": "1.3146492",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762742517000",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "616396095815294977X2",
+    "order": "C02__616396095815294977095",
+    "timestamp": 1762742517000,
+    "datetime": "2025-11-10T02:41:57.000Z",
+    "symbol": "AAVE/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 219.1182,
+    "amount": 0.007,
+    "cost": 1.5338274,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "AAVEUSDC",
+      "id": "616396095815294977X2",
+      "orderId": "C02__616396095815294977095",
+      "orderListId": "-1",
+      "price": "219.1182",
+      "qty": "0.007",
+      "quoteQty": "1.5338274",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762742517000",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "616396095815294977X3",
+    "order": "C02__616396095815294977095",
+    "timestamp": 1762742517000,
+    "datetime": "2025-11-10T02:41:57.000Z",
+    "symbol": "AAVE/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 219.1282,
+    "amount": 0.007,
+    "cost": 1.5338974,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "AAVEUSDC",
+      "id": "616396095815294977X3",
+      "orderId": "C02__616396095815294977095",
+      "orderListId": "-1",
+      "price": "219.1282",
+      "qty": "0.007",
+      "quoteQty": "1.5338974",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762742517000",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "616396095815294977X4",
+    "order": "C02__616396095815294977095",
+    "timestamp": 1762742517000,
+    "datetime": "2025-11-10T02:41:57.000Z",
+    "symbol": "AAVE/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "taker",
+    "price": 219.1383,
+    "amount": 0.227,
+    "cost": 49.7443941,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "AAVEUSDC",
+      "id": "616396095815294977X4",
+      "orderId": "C02__616396095815294977095",
+      "orderListId": "-1",
+      "price": "219.1383",
+      "qty": "0.227",
+      "quoteQty": "49.7443941",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762742517000",
+      "isBuyer": true,
+      "isMaker": false,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "616629466504003584X1",
+    "order": "C02__616629466504003584095",
+    "timestamp": 1762798409000,
+    "datetime": "2025-11-10T18:13:29.000Z",
+    "symbol": "ALGO/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 0.18844,
+    "amount": 785.83,
+    "cost": 148.0818052,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "ALGOUSDC",
+      "id": "616629466504003584X1",
+      "orderId": "C02__616629466504003584095",
+      "orderListId": "-1",
+      "price": "0.18844",
+      "qty": "785.83",
+      "quoteQty": "148.0818052",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762798409000",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "614810487833538560X1",
+    "order": "C02__614810487833538560095",
+    "timestamp": 1762364482000,
+    "datetime": "2025-11-05T17:41:22.000Z",
+    "symbol": "ASTER/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 1.0793,
+    "amount": 164.11,
+    "cost": 177.123923,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "ASTERUSDC",
+      "id": "614810487833538560X1",
+      "orderId": "C02__614810487833538560095",
+      "orderListId": "-1",
+      "price": "1.0793",
+      "qty": "164.11",
+      "quoteQty": "177.123923",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762364482000",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "617471242005430274X1",
+    "order": "C02__617471242005430274095",
+    "timestamp": 1762998860000,
+    "datetime": "2025-11-13T01:54:20.000Z",
+    "symbol": "ASTER/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 1.1294,
+    "amount": 44.59,
+    "cost": 50.359946,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "ASTERUSDC",
+      "id": "617471242005430274X1",
+      "orderId": "C02__617471242005430274095",
+      "orderListId": "-1",
+      "price": "1.1294",
+      "qty": "44.59",
+      "quoteQty": "50.359946",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762998860000",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "617471242005430274X2",
+    "order": "C02__617471242005430274095",
+    "timestamp": 1762998883000,
+    "datetime": "2025-11-13T01:54:43.000Z",
+    "symbol": "ASTER/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 1.1294,
+    "amount": 44.56,
+    "cost": 50.326064,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "ASTERUSDC",
+      "id": "617471242005430274X2",
+      "orderId": "C02__617471242005430274095",
+      "orderListId": "-1",
+      "price": "1.1294",
+      "qty": "44.56",
+      "quoteQty": "50.326064",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762998883000",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  },
+  {
+    "id": "617471242005430274X3",
+    "order": "C02__617471242005430274095",
+    "timestamp": 1762999227000,
+    "datetime": "2025-11-13T02:00:27.000Z",
+    "symbol": "ASTER/USDC",
+    "type": null,
+    "side": "buy",
+    "takerOrMaker": "maker",
+    "price": 1.1294,
+    "amount": 0.63,
+    "cost": 0.711522,
+    "fee": {
+      "currency": "USDC",
+      "cost": 0.0
+    },
+    "info": {
+      "symbol": "ASTERUSDC",
+      "id": "617471242005430274X3",
+      "orderId": "C02__617471242005430274095",
+      "orderListId": "-1",
+      "price": "1.1294",
+      "qty": "0.63",
+      "quoteQty": "0.711522",
+      "commission": "0",
+      "commissionAsset": "USDC",
+      "time": "1762999227000",
+      "isBuyer": true,
+      "isMaker": true,
+      "isBestMatch": true,
+      "isSelfTrade": false,
+      "clientOrderId": ""
+    },
+    "fees": [
+      {
+        "currency": "USDC",
+        "cost": 0.0
+      }
+    ]
+  }
+]
