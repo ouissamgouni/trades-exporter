@@ -122,7 +122,7 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 source_transaction_id=f"{tx_hash}_{tx_log_index}",
                 date_time=dt,
                 direction=direction,
-                transaction_type=None,
+                transaction_type="transfer",
                 source_transaction_type="token-transfer",
                 source_asset_symbol=f"{token_symbol}_{contract_address}",
                 quantity=float(value),

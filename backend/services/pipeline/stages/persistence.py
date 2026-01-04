@@ -204,7 +204,7 @@ class PersistenceStage(PipelineStage):
 
         return NormalizedTransaction(
             source=tx.source,
-            account=tx.account,
+            account_id=tx.account_id,
             source_transaction_id=tx.source_transaction_id,
             source_transaction_type=tx.source_transaction_type,
             source_asset_symbol=tx.source_asset_symbol,
@@ -220,7 +220,6 @@ class PersistenceStage(PipelineStage):
             transaction_type=tx.transaction_type,
             quantity=tx.quantity,
             price=tx.price,
-            total=tx.total,
             fee=tx.fee,
             include_fee=tx.include_fee or False,
             disposal_taxable=tx.disposal_taxable or False,

@@ -162,7 +162,7 @@ class BinanceWithdrawalsConnector(BaseConnector):
             source_transaction_id=withdrawal_id,
             date_time=dt,
             direction="outflow",
-            transaction_type=None,
+            transaction_type="transfer",
             source_transaction_type=source_transaction_type,
             source_asset_symbol=currency,
             source_fee_quote_asset_symbol=fee_quote,

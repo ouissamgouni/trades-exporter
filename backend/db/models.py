@@ -8,7 +8,6 @@ and normalized structure for P&L calculations.
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Any, Dict
-from uuid import UUID, uuid4
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 from sqlalchemy import UniqueConstraint, Text, ARRAY, Numeric, case, Integer
 from enum import Enum
@@ -77,12 +76,14 @@ class UnitPattern(str, Enum):
     - TRANSFER: Same asset moves between owned accounts (non-taxable)
     - SWAP: Exchange of value (taxability depends on asset types)
     - SPLIT: Same asset, quantity changes (stock split - non-taxable)
+    - PENDING_TRANSFER: Transfer with missing counterpart leg (awaiting reconciliation)
     - UNKNOWN: Needs user review
     """
 
     TRANSFER = "transfer"  # Self-transfer between owned accounts (non-taxable)
     SWAP = "swap"  # Exchange of value (taxable/non-taxable based on config)
     SPLIT = "split"  # Stock split - same asset, qty changes (non-taxable)
+    PENDING_TRANSFER = "pending_transfer"  # Transfer missing inflow or outflow leg
     UNKNOWN = "unknown"  # Needs review
 
 
@@ -102,6 +103,90 @@ class LotEventType(str, Enum):
     SETTLED = "settled"
     TRANSFERRED = "transferred"
     ADJUSTED = "adjusted"
+
+
+class TransactionType(str, Enum):
+    """Transaction type for P&L calculation and leg expansion.
+    
+    Simplified 3-value enum:
+    - TRADE: Buy/sell exchange of assets (expand to inflow + outflow legs)
+    - TRANSFER: Movement of assets between accounts (deposits, withdrawals, internal transfers)
+    - TECHNICAL: Zero-value transactions (approvals, failed txs, contract interactions)
+    """
+    
+    TRADE = "trade"  # Buy/sell - will be expanded to inflow + outflow legs
+    TRANSFER = "transfer"  # Deposits, withdrawals, internal transfers
+    TECHNICAL = "technical"  # Zero-value: approvals, failed txs, contract calls
+
+
+class TaxabilityStatus(str, Enum):
+    """Taxability status for transactions.
+    
+    Values:
+    - TAXABLE: Transaction is a taxable event (capital gains/losses)
+    - NON_TAXABLE: Transaction is not taxable (transfers, gifts received)
+    - UNKNOWN: Needs user review to determine taxability
+    """
+    
+    TAXABLE = "taxable"
+    NON_TAXABLE = "non_taxable"
+    UNKNOWN = "unknown"
+
+
+class Direction(str, Enum):
+    """Transaction direction for flow classification.
+    
+    Values:
+    - INFLOW: Assets coming into the account (buys, deposits, receives)
+    - OUTFLOW: Assets leaving the account (sells, withdrawals, sends)
+    - NEUTRAL: No asset movement (approvals, contract interactions)
+    """
+    
+    INFLOW = "inflow"
+    OUTFLOW = "outflow"
+    NEUTRAL = "neutral"
+
+
+class ReviewStatus(str, Enum):
+    """Review status for transaction workflow.
+    
+    Values:
+    - VALID: Transaction has been reviewed and validated
+    - PENDING: Transaction awaits user review
+    - INVALID: Transaction marked as invalid/error
+    """
+    
+    VALID = "valid"
+    PENDING = "pending"
+    INVALID = "invalid"
+
+
+class AccountType(str, Enum):
+    """Account type classification.
+    
+    Values:
+    - CEX: Centralized exchange account (Binance, Coinbase, etc.)
+    - BROKER: Traditional broker account (stocks, ETFs)
+    - WALLET: On-chain wallet (MetaMask, hardware wallets)
+    """
+    
+    CEX = "cex"
+    BROKER = "broker"
+    WALLET = "wallet"
+
+
+class ConnectorCategory(str, Enum):
+    """Connector category for data sources.
+    
+    Values:
+    - CEX: Centralized exchange connectors (API-based)
+    - ONCHAIN: On-chain/blockchain connectors (address-based)
+    - BROKER: Traditional broker connectors
+    """
+    
+    CEX = "cex"
+    ONCHAIN = "onchain"
+    BROKER = "broker"
 
 
 # ============================================================================
@@ -421,9 +506,6 @@ class NormalizedTransaction(SQLModel, table=True):
     source_transaction_type: Optional[str] = Field(default=None)
     source_transaction_id: Optional[str] = Field(default=None, index=True)
 
-    # Account identifier (legacy field for filtering, use account_id relationship)
-    account: Optional[str] = Field(default=None, index=True)
-
     # Account ownership
     account_id: Optional[int] = Field(
         default=None, foreign_key="accounts.id", index=True
@@ -434,7 +516,7 @@ class NormalizedTransaction(SQLModel, table=True):
     direction: str = Field(default="")  # 'inflow', 'outflow', 'neutral'
     transaction_type: str = Field(
         default=""
-    )  # 'acquisition', 'disposal', 'transfer', 'technical'
+    )  # 'trade', 'transfer', 'technical' (see TransactionType enum)
 
     # Asset and quantity
     asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
@@ -451,9 +533,6 @@ class NormalizedTransaction(SQLModel, table=True):
     price_quote_asset_id: Optional[int] = Field(
         default=None, foreign_key="assets.asset_id"
     )
-
-    # Totals (in quote asset)
-    total: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))
 
     # Fees (in fee quote asset)
     fee: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))
@@ -476,11 +555,11 @@ class NormalizedTransaction(SQLModel, table=True):
     to_account_id: Optional[int] = Field(default=None, foreign_key="accounts.id")
 
     # Source account identifiers (raw from connector, before mapping)
-    source_from_account: Optional[str] = None  # Raw source address/identifier
-    source_to_account: Optional[str] = None  # Raw destination address/identifier
-    network: Optional[str] = None
-    network_transaction_id: Optional[str] = None
-    token_contract_address: Optional[str] = None
+    source_from_account: Optional[str] = Field(default=None)  # Raw source address/identifier
+    source_to_account: Optional[str] = Field(default=None)  # Raw destination address/identifier
+    network: Optional[str] = Field(default=None)
+    network_transaction_id: Optional[str] = Field(default=None)
+    token_contract_address: Optional[str] = Field(default=None)
 
     # Metadata
     tags: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
@@ -492,21 +571,13 @@ class NormalizedTransaction(SQLModel, table=True):
         default="unknown", index=True
     )  # taxable, non_taxable, unknown
 
-    # V3 Architecture: CalculationUnit
+    # V3 Architecture: CalculationUnit (user-defined transaction grouping)
     user_calculation_unit_id: Optional[int] = Field(
-        default=None, foreign_key="bundles.id", index=True  # Table named 'bundles' for DB compatibility
+        default=None, foreign_key="bundles.id", index=True
     )
-    
-    # Convenience alias for calculation_unit_id
-    @property
-    def unit_id(self) -> Optional[int]:
-        """Alias for calculation_unit_id."""
-        return self.user_calculation_unit_id
-    
-    @unit_id.setter
-    def unit_id(self, value: Optional[int]):
-        """Alias setter for calculation_unit_id."""
-        self.user_calculation_unit_id = value
+
+    # Totals (in quote asset)
+    total: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))
 
     # Review notes
     review_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
@@ -710,7 +781,6 @@ class CostLot(SQLModel, table=True):
     __tablename__ = "cost_lots"
 
     cost_lot_id: Optional[int] = Field(default=None, primary_key=True)
-    lot_uuid: UUID = Field(default_factory=uuid4, unique=True)
     # version_id removed - version now accessed via unit.version
     asset_id: Optional[int] = Field(
         default=None, foreign_key="assets.asset_id", index=True
@@ -738,7 +808,7 @@ class CostLot(SQLModel, table=True):
     is_negative: bool = Field(default=False, index=True)
     is_zero_cost: bool = Field(default=False)
     is_settled: bool = Field(default=False, index=True)
-    settled_by_lot_uuid: Optional[UUID] = Field(default=None)
+    settled_by_lot_id: Optional[int] = Field(default=None, foreign_key="cost_lots.cost_lot_id", index=True)
     settled_cost_in_base: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
@@ -1346,6 +1416,12 @@ class CalculationUnit(SQLModel, table=True):
         
         Returns:
             Tuple of (pattern, reason) for logging.
+            
+        Pattern detection priority:
+        1. Same single asset in/out = transfer (complete)
+        2. Different assets with both in/out = swap
+        3. Single-leg transfer (outflow-only or inflow-only with transfer tx_type) = pending_transfer
+        4. Unknown
         """
         if not self.legs:
             return (UnitPattern.UNKNOWN.value, "no legs")
@@ -1353,7 +1429,7 @@ class CalculationUnit(SQLModel, table=True):
         outflow_assets = self._outflow_asset_ids
         inflow_assets = self._inflow_asset_ids
         
-        # Same single asset in/out = transfer
+        # Same single asset in/out = transfer (complete)
         if outflow_assets == inflow_assets and len(outflow_assets) == 1:
             asset_id = next(iter(outflow_assets))
             return (UnitPattern.TRANSFER.value, f"same asset #{asset_id} in/out")
@@ -1362,8 +1438,37 @@ class CalculationUnit(SQLModel, table=True):
         if outflow_assets and inflow_assets:
             return (UnitPattern.SWAP.value, "different assets")
         
+        # Check for incomplete transfer: single-leg with transfer transaction_type
+        # This detects withdrawal/deposit without matching counterpart
+        if self._is_incomplete_transfer():
+            if outflow_assets:
+                return (UnitPattern.PENDING_TRANSFER.value, "outflow-only transfer awaiting inflow")
+            else:
+                return (UnitPattern.PENDING_TRANSFER.value, "inflow-only transfer awaiting outflow")
+        
         # Default to unknown
         return (UnitPattern.UNKNOWN.value, "unable to determine pattern")
+    
+    def _is_incomplete_transfer(self) -> bool:
+        """Check if this unit is an incomplete transfer (single leg with transfer tx_type).
+        
+        Returns:
+            True if legs indicate a transfer but missing counterpart (inflow or outflow).
+        """
+        # Must be single-direction (outflow-only or inflow-only)
+        if not (self.is_outflow_only or self.is_inflow_only):
+            return False
+        
+        # Check if any leg's source transaction has transfer-related type
+        transfer_types = {"transfer", "withdrawal", "deposit", "internal_transfer"}
+        
+        for leg in self.legs:
+            if leg.transaction and leg.transaction.transaction_type:
+                tx_type = leg.transaction.transaction_type.lower()
+                if tx_type in transfer_types:
+                    return True
+        
+        return False
     
     @property
     def is_cost_basis_transfer(self) -> bool:
@@ -1427,19 +1532,16 @@ class LotSettlement(SQLModel, table=True):
     __tablename__ = "lot_settlements"
 
     settlement_id: Optional[int] = Field(default=None, primary_key=True)
-    settlement_uuid: UUID = Field(default_factory=uuid4, unique=True)
     
     # The negative lot (debt) being settled
     negative_lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    negative_lot_uuid: UUID = Field(index=True)
     
     # The positive lot providing funds (owner of this settlement)
     settling_lot_id: Optional[int] = Field(
         default=None, foreign_key="cost_lots.cost_lot_id", index=True
     )
-    settling_lot_uuid: UUID = Field(index=True)
     
     # Transaction that triggered the settlement (the inflow)
     settling_transaction_id: Optional[int] = Field(

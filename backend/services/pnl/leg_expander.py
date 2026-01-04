@@ -41,12 +41,19 @@ def should_expand_as_trade(tx: NormalizedTransaction) -> bool:
     Determine if a transaction should be expanded as a trade.
     
     A trade should be expanded if:
-    - Transaction type is buy/sell
+    - transaction_type is 'trade'
+    - direction is 'inflow' (buy) or 'outflow' (sell)
     - Has base asset with quantity > 0
     - Has different quote asset
     """
-    tx_type = tx.source_transaction_type or ""
-    if tx_type.lower() not in ("buy", "sell"):
+    # Check transaction_type instead of source_transaction_type
+    tx_type = (tx.transaction_type or "").lower()
+    if tx_type != "trade":
+        return False
+    
+    # Ensure valid direction for trade expansion
+    direction = (tx.direction or "").lower()
+    if direction not in ("inflow", "outflow"):
         return False
     
     quantity = tx.quantity
@@ -84,14 +91,14 @@ def is_neutral_transaction(tx: NormalizedTransaction) -> bool:
     Check if transaction is neutral (no value movement, just fee).
     Examples: Token approval, failed transaction, contract interaction.
     """
-    tx_type = tx.source_transaction_type or ""
-    quantity = tx.quantity or 0
+    # Check transaction_type for technical transactions
+    tx_type = (tx.transaction_type or "").lower()
+    is_technical = tx_type == "technical"
     
-    neutral_types = ("approval", "approve", "failed", "reverted", "contract_call", "fee")
-    is_fee_only_type = tx_type.lower() in neutral_types
+    quantity = tx.quantity or 0
     is_zero_quantity = float(quantity) == 0
     
-    return is_fee_only_type or (is_zero_quantity and has_fee(tx))
+    return is_technical or (is_zero_quantity and has_fee(tx))
 
 
 # =============================================================================
@@ -122,7 +129,7 @@ def _convert_to_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
     
     # Create leg with only database fields and relationships
     return CalculationUnitLeg(
-        unit_id=tx.unit_id,  # FK to calculation_unit (will be set by parent)
+        unit_id=tx.user_calculation_unit_id,  # FK to calculation_unit (will be set by parent)
         transaction_id=tx.id,
         asset_id=tx.asset_id,
         leg_type=leg_type,
@@ -144,7 +151,7 @@ def _create_fee_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
     
     # Create fee leg with only database fields and relationships
     return CalculationUnitLeg(
-        unit_id=tx.unit_id,  # FK to calculation_unit (will be set by parent)
+        unit_id=tx.user_calculation_unit_id,  # FK to calculation_unit (will be set by parent)
         transaction_id=tx.id,
         asset_id=tx.fee_quote_asset_id,
         leg_type="fee",
@@ -187,7 +194,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
     if direction == "inflow":
         # BUY: outflow quote asset, inflow base asset
         legs.append(CalculationUnitLeg(
-            unit_id=tx.unit_id,
+            unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
             leg_type="outflow",
@@ -196,7 +203,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             asset=quote_rel,
         ))
         legs.append(CalculationUnitLeg(
-            unit_id=tx.unit_id,
+            unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
             leg_type="inflow",
@@ -207,7 +214,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
     else:
         # SELL: outflow base asset, inflow quote asset
         legs.append(CalculationUnitLeg(
-            unit_id=tx.unit_id,
+            unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
             leg_type="outflow",
@@ -216,7 +223,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             asset=base_rel,
         ))
         legs.append(CalculationUnitLeg(
-            unit_id=tx.unit_id,
+            unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
             leg_type="inflow",
@@ -231,7 +238,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
     
     log.debug(
         f"Expanded trade {tx.id}: {len(legs)} legs "
-        f"({tx.source_transaction_type or 'unknown'} {quantity} "
+        f"({tx.transaction_type}/{tx.direction} {quantity} "
         f"{tx.source_asset_symbol or 'unknown'})"
     )
     

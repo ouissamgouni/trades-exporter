@@ -4,12 +4,14 @@ import {
     GridItem, Heading, Input, NativeSelect, Spinner, Text
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Account, API_URL, Asset } from '../types';
+import { Direction, ReviewStatus, TransactionType } from '../enums';
 import { AssetSelector } from './AssetSelector';
 import { ComboSelect, SOURCE_OPTIONS } from './ComboSelect';
 
-// Simplified transaction category
-type SimplifiedType = 'trade' | 'transfer';
+// Simplified transaction category using enum values
+type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER;
 
 // Tag as key-value pair
 interface Tag {
@@ -52,9 +54,9 @@ interface FormData {
 
 const initialFormData: FormData = {
     date_time: '',
-    direction: 'inflow',
-    simplified_type: 'trade',
-    transaction_type: 'acquisition',
+    direction: Direction.INFLOW,
+    simplified_type: TransactionType.TRADE,
+    transaction_type: TransactionType.TRADE,
     source_transaction_type: '',
     source_transaction_id: '',
     source: 'manual',
@@ -71,28 +73,60 @@ const initialFormData: FormData = {
     fee: '',
     source_fee_quote_asset_symbol: '',
     fee_quote_asset_id: null,
-    include_fee: false,
+    include_fee: true,
     disposal_taxable: false,
     from_address: '',
     to_address: '',
     network: '',
     network_transaction_id: '',
     token_contract_address: '',
-    review_status: 'pending',
+    review_status: ReviewStatus.PENDING,
     review_notes: '',
     tags: [],
 };
 
 // Derive transaction_type from simplified_type + direction
 const deriveTransactionType = (simplifiedType: SimplifiedType, direction: string): string => {
-    if (simplifiedType === 'transfer') {
-        return direction === 'inflow' ? 'transfer_in' : 'transfer_out';
+    if (simplifiedType === TransactionType.TRANSFER) {
+        return TransactionType.TRANSFER;
     }
-    // Trade
-    return direction === 'inflow' ? 'acquisition' : 'disposal';
+    // Trade - direction determines buy/sell semantics at runtime
+    return TransactionType.TRADE;
 };
 
-export const ManualTransactionForm: React.FC = () => {
+// Derive simplified_type from transaction_type
+const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
+    if (transactionType === TransactionType.TRANSFER) {
+        return TransactionType.TRANSFER;
+    }
+    return TransactionType.TRADE;
+};
+
+// Helper to format date as local datetime-local input value (avoids UTC timezone shift)
+const toLocalDateTimeString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+// Props for supporting both create and edit modes
+export interface ManualTransactionFormProps {
+    mode?: 'create' | 'edit';
+    transaction?: import('../types').Transaction;
+    onSuccess?: () => void;
+    onCancel?: () => void;
+}
+
+export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
+    mode = 'create',
+    transaction,
+    onSuccess,
+    onCancel,
+}) => {
+    const queryClient = useQueryClient();
     const [formData, setFormData] = useState<FormData>(initialFormData);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -108,6 +142,52 @@ export const ManualTransactionForm: React.FC = () => {
     const [newAccountType, setNewAccountType] = useState<'cex' | 'broker' | 'wallet'>('wallet');
     const [newAccountOwned, setNewAccountOwned] = useState(true);
 
+    // Helper to convert transaction to form data for edit mode
+    const transactionToFormData = (tx: import('../types').Transaction): FormData => {
+        const simplifiedType = deriveSimplifiedType(tx.transaction_type);
+        const dateTime = tx.date_time 
+            ? new Date(typeof tx.date_time === 'number' ? tx.date_time * 1000 : tx.date_time)
+            : new Date();
+        
+        // Convert tags object to array format
+        const tagsArray: Tag[] = tx.tags 
+            ? Object.entries(tx.tags).map(([key, value]) => ({ key, value: String(value) }))
+            : [];
+
+        return {
+            date_time: toLocalDateTimeString(dateTime),
+            direction: tx.direction || Direction.INFLOW,
+            simplified_type: simplifiedType,
+            transaction_type: tx.transaction_type || TransactionType.TRADE,
+            source_transaction_type: tx.source_transaction_type || '',
+            source_transaction_id: tx.source_transaction_id || '',
+            source: tx.source || 'manual',
+            account_id: tx.account_id || null,
+            from_account_id: tx.from_account_id || null,
+            to_account_id: tx.to_account_id || null,
+            quantity: tx.quantity?.toString() || '',
+            source_asset_symbol: tx.source_asset_symbol || '',
+            asset_id: tx.asset_id || null,
+            price: tx.price?.toString() || '',
+            source_price_quote_asset_symbol: tx.source_price_quote_asset_symbol || '',
+            price_quote_asset_id: tx.price_quote_asset_id || null,
+            total: tx.total?.toString() || '',
+            fee: tx.fee?.toString() || '',
+            source_fee_quote_asset_symbol: tx.source_fee_quote_asset_symbol || '',
+            fee_quote_asset_id: tx.fee_quote_asset_id || null,
+            include_fee: tx.include_fee ?? true,
+            disposal_taxable: tx.disposal_taxable ?? false,
+            from_address: tx.source_from_account || '',
+            to_address: tx.source_to_account || '',
+            network: tx.network || '',
+            network_transaction_id: tx.network_transaction_id || '',
+            token_contract_address: tx.token_contract_address || '',
+            review_status: tx.review_status || ReviewStatus.PENDING,
+            review_notes: tx.review_notes || '',
+            tags: tagsArray,
+        };
+    };
+
     useEffect(() => {
         const initForm = async () => {
             // Fetch assets and accounts
@@ -115,9 +195,14 @@ export const ManualTransactionForm: React.FC = () => {
             await fetchAccounts();
             await fetchTags();
 
-            // Set default datetime to now
+            // If in edit mode with a transaction, populate form data
+            if (mode === 'edit' && transaction) {
+                setFormData(transactionToFormData(transaction));
+                return;
+            }
+
+            // Create mode: Set default datetime to now
             const now = new Date();
-            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
 
             // Find EUR asset to set as default for price/fee quote
             const eurAsset = assetsList?.find((a: Asset) => a.symbol === 'EUR');
@@ -125,13 +210,13 @@ export const ManualTransactionForm: React.FC = () => {
 
             setFormData(prev => ({
                 ...prev,
-                date_time: now.toISOString().slice(0, 16),
+                date_time: toLocalDateTimeString(now),
                 price_quote_asset_id: eurAssetId,
                 fee_quote_asset_id: eurAssetId,
             }));
         };
         initForm();
-    }, []);
+    }, [mode, transaction]);
 
     // Update from_account_id and to_account_id based on direction and account_id for transfers
     useEffect(() => {
@@ -155,6 +240,26 @@ export const ManualTransactionForm: React.FC = () => {
             }
         }
     }, [formData.account_id, formData.direction, formData.simplified_type]);
+
+    // Auto-select taxable event for outflow trades with price in base currency (EUR)
+    useEffect(() => {
+        // Find EUR asset for comparison
+        const eurAsset = assets.find(a => a.symbol === 'EUR');
+        const eurAssetId = eurAsset?.asset_id;
+        
+        // Check conditions: trade + outflow + has price value + price_quote_asset is EUR
+        const shouldBeChecked = 
+            formData.simplified_type === 'trade' &&
+            formData.direction === 'outflow' &&
+            formData.price && 
+            parseFloat(formData.price) > 0 &&
+            eurAssetId &&
+            formData.price_quote_asset_id === eurAssetId;
+        
+        if (shouldBeChecked && !formData.disposal_taxable) {
+            setFormData(prev => ({ ...prev, disposal_taxable: true }));
+        }
+    }, [formData.simplified_type, formData.direction, formData.price, formData.price_quote_asset_id, assets]);
 
     const fetchAssets = async (): Promise<Asset[] | null> => {
         try {
@@ -300,11 +405,10 @@ export const ManualTransactionForm: React.FC = () => {
             if (formData.source_asset_symbol) payload.source_asset_symbol = formData.source_asset_symbol;
             if (formData.price) payload.price = parseFloat(formData.price);
             if (formData.source_price_quote_asset_symbol) payload.source_price_quote_asset_symbol = formData.source_price_quote_asset_symbol;
-            if (formData.total) payload.total = parseFloat(formData.total);
             if (formData.fee) payload.fee = parseFloat(formData.fee);
             if (formData.source_fee_quote_asset_symbol) payload.source_fee_quote_asset_symbol = formData.source_fee_quote_asset_symbol;
-            if (formData.from_address) payload.from_address = formData.from_address;
-            if (formData.to_address) payload.to_address = formData.to_address;
+            if (formData.from_address) payload.source_from_account = formData.from_address;
+            if (formData.to_address) payload.source_to_account = formData.to_address;
             if (formData.network) payload.network = formData.network;
             if (formData.network_transaction_id) payload.network_transaction_id = formData.network_transaction_id;
             if (formData.token_contract_address) payload.token_contract_address = formData.token_contract_address;
@@ -313,25 +417,71 @@ export const ManualTransactionForm: React.FC = () => {
             if (formData.to_account_id) payload.to_account_id = formData.to_account_id;
             if (formData.tags.length > 0) payload.tags = formData.tags;
 
-            const response = await fetch(`${API_URL}/transactions`, {
-                method: 'POST',
+            // Different API call for create vs edit mode
+            const isEditMode = mode === 'edit' && transaction?.id;
+            const url = isEditMode 
+                ? `${API_URL}/transactions/${transaction.id}`
+                : `${API_URL}/transactions`;
+            const method = isEditMode ? 'PATCH' : 'POST';
+
+            const response = await fetch(url, {
+                method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to create transaction');
+                throw new Error(errorData.detail || `Failed to ${isEditMode ? 'update' : 'create'} transaction`);
             }
 
             const result = await response.json();
-            // API returns { transactions: [...], split: bool, message: str }
-            const createdTransactions = result.transactions || [];
-            setSuccess(`Transaction created successfully! ${result.message}`);
-            // Add all created transactions (may be multiple if split into legs)
-            setRecentTransactions(prev => [...createdTransactions, ...prev].slice(0, 5));
+            
+            if (isEditMode) {
+                // Edit mode: single transaction updated
+                setSuccess('Transaction updated successfully!');
+                // Trigger refresh of transactions in other components
+                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                // Call success callback if provided
+                onSuccess?.();
+            } else {
+                // Create mode: API returns { transactions: [...], split: bool, message: str }
+                const createdTransactions = result.transactions || [];
+                setSuccess(`Transaction created successfully! ${result.message}`);
+                // Add all created transactions (may be multiple if split into legs)
+                setRecentTransactions(prev => [...createdTransactions, ...prev].slice(0, 5));
 
-            // Reset form but keep date near current time and EUR defaults
+                // Trigger refresh of transactions in other components
+                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+
+                // Reset form but keep date near current time and EUR defaults
+                const now = new Date();
+                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+                const eurAsset = assets.find(a => a.symbol === 'EUR');
+                const eurAssetId = eurAsset?.asset_id || null;
+                setFormData({
+                    ...initialFormData,
+                    date_time: now.toISOString().slice(0, 16),
+                    price_quote_asset_id: eurAssetId,
+                    fee_quote_asset_id: eurAssetId,
+                });
+            }
+
+        } catch (err) {
+            setError(err instanceof Error ? err.message : `Failed to ${mode === 'edit' ? 'update' : 'create'} transaction`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleClear = () => {
+        if (mode === 'edit') {
+            // In edit mode, reset to original transaction data
+            if (transaction) {
+                setFormData(transactionToFormData(transaction));
+            }
+        } else {
+            // In create mode, reset to defaults
             const now = new Date();
             now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
             const eurAsset = assets.find(a => a.symbol === 'EUR');
@@ -342,25 +492,7 @@ export const ManualTransactionForm: React.FC = () => {
                 price_quote_asset_id: eurAssetId,
                 fee_quote_asset_id: eurAssetId,
             });
-
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to create transaction');
-        } finally {
-            setLoading(false);
         }
-    };
-
-    const handleClear = () => {
-        const now = new Date();
-        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        const eurAsset = assets.find(a => a.symbol === 'EUR');
-        const eurAssetId = eurAsset?.asset_id || null;
-        setFormData({
-            ...initialFormData,
-            date_time: now.toISOString().slice(0, 16),
-            price_quote_asset_id: eurAssetId,
-            fee_quote_asset_id: eurAssetId,
-        });
         setError(null);
         setSuccess(null);
     };
@@ -374,16 +506,21 @@ export const ManualTransactionForm: React.FC = () => {
         </Text>
     );
 
+    const isEditMode = mode === 'edit';
+
     return (
         <Box maxW="1200px" mx="auto">
             {/* Header */}
             <Box mb={6}>
-                <Heading as="h2" size="lg" mb={2} color="gray.800">Add Transaction</Heading>
+                <Heading as="h2" size="lg" mb={2} color="gray.800">
+                    {isEditMode ? 'Edit Transaction' : 'Add Transaction'}
+                </Heading>
                 <Text color="gray.500" fontSize="sm">
-                    Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.
+                    {isEditMode 
+                        ? 'Update transaction details. Changes will be saved when you click Save.'
+                        : 'Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.'}
                 </Text>
             </Box>
-
             {/* Alerts */}
             {error && (
                 <Box mb={4} p={4} bg="red.50" borderRadius="lg" borderLeft="4px solid" borderLeftColor="red.500">
@@ -467,13 +604,16 @@ export const ManualTransactionForm: React.FC = () => {
                         </Card.Body>
                     </Card.Root>
 
-                    {/* Section 2: Transaction Details */}
-                    <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Card.Header bg="blue.50" py={3} px={4} borderTopRadius="xl">
-                            <Heading size="sm" color="blue.700">💱 Transaction Details</Heading>
-                        </Card.Header>
-                        <Card.Body p={4}>
-                            <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
+                    {/* Section 2 + Tags: Transaction Details (75%) and Tags (25%) side by side */}
+                    <Flex gap={4} direction={{ base: "column", lg: "row" }}>
+                        {/* Section 2: Transaction Details - 75% */}
+                        <Box flex="3">
+                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
+                                <Card.Header bg="blue.50" py={3} px={4} borderTopRadius="xl">
+                                    <Heading size="sm" color="blue.700">💱 Transaction Details</Heading>
+                                </Card.Header>
+                                <Card.Body p={4}>
+                                    <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
                                 <GridItem>
                                     <Label required>Type</Label>
                                     <NativeSelect.Root size="sm">
@@ -704,18 +844,20 @@ export const ManualTransactionForm: React.FC = () => {
                                 </Grid>
                             </Box>
 
-                        </Card.Body>
-                    </Card.Root>
+                                </Card.Body>
+                            </Card.Root>
+                        </Box>
 
-                    {/* Section 2.5: Tags */}
-                    <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Card.Header bg="purple.50" py={3} px={4} borderTopRadius="xl">
-                            <Heading size="sm" color="purple.700">🏷️ Tags</Heading>
-                        </Card.Header>
-                        <Card.Body p={4}>
-                            <Text fontSize="xs" color="gray.500" mb={3}>
-                                Add key-value tags to categorize this transaction (e.g., category: airdrop, protocol: uniswap)
-                            </Text>
+                        {/* Section 2.5: Tags - 25% */}
+                        <Box flex="1">
+                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
+                                <Card.Header bg="purple.50" py={3} px={4} borderTopRadius="xl">
+                                    <Heading size="sm" color="purple.700">🏷️ Tags</Heading>
+                                </Card.Header>
+                                <Card.Body p={4}>
+                                    <Text fontSize="xs" color="gray.500" mb={3}>
+                                        Add key-value tags to categorize this transaction
+                                    </Text>
 
                             {/* Selected tags */}
                             {formData.tags.length > 0 && (
@@ -815,8 +957,10 @@ export const ManualTransactionForm: React.FC = () => {
                                     </Flex>
                                 </Box>
                             )}
-                        </Card.Body>
-                    </Card.Root>
+                                </Card.Body>
+                            </Card.Root>
+                        </Box>
+                    </Flex>
 
                     {/* Section 3: Pricing */}
                     <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
@@ -1039,13 +1183,23 @@ export const ManualTransactionForm: React.FC = () => {
                     zIndex={10}
                 >
                     <Flex gap={3} justify="flex-end">
+                        {isEditMode && onCancel && (
+                            <Button
+                                variant="ghost"
+                                onClick={onCancel}
+                                disabled={loading}
+                                size="lg"
+                            >
+                                Cancel
+                            </Button>
+                        )}
                         <Button
                             variant="ghost"
                             onClick={handleClear}
                             disabled={loading}
                             size="lg"
                         >
-                            Clear
+                            {isEditMode ? 'Reset' : 'Clear'}
                         </Button>
                         <Button
                             type="submit"
@@ -1055,14 +1209,16 @@ export const ManualTransactionForm: React.FC = () => {
                             px={8}
                         >
                             {loading ? <Spinner size="sm" mr={2} /> : null}
-                            {loading ? 'Creating...' : '➕ Create Transaction'}
+                            {loading 
+                                ? (isEditMode ? 'Saving...' : 'Creating...') 
+                                : (isEditMode ? '💾 Save Changes' : '➕ Create Transaction')}
                         </Button>
                     </Flex>
                 </Box>
             </form>
 
-            {/* Recent Transactions */}
-            {recentTransactions.length > 0 && (
+            {/* Recent Transactions - only show in create mode */}
+            {!isEditMode && recentTransactions.length > 0 && (
                 <Card.Root mt={8} shadow="sm" borderRadius="xl">
                     <Card.Header bg="gray.50" py={3} px={4}>
                         <Heading size="sm" color="gray.700">✨ Recently Created</Heading>

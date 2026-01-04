@@ -170,9 +170,7 @@ class MEXCConnectorTrx(BaseConnector):
                 source_transaction_id=trade_id,
                 date_time=dt,
                 direction="inflow" if source_transaction_type == "buy" else "outflow",
-                transaction_type="acquisition"
-                if source_transaction_type == "buy"
-                else "disposal",
+                transaction_type="trade",
                 source_transaction_type=source_transaction_type,
                 source_asset_symbol=base,
                 quantity=qty,

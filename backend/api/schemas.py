@@ -48,7 +48,6 @@ class TransactionUpdate(BaseModel):
     asset_id: Optional[int] = None
     price_quote_asset_id: Optional[int] = None
     fee_quote_asset_id: Optional[int] = None
-    account: Optional[str] = None
     account_id: Optional[int] = None
     source: Optional[str] = None
     direction: Optional[str] = Field(None, pattern="^(inflow|outflow|internal)$")
@@ -64,7 +63,6 @@ class TransactionUpdate(BaseModel):
     transaction_type: Optional[str] = Field(
         None, description="Transaction type (predefined or custom)"
     )
-    group_id: Optional[int] = None
     review_status: Optional[str] = Field(None, pattern="^(valid|pending|invalid)$")
     review_notes: Optional[str] = None
 
@@ -72,9 +70,21 @@ class TransactionUpdate(BaseModel):
     taxability_status: Optional[str] = Field(
         None, pattern="^(taxable|non_taxable|unknown)$", description="Taxability status"
     )
-    unit_id: Optional[int] = Field(
-        None, description="Unit ID (null to remove from unit)"
+    user_calculation_unit_id: Optional[int] = Field(
+        None, description="Calculation unit ID (null to remove from unit)"
     )
+    
+    # Transfer/network fields
+    source_from_account: Optional[str] = None
+    source_to_account: Optional[str] = None
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    network: Optional[str] = None
+    network_transaction_id: Optional[str] = None
+    token_contract_address: Optional[str] = None
+    
+    # Date/time
+    date_time: Optional[datetime] = None
 
 
 class TransactionResponse(BaseModel):
@@ -111,7 +121,6 @@ class TransactionResponse(BaseModel):
     source_fee_quote_asset_symbol: Optional[str] = None
 
     # Account fields
-    account: Optional[str] = None
     account_id: Optional[int] = None
 
     # Foreign keys
@@ -119,7 +128,7 @@ class TransactionResponse(BaseModel):
     asset_id: Optional[int] = None
     price_quote_asset_id: Optional[int] = None
     fee_quote_asset_id: Optional[int] = None
-    group_id: Optional[int] = None
+    user_calculation_unit_id: Optional[int] = None
 
     # Normalized fields
     date_time: Optional[Union[datetime, int]] = None
@@ -129,7 +138,7 @@ class TransactionResponse(BaseModel):
 
     # Pricing information (in quote asset - base is runtime P&L config)
     price: Optional[float] = None
-    total: Optional[float] = None
+    total: Optional[float] = None  # Computed: price * quantity
 
     # Fee information (in fee quote asset)
     fee: Optional[float] = None
@@ -147,14 +156,9 @@ class TransactionResponse(BaseModel):
     network_transaction_id: Optional[str] = None
     token_contract_address: Optional[str] = None
 
-    # Leg expansion - links expanded legs to parent transaction
-    parent_transaction_id: Optional[int] = None
-    leg_type: Optional[str] = None  # cost, proceeds, acquired, disposed, fee
-
     # Review status and taxability
     review_status: Optional[str] = "pending"  # valid, pending, invalid
     taxability_status: Optional[str] = "unknown"  # taxable, non_taxable, unknown
-    unit_id: Optional[int] = None  # User-created unit
 
     # Review notes
     review_notes: Optional[str] = None
@@ -169,6 +173,11 @@ class TransactionResponse(BaseModel):
     linked_asset_symbol: Optional[str] = None
     linked_price_quote_asset_symbol: Optional[str] = None
     linked_fee_quote_asset_symbol: Optional[str] = None
+
+    # Additional fields from JOIN with accounts table (server-side resolved)
+    account_name: Optional[str] = None
+    from_account_name: Optional[str] = None
+    to_account_name: Optional[str] = None
 
 
 # =============================================================================

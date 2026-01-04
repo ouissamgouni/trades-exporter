@@ -3,15 +3,19 @@ import {
     Button, Card, Flex,
     Heading, Progress, Spinner, Text
 } from '@chakra-ui/react';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL, ConnectorsInfo, SyncJobProgress, SyncJobStartResponse } from '../types';
 
 export const SyncJobPanel: React.FC = () => {
+    const queryClient = useQueryClient();
     const [jobStatus, setJobStatus] = useState<SyncJobProgress | null>(null);
     const [connectors, setConnectors] = useState<ConnectorsInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    // Track previous status to detect completion
+    const prevStatusRef = useRef<string | null>(null);
 
     // Fetch job status
     const fetchJobStatus = useCallback(async () => {
@@ -54,6 +58,20 @@ export const SyncJobPanel: React.FC = () => {
             return () => clearInterval(interval);
         }
     }, [jobStatus?.status, fetchJobStatus]);
+
+    // Trigger transaction refresh when sync job completes
+    useEffect(() => {
+        const currentStatus = jobStatus?.status;
+        const prevStatus = prevStatusRef.current;
+        
+        // Detect transition from running to completed
+        if (prevStatus === 'running' && currentStatus === 'completed') {
+            console.log('🔄 Sync completed, refreshing transactions...');
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        }
+        
+        prevStatusRef.current = currentStatus ?? null;
+    }, [jobStatus?.status, queryClient]);
 
     // Start a new sync job
     const startJob = async () => {

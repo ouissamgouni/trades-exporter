@@ -19,6 +19,7 @@ The engine handles:
 3. Managing lot consumption and creation
 """
 
+from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Any, Dict
@@ -109,7 +110,7 @@ class PnLEngine:
             if key_type == "unit":
                 unit_origin = f"bundle:{key_id}"
                 # Get bundle from first member (all members have same bundle)
-                bundle = members[0].bundle if members else None
+                bundle = members[0].transaction.user_calculation_unit if members else None
             else:
                 unit_origin = f"tx:{key_id}"
                 bundle = None

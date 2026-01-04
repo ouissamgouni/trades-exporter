@@ -89,10 +89,18 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                 transaction_id: data.id,
                 date_time: data.date_time,
                 account_id: data.account_id,
-                account_name: data.account || '-',  // API returns 'account' field
+                account_name: data.account_name || '-',  // Use server-side resolved account_name
                 source: data.source,
                 source_transaction_type: data.source_transaction_type,
+                transaction_type: data.transaction_type,
                 direction: data.direction,
+                // Transfer fields
+                from_account_id: data.from_account_id,
+                from_account_name: data.from_account_name,
+                to_account_id: data.to_account_id,
+                to_account_name: data.to_account_name,
+                source_from_account: data.source_from_account,
+                source_to_account: data.source_to_account,
                 asset_id: data.asset_id,
                 asset_symbol: data.linked_asset_symbol || data.source_asset_symbol,
                 quantity: data.quantity,
@@ -137,12 +145,12 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                         <Text color="white">{txData.account_name || '-'}</Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Source</Text>
-                        <Text color="white">{txData.source || '-'}</Text>
+                        <Text color="gray.400">Type</Text>
+                        <Text color="white">{txData.transaction_type || txData.source_transaction_type || '-'}</Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
-                        <Text color="gray.400">Type</Text>
-                        <Text color="white">{txData.source_transaction_type || '-'}</Text>
+                        <Text color="gray.400">Source</Text>
+                        <Text color="white">{txData.source || '-'}</Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Asset</Text>
@@ -171,6 +179,14 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Fee Quote</Text>
                         <Text color="white">{txData.fee_quote_asset_symbol || '-'}</Text>
+                    </Flex>
+                    <Flex justify="space-between" mb={1}>
+                        <Text color="gray.400">From/To Account</Text>
+                        <Text color="white">
+                            {txData.direction === 'inflow'
+                                ? (txData.from_account_name || txData.source_from_account || '-')
+                                : (txData.to_account_name || txData.source_to_account || '-')}
+                        </Text>
                     </Flex>
                 </Box>
             ) : (
@@ -418,10 +434,18 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                         transaction_id: data.id,
                         date_time: data.date_time,
                         account_id: data.account_id,
-                        account_name: data.account || '-',
+                        account_name: data.account_name || '-',  // Use server-side resolved account_name
                         source: data.source,
                         source_transaction_type: data.source_transaction_type,
+                        transaction_type: data.transaction_type,
                         direction: data.direction,
+                        // Transfer fields
+                        from_account_id: data.from_account_id,
+                        from_account_name: data.from_account_name,
+                        to_account_id: data.to_account_id,
+                        to_account_name: data.to_account_name,
+                        source_from_account: data.source_from_account,
+                        source_to_account: data.source_to_account,
                         asset_id: data.asset_id,
                         asset_symbol: data.linked_asset_symbol || data.source_asset_symbol,
                         quantity: data.quantity,
@@ -445,11 +469,11 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
         fetchOriginTransactions();
     }, [allTxIds]);
 
-    // Build a map of lot_uuid -> CostLot for quick lookup
+    // Build a map of cost_lot_id -> CostLot for quick lookup
     const lotMap = useMemo(() => {
-        const map = new Map<string, CostLot>();
+        const map = new Map<number, CostLot>();
         for (const lot of costLots) {
-            map.set(lot.lot_uuid, lot);
+            map.set(lot.cost_lot_id, lot);
         }
         return map;
     }, [costLots]);
@@ -503,51 +527,67 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                         <Table.ColumnHeader fontSize="xs" textAlign="right">Fee</Table.ColumnHeader>
                                         <Table.ColumnHeader fontSize="xs">Account</Table.ColumnHeader>
                                         <Table.ColumnHeader fontSize="xs">Type</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="xs">From/To</Table.ColumnHeader>
                                     </Table.Row>
                                 </Table.Header>
                                 <Table.Body>
-                                    {originTxs.map((tx) => (
-                                        <Table.Row key={tx.transaction_id}>
-                                            <Table.Cell>
-                                                <TransactionCell
-                                                    txId={tx.transaction_id}
-                                                    baseCurrency={baseCurrency}
-                                                    onTransactionClick={onTransactionClick}
-                                                    prefix=""
-                                                    size="xs"
-                                                />
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Badge
-                                                    size="xs"
-                                                    colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
-                                                >
-                                                    {tx.direction || '-'}
-                                                </Badge>
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                <Badge size="xs">{tx.asset_symbol || '-'}</Badge>
-                                            </Table.Cell>
-                                            <Table.Cell fontSize="xs" textAlign="right" fontFamily="mono">
-                                                {formatQty(tx.quantity || 0)}
-                                            </Table.Cell>
-                                            <Table.Cell fontSize="xs" textAlign="right">
-                                                {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
-                                            </Table.Cell>
-                                            <Table.Cell fontSize="xs" textAlign="right">
-                                                {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
-                                            </Table.Cell>
-                                            <Table.Cell fontSize="xs" textAlign="right">
-                                                {tx.fee ? (
-                                                    <Text color="orange.600">
-                                                        {formatQty(tx.fee)} {tx.fee_quote_asset_symbol || ''}
-                                                    </Text>
-                                                ) : '-'}
-                                            </Table.Cell>
-                                            <Table.Cell fontSize="xs">{tx.account_name || '-'}</Table.Cell>
-                                            <Table.Cell fontSize="xs">{tx.source_transaction_type || '-'}</Table.Cell>
-                                        </Table.Row>
-                                    ))}
+                                    {originTxs.map((tx) => {
+                                        const txType = tx.transaction_type || tx.source_transaction_type || '-';
+                                        const fromAccount = tx.from_account_name || tx.source_from_account;
+                                        const toAccount = tx.to_account_name || tx.source_to_account;
+                                        // From/To Account: show from_account if inflow, to_account if outflow
+                                        const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
+                                        
+                                        return (
+                                            <Table.Row key={tx.transaction_id}>
+                                                <Table.Cell>
+                                                    <TransactionCell
+                                                        txId={tx.transaction_id}
+                                                        baseCurrency={baseCurrency}
+                                                        onTransactionClick={onTransactionClick}
+                                                        prefix=""
+                                                        size="xs"
+                                                    />
+                                                </Table.Cell>
+                                                <Table.Cell>
+                                                    <Badge
+                                                        size="xs"
+                                                        colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
+                                                    >
+                                                        {tx.direction || '-'}
+                                                    </Badge>
+                                                </Table.Cell>
+                                                <Table.Cell>
+                                                    <Badge size="xs">{tx.asset_symbol || '-'}</Badge>
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs" textAlign="right" fontFamily="mono">
+                                                    {formatQty(tx.quantity || 0)}
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs" textAlign="right">
+                                                    {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs" textAlign="right">
+                                                    {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs" textAlign="right">
+                                                    {tx.fee ? (
+                                                        <Text color="orange.600">
+                                                            {formatQty(tx.fee)} {tx.fee_quote_asset_symbol || ''}
+                                                        </Text>
+                                                    ) : '-'}
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs">{tx.account_name || '-'}</Table.Cell>
+                                                <Table.Cell fontSize="xs">
+                                                    <Badge size="xs" colorPalette={txType === 'transfer' ? 'blue' : 'gray'}>
+                                                        {txType}
+                                                    </Badge>
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs" color="gray.600">
+                                                    {fromToAccount || '-'}
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        );
+                                    })}
                                 </Table.Body>
                             </Table.Root>
                         ) : (
@@ -627,6 +667,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     <Table.Row>
                                                         <Table.ColumnHeader fontSize="xs" width="80px">Event</Table.ColumnHeader>
                                                         <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
+                                                        <Table.ColumnHeader fontSize="xs">Account</Table.ColumnHeader>
                                                         <Table.ColumnHeader fontSize="xs" textAlign="right">Qty Δ</Table.ColumnHeader>
                                                         <Table.ColumnHeader fontSize="xs" textAlign="right">Cost Δ</Table.ColumnHeader>
                                                         <Table.ColumnHeader fontSize="xs" textAlign="right">Remaining</Table.ColumnHeader>
@@ -642,6 +683,9 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                             </Table.Cell>
                                                             <Table.Cell fontSize="xs">
                                                                 <Badge size="xs">{event.asset?.name || '-'}</Badge>
+                                                            </Table.Cell>
+                                                            <Table.Cell fontSize="xs" color="gray.600">
+                                                                {event.account_name || '-'}
                                                             </Table.Cell>
                                                             <Table.Cell fontSize="xs" textAlign="right" fontFamily="mono">
                                                                 <Text color={event.quantity_delta >= 0 ? 'green.600' : 'red.600'}>
@@ -856,36 +900,68 @@ export const UnitsTab: React.FC<{
                     <Table.Body>
                         {filtered.slice(0, 200).map((unit) => {
                             // Generate operation label from unit_label or compose compact preview
-                            // Format: "out: BTC 0.5, ETH 1.2 → in: USD 500"
-                            const generateCompactLabel = (): string => {
+                            // For transfers: "Account A → Account B: BTC"
+                            // For trades: "−: BTC → +: USD"
+                            // Generate operation label based on pattern type
+                            // For trades/swaps: "−: BTC → +: USD" 
+                            // For transfers: "⇄ BTC" with transfer indicator
+                            const generateOperationDisplay = (): { mainLabel: string; subLabel?: string; icon: string } => {
                                 const outSymbols = unit.outflow_asset_symbols || [];
                                 const inSymbols = unit.inflow_asset_symbols || [];
                                 const feeSymbols = unit.fee_asset_symbols || [];
+                                const isTransfer = unit.pattern === 'transfer';
+                                const isSwap = unit.pattern === 'swap';
 
-                                const formatPart = (symbols: string[], prefix: string): string => {
+                                // Format asset symbols for display
+                                const formatAssets = (symbols: string[], max: number = 2): string => {
                                     if (!symbols.length) return '';
-                                    const display = symbols.slice(0, 2).join(', ');
-                                    const more = symbols.length > 2 ? '…' : '';
-                                    return `${prefix}: ${display}${more}`;
+                                    const display = symbols.slice(0, max).join(', ');
+                                    return symbols.length > max ? `${display}…` : display;
                                 };
 
-                                const outPart = formatPart(outSymbols, '−');
-                                const inPart = formatPart(inSymbols, '+');
-                                const feePart = feeSymbols.length > 0 ? ` (fee: ${feeSymbols.slice(0, 1).join('')})` : '';
-
-                                if (outPart && inPart) {
-                                    return `${outPart} → ${inPart}${feePart}`;
-                                } else if (outPart) {
-                                    return outPart + feePart;
-                                } else if (inPart) {
-                                    return inPart + feePart;
+                                // If unit has a custom label, use it
+                                if (unit.unit_label) {
+                                    return { mainLabel: unit.unit_label, icon: isTransfer ? '⇄' : isSwap ? '↔' : '•' };
                                 }
-                                return '—';
+
+                                if (isTransfer) {
+                                    // Transfer: show moved assets
+                                    const assets = [...new Set([...outSymbols, ...inSymbols])];
+                                    const assetLabel = formatAssets(assets) || 'assets';
+                                    return { 
+                                        mainLabel: assetLabel, 
+                                        subLabel: 'moved between accounts',
+                                        icon: '⇄' 
+                                    };
+                                }
+
+                                if (isSwap) {
+                                    // Swap/Trade: show exchange "BTC → USD"
+                                    const outPart = formatAssets(outSymbols);
+                                    const inPart = formatAssets(inSymbols);
+                                    const feePart = feeSymbols.length > 0 ? ` (fee: ${feeSymbols[0]})` : '';
+                                    
+                                    if (outPart && inPart) {
+                                        return { mainLabel: `${outPart} → ${inPart}${feePart}`, icon: '↔' };
+                                    } else if (outPart) {
+                                        return { mainLabel: `Sell ${outPart}${feePart}`, icon: '↔' };
+                                    } else if (inPart) {
+                                        return { mainLabel: `Buy ${inPart}${feePart}`, icon: '↔' };
+                                    }
+                                }
+
+                                // Default: generic format
+                                const outPart = outSymbols.length ? `−${formatAssets(outSymbols)}` : '';
+                                const inPart = inSymbols.length ? `+${formatAssets(inSymbols)}` : '';
+                                const label = [outPart, inPart].filter(Boolean).join(' → ') || '—';
+                                return { mainLabel: label, icon: '•' };
                             };
 
-                            const operationLabel = unit.unit_label || generateCompactLabel();
+                            const { mainLabel, subLabel, icon } = generateOperationDisplay();
                             const warningCount = unit.warnings?.length || 0;
                             const txCount = unit.transaction_ids?.length || 0;
+                            const isTransfer = unit.pattern === 'transfer';
+                            const isSwap = unit.pattern === 'swap';
                             return (
                                 <React.Fragment key={unit.unit_id}>
                                     <Table.Row onClick={() => toggleExpand(unit.unit_id)} style={{ cursor: 'pointer' }} _hover={{ bg: 'gray.50' }}>
@@ -901,12 +977,26 @@ export const UnitsTab: React.FC<{
                                             </Badge>
                                         </Table.Cell>
                                         <Table.Cell fontSize="xs">{formatDate(unit.date)}</Table.Cell>
-                                        {/* Merged Operation Column: Label + Transactions */}
+                                        {/* Operation Column: Icon + Label + Sub-label + Transactions */}
                                         <Table.Cell>
                                             <Flex direction="column" gap={0}>
-                                                <Text fontSize="xs" fontWeight="medium">
-                                                    {operationLabel}
-                                                </Text>
+                                                <Flex align="center" gap={1}>
+                                                    <Text 
+                                                        fontSize="sm" 
+                                                        color={isTransfer ? 'blue.500' : isSwap ? 'orange.500' : 'gray.500'}
+                                                        fontWeight="bold"
+                                                    >
+                                                        {icon}
+                                                    </Text>
+                                                    <Text fontSize="xs" fontWeight="medium">
+                                                        {mainLabel}
+                                                    </Text>
+                                                </Flex>
+                                                {subLabel && (
+                                                    <Text fontSize="2xs" color="gray.500" ml={4}>
+                                                        {subLabel}
+                                                    </Text>
+                                                )}
                                                 {txCount > 0 && (
                                                     <Flex gap={1} wrap="wrap" mt={1}>
                                                         {(unit.transaction_ids || []).slice(0, 3).map(txId => (
@@ -1022,7 +1112,7 @@ const CostLotsTab: React.FC<{
                 const s = search.toLowerCase();
                 const symbol = lot.asset?.name ?? lot.asset_symbol ?? '';
                 return symbol.toLowerCase().includes(s) ||
-                    lot.lot_uuid.toLowerCase().includes(s) ||
+                    String(lot.cost_lot_id).includes(s) ||
                     (lot.account_name || '').toLowerCase().includes(s);
             }
             return true;
@@ -1133,7 +1223,7 @@ const CostLotsTab: React.FC<{
 
                             return (
                                 <Table.Row
-                                    key={lot.lot_uuid}
+                                    key={lot.cost_lot_id}
                                     bg={isNegative ? 'red.50' : isExhausted ? 'gray.50' : undefined}
                                 >
                                     <Table.Cell>
@@ -1225,7 +1315,7 @@ export const CostLotEventsTab: React.FC<{
             if (eventTypeFilter !== 'all' && event.event_type !== eventTypeFilter) return false;
             if (search) {
                 const s = search.toLowerCase();
-                return (event.lot_uuid || '').toLowerCase().includes(s) ||
+                return String(event.lot_id).includes(s) ||
                     (event.asset?.name || '').toLowerCase().includes(s);
             }
             return true;
@@ -1344,6 +1434,7 @@ export const CostLotEventsTab: React.FC<{
                             <Table.ColumnHeader width="50px">Type</Table.ColumnHeader>
                             <Table.ColumnHeader>Timestamp</Table.ColumnHeader>
                             <Table.ColumnHeader>Asset</Table.ColumnHeader>
+                            <Table.ColumnHeader>Account</Table.ColumnHeader>
                             <Table.ColumnHeader>Lot ID</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Qty Delta</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Cost Delta</Table.ColumnHeader>
@@ -1376,8 +1467,11 @@ export const CostLotEventsTab: React.FC<{
                                 <Table.Cell>
                                     <Badge size="xs">{event.asset?.name || '?'}</Badge>
                                 </Table.Cell>
+                                <Table.Cell fontSize="xs" color="gray.600">
+                                    {event.account_name || '-'}
+                                </Table.Cell>
                                 <Table.Cell fontSize="2xs" fontFamily="mono" color="gray.500">
-                                    {event.lot_uuid?.slice(0, 8) || String(event.lot_id).slice(0, 8)}
+                                    #{event.lot_id}
                                 </Table.Cell>
                                 <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
                                     <Text color={event.quantity_delta >= 0 ? 'green.600' : 'red.600'}>
@@ -1980,11 +2074,11 @@ const SettlementsTab: React.FC<{
 }> = ({ settlements, costLots, baseCurrency, onTransactionClick }) => {
     const [search, setSearch] = useState('');
 
-    // Build a map of lot_uuid -> CostLot for enrichment
+    // Build a map of cost_lot_id -> CostLot for enrichment
     const lotMap = useMemo(() => {
-        const map = new Map<string, CostLot>();
+        const map = new Map<number, CostLot>();
         for (const lot of costLots) {
-            map.set(lot.lot_uuid, lot);
+            map.set(lot.cost_lot_id, lot);
         }
         return map;
     }, [costLots]);
@@ -1993,12 +2087,12 @@ const SettlementsTab: React.FC<{
         if (!search) return settlements;
         const s = search.toLowerCase();
         return settlements.filter(settlement => {
-            const negativeLot = lotMap.get(settlement.negative_lot_uuid);
-            const settlingLot = lotMap.get(settlement.settling_lot_uuid);
+            const negativeLot = lotMap.get(settlement.negative_lot_id);
+            const settlingLot = lotMap.get(settlement.settling_lot_id);
             return (
-                settlement.settlement_uuid.toLowerCase().includes(s) ||
-                settlement.negative_lot_uuid.toLowerCase().includes(s) ||
-                settlement.settling_lot_uuid.toLowerCase().includes(s) ||
+                String(settlement.settlement_id).includes(s) ||
+                String(settlement.negative_lot_id).includes(s) ||
+                String(settlement.settling_lot_id).includes(s) ||
                 (negativeLot?.asset_symbol || '').toLowerCase().includes(s) ||
                 (settlingLot?.asset_symbol || '').toLowerCase().includes(s)
             );
@@ -2014,8 +2108,8 @@ const SettlementsTab: React.FC<{
     const stats = useMemo(() => {
         const totalQtySettled = settlements.reduce((sum, s) => sum + s.qty_settled, 0);
         const totalCostApplied = settlements.reduce((sum, s) => sum + (s.cost_basis_applied || 0), 0);
-        const uniqueNegativeLots = new Set(settlements.map(s => s.negative_lot_uuid)).size;
-        const uniqueSettlingLots = new Set(settlements.map(s => s.settling_lot_uuid)).size;
+        const uniqueNegativeLots = new Set(settlements.map(s => s.negative_lot_id)).size;
+        const uniqueSettlingLots = new Set(settlements.map(s => s.settling_lot_id)).size;
         return { totalQtySettled, totalCostApplied, uniqueNegativeLots, uniqueSettlingLots };
     }, [settlements]);
 
@@ -2084,10 +2178,10 @@ const SettlementsTab: React.FC<{
                     </Table.Header>
                     <Table.Body>
                         {sorted.slice(0, 200).map((settlement) => {
-                            const negativeLot = lotMap.get(settlement.negative_lot_uuid);
-                            const settlingLot = lotMap.get(settlement.settling_lot_uuid);
+                            const negativeLot = lotMap.get(settlement.negative_lot_id);
+                            const settlingLot = lotMap.get(settlement.settling_lot_id);
                             return (
-                                <Table.Row key={settlement.settlement_uuid}>
+                                <Table.Row key={settlement.settlement_id}>
                                     <Table.Cell fontSize="xs">
                                         {formatDate(settlement.settled_at)}
                                     </Table.Cell>
@@ -2100,7 +2194,7 @@ const SettlementsTab: React.FC<{
                                                 )}
                                             </Flex>
                                             <Text fontSize="2xs" fontFamily="mono" color="gray.500">
-                                                {settlement.negative_lot_uuid.slice(0, 8)}...
+                                                #{settlement.negative_lot_id}
                                             </Text>
                                             {negativeLot && (
                                                 <Flex direction="column" gap={0} fontSize="2xs" color="gray.600">
@@ -2143,7 +2237,7 @@ const SettlementsTab: React.FC<{
                                                 )}
                                             </Flex>
                                             <Text fontSize="2xs" fontFamily="mono" color="gray.500">
-                                                {settlement.settling_lot_uuid.slice(0, 8)}...
+                                                #{settlement.settling_lot_id}
                                             </Text>
                                             {settlingLot && settlingLot.origin_transaction_id && (
                                                 <TransactionTooltip txId={settlingLot.origin_transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
@@ -2408,7 +2502,6 @@ const LotEventsTab: React.FC<{
         if (search) {
             const s = search.toLowerCase();
             result = result.filter(e =>
-                (e.lot_uuid && e.lot_uuid.toLowerCase().includes(s)) ||
                 (e.asset?.name && e.asset.name.toLowerCase().includes(s)) ||
                 String(e.lot_id).includes(s)
             );
@@ -2503,7 +2596,7 @@ const LotEventsTab: React.FC<{
                                     </Badge>
                                 </Table.Cell>
                                 <Table.Cell fontFamily="mono" fontSize="2xs">
-                                    {event.lot_uuid?.slice(0, 8) || `#${event.lot_id}`}
+                                    #{event.lot_id}
                                 </Table.Cell>
                                 <Table.Cell>
                                     <Text fontSize="xs" fontWeight="medium">

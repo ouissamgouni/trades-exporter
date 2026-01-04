@@ -29,7 +29,6 @@ print(f"✓ UserCalculationBundle created: label={bundle.label}")
 
 # Test CostLot has unit_id
 lot = CostLot(
-    lot_uuid="123e4567-e89b-12d3-a456-426614174000",
     asset_id=1,
     account_id=1,
     qty=10,

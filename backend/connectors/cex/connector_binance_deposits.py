@@ -147,7 +147,7 @@ class ConnectorBinanceDeposits(BaseConnector):
             date_time=dt,
             direction="inflow",
             source_transaction_type="deposit",
-            transaction_type=None,
+            transaction_type="transfer",
             source_asset_symbol=currency,
             quantity=amount,
             fee=fee,

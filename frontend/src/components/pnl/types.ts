@@ -212,7 +212,7 @@ export interface AssetPnLRow {
 // ============================================================================
 
 export interface CostLot {
-    lot_uuid: string;
+    cost_lot_id: number;
     asset: AssetRef;  // Asset reference with id and name
     // Deprecated: use asset.id and asset.name instead
     asset_id?: number;
@@ -260,9 +260,9 @@ export interface CostLot {
 // ============================================================================
 
 export interface Settlement {
-    settlement_uuid: string;
-    negative_lot_uuid: string;  // The debt being settled
-    settling_lot_uuid: string;  // The lot providing funds
+    settlement_id: number;
+    negative_lot_id: number;  // The debt being settled
+    settling_lot_id: number;  // The lot providing funds
     settling_transaction_id?: number;  // Which transaction triggered this
     qty_settled: number;  // How much was settled
     cost_basis_applied?: number;  // For non-base: cost applied
@@ -356,7 +356,7 @@ export interface PnLImpactEvent {
 }
 
 export interface ConsumedLotDetail {
-    lot_uuid: string;
+    cost_lot_id: number;
     qty_consumed: number;
     cost_basis: number;
     unit_cost: number;
@@ -446,7 +446,7 @@ export interface PnLWarningItem {
 // ============================================================================
 
 export interface ConsumedSliceDetail {
-    lot_uuid: string;
+    cost_lot_id: number;
     asset?: AssetRef;  // Asset of the consumed lot
     quantity: number;
     unit_cost_in_base: number;
@@ -469,8 +469,9 @@ export interface CostLotEventEntry {
     event_type: LotEventType;
 
     lot_id: number;
-    lot_uuid?: string;  // Derived from lot relationship for convenience
     asset?: AssetRef;
+    account_id?: number;
+    account_name?: string;
 
     quantity_delta: number;
     cost_basis_delta?: number;
@@ -478,7 +479,6 @@ export interface CostLotEventEntry {
     cost_basis_remaining_after?: number;
 
     related_lot_id?: number;
-    related_lot_uuid?: string;  // Derived from related_lot relationship
     triggered_by_transaction_id?: number;
     triggered_by_unit_id?: number;
     triggered_by_unit_label?: string;
@@ -561,7 +561,16 @@ export interface OriginTransactionDetail {
     account_name?: string;
     source?: string;
     source_transaction_type?: string;
+    transaction_type?: string;  // Normalized transaction type
     direction?: string;
+
+    // Transfer fields
+    from_account_id?: number;
+    from_account_name?: string;
+    to_account_id?: number;
+    to_account_name?: string;
+    source_from_account?: string;
+    source_to_account?: string;
 
     // Base asset
     asset_id?: number;
@@ -637,7 +646,7 @@ export interface CalculationUnit {
     account_id?: number;
     account_name?: string;
     transaction_id?: number;
-    lot_uuid?: string;
+    cost_lot_id?: number;
 }
 
 // Deprecated - use CalculationUnit instead

@@ -273,7 +273,6 @@ class TestSettlementEvents:
     def test_settled_event_on_negative_lot_settlement(self, base_datetime):
         """Settling a negative lot should emit 'settled' events."""
         from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
-        from uuid import uuid4
 
         config = PnLConfig(
             lot_method=CostMethod.FIFO,
@@ -319,7 +318,6 @@ class TestSettlementEvents:
             asset=mock_asset,
             available_qty=Decimal("2"),
             unit_cost=Decimal("150"),
-            settling_lot_uuid=positive_lot.lot_uuid,
             settling_lot=positive_lot,
             settling_transaction=mock_tx,
             triggered_by_unit=mock_unit,

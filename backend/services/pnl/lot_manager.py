@@ -10,7 +10,6 @@ from collections import deque
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Deque, Tuple, Any
-from uuid import uuid4, UUID
 
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
@@ -89,12 +88,12 @@ class LotManager:
         # Enforce mandatory context for audit trail integrity
         if triggered_by_transaction is None:
             raise ValueError(
-                f"triggered_by_transaction is required for {event_type.value} event on lot {lot.lot_uuid}. "
+                f"triggered_by_transaction is required for {event_type.value} event on lot #{lot.cost_lot_id}. "
                 "All lot events must be traceable to a source transaction."
             )
         if triggered_by_unit is None:
             raise ValueError(
-                f"triggered_by_unit is required for {event_type.value} event on lot {lot.lot_uuid}. "
+                f"triggered_by_unit is required for {event_type.value} event on lot #{lot.cost_lot_id}. "
                 "All lot events must be associated with a calculation unit."
             )
         
@@ -120,7 +119,7 @@ class LotManager:
         log.debug(
             "lot_event_emitted",
             event_type=event_type.value,
-            lot_uuid=str(lot.lot_uuid),
+            lot_id=lot.cost_lot_id,
             qty_delta=float(quantity_delta),
             cost_delta=float(cost_basis_delta) if cost_basis_delta else None,
         )
@@ -176,7 +175,7 @@ class LotManager:
                 asset_id=lot.asset_id,
                 account_id=lot.account_id,
                 qty=float(lot.qty),
-                lot_uuid=str(lot.lot_uuid),
+                lot_id=lot.cost_lot_id,
             )
             # Emit creation event for negative lot (unless reloading from DB)
             if emit_event:
@@ -325,7 +324,7 @@ class LotManager:
 
             log.debug(
                 "lot_consumed",
-                lot_uuid=str(lot.lot_uuid),
+                lot_id=lot.cost_lot_id,
                 asset_id=asset_id,
                 asset_symbol=asset_symbol,
                 consumed_qty=float(consume_qty),
@@ -348,7 +347,7 @@ class LotManager:
             # Remove exhausted lot from front
             if lot.qty_remaining <= 0:
                 lots.popleft()
-                log.debug("lot_exhausted", lot_uuid=str(lot.lot_uuid), asset_id=asset_id)
+                log.debug("lot_exhausted", lot_id=lot.cost_lot_id, asset_id=asset_id)
 
         # Handle shortfall
         if remaining_qty > 0:
@@ -361,7 +360,6 @@ class LotManager:
                 # This will be settled when a later acquisition arrives
                 # Both qty and qty_remaining are negative to indicate debt
                 negative_lot = CostLot(
-                    lot_uuid=uuid4(),
                     version=self._version,
                     asset_id=asset_id,
                     account_id=(
@@ -396,11 +394,10 @@ class LotManager:
                     account_id=account_id,
                     shortfall_qty=float(remaining_qty),
                     unit_cost=float(unit_cost),
-                    lot_uuid=str(negative_lot.lot_uuid),
+                    lot_id=negative_lot.cost_lot_id,
                 )
                 # Add slice for the negative portion
                 neg_slice = ConsumedLotSlice(
-                    lot_uuid=negative_lot.lot_uuid,
                     quantity=remaining_qty,
                     unit_cost_in_base=unit_cost,
                     total_cost_in_base=remaining_qty * unit_cost,
@@ -469,7 +466,6 @@ class LotManager:
         asset: Asset,
         available_qty: Decimal,
         unit_cost: Decimal,
-        settling_lot_uuid: UUID,
         settling_transaction: Optional[NormalizedTransaction] = None,
         settling_lot: Optional[CostLot] = None,
         triggered_by_unit: Optional[Any] = None,
@@ -491,9 +487,8 @@ class LotManager:
             asset: Asset object being settled
             available_qty: Quantity from new acquisition
             unit_cost: Unit cost of new acquisition
-            settling_lot_uuid: UUID of the settling lot
             settling_transaction: Transaction that triggered settlement
-            settling_lot: Optional CostLot entity for relationship setting
+            settling_lot: CostLot entity for relationship setting (required)
             triggered_by_unit: Calculation unit context (required if emit_event=True)
             emit_event: Whether to emit SETTLED events (False for testing)
             
@@ -535,19 +530,16 @@ class LotManager:
             # Check if fully settled (qty_remaining == 0)
             if neg_lot.qty_remaining >= 0:
                 neg_lot.is_settled = True
-                neg_lot.settled_by_lot_uuid = settling_lot_uuid
+                neg_lot.settled_by_lot_id = settling_lot.cost_lot_id if settling_lot else None
             
             # Create settlement record with relationships set
-            # Set both FK IDs/UUIDs and relationship objects (IDs/UUIDs needed for runtime access,
+            # Set both FK IDs and relationship objects (IDs needed for runtime access,
             # relationship objects needed for persistence when objects aren't yet persisted)
             settlement = LotSettlement(
-                settlement_uuid=uuid4(),
                 # Negative lot
                 negative_lot=neg_lot,
-                negative_lot_uuid=neg_lot.lot_uuid,
                 # Settling lot
                 settling_lot=settling_lot,
-                settling_lot_uuid=settling_lot_uuid,
                 # Settling transaction
                 settling_transaction=settling_transaction,
                 settling_transaction_id=settling_transaction.id if settling_transaction else None,
@@ -555,9 +547,6 @@ class LotManager:
                 qty_settled=settle_qty,
                 settled_at=datetime.utcnow(),
                 cost_basis_applied=cost_applied,
-                # Version (both ID and relationship)
-                version_id=self._version.version_id if self._version else 0,
-                version=self._version,
             )
 
             settlement_records.append(settlement)
@@ -573,7 +562,7 @@ class LotManager:
                     triggered_by_transaction=settling_transaction,
                     triggered_by_unit=triggered_by_unit,
                     metadata={
-                        "settlement_uuid": str(settlement.settlement_uuid),
+                        "settlement_id": settlement.settlement_id,
                         "is_fully_settled": neg_lot.is_settled,
                     },
                 )
@@ -582,7 +571,7 @@ class LotManager:
             
             log.info(
                 "negative_lot_settled",
-                lot_uuid=str(neg_lot.lot_uuid),
+                lot_id=neg_lot.cost_lot_id,
                 qty_settled=float(settle_qty),
                 cost_applied=float(cost_applied),
                 is_fully_settled=neg_lot.is_settled,

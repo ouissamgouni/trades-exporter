@@ -1,7 +1,19 @@
 
 import React, { Suspense } from 'react';
 import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner } from '@chakra-ui/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TestModeBanner } from './components/TestModeBanner';
+
+// Create a client with sensible defaults
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 30_000, // Data considered fresh for 30 seconds
+            refetchOnWindowFocus: false, // Don't refetch on tab focus
+            retry: 1, // Only retry once on failure
+        },
+    },
+});
 
 // Lazy load all main tab components for better initial load performance
 const UnifiedSetupView = React.lazy(() => import('./components/UnifiedSetupView'));
@@ -21,8 +33,9 @@ const TabLoadingFallback = () => (
 
 const App = () => {
     return (
-        <Box minH="100vh" bg="gray.50">
-            <TestModeBanner />
+        <QueryClientProvider client={queryClient}>
+            <Box minH="100vh" bg="gray.50">
+                <TestModeBanner />
             <Container maxW="6xl" py={8}>
                 <Heading as="h1" size="xl" mb={4} textAlign="center" color="blue.700">
                     Trades Exporter
@@ -106,6 +119,7 @@ const App = () => {
                 </Tabs.Root>
             </Container>
         </Box>
+        </QueryClientProvider>
     );
 };
 

@@ -152,8 +152,8 @@ function AssetDetailView({
                     outflow_asset_symbols: u.outflows?.map((leg: any) => leg.asset.name) || [],
                     inflow_asset_symbols: u.inflows?.map((leg: any) => leg.asset.name) || [],
                     fee_asset_symbols: u.fees?.map((leg: any) => leg.asset.name) || [],
-                    lots_created_uuids: u.cost_basis?.lots?.map((lot: any) => lot.lot_uuid) || [],
-                    lots_consumed_uuids: u.cost_basis?.consumed?.map((slice: any) => slice.lot_uuid) || [],
+                    lots_created_uuids: u.cost_basis?.lots?.map((lot: any) => lot.cost_lot_id) || [],
+                    lots_consumed_uuids: u.cost_basis?.consumed?.map((slice: any) => slice.cost_lot_id) || [],
                     consumed_slices: u.cost_basis?.consumed || [],
                     settlements: u.cost_basis?.settlements || [],
                     realized_entries: u.realized_entries || [],
@@ -176,7 +176,7 @@ function AssetDetailView({
                 if (unit.cost_basis?.lots) {
                     for (const lot of unit.cost_basis.lots) {
                         allLots.push({
-                            lot_uuid: lot.lot_uuid,
+                            cost_lot_id: lot.cost_lot_id,
                             asset: lot.asset,
                             asset_id: lot.asset.id,
                             asset_symbol: lot.asset.name,

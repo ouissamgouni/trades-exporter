@@ -12,7 +12,15 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from backend.db.database import get_db
-from backend.db.models import NormalizedTransaction, UserCalculationBundle, Asset
+from backend.db.models import (
+    NormalizedTransaction,
+    UserCalculationBundle,
+    Asset,
+    UnitPattern,
+    TaxabilityStatus,
+    Direction,
+    ReviewStatus,
+)
 from backend.services.suggestion_service import SuggestionService, GroupingSuggestion
 
 router = APIRouter(prefix="/bundles", tags=["Bundles"])
@@ -28,12 +36,11 @@ class UnitCreate(BaseModel):
 
     transaction_ids: List[int] = Field(..., description="Transaction IDs to include")
     label: Optional[str] = Field(None, description="Unit label")
-    pattern: Optional[str] = Field(None, description="Pattern type")
+    pattern: Optional[UnitPattern] = Field(None, description="Pattern type")
     notes: Optional[str] = Field(None, description="Notes")
-    taxability_override: Optional[str] = Field(
+    taxability_override: Optional[TaxabilityStatus] = Field(
         None,
-        pattern="^(taxable|non_taxable)$",
-        description="Override taxability for all transactions",
+        description="Override taxability for all transactions (taxable or non_taxable)",
     )
 
 
@@ -41,9 +48,9 @@ class UnitUpdate(BaseModel):
     """Request model for updating a calculation unit."""
 
     label: Optional[str] = Field(None, description="Unit label")
-    pattern: Optional[str] = Field(None, description="Pattern type")
+    pattern: Optional[UnitPattern] = Field(None, description="Pattern type")
     notes: Optional[str] = Field(None, description="Notes")
-    taxability_override: Optional[str] = Field(
+    taxability_override: Optional[TaxabilityStatus] = Field(
         None, description="Override taxability (null to remove override)"
     )
 
@@ -52,12 +59,15 @@ class TransactionSummary(BaseModel):
     """Summary of a transaction in a unit."""
 
     id: int
-    date_time: Optional[str]
-    direction: str
-    transaction_type: str
-    asset_symbol: Optional[str]
-    quantity: float
-    source: Optional[str]
+    date_time: Optional[str] = None
+    direction: Optional[Direction] = None
+    transaction_type: Optional[str] = None
+    asset_symbol: Optional[str] = None
+    symbol: Optional[str] = None  # Alias for frontend compatibility
+    quantity: Optional[float] = None
+    source: Optional[str] = None
+    source_transaction_id: Optional[str] = None
+    network: Optional[str] = None
 
 
 class UnitResponse(BaseModel):
@@ -65,9 +75,9 @@ class UnitResponse(BaseModel):
 
     id: int
     label: Optional[str]
-    pattern: Optional[str]
+    pattern: Optional[UnitPattern]
     notes: Optional[str]
-    taxability_override: Optional[str]
+    taxability_override: Optional[TaxabilityStatus]
     created_at: str
     transaction_count: int
     transactions: List[TransactionSummary]
@@ -80,21 +90,22 @@ class UnitResponse(BaseModel):
 class SuggestionResponse(BaseModel):
     """Response model for a unit suggestion."""
 
-    pattern: str
+    pattern: UnitPattern
     transaction_ids: List[int]
     confidence: float
     label: str
     reason: str
-    taxability_suggestion: str
+    taxability_suggestion: TaxabilityStatus
     total_quantity: Optional[float] = None
     asset_symbol: Optional[str] = None
     date_range: Optional[str] = None
+    transactions: List[TransactionSummary] = []
 
 
 class AcceptSuggestionRequest(BaseModel):
     """Request to accept a suggestion."""
 
-    pattern: str
+    pattern: UnitPattern
     transaction_ids: List[int]
     label: Optional[str] = None
     notes: Optional[str] = None
@@ -159,20 +170,32 @@ def get_suggestions(
             label=s.label,
             reason=s.reason,
             taxability_suggestion=_pattern_to_taxability(s.pattern),
+            transactions=[
+                TransactionSummary(
+                    id=t.get("id", 0),
+                    date_time=t.get("date_time", ""),
+                    source=t.get("source", ""),
+                    source_transaction_id=t.get("source_transaction_id", ""),
+                    direction=t.get("direction", ""),
+                    quantity=t.get("quantity", 0),
+                    symbol=t.get("symbol", ""),
+                )
+                for t in (s.transactions or [])
+            ],
         )
         for s in suggestions
     ]
 
 
-def _pattern_to_taxability(pattern: str) -> str:
+def _pattern_to_taxability(pattern: str) -> TaxabilityStatus:
     """Convert pattern to default taxability."""
-    if pattern == "TRANSFER":
-        return "non_taxable"
-    elif pattern == "SPLIT":
-        return "non_taxable"
-    elif pattern == "SWAP":
-        return "taxable"
-    return "unknown"
+    if pattern == UnitPattern.TRANSFER.value or pattern == "transfer":
+        return TaxabilityStatus.NON_TAXABLE
+    elif pattern == UnitPattern.SPLIT.value or pattern == "split":
+        return TaxabilityStatus.NON_TAXABLE
+    elif pattern == UnitPattern.SWAP.value or pattern == "swap":
+        return TaxabilityStatus.TAXABLE
+    return TaxabilityStatus.UNKNOWN
 
 
 @router.post("/accept-suggestion", response_model=UnitResponse)
@@ -238,7 +261,7 @@ def create_bundle(
     # Link transactions via user_calculation_unit_id FK
     for tx in transactions:
         tx.user_calculation_unit_id = bundle.id
-        tx.review_status = "reviewed"
+        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
 
     session.commit()
@@ -317,18 +340,13 @@ def delete_bundle(
 
         for tx in transactions:
             tx.user_calculation_unit_id = None
-            tx.review_status = "pending"
+            tx.review_status = ReviewStatus.PENDING.value
             session.add(tx)
 
     session.delete(bundle)
     session.commit()
 
     return {"success": True, "message": f"Bundle {bundle_id} deleted"}
-
-    session.delete(unit)
-    session.commit()
-
-    return {"success": True, "message": f"Unit {unit_id} deleted"}
 
 
 @router.post("/{bundle_id}/add-transactions")
@@ -351,7 +369,7 @@ def add_transactions_to_bundle(
             continue  # Already in a bundle
 
         tx.user_calculation_unit_id = bundle_id
-        tx.review_status = "reviewed"
+        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
         added += 1
 
@@ -380,7 +398,7 @@ def remove_transactions_from_bundle(
             continue
 
         tx.user_calculation_unit_id = None
-        tx.review_status = "pending"
+        tx.review_status = ReviewStatus.PENDING.value
         session.add(tx)
         removed += 1
 
@@ -422,18 +440,21 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
                 direction=tx.direction,
                 transaction_type=tx.transaction_type,
                 asset_symbol=asset_symbol,
-                quantity=float(tx.quantity),
+                symbol=asset_symbol,  # Alias for frontend
+                quantity=float(tx.quantity) if tx.quantity else 0,
                 source=tx.source,
+                source_transaction_id=tx.source_transaction_id,
+                network=tx.network,
             )
         )
 
         # Aggregate flows
         if asset_symbol:
-            if tx.direction == "inflow":
+            if tx.direction == Direction.INFLOW.value:
                 inflows[asset_symbol] = inflows.get(asset_symbol, 0) + float(
                     tx.quantity
                 )
-            elif tx.direction == "outflow":
+            elif tx.direction == Direction.OUTFLOW.value:
                 outflows[asset_symbol] = outflows.get(asset_symbol, 0) + float(
                     tx.quantity
                 )
