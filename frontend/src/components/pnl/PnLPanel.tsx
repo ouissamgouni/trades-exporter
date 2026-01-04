@@ -624,8 +624,8 @@ export const PnLPanel: React.FC = () => {
                     outflow_asset_symbols: u.outflows?.map((leg: any) => leg.asset.name) || [],
                     inflow_asset_symbols: u.inflows?.map((leg: any) => leg.asset.name) || [],
                     fee_asset_symbols: u.fees?.map((leg: any) => leg.asset.name) || [],
-                    lots_created_uuids: u.cost_basis?.lots?.map((lot: any) => lot.lot_uuid) || [],
-                    lots_consumed_uuids: u.cost_basis?.consumed?.map((slice: any) => slice.lot_uuid) || [],
+                    lots_created_uuids: u.cost_basis?.lots?.map((lot: any) => lot.cost_lot_id) || [],
+                    lots_consumed_uuids: u.cost_basis?.consumed?.map((slice: any) => slice.cost_lot_id) || [],
                     consumed_slices: u.cost_basis?.consumed || [],
                     settlements: u.cost_basis?.settlements || [],
                     realized_entries: u.realized_entries || [],
@@ -675,7 +675,7 @@ export const PnLPanel: React.FC = () => {
 
             // Store cost lots
             const allLots: CostLot[] = lots.map((lot: any) => ({
-                lot_uuid: lot.lot_uuid,
+                cost_lot_id: lot.cost_lot_id,
                 asset: lot.asset,
                 asset_id: lot.asset.id,
                 asset_symbol: lot.asset.name,
@@ -699,7 +699,7 @@ export const PnLPanel: React.FC = () => {
 
             // Store consumed slices
             const allConsumed: ConsumedSliceDetail[] = consumedSlices.map((s: any) => ({
-                lot_uuid: s.lot_uuid,
+                cost_lot_id: s.cost_lot_id,
                 asset: s.asset,
                 quantity: s.quantity,
                 unit_cost_in_base: s.unit_cost_in_base,
@@ -714,9 +714,9 @@ export const PnLPanel: React.FC = () => {
 
             // Store settlements
             const mappedSettlements: Settlement[] = settlements.map((s: any) => ({
-                settlement_uuid: s.settlement_uuid,
-                negative_lot_uuid: s.negative_lot_uuid,
-                settling_lot_uuid: s.settling_lot_uuid,
+                settlement_id: s.settlement_id,
+                negative_lot_id: s.negative_lot_id,
+                settling_lot_id: s.settling_lot_id,
                 settling_transaction_id: s.settling_transaction_id,
                 qty_settled: s.qty_settled,
                 cost_basis_applied: s.cost_basis_applied,
@@ -1046,7 +1046,7 @@ export const PnLPanel: React.FC = () => {
         const lots: CostLot[] = allCostLots
             .filter(lot => lot.asset_id === assetId)
             .map((lot) => ({
-                lot_uuid: lot.lot_uuid,
+                cost_lot_id: lot.cost_lot_id,
                 asset: lot.asset,
                 asset_id: lot.asset_id,
                 asset_symbol: lot.asset_symbol,

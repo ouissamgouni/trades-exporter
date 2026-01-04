@@ -224,7 +224,7 @@ class ConnectorEtherscanTokenTransfers(BaseConnector):
                 date_time=dt,
                 direction=direction,
                 source_transaction_type="token-transfer",
-                transaction_type=None,
+                transaction_type="transfer",
                 source_asset_symbol=f"{token_symbol}_{contract_address}",
                 quantity=float(value),
                 fee=float(fee),

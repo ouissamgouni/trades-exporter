@@ -16,6 +16,7 @@ from backend.api.routes import (
     price_snapshots,
     raw_assets,
     raw_accounts,
+    raw_transactions,
     sync_job,
     config,
     pnl,
@@ -75,6 +76,7 @@ app.include_router(assets.router)
 app.include_router(price_snapshots.router)
 app.include_router(raw_assets.router)
 app.include_router(raw_accounts.router)
+app.include_router(raw_transactions.router)
 app.include_router(sync_job.router)
 app.include_router(pnl.router)
 app.include_router(accounts.router)

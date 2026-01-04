@@ -11,7 +11,6 @@ import pytest
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import Mock, MagicMock, patch
-from uuid import uuid4
 
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode, WarningType
@@ -84,9 +83,6 @@ def sample_result(fifo_config, sample_version):
     """Sample PnLResult for testing using SQLModel entities with proper cascade structure."""
     result = PnLResult(config=fifo_config, version=sample_version)
     
-    lot_uuid = uuid4()
-    consumed_lot_uuid = uuid4()
-    
     # Create a calculation unit (this is the owner of all entities)
     unit = CalculationUnit(
         version_id=sample_version.version_id,
@@ -97,7 +93,6 @@ def sample_result(fifo_config, sample_version):
     
     # Create and attach a cost lot (owned by unit via cascade)
     lot = CostLot(
-        lot_uuid=lot_uuid,
         asset_id=3,  # ETH
         account_id=1,
         qty=Decimal("10"),

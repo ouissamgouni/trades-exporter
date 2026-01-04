@@ -132,7 +132,7 @@ class FeeSummaryResponse(BaseModel):
 class CostLotResponse(BaseModel):
     """Cost lot response for detailed view."""
 
-    lot_uuid: str
+    cost_lot_id: int
     asset: AssetRef
     account_id: Optional[int] = None
     account_name: Optional[str] = None
@@ -174,9 +174,9 @@ class SettlementResponse(BaseModel):
     Example: BUY BTC created EUR debt → SELL AAPL provided EUR to settle.
     """
     
-    settlement_uuid: str
-    negative_lot_uuid: str  # The debt being settled
-    settling_lot_uuid: str  # The lot providing funds
+    settlement_id: int
+    negative_lot_id: int  # The debt being settled
+    settling_lot_id: int  # The lot providing funds
     settling_transaction_id: Optional[int] = None  # Which transaction triggered this
     qty_settled: float  # How much was settled
     cost_basis_applied: Optional[float] = None  # For non-base: cost applied
@@ -194,8 +194,9 @@ class CostLotEventResponse(BaseModel):
     event_type: str  # created, consumed, settled, transferred, adjusted
     
     lot_id: int
-    lot_uuid: Optional[str] = None  # Derived from lot relationship for convenience
     asset: Optional[AssetRef] = None
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
     
     quantity_delta: float
     cost_basis_delta: Optional[float] = None
@@ -203,7 +204,6 @@ class CostLotEventResponse(BaseModel):
     cost_basis_remaining_after: Optional[float] = None
     
     related_lot_id: Optional[int] = None
-    related_lot_uuid: Optional[str] = None  # Derived from related_lot relationship
     triggered_by_transaction_id: Optional[int] = None
     triggered_by_unit_id: Optional[int] = None
     triggered_by_unit_label: Optional[str] = None
@@ -215,7 +215,7 @@ class CostLotEventResponse(BaseModel):
 class ConsumedSliceResponse(BaseModel):
     """Details of a consumed lot slice for audit."""
     
-    lot_uuid: str
+    cost_lot_id: int
     asset: Optional[AssetRef] = None  # Asset of the consumed lot
     quantity: float
     unit_cost_in_base: float
@@ -369,7 +369,7 @@ def build_asset_ref(asset, asset_id: int) -> AssetRef:
 def build_cost_lot_response(lot: CostLot) -> CostLotResponse:
     """Build CostLotResponse from CostLot model."""
     return CostLotResponse(
-        lot_uuid=str(lot.lot_uuid),
+        cost_lot_id=lot.cost_lot_id,
         asset=build_asset_ref(lot.asset, lot.asset_id),
         account_id=lot.account_id,
         account_name=lot.account.name if lot.account else None,
@@ -403,7 +403,7 @@ def build_consumed_slice_response(
         asset_ref = AssetRef(id=slice.cost_lot.asset_id, name=f"#{slice.cost_lot.asset_id}")
     
     return ConsumedSliceResponse(
-        lot_uuid=str(slice.cost_lot.lot_uuid) if slice.cost_lot else "",
+        cost_lot_id=slice.cost_lot.cost_lot_id if slice.cost_lot else 0,
         asset=asset_ref,
         quantity=float(slice.quantity),
         unit_cost_in_base=float(slice.unit_cost_in_base),
@@ -444,9 +444,9 @@ def build_warning_response(warning: PnlWarning, unit_label: Optional[str] = None
 def build_settlement_response(settlement: LotSettlement) -> SettlementResponse:
     """Build SettlementResponse from LotSettlement model."""
     return SettlementResponse(
-        settlement_uuid=str(settlement.settlement_uuid),
-        negative_lot_uuid=str(settlement.negative_lot_uuid),
-        settling_lot_uuid=str(settlement.settling_lot_uuid),
+        settlement_id=settlement.settlement_id,
+        negative_lot_id=settlement.negative_lot_id,
+        settling_lot_id=settlement.settling_lot_id,
         settling_transaction_id=settlement.settling_transaction_id,
         qty_settled=float(settlement.qty_settled),
         cost_basis_applied=float(settlement.cost_basis_applied) if settlement.cost_basis_applied else None,
@@ -1112,7 +1112,7 @@ def get_version_lots(
     
     return [
         CostLotResponse(
-            lot_uuid=str(lot.lot_uuid),
+            cost_lot_id=lot.cost_lot_id,
             asset=AssetRef(
                 id=lot.asset.asset_id if lot.asset else lot.asset_id,
                 name=lot.asset.symbol if lot.asset else f"#{lot.asset_id}"
@@ -1171,7 +1171,7 @@ def get_version_consumed_slices(
     
     return [
         ConsumedSliceResponse(
-            lot_uuid=str(s.cost_lot.lot_uuid) if s.cost_lot else "",
+            cost_lot_id=s.cost_lot.cost_lot_id if s.cost_lot else 0,
             asset=AssetRef(
                 id=s.cost_lot.asset.asset_id if s.cost_lot and s.cost_lot.asset else (s.cost_lot.asset_id if s.cost_lot else 0),
                 name=s.cost_lot.asset.symbol if s.cost_lot and s.cost_lot.asset else f"#{s.cost_lot.asset_id if s.cost_lot else 0}"
@@ -1645,9 +1645,9 @@ def get_version_settlements(
     
     return [
         SettlementResponse(
-            settlement_uuid=str(s.settlement_uuid),
-            negative_lot_uuid=str(s.negative_lot_uuid),
-            settling_lot_uuid=str(s.settling_lot_uuid),
+            settlement_id=s.settlement_id,
+            negative_lot_id=s.negative_lot_id,
+            settling_lot_id=s.settling_lot_id,
             settling_transaction_id=s.settling_transaction_id,
             qty_settled=float(s.qty_settled),
             cost_basis_applied=float(s.cost_basis_applied) if s.cost_basis_applied else None,
@@ -1693,6 +1693,7 @@ def get_version_lot_events(
         .where(CalculationUnit.version_id == version_id)
         .options(
             selectinload(CostLotEvent.lot).selectinload(CostLot.asset),
+            selectinload(CostLotEvent.lot).selectinload(CostLot.account),
             selectinload(CostLotEvent.related_lot),
             selectinload(CostLotEvent.triggered_by_unit),
         )
@@ -1720,14 +1721,14 @@ def get_version_lot_events(
             event_id=e.event_id,
             event_type=e.event_type,
             lot_id=e.lot_id,
-            lot_uuid=str(e.lot.lot_uuid) if e.lot else None,
             asset=build_asset_ref(e.lot.asset, e.lot.asset_id) if e.lot else None,
+            account_id=e.lot.account_id if e.lot else None,
+            account_name=e.lot.account.name if e.lot and e.lot.account else None,
             quantity_delta=float(e.quantity_delta),
             cost_basis_delta=float(e.cost_basis_delta) if e.cost_basis_delta else None,
             qty_remaining_after=float(e.qty_remaining_after),
             cost_basis_remaining_after=float(e.cost_basis_remaining_after) if e.cost_basis_remaining_after else None,
             related_lot_id=e.related_lot_id,
-            related_lot_uuid=str(e.related_lot.lot_uuid) if e.related_lot else None,
             triggered_by_transaction_id=e.triggered_by_transaction_id,
             triggered_by_unit_id=e.triggered_by_unit_id,
             triggered_by_unit_label=e.triggered_by_unit.unit_label if e.triggered_by_unit else None,
@@ -1778,7 +1779,7 @@ def get_unit_consumed_slices(
                 cost_lot = slice.cost_lot
                 consumed_slices.append(
                     ConsumedSliceResponse(
-                        lot_uuid=str(cost_lot.lot_uuid) if cost_lot else "",
+                        cost_lot_id=cost_lot.cost_lot_id if cost_lot else 0,
                         quantity=float(slice.quantity),
                         unit_cost_in_base=float(slice.unit_cost_in_base),
                         total_cost_in_base=float(slice.total_cost_in_base),

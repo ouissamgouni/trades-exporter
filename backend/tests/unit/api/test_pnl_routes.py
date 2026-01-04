@@ -74,7 +74,6 @@ def mock_cost_lot():
     """Mock cost lot with asset relationship."""
     lot = MagicMock()
     lot.cost_lot_id = 1
-    lot.lot_uuid = uuid4()
     lot.version_id = 1
     lot.asset_id = 2
     lot.account_id = 1

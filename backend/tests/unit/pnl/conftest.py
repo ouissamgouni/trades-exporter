@@ -5,7 +5,6 @@ Shared fixtures for P&L unit tests.
 import pytest
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
 from unittest.mock import Mock
 from typing import Optional, List
 
@@ -297,7 +296,6 @@ def create_lot(
 ) -> CostLot:
     """Helper to create CostLot for testing."""
     return CostLot(
-        lot_uuid=uuid4(),
         asset_id=asset_id,
         account_id=account_id,
         qty=qty,

@@ -8,10 +8,20 @@ from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+from sqlalchemy.orm import joinedload
 
 from backend.api.schemas import TransactionResponse, TransactionUpdate
 from backend.db.database import get_db
-from backend.db.models import NormalizedTransaction, Asset, CalculationUnit, Account
+from backend.db.models import (
+    NormalizedTransaction,
+    Asset,
+    CalculationUnit,
+    Account,
+    ReviewStatus,
+    TaxabilityStatus,
+    Direction,
+    TransactionType,
+)
 from backend.services.pipeline import (
     create_default_pipeline,
     PipelineContext,
@@ -29,8 +39,8 @@ class BulkUpdateRequest(BaseModel):
     """Request model for bulk updating transactions."""
 
     transaction_ids: List[int] = Field(..., description="IDs of transactions to update")
-    review_status: Optional[str] = Field(
-        None, pattern="^(valid|pending|invalid)$", description="New review status"
+    review_status: Optional[ReviewStatus] = Field(
+        None, description="New review status"
     )
     transaction_type: Optional[str] = Field(None, description="New transaction type")
 
@@ -39,12 +49,11 @@ class BulkStatusUpdate(BaseModel):
     """Request model for bulk review status update."""
 
     transaction_ids: List[int] = Field(..., description="IDs of transactions to update")
-    review_status: str = Field(
-        ..., pattern="^(valid|pending|invalid)$", description="New review status"
+    review_status: ReviewStatus = Field(
+        ..., description="New review status"
     )
-    taxability_status: Optional[str] = Field(
+    taxability_status: Optional[TaxabilityStatus] = Field(
         None,
-        pattern="^(taxable|non_taxable|unknown)$",
         description="New taxability status",
     )
 
@@ -78,8 +87,8 @@ class TransactionCreate(BaseModel):
     """Request model for creating a manual transaction."""
 
     date_time: str = Field(..., description="Transaction datetime (ISO format)")
-    direction: str = Field(
-        ..., pattern="^(inflow|outflow|neutral)$", description="Transaction direction"
+    direction: Direction = Field(
+        ..., description="Transaction direction"
     )
     transaction_type: str = Field(
         ...,
@@ -133,9 +142,8 @@ class TransactionCreate(BaseModel):
     network: Optional[str] = Field(None, description="Network name")
     network_transaction_id: Optional[str] = Field(None, description="Network TX ID")
     token_contract_address: Optional[str] = Field(None, description="Token contract")
-    review_status: str = Field(
-        "pending",
-        pattern="^(valid|pending|invalid)$",
+    review_status: ReviewStatus = Field(
+        ReviewStatus.PENDING,
         description="Review status",
     )
     review_notes: Optional[str] = Field(None, description="Notes")
@@ -158,27 +166,24 @@ def _build_transaction_response(
     Build a TransactionResponse from a NormalizedTransaction.
 
     Resolves asset IDs to symbols for the linked_*_symbol fields.
+    Resolves account IDs to names for the account_name, from_account_name, to_account_name fields.
     """
-    linked_asset_symbol = None
-    linked_price_quote_symbol = None
-    linked_fee_quote_symbol = None
+    linked_asset_symbol = tx.asset.symbol if tx.asset else None
+    linked_price_quote_symbol = tx.price_quote_asset.symbol if tx.price_quote_asset else None
+    linked_fee_quote_symbol = tx.fee_quote_asset.symbol if tx.fee_quote_asset else None
 
-    if tx.asset_id:
-        asset = session.get(Asset, tx.asset_id)
-        linked_asset_symbol = asset.symbol if asset else None
-
-    if tx.price_quote_asset_id:
-        asset = session.get(Asset, tx.price_quote_asset_id)
-        linked_price_quote_symbol = asset.symbol if asset else None
-
-    if tx.fee_quote_asset_id:
-        asset = session.get(Asset, tx.fee_quote_asset_id)
-        linked_fee_quote_symbol = asset.symbol if asset else None
+    # Resolve account names server-side
+    account_name = tx.account_rel.name if tx.account_rel else None
+    from_account_name = tx.from_account.name if tx.from_account else None
+    to_account_name = tx.to_account.name if tx.to_account else None
 
     tx_dict = tx.model_dump()
     tx_dict["linked_asset_symbol"] = linked_asset_symbol
     tx_dict["linked_price_quote_asset_symbol"] = linked_price_quote_symbol
     tx_dict["linked_fee_quote_asset_symbol"] = linked_fee_quote_symbol
+    tx_dict["account_name"] = account_name
+    tx_dict["from_account_name"] = from_account_name
+    tx_dict["to_account_name"] = to_account_name
     tx_dict["synced_at"] = _serialize_datetime(tx_dict.get("synced_at"))
 
     return TransactionResponse(**tx_dict)
@@ -193,7 +198,7 @@ def list_transactions(
         None, description="Filter by taxability status (taxable/non_taxable/unknown)"
     ),
     source: Optional[str] = Query(None, description="Filter by source exchange"),
-    account: Optional[str] = Query(None, description="Filter by account"),
+    account_id: Optional[int] = Query(None, description="Filter by account ID"),
     unit_id: Optional[int] = Query(None, description="Filter by unit ID"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
@@ -205,14 +210,21 @@ def list_transactions(
     - **review_status**: Filter by review status (valid, pending, invalid)
     - **taxability**: Filter by taxability_status (taxable, non_taxable, unknown)
     - **source**: Filter by source exchange (e.g., binance, coinbase)
-    - **account**: Filter by account (e.g., binance, mexc, onchain)
+    - **account_id**: Filter by account ID
     - **unit_id**: Filter to transactions in a specific unit
     - **limit**: Maximum number of results to return
     - **offset**: Number of results to skip for pagination
     """
     try:
         # Build query with filters
-        statement = select(NormalizedTransaction)
+        statement = select(NormalizedTransaction).options(
+            joinedload(NormalizedTransaction.asset),
+            joinedload(NormalizedTransaction.price_quote_asset),
+            joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.account_rel),
+            joinedload(NormalizedTransaction.from_account),
+            joinedload(NormalizedTransaction.to_account),
+        )
 
         if review_status:
             statement = statement.where(NormalizedTransaction.review_status == review_status)
@@ -225,11 +237,11 @@ def list_transactions(
         if source:
             statement = statement.where(NormalizedTransaction.source == source)
 
-        if account:
-            statement = statement.where(NormalizedTransaction.account == account)
+        if account_id is not None:
+            statement = statement.where(NormalizedTransaction.account_id == account_id)
 
         if unit_id is not None:
-            statement = statement.where(NormalizedTransaction.unit_id == unit_id)
+            statement = statement.where(NormalizedTransaction.user_calculation_unit_id == unit_id)
 
         statement = (
             statement.order_by(NormalizedTransaction.date_time.desc())
@@ -264,7 +276,15 @@ def get_inbox(
         # Get pending transactions (review_status=pending)
         statement = (
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.review_status == "pending")
+            .options(
+                joinedload(NormalizedTransaction.asset),
+                joinedload(NormalizedTransaction.price_quote_asset),
+                joinedload(NormalizedTransaction.fee_quote_asset),
+                joinedload(NormalizedTransaction.account_rel),
+                joinedload(NormalizedTransaction.from_account),
+                joinedload(NormalizedTransaction.to_account),
+            )
+            .where(NormalizedTransaction.review_status == ReviewStatus.PENDING.value)
             .order_by(NormalizedTransaction.date_time.desc())
             .limit(limit)
         )
@@ -274,14 +294,14 @@ def get_inbox(
         # Count transactions needing taxability review
         taxability_count = session.exec(
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.review_status == "pending")
-            .where(NormalizedTransaction.taxability_status == "unknown")
+            .where(NormalizedTransaction.review_status == ReviewStatus.PENDING.value)
+            .where(NormalizedTransaction.taxability_status == TaxabilityStatus.UNKNOWN.value)
         ).all()
         
         # Total pending count
         total_pending = session.exec(
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.review_status == "pending")
+            .where(NormalizedTransaction.review_status == ReviewStatus.PENDING.value)
         ).all()
         
         return {
@@ -309,7 +329,15 @@ def get_reviewed_transactions(
     try:
         statement = (
             select(NormalizedTransaction)
-            .where(NormalizedTransaction.review_status == "valid")
+            .options(
+                joinedload(NormalizedTransaction.asset),
+                joinedload(NormalizedTransaction.price_quote_asset),
+                joinedload(NormalizedTransaction.fee_quote_asset),
+                joinedload(NormalizedTransaction.account_rel),
+                joinedload(NormalizedTransaction.from_account),
+                joinedload(NormalizedTransaction.to_account),
+            )
+            .where(NormalizedTransaction.review_status == ReviewStatus.VALID.value)
             .order_by(NormalizedTransaction.date_time.desc())
             .offset(offset)
             .limit(limit)
@@ -381,7 +409,15 @@ def get_inbox(
     """
     statement = (
         select(NormalizedTransaction)
-        .where(NormalizedTransaction.review_status == "pending")
+        .options(
+            joinedload(NormalizedTransaction.asset),
+            joinedload(NormalizedTransaction.price_quote_asset),
+            joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.account_rel),
+            joinedload(NormalizedTransaction.from_account),
+            joinedload(NormalizedTransaction.to_account),
+        )
+        .where(NormalizedTransaction.review_status == ReviewStatus.PENDING.value)
         .order_by(NormalizedTransaction.date_time.desc())
         .offset(offset)
         .limit(limit)
@@ -404,7 +440,15 @@ def get_reviewed(
     """
     statement = (
         select(NormalizedTransaction)
-        .where(NormalizedTransaction.review_status == "valid")
+        .options(
+            joinedload(NormalizedTransaction.asset),
+            joinedload(NormalizedTransaction.price_quote_asset),
+            joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.account_rel),
+            joinedload(NormalizedTransaction.from_account),
+            joinedload(NormalizedTransaction.to_account),
+        )
+        .where(NormalizedTransaction.review_status == ReviewStatus.VALID.value)
         .order_by(NormalizedTransaction.date_time.desc())
         .offset(offset)
         .limit(limit)
@@ -461,7 +505,19 @@ def get_transaction(
     - **transaction_id**: The ID of the transaction to retrieve
     """
     try:
-        tx = session.get(NormalizedTransaction, transaction_id)
+        statement = (
+            select(NormalizedTransaction)
+            .options(
+                joinedload(NormalizedTransaction.asset),
+                joinedload(NormalizedTransaction.price_quote_asset),
+                joinedload(NormalizedTransaction.fee_quote_asset),
+                joinedload(NormalizedTransaction.account_rel),
+                joinedload(NormalizedTransaction.from_account),
+                joinedload(NormalizedTransaction.to_account),
+            )
+            .where(NormalizedTransaction.id == transaction_id)
+        )
+        tx = session.exec(statement).first()
 
         if not tx:
             raise HTTPException(status_code=404, detail="Transaction not found")
@@ -487,7 +543,19 @@ def update_transaction(
     - **update**: Fields to update (only provided fields will be changed)
     """
     try:
-        tx = session.get(NormalizedTransaction, transaction_id)
+        statement = (
+            select(NormalizedTransaction)
+            .options(
+                joinedload(NormalizedTransaction.asset),
+                joinedload(NormalizedTransaction.price_quote_asset),
+                joinedload(NormalizedTransaction.fee_quote_asset),
+                joinedload(NormalizedTransaction.account_rel),
+                joinedload(NormalizedTransaction.from_account),
+                joinedload(NormalizedTransaction.to_account),
+            )
+            .where(NormalizedTransaction.id == transaction_id)
+        )
+        tx = session.exec(statement).first()
 
         if not tx:
             raise HTTPException(status_code=404, detail="Transaction not found")
@@ -597,13 +665,22 @@ def create_transaction(
         # Query persisted transactions to build response
         created_transactions = []
         for pydantic_tx in result.pydantic_transactions:
-            db_tx = session.exec(
-                select(NormalizedTransaction).where(
-                    NormalizedTransaction.source == pydantic_tx.source,
-                    NormalizedTransaction.source_transaction_id
-                    == pydantic_tx.source_transaction_id,
+            statement = (
+                select(NormalizedTransaction)
+                .options(
+                    joinedload(NormalizedTransaction.asset),
+                    joinedload(NormalizedTransaction.price_quote_asset),
+                    joinedload(NormalizedTransaction.fee_quote_asset),
+                    joinedload(NormalizedTransaction.account_rel),
+                    joinedload(NormalizedTransaction.from_account),
+                    joinedload(NormalizedTransaction.to_account),
                 )
-            ).first()
+                .where(
+                    NormalizedTransaction.source == pydantic_tx.source,
+                    NormalizedTransaction.source_transaction_id == pydantic_tx.source_transaction_id,
+                )
+            )
+            db_tx = session.exec(statement).first()
             if db_tx:
                 created_transactions.append(db_tx)
 
@@ -777,7 +854,7 @@ def bulk_add_to_unit(
                 errors.append(f"Transaction {tx_id} not found")
                 continue
 
-            tx.unit_id = unit.id
+            tx.user_calculation_unit_id = unit.id
             session.add(tx)
             updated_count += 1
 

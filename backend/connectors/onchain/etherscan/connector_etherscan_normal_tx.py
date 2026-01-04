@@ -221,7 +221,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
                 source_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
-                transaction_type="technical" if value == 0 else None,
+                transaction_type="technical" if value == 0 else "transfer",
                 source_transaction_type="normal-tx",
                 source_asset_symbol=self.native_token,
                 quantity=float(value),

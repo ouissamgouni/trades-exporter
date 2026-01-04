@@ -781,10 +781,10 @@ class TestSettlementRecordGeneration:
         assert len(result.settlement_records) == 1, "Should have 1 settlement record"
         
         settlement = result.settlement_records[0]
-        assert settlement.negative_lot_uuid == negative_lot.lot_uuid
+        assert settlement.negative_lot is not None
         assert settlement.qty_settled == Decimal("100")
-        # The settling_lot_uuid should match the EUR lot created
-        assert settlement.settling_lot_uuid is not None
+        # The settling_lot should reference the EUR lot created
+        assert settlement.settling_lot is not None
 
     def test_settlement_records_created_on_full_settlement(
         self, fifo_config, mock_price_service, base_datetime

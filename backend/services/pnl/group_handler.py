@@ -21,7 +21,7 @@ from backend.services.pnl.models import (
     CalculationUnit,
     PnlWarning,
 )
-from backend.db.models import CalculationUnitLeg, CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry, LotSettlement, ensure_utc, utc_now
+from backend.db.models import CalculationUnitLeg, CostLot, ConsumedLotSlice, RealizedPnl, FeeEntry, LotSettlement, ensure_utc, utc_now, UnitPattern
 from backend.services.pnl.lot_manager import LotManager
 from backend.services.pnl.fmv_service import FMVService, compute_group_residual
 from backend.services.pnl.taxability import TaxabilityCalculator
@@ -148,12 +148,18 @@ def _process_disposals(
 ) -> List[ConsumedLotSlice]:
     """
     Process all disposal transactions - consume lots and compute P&L.
+    
+    For pending transfers (outflow-only with transfer tx_type):
+    - Lots are consumed normally
+    - P&L realization is SKIPPED (no RealizedPnl created)
+    - Warning is emitted with consumed slice details for user visibility
 
     Returns:
         List of all consumed slices (for inflow processing)
     """
     all_consumed_slices: List[ConsumedLotSlice] = []
     taxability_calculator = TaxabilityCalculator(config)
+    is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
 
     for disposal in disposals:
         asset_id = disposal.asset_id
@@ -178,6 +184,7 @@ def _process_disposals(
             account_id=account_id,
             disposal_taxable=disposal.disposal_taxable,
             is_fee=is_fee,
+            is_pending_transfer=is_pending_transfer,
         )
 
         # Consume lots
@@ -194,8 +201,16 @@ def _process_disposals(
                 unit.cost_lots = []
             unit.cost_lots.append(negative_lot)
 
-        # Compute P&L if disposal is taxable
-        if  slices:
+        # For pending transfers: skip P&L realization, emit warning instead
+        if is_pending_transfer and slices:
+            _create_pending_transfer_warning(
+                unit=unit,
+                direction="outflow",
+                legs=[disposal],
+                slices=slices,
+            )
+        # Compute P&L if disposal is taxable (and not pending transfer)
+        elif slices:
             _proceeds_and_pnl_entry(
                 disposal=disposal,
                 slices=slices,
@@ -208,6 +223,106 @@ def _process_disposals(
        
 
     return all_consumed_slices
+
+
+def _create_pending_transfer_warning(
+    unit: CalculationUnit,
+    direction: str,
+    legs: List[CalculationUnitLeg],
+    slices: Optional[List[ConsumedLotSlice]] = None,
+) -> None:
+    """
+    Create warning for pending transfer (outflow or inflow).
+    
+    Args:
+        unit: The calculation unit
+        direction: "outflow" or "inflow"
+        legs: The legs being processed (outflows or inflows)
+        slices: Consumed lot slices (only for outflows)
+    """
+    if not legs:
+        return
+        
+    leg = legs[0]
+    asset_symbol = leg.asset_symbol
+    asset_id = leg.asset_id
+    account_id = leg.account_id
+    timestamp = leg.date_time.isoformat() if leg.date_time else None
+    
+    # Build details based on direction
+    if direction == "outflow" and slices:
+        total_qty = sum(s.quantity for s in slices)
+        total_cost = sum(s.total_cost_in_base for s in slices)
+        
+        slice_details = [{
+            "slice_id": s.slice_id,
+            "cost_lot_id": s.cost_lot_id,
+            "quantity": float(s.quantity),
+            "cost_in_base": float(s.total_cost_in_base),
+            "unit_cost": float(s.total_cost_in_base / s.quantity) if s.quantity else 0,
+            "acquired_at": s.cost_lot.acquired_at.isoformat() if s.cost_lot and s.cost_lot.acquired_at else None,
+            "holding_period_days": s.holding_period_days,
+        } for s in slices]
+        
+        message = (
+            f"Transfer outflow missing inflow - {float(total_qty):.6g} {asset_symbol} "
+            f"(cost basis: {float(total_cost):.2f}). "
+            f"Link matching deposit to preserve cost basis and holding period."
+        )
+        details = {
+            "transfer_direction": "outflow",
+            "asset_id": asset_id,
+            "asset_symbol": asset_symbol,
+            "account_id": account_id,
+            "total_quantity": float(total_qty),
+            "total_cost_in_base": float(total_cost),
+            "timestamp": timestamp,
+            "consumed_slices": slice_details,
+        }
+        log_extra = {"cost_basis": float(total_cost), "slices_count": len(slices)}
+    else:
+        total_qty = sum(Decimal(i.quantity) if i.quantity else Decimal(0) for i in legs)
+        
+        message = (
+            f"Transfer inflow missing outflow - {float(total_qty):.6g} {asset_symbol}. "
+            f"No cost lot created. Link matching withdrawal to establish cost basis."
+        )
+        details = {
+            "transfer_direction": "inflow",
+            "asset_id": asset_id,
+            "asset_symbol": asset_symbol,
+            "account_id": account_id,
+            "total_quantity": float(total_qty),
+            "timestamp": timestamp,
+            "inflows": [{
+                "transaction_id": i.origin_transaction_id,
+                "quantity": float(i.quantity) if i.quantity else 0,
+                "account_id": i.account_id,
+            } for i in legs],
+        }
+        log_extra = {"account_id": account_id}
+    
+    warning = PnlWarning(
+        warning_type=WarningType.PENDING_TRANSFER.value,
+        message=message,
+        transaction_id=leg.origin_transaction_id,
+        asset_id=asset_id,
+        unit=unit,
+        details=details,
+    )
+    
+    if unit.warnings is None:
+        unit.warnings = []
+    unit.warnings.append(warning)
+    
+    log.info(
+        "pending_transfer_warning_created",
+        direction=direction,
+        asset_symbol=asset_symbol,
+        qty=float(total_qty),
+        unit_id=unit.id,
+        **log_extra,
+    )
 
 
 def _consume_lots(
@@ -388,6 +503,10 @@ def _process_inflows(
     """
     Handle inflows based on the unit pattern.
     
+    For pending transfers (inflow-only with transfer tx_type):
+    - Lot creation is SKIPPED (no cost basis available)
+    - Warning is emitted with inflow details for user visibility
+    
     Args:
         unit: The calculation unit being processed
         consumed_slices: All consumed slices from disposals (outflows + fees)
@@ -397,6 +516,15 @@ def _process_inflows(
     """
     inflows = unit.inflow_legs
     if not inflows:
+        return
+    
+    # For pending transfers (inflow-only): skip lot creation, emit warning
+    if unit.pattern == UnitPattern.PENDING_TRANSFER.value and unit.is_inflow_only:
+        _create_pending_transfer_warning(
+            unit=unit,
+            direction="inflow",
+            legs=inflows,
+        )
         return
         
     # Use unified is_cost_basis_transfer for non-taxable transfers
@@ -700,7 +828,6 @@ def _handle_cost_basis_transfer(
         unit_cost = slice.total_cost_in_base / new_qty      
 
         new_lot = CostLot(
-            lot_uuid=uuid4(),
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
             # relationship objects needed for persistence when objects aren't yet persisted)
             asset_id=inflow.asset_id,
@@ -710,11 +837,11 @@ def _handle_cost_basis_transfer(
             qty=new_qty,
             qty_remaining=new_qty,
             unit_cost_in_base=unit_cost,
-            acquired_at=ensure_utc(slice.acquired_at) if slice.acquired_at else utc_now(),  # Preserve original holding period
+            acquired_at=ensure_utc(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else utc_now(),  # Preserve original holding period
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
-            notes=f"Transfer (from lot {slice.lot_uuid})",
+            notes=f"Transfer (from lot {slice.cost_lot.cost_lot_id if slice.cost_lot else 'unknown'})",
         )
         lot_manager.add_lot(
             new_lot,
@@ -732,8 +859,8 @@ def _handle_cost_basis_transfer(
             asset_symbol=inflow.asset_symbol,
             qty=float(new_qty),
             unit_cost=float(unit_cost),
-            acquired_at=str(slice.acquired_at),
-            from_lot=str(slice.lot_uuid),
+            acquired_at=str(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else None,
+            from_lot_id=slice.cost_lot.cost_lot_id if slice.cost_lot else None,
             unit_id=unit.id,
         )
 
@@ -840,7 +967,6 @@ def _handle_acquisition(
             asset=inflow.asset,
             available_qty=inflow_qty,
             unit_cost=unit_cost,
-            settling_lot_uuid=settling_lot.lot_uuid,
             settling_transaction=inflow.origin_transaction,  # Use object
             settling_lot=settling_lot,  # Pass lot for relationship setting
             triggered_by_unit=unit,  # Required for event audit trail
@@ -889,7 +1015,7 @@ def _handle_acquisition(
                 log.debug(
                     "pnl_adjustment_skipped_base_currency",
                     qty=float(settlement.qty_settled),
-                    negative_lot=str(settlement.negative_lot_uuid),
+                    negative_lot_id=settlement.negative_lot_id,
                 )
                 continue
                 
@@ -908,12 +1034,12 @@ def _handle_acquisition(
                 transaction=inflow.origin_transaction,  # Use relationship object
                 unit=unit,  # FK to calculation_units - auto-populates realized_pnl_records
                 realized_at=inflow_date,
-                notes=f"Cost basis settlement for negative lot {settlement.negative_lot_uuid}",
+                notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id}",
             )
             log.info(
                 "pnl_adjustment_created",
                 cost_applied=float(cost_applied),
                 qty=float(settlement.qty_settled),
-                negative_lot=str(settlement.negative_lot_uuid),
+                negative_lot_id=settlement.negative_lot_id,
             )
 

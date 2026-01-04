@@ -4,46 +4,66 @@ import {
     Heading, Input, NativeSelect, Portal, Spinner,
     Switch, Table, Tabs, Text
 } from '@chakra-ui/react';
+import { BiTransfer } from 'react-icons/bi';
+import { RiExchangeFundsLine } from 'react-icons/ri';
+import { FaQuestion } from 'react-icons/fa';
+import { LuPencil } from 'react-icons/lu';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL, Account, Asset, Bundle, BundleSuggestion, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus } from '../types';
+import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
 import { AssetSelector } from './AssetSelector';
 import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
+import { TransactionEditorDialog } from './TransactionEditorDialog';
+import { BundleTransactionList } from './BundleTransactionList';
+import { BundleTable } from './BundleTable';
+import { TransactionDetailPanel } from './TransactionDetailPanel';
 
 const ITEMS_PER_PAGE = 25;
 
 // Direction color mapping for row backgrounds
 const directionRowColors: Record<string, string> = {
-    inflow: 'green.50',
-    outflow: 'red.50',
+    [Direction.INFLOW]: 'green.50',
+    [Direction.OUTFLOW]: 'red.50',
     internal: 'gray.50',
 };
 
 // Status badge color mapping (for review_status column display)
 const statusBadgeColors: Record<TransactionStatus, string> = {
-    valid: 'green',
-    pending: 'yellow',
-    invalid: 'red',
+    [ReviewStatus.VALID]: 'green',
+    [ReviewStatus.PENDING]: 'yellow',
+    [ReviewStatus.INVALID]: 'red',
 };
 
 // Review status options for filter dropdown (same as TransactionStatus)
 const reviewStatusOptions = [
     { value: '', label: 'All Status' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'valid', label: 'Valid' },
-    { value: 'invalid', label: 'Invalid' },
+    { value: ReviewStatus.PENDING, label: 'Pending' },
+    { value: ReviewStatus.VALID, label: 'Valid' },
+    { value: ReviewStatus.INVALID, label: 'Invalid' },
 ];
 
 // Taxability colors
 const taxabilityColors: Record<TaxabilityStatus, string> = {
-    taxable: 'orange',
-    non_taxable: 'green',
-    unknown: 'yellow',
+    [TaxabilityStatusEnum.TAXABLE]: 'orange',
+    [TaxabilityStatusEnum.NON_TAXABLE]: 'green',
+    [TaxabilityStatusEnum.UNKNOWN]: 'yellow',
 };
 
 // Pattern colors for suggestions (simplified to swap and transfer)
 const patternColors: Record<string, string> = {
-    transfer: 'blue',
-    swap: 'orange',
+    [UnitPattern.TRANSFER]: 'blue',
+    [UnitPattern.SWAP]: 'orange',
+};
+
+// Helper to format date as local datetime-local input value (avoids UTC timezone shift)
+const toLocalDateTimeString = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 // Props interface for configurable behavior
@@ -65,7 +85,7 @@ export interface TransactionsTableProps {
 }
 
 // Editable cell types
-type EditableField = 'account' | 'source_transaction_type' | 'direction' | 'transaction_type' | 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id' | 'review_status' | 'review_notes' | 'date_time' | 'source' | 'source_asset_symbol' | 'quantity' | 'price' | 'fee' | 'bundle_id';
+type EditableField = 'account_id' | 'source_transaction_type' | 'direction' | 'transaction_type' | 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id' | 'review_status' | 'review_notes' | 'date_time' | 'source' | 'source_asset_symbol' | 'quantity' | 'price' | 'fee' | 'user_calculation_unit_id';
 
 export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     title = 'Transactions',
@@ -76,13 +96,11 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     showSuggestions = false,
     onDataChange,
 }) => {
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const queryClient = useQueryClient();
     const [bundles, setBundles] = useState<Bundle[]>([]);
     const [suggestions, setSuggestions] = useState<BundleSuggestion[]>([]);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     // Cell-level editing: "txId:field" format, e.g., "123:account"
     const [editingCell, setEditingCell] = useState<string | null>(null);
     const [editValues, setEditValues] = useState<Partial<Transaction>>({});
@@ -105,11 +123,33 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const [showBulkStatusDialog, setShowBulkStatusDialog] = useState(false);
     const [showBulkTypeDialog, setShowBulkTypeDialog] = useState(false);
     const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
-    const [bulkStatus, setBulkStatus] = useState<TransactionStatus>('valid');
+    const [bulkStatus, setBulkStatus] = useState<TransactionStatus>(ReviewStatus.VALID);
     const [bulkType, setBulkType] = useState<string>('');
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+    
+    // Transaction editor dialog state
+    const [showEditorDialog, setShowEditorDialog] = useState(false);
+    const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
+
+    // TanStack Query for transactions - filters are part of the query key
+    const { data: transactions = [], isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
+        queryKey: ['transactions', workflowFilter, sourceFilter, accountFilter],
+        queryFn: async () => {
+            const params = new URLSearchParams();
+            if (workflowFilter) params.append('review_status', workflowFilter);
+            if (sourceFilter) params.append('source', sourceFilter);
+            if (accountFilter) params.append('account_id', accountFilter);
+            const response = await fetch(`${API_URL}/transactions?${params}`);
+            if (!response.ok) throw new Error('Failed to fetch transactions');
+            return response.json() as Promise<Transaction[]>;
+        },
+    });
+
+    const error = queryError ? (queryError instanceof Error ? queryError.message : 'Unknown error') : null;
 
     // Fetch static data once on mount
     useEffect(() => {
@@ -121,11 +161,6 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         fetchAssets();
         fetchAccounts();
     }, [showBundles, showSuggestions]);
-
-    // Fetch transactions when filters change
-    useEffect(() => {
-        fetchTransactions();
-    }, [workflowFilter, sourceFilter, accountFilter]);
 
     // Reset to first page when filters change
     useEffect(() => { setCurrentPage(1); }, [workflowFilter, sourceFilter, accountFilter]);
@@ -193,13 +228,64 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 }),
             });
             if (response.ok) {
-                await fetchTransactions();
+                queryClient.invalidateQueries({ queryKey: ['transactions'] });
                 await fetchBundles();
                 await fetchSuggestions();
                 onDataChange?.();
             }
         } catch (err) {
             console.error('Failed to accept suggestion:', err);
+        }
+    };
+
+    // Bundle update handler
+    const handleBundleUpdate = async (bundleId: number, updates: Partial<Bundle>) => {
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            });
+            if (!response.ok) throw new Error('Failed to update bundle');
+            await fetchBundles();
+            onDataChange?.();
+        } catch (err) {
+            console.error('Failed to update bundle:', err);
+            alert(err instanceof Error ? err.message : 'Failed to update bundle');
+        }
+    };
+
+    // Bundle delete handler
+    const handleBundleDelete = async (bundleId: number) => {
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) throw new Error('Failed to delete bundle');
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            await fetchBundles();
+            onDataChange?.();
+        } catch (err) {
+            console.error('Failed to delete bundle:', err);
+            alert(err instanceof Error ? err.message : 'Failed to delete bundle');
+        }
+    };
+
+    // Remove transaction from bundle handler
+    const handleRemoveTransactionFromBundle = async (bundleId: number, transactionId: number) => {
+        try {
+            const response = await fetch(`${API_URL}/transactions/${transactionId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_calculation_unit_id: null }),
+            });
+            if (!response.ok) throw new Error('Failed to remove transaction from bundle');
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            await fetchBundles();
+            onDataChange?.();
+        } catch (err) {
+            console.error('Failed to remove transaction from bundle:', err);
+            alert(err instanceof Error ? err.message : 'Failed to remove transaction');
         }
     };
 
@@ -222,30 +308,11 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify({ [field]: value })
             });
             if (!response.ok) throw new Error('Failed to update');
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
             alert(`Failed to save ${field}`);
-        }
-    };
-
-    const fetchTransactions = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const params = new URLSearchParams();
-            if (workflowFilter) params.append('review_status', workflowFilter);
-            if (sourceFilter) params.append('source', sourceFilter);
-            if (accountFilter) params.append('account', accountFilter);
-            const response = await fetch(`${API_URL}/transactions?${params}`);
-            if (!response.ok) throw new Error('Failed to fetch transactions');
-            const data = await response.json();
-            setTransactions(data);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -270,7 +337,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             asset_id: tx.asset_id,
             price_quote_asset_id: tx.price_quote_asset_id,
             fee_quote_asset_id: tx.fee_quote_asset_id,
-            account: tx.account || '',
+            account_id: tx.account_id,
             source_transaction_type: tx.source_transaction_type || '',
             transaction_type: tx.transaction_type,
             direction: tx.direction,
@@ -284,7 +351,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             quantity: tx.quantity,
             price: tx.price,
             fee: tx.fee,
-            bundle_id: tx.bundle_id
+            user_calculation_unit_id: tx.user_calculation_unit_id
         });
         // Focus input after render
         setTimeout(() => editInputRef.current?.focus(), 0);
@@ -359,7 +426,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify(values)
             });
             if (!response.ok) throw new Error('Failed to update transaction');
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
@@ -376,7 +443,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify({ [field]: !tx[field] })
             });
             if (!response.ok) throw new Error('Failed to update');
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
         } catch (err) {
             alert(err instanceof Error ? err.message : 'Failed to save');
         }
@@ -427,7 +494,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 })
             });
             if (!response.ok) throw new Error('Failed to create bundle');
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setBundleLabel('');
             setShowBundleDialog(false);
@@ -452,7 +519,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             alert(result.message);
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkStatusDialog(false);
         } catch (err) {
@@ -477,7 +544,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             alert(result.message);
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkTypeDialog(false);
             setBulkType('');
@@ -502,11 +569,35 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to delete transactions');
             const result = await response.json();
             alert(result.message);
-            await fetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkDeleteDialog(false);
         } catch (err) {
             alert(err instanceof Error ? err.message : 'Failed to delete');
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const handleDeleteTransaction = async () => {
+        if (!transactionToDelete) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: [transactionToDelete.id]
+                })
+            });
+            if (!response.ok) throw new Error('Failed to delete transaction');
+            const result = await response.json();
+            alert(result.message);
+            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            setShowDeleteDialog(false);
+            setTransactionToDelete(null);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to delete transaction');
         } finally {
             setBulkActionLoading(false);
         }
@@ -555,7 +646,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const allCurrentPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
 
     const handleRefresh = () => {
-        fetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
         if (showBundles) fetchBundles();
         if (showSuggestions) fetchSuggestions();
     };
@@ -603,7 +694,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             ) : (
                                 <Flex gap={3} flexWrap="wrap">
                                     {suggestions.map((suggestion, idx) => (
-                                        <Card.Root key={idx} size="sm" width="280px" bg="white">
+                                        <Card.Root key={idx} size="sm" width="320px" bg="white">
                                             <Card.Body p={3}>
                                                 <Flex justify="space-between" align="center" mb={2}>
                                                     <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
@@ -620,6 +711,17 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                         {suggestion.total_quantity} {suggestion.asset_symbol}
                                                     </Text>
                                                 )}
+                                                {/* Expandable Transaction List */}
+                                                <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                    <Text fontSize="xs" color="gray.500" mb={1}>
+                                                        {suggestion.transaction_ids.length} transaction{suggestion.transaction_ids.length !== 1 ? 's' : ''}:
+                                                    </Text>
+                                                    <BundleTransactionList
+                                                        transactions={suggestion.transactions || []}
+                                                        maxVisible={3}
+                                                        colorScheme="teal"
+                                                    />
+                                                </Box>
                                                 <Flex mt={3} gap={2}>
                                                     <Button
                                                         size="xs"
@@ -724,7 +826,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                     ) : (
                                         <Flex gap={3} flexWrap="wrap">
                                             {suggestions.map((suggestion, idx) => (
-                                                <Card.Root key={idx} size="sm" width="280px" bg="white">
+                                                <Card.Root key={idx} size="sm" width="320px" bg="white">
                                                     <Card.Body p={3}>
                                                         <Flex justify="space-between" align="center" mb={2}>
                                                             <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
@@ -741,6 +843,17 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                 {suggestion.total_quantity} {suggestion.asset_symbol}
                                                             </Text>
                                                         )}
+                                                        {/* Expandable Transaction List */}
+                                                        <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                            <Text fontSize="xs" color="gray.500" mb={1}>
+                                                                {suggestion.transaction_ids.length} transaction{suggestion.transaction_ids.length !== 1 ? 's' : ''}:
+                                                            </Text>
+                                                            <BundleTransactionList
+                                                                transactions={suggestion.transactions || []}
+                                                                maxVisible={3}
+                                                                colorScheme="teal"
+                                                            />
+                                                        </Box>
                                                         <Flex mt={3} gap={2}>
                                                             <Button
                                                                 size="xs"
@@ -760,45 +873,14 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             )}
                         </Box>
 
-                        {/* Existing Bundles */}
-                        <Box p={4} bg="purple.50" borderRadius="md" borderWidth={1} borderColor="purple.200" minH="200px">
-                            <Text fontWeight="bold" color="purple.700" mb={3}>📦 Existing Bundles ({bundles.length})</Text>
-                            {bundles.length === 0 ? (
-                                <Box textAlign="center" py={6}>
-                                    <Text color="purple.500" fontSize="sm">No bundles yet. Accept suggestions above or select transactions from the Transactions tab.</Text>
-                                </Box>
-                            ) : (
-                                <Flex gap={4} flexWrap="wrap">
-                                    {bundles.map(bundle => (
-                                        <Card.Root key={bundle.id} size="sm" width="250px" bg="white">
-                                            <Card.Body p={4}>
-                                                <Flex justify="space-between" align="center" mb={2}>
-                                                    <Badge colorPalette={bundle.pattern === 'TRANSFER' ? 'blue' : 'orange'} size="sm">
-                                                        {bundle.pattern || 'SWAP'}
-                                                    </Badge>
-                                                    <Badge colorPalette={taxabilityColors[bundle.taxability_override as TaxabilityStatus] || 'yellow'} size="sm">
-                                                        {bundle.taxability_override || 'unknown'}
-                                                    </Badge>
-                                                </Flex>
-                                                <Text fontWeight="bold" fontSize="md" mb={1}>
-                                                    {bundle.label || `Bundle #${bundle.id}`}
-                                                </Text>
-                                                <Text fontSize="sm" color="gray.600" mb={2}>
-                                                    {bundle.transaction_count || 0} transactions
-                                                </Text>
-                                                {bundle.notes && (
-                                                    <Text fontSize="xs" color="gray.500" mb={2}>{bundle.notes}</Text>
-                                                )}
-                                                <Flex gap={2} mt={2}>
-                                                    <Button size="xs" variant="outline" colorPalette="purple">View</Button>
-                                                    <Button size="xs" variant="ghost" colorPalette="red">Delete</Button>
-                                                </Flex>
-                                            </Card.Body>
-                                        </Card.Root>
-                                    ))}
-                                </Flex>
-                            )}
-                        </Box>
+                        {/* Existing Bundles - New Table View */}
+                        <BundleTable
+                            bundles={bundles}
+                            onBundleUpdate={handleBundleUpdate}
+                            onBundleDelete={handleBundleDelete}
+                            onRemoveTransaction={handleRemoveTransactionFromBundle}
+                            onRefresh={fetchBundles}
+                        />
                     </Tabs.Content>
                 </Tabs.Root>
             )}
@@ -967,8 +1049,8 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             size="xs"
                                                             type="datetime-local"
                                                             value={typeof editValues.date_time === 'number'
-                                                                ? new Date(editValues.date_time * 1000).toISOString().slice(0, 16)
-                                                                : editValues.date_time ? new Date(editValues.date_time).toISOString().slice(0, 16) : ''}
+                                                                ? toLocalDateTimeString(new Date(editValues.date_time * 1000))
+                                                                : editValues.date_time ? toLocalDateTimeString(new Date(editValues.date_time)) : ''}
                                                             onChange={e => updateEditValues({ date_time: e.target.value })}
                                                             onKeyDown={handleEditKeyDown}
                                                             onBlur={saveAndClose}
@@ -981,25 +1063,23 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                     )}
                                                 </Table.Cell>
                                                 {/* Account column - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'account') && startCellEdit(tx, 'account')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'account') ? (
+                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'account_id') && startCellEdit(tx, 'account_id')} cursor="pointer">
+                                                    {isEditingCell(tx.id, 'account_id') ? (
                                                         <NativeSelect.Root size="sm" width="80px">
                                                             <NativeSelect.Field
                                                                 value={editValues.account_id ?? tx.account_id ?? ''}
                                                                 onChange={async e => {
                                                                     const newAccountId = e.target.value ? parseInt(e.target.value) : null;
-                                                                    const selectedAccount = accounts.find(a => a.id === newAccountId);
                                                                     try {
                                                                         const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
                                                                             method: 'PATCH',
                                                                             headers: { 'Content-Type': 'application/json' },
                                                                             body: JSON.stringify({
-                                                                                account_id: newAccountId,
-                                                                                account: selectedAccount?.name || null
+                                                                                account_id: newAccountId
                                                                             })
                                                                         });
                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                        await fetchTransactions();
+                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
@@ -1023,7 +1103,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                         </NativeSelect.Root>
                                                     ) : (
                                                         <Badge size="sm" colorPalette="purple">
-                                                            {tx.account || '-'}
+                                                            {accounts.find(a => a.id === tx.account_id)?.name || '-'}
                                                         </Badge>
                                                     )}
                                                 </Table.Cell>
@@ -1085,7 +1165,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                             body: JSON.stringify({ direction: newDir })
                                                                         });
                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                        await fetchTransactions();
+                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
@@ -1127,7 +1207,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                             body: JSON.stringify({ transaction_type: newType })
                                                                         });
                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                        await fetchTransactions();
+                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
@@ -1149,7 +1229,18 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             </NativeSelect.Field>
                                                         </NativeSelect.Root>
                                                     ) : (
-                                                        <Badge size="xs" colorPalette="blue">{tx.transaction_type?.substring(0, 8)}</Badge>
+                                                        <Flex align="center" gap={1}>
+                                                            {tx.transaction_type === 'transfer' ? (
+                                                                <BiTransfer color="#805AD5" size={12} title="Transfer" />
+                                                            ) : tx.transaction_type === 'trade' ? (
+                                                                <RiExchangeFundsLine color="#3182CE" size={12} title="Trade" />
+                                                            ) : tx.transaction_type === 'technical' ? (
+                                                                <FaQuestion color="#A0AEC0" size={10} title="Technical (approval, contract call)" />
+                                                            ) : (
+                                                                <FaQuestion color="#718096" size={10} title="Other" />
+                                                            )}
+                                                            <Badge size="xs" colorPalette="blue">{tx.transaction_type?.substring(0, 6)}</Badge>
+                                                        </Flex>
                                                     )}
                                                 </Table.Cell>
                                                 {/* Source Asset Symbol - click to edit */}
@@ -1347,7 +1438,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                 </Table.Cell>
                                                 {/* Bundle - read only */}
                                                 <Table.Cell py={1}>
-                                                    {tx.bundle_id ? <Badge size="sm" colorPalette="purple">📦 #{tx.bundle_id}</Badge> : <Text fontSize="8px" color="gray.400">-</Text>}
+                                                    {tx.user_calculation_unit_id ? <Badge size="sm" colorPalette="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <Text fontSize="8px" color="gray.400">-</Text>}
                                                 </Table.Cell>
                                                 {/* Status - click to edit */}
                                                 <Table.Cell position="sticky" right="30px" bg={getRowBgColor(tx)} zIndex={5} borderLeft="2px solid" borderColor="gray.300" onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')} cursor="pointer">
@@ -1372,104 +1463,80 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                     )}
                                                 </Table.Cell>
                                                 {/* Actions - show cancel when editing */}
-                                                <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="30px">
-                                                    {getEditingTxId() === tx.id && (
-                                                        <Button size="xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)">
-                                                            ✗
-                                                        </Button>
-                                                    )}
+                                                <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="80px">
+                                                    <Flex gap={1}>
+                                                        {getEditingTxId() === tx.id ? (
+                                                            <Button size="xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)">
+                                                                ✗
+                                                            </Button>
+                                                        ) : (
+                                                            <>
+                                                                <Button
+                                                                    size="xs"
+                                                                    variant="ghost"
+                                                                    colorPalette="blue"
+                                                                    onClick={() => {
+                                                                        setTransactionToEdit(tx);
+                                                                        setShowEditorDialog(true);
+                                                                    }}
+                                                                    title="Edit all fields"
+                                                                >
+                                                                    <LuPencil />
+                                                                </Button>
+                                                                <Button
+                                                                    size="xs"
+                                                                    variant="ghost"
+                                                                    colorPalette="red"
+                                                                    onClick={() => {
+                                                                        setTransactionToDelete(tx);
+                                                                        setShowDeleteDialog(true);
+                                                                    }}
+                                                                    title="Delete transaction"
+                                                                >
+                                                                    🗑️
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </Flex>
                                                 </Table.Cell>
                                             </Table.Row>
                                             {expandedRow === tx.id && (
                                                 <Table.Row>
-                                                    <Table.Cell colSpan={20} bg="gray.50">
-                                                        <Box p={2}>
-                                                            <Heading size="xs" mb={2}>Transaction Details</Heading>
-                                                            <Flex flexWrap="wrap" gap={4}>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">IDs</Text>
-                                                                    <Text fontSize="8px">ID: {tx.id}</Text>
-                                                                    <Text fontSize="8px">Raw TX ID: {tx.raw_transaction_id || '-'}</Text>
-                                                                    <Text fontSize="8px">Asset ID: {tx.asset_id || '-'}</Text>
-                                                                    <Text fontSize="8px">Source TX ID: {tx.source_transaction_id}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Asset Info</Text>
-                                                                    <Text fontSize="8px">Source Symbol: {tx.source_asset_symbol || '-'}</Text>
-                                                                    <Text fontSize="8px">Linked Asset: {tx.linked_asset_symbol || 'Not linked'}</Text>
-                                                                    <Text fontSize="8px">Asset ID: {tx.asset_id || '-'}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Pricing</Text>
-                                                                    <Text fontSize="8px">Price: {tx.price ?? '-'}</Text>
-                                                                    <Text fontSize="8px">Source Quote: {tx.source_price_quote_asset_symbol || '-'}</Text>
-                                                                    <Text fontSize="8px">Linked Quote: {tx.linked_price_quote_asset_symbol || 'Not linked'}</Text>
-                                                                    <Text fontSize="8px">Price Quote Asset ID: {tx.price_quote_asset_id || '-'}</Text>
-                                                                    <Text fontSize="8px">Total: {tx.total ?? '-'}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Fees</Text>
-                                                                    <Text fontSize="8px">Fee: {tx.fee ?? '-'}</Text>
-                                                                    <Text fontSize="8px">Source Fee Quote: {tx.source_fee_quote_asset_symbol || '-'}</Text>
-                                                                    <Text fontSize="8px">Linked Fee Quote: {tx.linked_fee_quote_asset_symbol || 'Not linked'}</Text>
-                                                                    <Text fontSize="8px">Fee Quote Asset ID: {tx.fee_quote_asset_id || '-'}</Text>
-                                                                    <Text fontSize="8px">Include in Cost: {tx.include_fee ? 'Yes' : 'No'}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Network</Text>
-                                                                    <Text fontSize="8px">Network: {tx.network || '-'}</Text>
-                                                                    <Text fontSize="8px" wordBreak="break-all">From: {tx.source_from_account || '-'}</Text>
-                                                                    <Text fontSize="8px" wordBreak="break-all">To: {tx.source_to_account || '-'}</Text>
-                                                                    <Text fontSize="8px" wordBreak="break-all">Contract: {tx.token_contract_address || '-'}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Type Info</Text>
-                                                                    <Text fontSize="8px">Type: {tx.transaction_type}</Text>
-                                                                    <Text fontSize="8px">Source Type: {tx.source_transaction_type || '-'}</Text>
-                                                                    <Text fontSize="8px">Direction: {tx.direction}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Review</Text>
-                                                                    <Text fontSize="8px">Status: {tx.review_status}</Text>
-                                                                    <Text fontSize="8px">Notes: {tx.review_notes || '-'}</Text>
-                                                                    <Text fontSize="8px">Synced At: {tx.synced_at || '-'}</Text>
-                                                                </Box>
-                                                                <Box minW="150px">
-                                                                    <Text fontWeight="bold" fontSize="8px" color="gray.500">Tags</Text>
-                                                                    <Text fontSize="8px" whiteSpace="pre-wrap">
-                                                                        {tx.tags ? JSON.stringify(tx.tags, null, 2) : '-'}
-                                                                    </Text>
-                                                                </Box>
-                                                            </Flex>
-                                                            {/* Editable Notes Section - click to edit */}
-                                                            <Box mt={2} pt={2} borderTop="1px" borderColor="gray.200">
-                                                                <Text fontWeight="bold" fontSize="8px" mb={1}>Notes:</Text>
-                                                                {isEditingCell(tx.id, 'review_notes') ? (
-                                                                    <Input
-                                                                        ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                        size="xs"
-                                                                        value={editValues.review_notes || ''}
-                                                                        onChange={e => setEditValues(prev => ({ ...prev, review_notes: e.target.value }))}
-                                                                        onKeyDown={handleEditKeyDown}
-                                                                        onBlur={saveAndClose}
-                                                                        placeholder="Add review notes..."
-                                                                        fontSize="8px"
-                                                                    />
-                                                                ) : (
-                                                                    <Text
-                                                                        fontSize="8px"
-                                                                        color={tx.review_notes ? 'gray.700' : 'gray.400'}
-                                                                        cursor="pointer"
-                                                                        onClick={() => startCellEdit(tx, 'review_notes')}
-                                                                        _hover={{ bg: 'gray.100' }}
-                                                                        p={1}
-                                                                        borderRadius="sm"
-                                                                    >
-                                                                        {tx.review_notes || 'Click to add notes...'}
-                                                                    </Text>
-                                                                )}
-                                                            </Box>
-                                                        </Box>
+                                                    <Table.Cell colSpan={20} p={0}>
+                                                        <TransactionDetailPanel
+                                                            transaction={tx}
+                                                            accounts={accounts}
+                                                            onNotesChange={async (txId, notes) => {
+                                                                try {
+                                                                    const response = await fetch(`${API_URL}/transactions/${txId}`, {
+                                                                        method: 'PUT',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ review_notes: notes }),
+                                                                    });
+                                                                    if (response.ok) {
+                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                        onDataChange?.();
+                                                                    }
+                                                                } catch (err) {
+                                                                    console.error('Failed to update notes:', err);
+                                                                }
+                                                            }}
+                                                            onTagsChange={async (txId, tags) => {
+                                                                try {
+                                                                    const response = await fetch(`${API_URL}/transactions/${txId}`, {
+                                                                        method: 'PUT',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ tags }),
+                                                                    });
+                                                                    if (response.ok) {
+                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                        onDataChange?.();
+                                                                    }
+                                                                } catch (err) {
+                                                                    console.error('Failed to update tags:', err);
+                                                                }
+                                                            }}
+                                                        />
                                                     </Table.Cell>
                                                 </Table.Row>
                                             )}
@@ -1708,6 +1775,56 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Single Transaction Dialog */}
+            <Dialog.Root open={showDeleteDialog} onOpenChange={(e) => setShowDeleteDialog(e.open)}>
+                <Portal>
+                    <Dialog.Backdrop />
+                    <Dialog.Positioner>
+                        <Dialog.Content>
+                            <Dialog.Header>
+                                <Dialog.Title>Delete Transaction</Dialog.Title>
+                            </Dialog.Header>
+                            <Dialog.Body>
+                                <Text color="red.600" fontWeight="bold" mb={2}>
+                                    ⚠️ Warning: This action cannot be undone!
+                                </Text>
+                                <Text mb={4}>
+                                    Are you sure you want to delete this transaction?
+                                </Text>
+                                {transactionToDelete && (
+                                    <Box p={3} bg="gray.50" borderRadius="md">
+                                        <Text fontSize="sm"><strong>ID:</strong> {transactionToDelete.id}</Text>
+                                        <Text fontSize="sm"><strong>Date:</strong> {formatDateTime(transactionToDelete.date_time)}</Text>
+                                        <Text fontSize="sm"><strong>Type:</strong> {transactionToDelete.transaction_type}</Text>
+                                        <Text fontSize="sm"><strong>Quantity:</strong> {transactionToDelete.quantity} {transactionToDelete.source_asset_symbol}</Text>
+                                    </Box>
+                                )}
+                            </Dialog.Body>
+                            <Dialog.Footer>
+                                <Flex gap={2}>
+                                    <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+                                        Cancel
+                                    </Button>
+                                    <Button colorPalette="red" onClick={handleDeleteTransaction} disabled={bulkActionLoading}>
+                                        {bulkActionLoading ? 'Deleting...' : 'Delete Transaction'}
+                                    </Button>
+                                </Flex>
+                            </Dialog.Footer>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
+
+            {/* Transaction Editor Dialog */}
+            <TransactionEditorDialog
+                transaction={transactionToEdit}
+                isOpen={showEditorDialog}
+                onClose={() => {
+                    setShowEditorDialog(false);
+                    setTransactionToEdit(null);
+                }}
+            />
         </Box >
     );
 };

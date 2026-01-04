@@ -85,11 +85,15 @@ class TaxabilityCalculator:
         if self._is_cost_basis_transfer(unit):
             return False
         
+        # 5b. Pending transfers are non-taxable (P&L realization skipped anyway)
+        if self._is_pending_transfer(unit):
+            return False
+        
         # 6. Fees use config
         if self._is_fee(leg):
             return self.config.fee_taxable_by_default
         
-        # 7. Outflow-only always taxable
+        # 7. Outflow-only always taxable (but not pending transfers - handled above)
         if self._is_outflow_only(unit):
             return True
         
@@ -143,6 +147,11 @@ class TaxabilityCalculator:
     def _is_cost_basis_transfer(self, unit: Any) -> bool:
         """Check if unit is a cost basis transfer (transfer/split)."""
         return getattr(unit, 'is_cost_basis_transfer', False)
+    
+    def _is_pending_transfer(self, unit: Any) -> bool:
+        """Check if unit is a pending transfer (incomplete transfer awaiting counterpart)."""
+        pattern = getattr(unit, 'pattern', None)
+        return pattern == "pending_transfer"
     
     def _is_outflow_only(self, unit: Any) -> bool:
         """Check if unit has only outflows (payment, gift, etc.)."""

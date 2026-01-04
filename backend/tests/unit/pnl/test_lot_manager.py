@@ -366,7 +366,6 @@ class TestNegativeLotSettlement:
 
     def test_settle_negative_lots_full_settlement(self, fifo_config, base_datetime):
         """Negative lot should be fully settled when acquisition covers it."""
-        from uuid import uuid4
         fifo_config.allow_negative_balances = True
         manager = LotManager(fifo_config)
 
@@ -397,7 +396,6 @@ class TestNegativeLotSettlement:
             asset=mock_asset,
             available_qty=Decimal("3"),
             unit_cost=Decimal("150"),
-            settling_lot_uuid=uuid4(),
             emit_event=False,
         )
 
@@ -409,7 +407,6 @@ class TestNegativeLotSettlement:
 
     def test_settle_negative_lots_partial_settlement(self, fifo_config, base_datetime):
         """Negative lot should be partially settled when acquisition is smaller."""
-        from uuid import uuid4
         fifo_config.allow_negative_balances = True
         manager = LotManager(fifo_config)
 
@@ -437,7 +434,6 @@ class TestNegativeLotSettlement:
             asset=mock_asset,
             available_qty=Decimal("1"),
             unit_cost=Decimal("200"),
-            settling_lot_uuid=uuid4(),
             emit_event=False,
         )
 
@@ -453,7 +449,6 @@ class TestNegativeLotSettlement:
 
     def test_no_settlement_when_no_negative_lots(self, fifo_config):
         """Should return full qty when no negative lots to settle."""
-        from uuid import uuid4
         manager = LotManager(fifo_config)
 
         mock_account = Account(id=1, name="Test", account_type="cex")
@@ -464,7 +459,6 @@ class TestNegativeLotSettlement:
             asset=mock_asset,
             available_qty=Decimal("5"),
             unit_cost=Decimal("100"),
-            settling_lot_uuid=uuid4(),
             emit_event=False,
         )
 

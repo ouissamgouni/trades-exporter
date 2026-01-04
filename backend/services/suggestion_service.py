@@ -20,7 +20,7 @@ from typing import List, Optional
 from sqlmodel import Session, select
 
 from backend.config.loader import configure_logging
-from backend.db.models import NormalizedTransaction, CalculationUnit, UnitPattern
+from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
@@ -98,9 +98,9 @@ class SuggestionService:
         suggestion: GroupingSuggestion,
         label: Optional[str] = None,
         notes: Optional[str] = None,
-    ) -> CalculationUnit:
+    ) -> UserCalculationBundle:
         """
-        Accept a suggestion and create a CalculationUnit.
+        Accept a suggestion and create a UserCalculationBundle.
 
         Args:
             suggestion: The suggestion to accept
@@ -108,10 +108,10 @@ class SuggestionService:
             notes: Optional notes
 
         Returns:
-            Created CalculationUnit (persisted)
+            Created UserCalculationBundle (persisted)
         """
-        # Create CalculationUnit from suggestion
-        unit = CalculationUnit(
+        # Create UserCalculationBundle from suggestion
+        bundle = UserCalculationBundle(
             label=label or suggestion.label,
             pattern=suggestion.pattern,
             notes=notes or suggestion.reason,
@@ -119,23 +119,22 @@ class SuggestionService:
             confidence=None,  # Clear confidence - this is now confirmed
             reason=suggestion.reason,  # Keep reason for history
         )
-        self.session.add(unit)
+        self.session.add(bundle)
         self.session.flush()  # Get the ID
 
-        # Link transactions to the unit
+        # Link transactions to the bundle
         for tx_id in suggestion.transaction_ids:
             tx = self.session.get(NormalizedTransaction, tx_id)
             if tx:
-                tx.user_calculation_unit_id = unit.id
-                tx.status = "reviewed"
+                tx.user_calculation_unit_id = bundle.id
                 self.session.add(tx)
 
         self.session.commit()
         log.info(
-            f"Created CalculationUnit {unit.id} with {len(suggestion.transaction_ids)} transactions"
+            f"Created UserCalculationBundle {bundle.id} with {len(suggestion.transaction_ids)} transactions"
         )
 
-        return unit
+        return bundle
 
     def _get_pending_transactions(self) -> List[NormalizedTransaction]:
         """Get all pending transactions (not yet reviewed/grouped)."""

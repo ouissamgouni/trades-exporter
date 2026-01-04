@@ -1,15 +1,43 @@
-export type TransactionStatus = 'valid' | 'pending' | 'invalid';
+import {
+    ReviewStatus,
+    TaxabilityStatus as TaxabilityStatusEnum,
+    Direction,
+    AccountType,
+    ConnectorCategory,
+    SyncStatus,
+    UnitPattern as UnitPatternEnum,
+    CostMethod as CostMethodEnum,
+    LotMode as LotModeEnum,
+    LegType as LegTypeEnum,
+} from './enums';
+
+// Re-export enums for convenience
+export {
+    ReviewStatus,
+    TaxabilityStatusEnum,
+    Direction,
+    AccountType,
+    ConnectorCategory,
+    SyncStatus,
+    UnitPatternEnum,
+    CostMethodEnum,
+    LotModeEnum,
+    LegTypeEnum,
+};
+
+// Type aliases using enum values for backward compatibility
+export type TransactionStatus = `${ReviewStatus}`;
 
 // V2 Architecture: Workflow status
 export type WorkflowStatus = 'pending' | 'reviewed' | 'excluded';
 
 // V2 Architecture: Taxability status
-export type TaxabilityStatus = 'taxable' | 'non_taxable' | 'unknown';
+export type TaxabilityStatus = `${TaxabilityStatusEnum}`;
 
 export interface Account {
     id: number;
     name: string;
-    account_type: 'cex' | 'broker' | 'wallet';
+    account_type: `${AccountType}`;
     address_or_identifier?: string;
     tags: string[];
     owned: boolean;
@@ -25,7 +53,7 @@ export interface AccountConnector {
     credentials_ref?: string;
     sync_priority: number;
     last_sync_at?: string;
-    last_sync_status?: 'pending' | 'running' | 'success' | 'failed';
+    last_sync_status?: `${SyncStatus}`;
     last_error?: string;
     created_at: string;
     updated_at: string;
@@ -38,7 +66,7 @@ export interface ConnectorWithAccount extends AccountConnector {
 
 export interface ConnectorTypeInfo {
     type: string;
-    category: 'cex' | 'onchain' | 'broker';
+    category: `${ConnectorCategory}`;
     display_name: string;
     supported_chains?: string[];
     required_config: string[];
@@ -54,11 +82,9 @@ export interface Transaction {
     // V2 Architecture fields
     status?: WorkflowStatus;
     taxability_status?: TaxabilityStatus;
-    calculation_unit_id?: number | null;
-    bundle_id?: number | null; // Backward compatibility alias for calculation_unit_id
+    user_calculation_unit_id?: number | null;
     source: string;
     source_transaction_id: string;
-    account?: string;
     account_id?: number | null;
     date_time: string | number;
     direction: string;
@@ -70,14 +96,20 @@ export interface Transaction {
     linked_asset_symbol?: string; // From assets table via asset_id FK
     linked_price_quote_asset_symbol?: string; // From assets table via price_quote_asset_id FK
     linked_fee_quote_asset_symbol?: string; // From assets table via fee_quote_asset_id FK
+    // Server-side resolved account names
+    account_name?: string;
+    from_account_name?: string;
+    to_account_name?: string;
     quantity: number;
     price?: number;
-    total?: number;
+    total?: number; // Computed: price * quantity
     fee?: number;
     include_fee?: boolean;
     disposal_taxable?: boolean;  // Whether disposing this asset is a taxable event
     source_from_account?: string;
     source_to_account?: string;
+    from_account_id?: number | null;
+    to_account_id?: number | null;
     network?: string;
     network_transaction_id?: string;
     token_contract_address?: string;
@@ -88,7 +120,7 @@ export interface Transaction {
 }
 
 // V2 Architecture: Calculation Unit patterns (unified concept for grouping transactions)
-export type UnitPattern = 'TRANSFER' | 'SWAP' | 'SPLIT' | 'UNKNOWN';
+export type UnitPattern = `${UnitPatternEnum}`;
 // Backward compatibility alias
 export type BundlePattern = 'transfer' | 'swap';
 
@@ -122,13 +154,14 @@ export interface GroupingSuggestion {
     total_quantity?: number;
     asset_symbol?: string;
     date_range?: string;
+    transactions?: TransactionSummary[];
 }
 
 // Backward compatibility alias
 export type BundleSuggestion = GroupingSuggestion;
 
 // Leg types for expanded transactions (deprecated - kept for backward compatibility)
-export type LegType = 'cost' | 'proceeds' | 'acquired' | 'disposed' | 'fee';
+export type LegType = `${LegTypeEnum}`;
 
 export interface TransactionLeg extends Transaction {
     leg_type?: LegType;
@@ -276,8 +309,8 @@ export interface ConfigStatus {
 }
 
 // P&L Types
-export type CostMethod = 'FIFO' | 'LIFO' | 'HIFO';
-export type LotMode = 'LOT_TRAVEL' | 'MEGA_WALLET';
+export type CostMethod = `${CostMethodEnum}`;
+export type LotMode = `${LotModeEnum}`;
 
 /**
  * Asset reference containing both ID and display name.
@@ -362,7 +395,7 @@ export interface PnLWarning {
 
 // Cost lot from API
 export interface CostLotEntry {
-    lot_uuid: string;
+    cost_lot_id: number;
     asset?: AssetRef;  // Asset reference with id and name (new)
     asset_id?: number;  // Deprecated: use asset.id
     asset_symbol?: string;  // Deprecated: use asset.name
@@ -388,9 +421,9 @@ export interface CostLotEntry {
 
 // Settlement record from API (audit trail for negative lot settlements)
 export interface SettlementEntry {
-    settlement_uuid: string;
-    negative_lot_uuid: string;  // The debt being settled
-    settling_lot_uuid: string;  // The lot providing funds
+    settlement_id: number;
+    negative_lot_id: number;  // The debt being settled
+    settling_lot_id: number;  // The lot providing funds
     settling_transaction_id?: number;  // Which transaction triggered this
     qty_settled: number;  // How much was settled
     cost_basis_applied?: number;  // For non-base: cost applied
@@ -409,8 +442,9 @@ export interface CostLotEventEntry {
     event_type: LotEventType;
 
     lot_id: number;
-    lot_uuid?: string;  // Derived from lot relationship for convenience
     asset?: AssetRef;
+    account_id?: number;
+    account_name?: string;
 
     quantity_delta: number;
     cost_basis_delta?: number;
@@ -418,7 +452,6 @@ export interface CostLotEventEntry {
     cost_basis_remaining_after?: number;
 
     related_lot_id?: number;
-    related_lot_uuid?: string;  // Derived from related_lot relationship
     triggered_by_transaction_id?: number;
     triggered_by_unit_id?: number;
     triggered_by_unit_label?: string;
@@ -429,7 +462,7 @@ export interface CostLotEventEntry {
 
 // Consumed slice detail from API
 export interface ConsumedSliceEntry {
-    lot_uuid: string;
+    cost_lot_id: number;
     quantity: number;
     unit_cost_in_base: number;
     total_cost_in_base: number;
