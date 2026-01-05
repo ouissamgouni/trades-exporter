@@ -24,6 +24,8 @@ import {
     Text,
     Textarea,
 } from '@chakra-ui/react';
+import { toaster } from './ui/toaster';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { FiChevronDown, FiChevronRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader } from 'react-icons/fi';
 import { Bundle, TransactionSummary, TaxabilityStatus, API_URL } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
@@ -585,17 +587,20 @@ const BundleRow: React.FC<BundleRowProps> = ({
     const [deleting, setDeleting] = useState(false);
     const [editingNotes, setEditingNotes] = useState(false);
     const [notesValue, setNotesValue] = useState(bundle.notes || '');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const assets = getUniqueAssets(bundle.transactions);
     const dateRange = getDateRange(bundle.transactions);
 
+    const openDeleteConfirm = () => setShowDeleteConfirm(true);
+
     const handleDelete = async () => {
-        if (!confirm(`Delete bundle "${bundle.label || `#${bundle.id}`}"?`)) return;
         setDeleting(true);
         try {
             await onDelete();
         } finally {
             setDeleting(false);
+            setShowDeleteConfirm(false);
         }
     };
 
@@ -714,7 +719,7 @@ const BundleRow: React.FC<BundleRowProps> = ({
                             size="xs"
                             variant="ghost"
                             colorPalette="red"
-                            onClick={handleDelete}
+                            onClick={openDeleteConfirm}
                             loading={deleting}
                             title="Delete bundle"
                             p={1}
@@ -778,6 +783,18 @@ const BundleRow: React.FC<BundleRowProps> = ({
                     </Table.Cell>
                 </Table.Row>
             )}
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={handleDelete}
+                title="Delete Bundle"
+                message={`Delete bundle "${bundle.label || `#${bundle.id}`}"?`}
+                confirmLabel="Delete"
+                isDestructive
+                isLoading={deleting}
+            />
         </>
     );
 };
@@ -839,6 +856,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [filters, setFilters] = useState<BundleFilters>({ search: '', pattern: '', taxability: '' });
     const [bulkLoading, setBulkLoading] = useState(false);
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
     // Filter bundles
     const filteredBundles = useMemo(() => {
@@ -887,9 +905,12 @@ export const BundleTable: React.FC<BundleTableProps> = ({
         }
     }, [filteredBundles, selectedIds]);
 
-    const handleBulkDelete = async () => {
+    const openBulkDeleteConfirm = () => {
         if (selectedIds.size === 0) return;
-        if (!confirm(`Delete ${selectedIds.size} bundle(s)?`)) return;
+        setShowBulkDeleteConfirm(true);
+    };
+
+    const handleBulkDelete = async () => {
         if (!onBundleDelete) return;
 
         setBulkLoading(true);
@@ -901,6 +922,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
             onRefresh?.();
         } finally {
             setBulkLoading(false);
+            setShowBulkDeleteConfirm(false);
         }
     };
 
@@ -941,7 +963,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
 
             <BulkActionsBar
                 selectedCount={selectedIds.size}
-                onDelete={handleBulkDelete}
+                onDelete={openBulkDeleteConfirm}
                 onClearSelection={() => setSelectedIds(new Set())}
                 loading={bulkLoading}
             />
@@ -994,6 +1016,18 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                     </Table.Body>
                 </Table.Root>
             </Box>
+
+            {/* Bulk Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={showBulkDeleteConfirm}
+                onClose={() => setShowBulkDeleteConfirm(false)}
+                onConfirm={handleBulkDelete}
+                title="Delete Bundles"
+                message={`Delete ${selectedIds.size} bundle(s)?`}
+                confirmLabel="Delete"
+                isDestructive
+                isLoading={bulkLoading}
+            />
         </Box>
     );
 };

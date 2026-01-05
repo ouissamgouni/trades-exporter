@@ -19,7 +19,10 @@ import {
 import React, { useEffect, useState } from 'react';
 import { LuTriangleAlert, LuCheck, LuPencil, LuPlus, LuTrash2, LuX, LuChevronDown, LuChevronRight, LuGripVertical } from 'react-icons/lu';
 import { Category, CategoryAssetsResponse, Dimension, DimensionWithCategories, LinkedAsset, UnclassifiedAssetsResponse } from '../types';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { Toaster, toaster } from './ui/toaster';
+import { ColorSelector } from './ColorSelector';
+import { getNextAvailableColor, getContrastTextColor, DEFAULT_CATEGORY_COLOR } from '../constants/colors';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -61,6 +64,10 @@ export const CategoriesEditor: React.FC = () => {
 
     // Collapsible state per dimension (default expanded)
     const [collapsedDimensions, setCollapsedDimensions] = useState<Set<number>>(new Set());
+
+    // Confirmation dialogs
+    const deleteCategoryConfirm = useConfirmDialog<Category>();
+    const deleteDimensionConfirm = useConfirmDialog<DimensionWithCategories>();
 
     const toggleDimensionCollapse = (dimensionId: number) => {
         setCollapsedDimensions(prev => {
@@ -107,22 +114,38 @@ export const CategoriesEditor: React.FC = () => {
     }, []);
 
     const startCreateCategory = (dimensionId: number) => {
+        // Get used colors in this dimension to suggest an unused one
+        const dimension = dimensionData.find(d => d.id === dimensionId);
+        const usedColors = dimension?.categories.map(c => c.color).filter(Boolean) as string[] || [];
+        const suggestedColor = getNextAvailableColor(usedColors);
+
         setNewCategoryDimensionId(dimensionId);
         setIsCreating(true);
         setFormData({
             dimension_id: dimensionId,
             label: '',
-            color: '',
+            color: suggestedColor,
             ordinal: 0,
         });
     };
 
     const startEditCategory = (category: Category) => {
+        // If category has no color, suggest next available
+        let colorToUse = category.color || '';
+        if (!colorToUse) {
+            const dimension = dimensionData.find(d => d.id === category.dimension_id);
+            const usedColors = dimension?.categories
+                .filter(c => c.id !== category.id)
+                .map(c => c.color)
+                .filter(Boolean) as string[] || [];
+            colorToUse = getNextAvailableColor(usedColors);
+        }
+
         setEditingCategory(category);
         setFormData({
             dimension_id: category.dimension_id,
             label: category.label,
-            color: category.color || '',
+            color: colorToUse,
             ordinal: category.ordinal,
         });
     };
@@ -204,10 +227,13 @@ export const CategoriesEditor: React.FC = () => {
         }
     };
 
-    const handleDeleteCategory = async (category: Category) => {
-        if (!confirm(`Delete category "${category.label}"? This will remove it from all assets.`)) {
-            return;
-        }
+    const handleDeleteCategory = (category: Category) => {
+        deleteCategoryConfirm.open(category);
+    };
+
+    const executeDeleteCategory = async () => {
+        if (!deleteCategoryConfirm.data) return;
+        const category = deleteCategoryConfirm.data;
 
         try {
             const response = await fetch(`${API_BASE}/categories/${category.id}`, {
@@ -281,11 +307,13 @@ export const CategoriesEditor: React.FC = () => {
         }
     };
 
-    const handleDeleteDimension = async (dimension: DimensionWithCategories) => {
-        const categoriesCount = dimension.categories.length;
-        if (!confirm(`Delete dimension "${dimension.label}" and all its ${categoriesCount} categories? This cannot be undone.`)) {
-            return;
-        }
+    const handleDeleteDimension = (dimension: DimensionWithCategories) => {
+        deleteDimensionConfirm.open(dimension);
+    };
+
+    const executeDeleteDimension = async () => {
+        if (!deleteDimensionConfirm.data) return;
+        const dimension = deleteDimensionConfirm.data;
 
         try {
             const response = await fetch(`${API_BASE}/categories/dimensions/${dimension.id}`, {
@@ -617,29 +645,24 @@ export const CategoriesEditor: React.FC = () => {
                                                         }}
                                                         autoFocus
                                                     />
-                                                    <Input
-                                                        placeholder="#hex"
+                                                    <ColorSelector
                                                         value={formData.color}
-                                                        onChange={e => setFormData({ ...formData, color: e.target.value })}
-                                                        size="sm"
-                                                        width="80px"
+                                                        onChange={(color) => setFormData({ ...formData, color })}
                                                     />
-                                                    <IconButton
-                                                        aria-label="Create"
+                                                    <Button
                                                         size="sm"
                                                         colorPalette="green"
                                                         onClick={handleCreateCategory}
                                                     >
-                                                        <Icon as={LuCheck} />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="Cancel"
+                                                        Save
+                                                    </Button>
+                                                    <Button
                                                         size="sm"
                                                         variant="ghost"
                                                         onClick={cancelEdit}
                                                     >
-                                                        <Icon as={LuX} />
-                                                    </IconButton>
+                                                        Cancel
+                                                    </Button>
                                                 </HStack>
                                             )}
 
@@ -666,37 +689,31 @@ export const CategoriesEditor: React.FC = () => {
                                                                 }}
                                                                 autoFocus
                                                             />
-                                                            <Input
-                                                                placeholder="#hex"
+                                                            <ColorSelector
                                                                 value={formData.color}
-                                                                onChange={e => setFormData({ ...formData, color: e.target.value })}
-                                                                size="sm"
-                                                                width="80px"
+                                                                onChange={(color) => setFormData({ ...formData, color })}
                                                             />
-                                                            <IconButton
-                                                                aria-label="Save"
+                                                            <Button
                                                                 size="sm"
                                                                 colorPalette="green"
                                                                 onClick={handleUpdateCategory}
                                                             >
-                                                                <Icon as={LuCheck} />
-                                                            </IconButton>
-                                                            <IconButton
-                                                                aria-label="Cancel"
+                                                                Save
+                                                            </Button>
+                                                            <Button
                                                                 size="sm"
                                                                 variant="ghost"
                                                                 onClick={cancelEdit}
                                                             >
-                                                                <Icon as={LuX} />
-                                                            </IconButton>
+                                                                Cancel
+                                                            </Button>
                                                         </HStack>
                                                     ) : (
                                                         <HStack
                                                             gap={2}
                                                             px={3}
                                                             py={2}
-                                                            bg={cat.color || 'gray.100'}
-                                                            _dark={{ bg: cat.color || 'gray.700' }}
+                                                            bg={cat.color || DEFAULT_CATEGORY_COLOR}
                                                             borderRadius="lg"
                                                             cursor="pointer"
                                                             onClick={() => openCategoryDrawer(cat)}
@@ -704,18 +721,21 @@ export const CategoriesEditor: React.FC = () => {
                                                             transition="all 0.15s"
                                                             boxShadow="sm"
                                                         >
-                                                            <Text fontSize="sm" fontWeight="medium">
+                                                            <Text
+                                                                fontSize="sm"
+                                                                fontWeight="medium"
+                                                                color={getContrastTextColor(cat.color || DEFAULT_CATEGORY_COLOR)}
+                                                            >
                                                                 {cat.label}
                                                             </Text>
                                                             {(cat.asset_count || 0) > 0 && (
-                                                                <Badge
-                                                                    size="sm"
-                                                                    variant="solid"
-                                                                    colorPalette="blue"
-                                                                    borderRadius="full"
+                                                                <Text
+                                                                    fontSize="xs"
+                                                                    color={getContrastTextColor(cat.color || DEFAULT_CATEGORY_COLOR)}
+                                                                    opacity={0.7}
                                                                 >
-                                                                    {cat.asset_count}
-                                                                </Badge>
+                                                                    ({cat.asset_count})
+                                                                </Text>
                                                             )}
                                                             <HStack gap={0}>
                                                                 <IconButton
@@ -850,6 +870,28 @@ export const CategoriesEditor: React.FC = () => {
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Category Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteCategoryConfirm.isOpen}
+                onClose={deleteCategoryConfirm.close}
+                onConfirm={executeDeleteCategory}
+                title="Delete Category"
+                message={deleteCategoryConfirm.data ? `Delete category "${deleteCategoryConfirm.data.label}"? This will remove it from all assets.` : ''}
+                confirmLabel="Delete"
+                isDestructive
+            />
+
+            {/* Delete Dimension Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteDimensionConfirm.isOpen}
+                onClose={deleteDimensionConfirm.close}
+                onConfirm={executeDeleteDimension}
+                title="Delete Dimension"
+                message={deleteDimensionConfirm.data ? `Delete dimension "${deleteDimensionConfirm.data.label}" and all its ${deleteDimensionConfirm.data.categories.length} categories? This cannot be undone.` : ''}
+                confirmLabel="Delete"
+                isDestructive
+            />
         </Box>
     );
 };

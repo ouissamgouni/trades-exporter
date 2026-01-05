@@ -37,7 +37,7 @@ def prepare_transactions_for_pnl(
     Returns:
         Tuple of:
         - List of ExpandedLeg objects (pass-through, converted for consistency)
-        - List of CalculationUnit objects with .members list
+        - List of CalculationUnit objects with .legs list
     """
     pass_through: List[CalculationUnitLeg] = []
     paired_units: List[CalculationUnit] = []
@@ -63,7 +63,7 @@ def prepare_transactions_for_pnl(
                 _label=expansion_result.label,
                 bundle_id=getattr(tx, "unit_id", None),
             )
-            unit.members = members  # Set members as class attribute
+            unit.legs = members
             paired_units.append(unit)
         else:
             # Convert to CalculationUnitLeg to ensure origin_transaction_id is available

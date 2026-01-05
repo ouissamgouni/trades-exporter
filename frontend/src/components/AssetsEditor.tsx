@@ -8,6 +8,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { LuTags, LuSettings } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 
 // Use ASSET_TYPE_OPTIONS but it now only has 3 values: crypto, stock, fiat
 const PRICE_TYPE_OPTIONS = ASSET_TYPE_OPTIONS;
@@ -130,6 +132,10 @@ export const AssetsEditor: React.FC = () => {
     const [dryRunMode, setDryRunMode] = useState(true);
     const [replacePriceGetters, setReplacePriceGetters] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Confirmation dialogs
+    const deleteAssetConfirm = useConfirmDialog<number>();
+    const deletePriceGetterConfirm = useConfirmDialog<number>();
 
     useEffect(() => {
         fetchAllAssets();
@@ -255,13 +261,13 @@ export const AssetsEditor: React.FC = () => {
             setEditingId(null);
             setEditValues({});
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
     const createAsset = async () => {
         if (!newAsset.symbol?.trim()) {
-            alert('Symbol is required');
+            toaster.error({ title: 'Validation error', description: 'Symbol is required' });
             return;
         }
         try {
@@ -278,18 +284,23 @@ export const AssetsEditor: React.FC = () => {
             setNewAsset({ status: 0 });
             setShowCreateDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create asset');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create asset' });
         }
     };
 
-    const deleteAsset = async (id: number) => {
-        if (!window.confirm('Are you sure you want to delete this asset?')) return;
+    const deleteAsset = (id: number) => {
+        deleteAssetConfirm.open(id);
+    };
+
+    const executeDeleteAsset = async () => {
+        if (!deleteAssetConfirm.data) return;
+        const id = deleteAssetConfirm.data;
         try {
             const response = await fetch(`${API_URL}/assets/${id}`, { method: 'DELETE' });
             if (!response.ok) throw new Error('Failed to delete asset');
             await refreshAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete asset');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete asset' });
         }
     };
 
@@ -326,13 +337,18 @@ export const AssetsEditor: React.FC = () => {
             if (updatedAsset) setSelectedAsset(updatedAsset);
             setNewGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100, enabled: true, params: {} });
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to add price getter');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to add price getter' });
         }
     };
 
-    const deletePriceGetter = async (getterId: number) => {
+    const deletePriceGetter = (getterId: number) => {
         if (!selectedAsset) return;
-        if (!window.confirm('Delete this price getter?')) return;
+        deletePriceGetterConfirm.open(getterId);
+    };
+
+    const executeDeletePriceGetter = async () => {
+        if (!selectedAsset || !deletePriceGetterConfirm.data) return;
+        const getterId = deletePriceGetterConfirm.data;
         try {
             const response = await fetch(`${API_URL}/assets/${selectedAsset.asset_id}/price-getters/${getterId}`, {
                 method: 'DELETE'
@@ -340,7 +356,7 @@ export const AssetsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to delete price getter');
             await refreshAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete' });
         }
     };
 
@@ -355,7 +371,7 @@ export const AssetsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to update price getter');
             await refreshAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
         }
     };
 
@@ -381,7 +397,7 @@ export const AssetsEditor: React.FC = () => {
             try {
                 parsedParams = JSON.parse(editingValues.params || '{}');
             } catch {
-                alert('Invalid JSON in parameters');
+                toaster.error({ title: 'Validation error', description: 'Invalid JSON in parameters' });
                 return;
             }
             const response = await fetch(`${API_URL}/assets/${selectedAsset.asset_id}/price-getters/${editingGetterId}`, {
@@ -400,7 +416,7 @@ export const AssetsEditor: React.FC = () => {
             await refreshAssets();
             cancelEditingGetter();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
         }
     };
 
@@ -441,7 +457,7 @@ export const AssetsEditor: React.FC = () => {
             await refreshAssets();
             setShowCategoriesDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save categories');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save categories' });
         } finally {
             setSavingCategories(false);
         }
@@ -527,7 +543,7 @@ export const AssetsEditor: React.FC = () => {
             setShowBulkStatusDialog(false);
             setSelectedIds(new Set());
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update assets');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update assets' });
         } finally {
             setBulkOperationLoading(false);
         }
@@ -554,7 +570,7 @@ export const AssetsEditor: React.FC = () => {
             setShowBulkTypeDialog(false);
             setSelectedIds(new Set());
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update assets');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update assets' });
         } finally {
             setBulkOperationLoading(false);
         }
@@ -583,7 +599,7 @@ export const AssetsEditor: React.FC = () => {
             setSelectedIds(new Set());
             setBulkCategoryIds(new Set());
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update categories');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update categories' });
         } finally {
             setBulkOperationLoading(false);
         }
@@ -613,7 +629,7 @@ export const AssetsEditor: React.FC = () => {
             setSelectedIds(new Set());
             setBulkPriceGetter({ price_getter: '', external_id: '', priority: 100 });
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to assign price getters');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to assign price getters' });
         } finally {
             setBulkOperationLoading(false);
         }
@@ -639,7 +655,7 @@ export const AssetsEditor: React.FC = () => {
             setShowBulkDeleteDialog(false);
             setSelectedIds(new Set());
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete assets');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete assets' });
         } finally {
             setBulkOperationLoading(false);
         }
@@ -668,7 +684,7 @@ export const AssetsEditor: React.FC = () => {
         if (file && file.name.endsWith('.csv')) {
             setImportFile(file);
         } else {
-            alert('Please drop a CSV file');
+            toaster.error({ title: 'Invalid file', description: 'Please drop a CSV file' });
         }
     };
 
@@ -693,7 +709,7 @@ export const AssetsEditor: React.FC = () => {
             setImportPreview(data);
             setImportStep('preview');
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to preview CSV');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to preview CSV' });
         } finally {
             setImportLoading(false);
         }
@@ -729,7 +745,7 @@ export const AssetsEditor: React.FC = () => {
                 await refreshAssets();
             }
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to import CSV');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to import CSV' });
         } finally {
             setImportLoading(false);
         }
@@ -2315,6 +2331,28 @@ export const AssetsEditor: React.FC = () => {
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Asset Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteAssetConfirm.isOpen}
+                onClose={deleteAssetConfirm.close}
+                onConfirm={executeDeleteAsset}
+                title="Delete Asset"
+                message="Are you sure you want to delete this asset?"
+                confirmLabel="Delete"
+                isDestructive
+            />
+
+            {/* Delete Price Getter Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deletePriceGetterConfirm.isOpen}
+                onClose={deletePriceGetterConfirm.close}
+                onConfirm={executeDeletePriceGetter}
+                title="Delete Price Getter"
+                message="Delete this price getter?"
+                confirmLabel="Delete"
+                isDestructive
+            />
         </Box>
     );
 };

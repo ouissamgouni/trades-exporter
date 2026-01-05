@@ -5,6 +5,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import { API_URL, Asset } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
+import { toaster } from './ui/toaster';
 
 interface AssetSelectorProps {
     value: number | null;
@@ -106,7 +107,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
     const createAsset = async () => {
         if (!newAsset.symbol?.trim()) {
-            alert('Symbol is required');
+            toaster.error({ title: 'Symbol is required' });
             return;
         }
         setCreating(true);
@@ -140,7 +141,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             // Then refresh the assets list
             if (onAssetCreated) onAssetCreated();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create asset');
+            toaster.error({ title: err instanceof Error ? err.message : 'Failed to create asset' });
         } finally {
             setCreating(false);
         }

@@ -6,6 +6,8 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Account, RawAccount } from '../types';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
 
 // Fuzzy matching utility for smart suggestions
@@ -78,6 +80,10 @@ export const RawAccountsEditor: React.FC = () => {
     const [newRawAccount, setNewRawAccount] = useState<Partial<RawAccount>>({});
     const [sourceFilter, setSourceFilter] = useState('');
     const [linkedFilter, setLinkedFilter] = useState<string>('');
+
+    // Confirmation dialogs
+    const deleteConfirm = useConfirmDialog<RawAccount>();
+    const autoMapConfirm = useConfirmDialog<{ count: number; items: { rawAccount: RawAccount; accountId: number }[] }>();
 
     useEffect(() => {
         fetchRawAccounts();
@@ -171,7 +177,7 @@ export const RawAccountsEditor: React.FC = () => {
             setEditingKey(null);
             setEditAccountId(null);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
@@ -186,12 +192,12 @@ export const RawAccountsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to update raw account');
             await fetchRawAccounts();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
     // Bulk auto-map all high-confidence suggestions
-    const autoMapAll = async () => {
+    const autoMapAll = () => {
         const toMap: { rawAccount: RawAccount; accountId: number }[] = [];
 
         rawAccounts
@@ -205,20 +211,23 @@ export const RawAccountsEditor: React.FC = () => {
             });
 
         if (toMap.length === 0) {
-            alert('No high-confidence matches found to auto-map');
+            toaster.info({ title: 'No matches', description: 'No high-confidence matches found to auto-map' });
             return;
         }
 
-        if (!confirm(`Auto-map ${toMap.length} raw account(s) with high confidence matches?`)) return;
+        autoMapConfirm.open({ count: toMap.length, items: toMap });
+    };
 
-        for (const { rawAccount, accountId } of toMap) {
+    const executeAutoMap = async () => {
+        if (!autoMapConfirm.data) return;
+        for (const { rawAccount, accountId } of autoMapConfirm.data.items) {
             await acceptSuggestion(rawAccount, accountId);
         }
     };
 
     const createRawAccount = async () => {
         if (!newRawAccount.label || !newRawAccount.source) {
-            alert('Label and Source are required');
+            toaster.error({ title: 'Validation error', description: 'Label and Source are required' });
             return;
         }
         try {
@@ -235,12 +244,17 @@ export const RawAccountsEditor: React.FC = () => {
             setNewRawAccount({});
             setShowCreateDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create' });
         }
     };
 
-    const deleteRawAccount = async (rawAccount: RawAccount) => {
-        if (!window.confirm(`Delete raw account "${rawAccount.label}" from ${rawAccount.source}?`)) return;
+    const deleteRawAccount = (rawAccount: RawAccount) => {
+        deleteConfirm.open(rawAccount);
+    };
+
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const rawAccount = deleteConfirm.data;
         try {
             const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
                 method: 'DELETE'
@@ -248,7 +262,7 @@ export const RawAccountsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to delete raw account');
             await fetchRawAccounts();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete' });
         }
     };
 
@@ -262,7 +276,7 @@ export const RawAccountsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to unlink raw account');
             await fetchRawAccounts();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to unlink');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unlink' });
         }
     };
 
@@ -558,6 +572,27 @@ export const RawAccountsEditor: React.FC = () => {
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Raw Account"
+                message={deleteConfirm.data ? `Delete raw account "${deleteConfirm.data.label}" from ${deleteConfirm.data.source}?` : ''}
+                confirmLabel="Delete"
+                isDestructive
+            />
+
+            {/* Auto-Map Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={autoMapConfirm.isOpen}
+                onClose={autoMapConfirm.close}
+                onConfirm={executeAutoMap}
+                title="Auto-Map Raw Accounts"
+                message={autoMapConfirm.data ? `Auto-map ${autoMapConfirm.data.count} raw account(s) with high confidence matches?` : ''}
+                confirmLabel="Auto-Map"
+            />
         </Box>
     );
 };

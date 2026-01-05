@@ -15,21 +15,107 @@ The decision chain priority (first match wins):
 7. Outflow-only → taxable (payment, gift, etc.)
 8. Disposal to base currency (selling) → taxable
 9. Default: crypto-to-crypto swap taxability from config
+
+This module also provides `suggest_bundle_taxability()` for suggestion-time
+taxability hints, using the same logic but adapted for bundle-level context
+(before legs exist).
 """
 
-from typing import TYPE_CHECKING, Any, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Optional, Protocol
+
+from backend.db.models import TaxabilityStatus
 
 if TYPE_CHECKING:
     from backend.db.models import CalculationUnitLeg, CalculationUnit
     from backend.services.pnl.config import PnLConfig
 
 
+# ============================================================================
+# Bundle-Level Taxability Suggestion (for API suggestions)
+# ============================================================================
+
+
+@dataclass
+class BundleTaxabilitySuggestion:
+    """Result of a bundle taxability suggestion."""
+    
+    taxability: TaxabilityStatus
+    reason: str
+    is_hint: bool = True  # Always True - this is a hint, not authoritative
+
+
+def suggest_bundle_taxability(
+    pattern: Optional[str],
+    crypto_swap_taxable: bool = False,
+) -> BundleTaxabilitySuggestion:
+    """
+    Suggest taxability for a bundle based on pattern and configuration.
+    
+    This is a HINT for UX purposes, not the authoritative taxability decision.
+    The actual per-leg taxability is computed during P&L calculation by
+    TaxabilityCalculator, which has access to full leg context.
+    
+    The suggestion uses the same decision logic as TaxabilityCalculator but
+    adapted for bundle-level (pattern-based) decisions:
+    - Rule 5: Cost basis transfers (transfer/split) → non-taxable
+    - Rule 5b: Pending transfers → non-taxable  
+    - Rule 9: Swaps → use crypto_swap_taxable config
+    
+    Note: Rules 2-4, 6-8 require leg-level context and are handled during P&L.
+    
+    Args:
+        pattern: The bundle pattern (transfer, swap, split, pending_transfer, etc.)
+        crypto_swap_taxable: Whether crypto-to-crypto swaps are taxable (from config)
+        
+    Returns:
+        BundleTaxabilitySuggestion with taxability status and explanation
+    """
+    # Rule 5: Cost basis transfers (transfer/split) → never taxable
+    if pattern in ("transfer", "split"):
+        return BundleTaxabilitySuggestion(
+            taxability=TaxabilityStatus.NON_TAXABLE,
+            reason=f"Pattern '{pattern}' is a cost basis transfer (non-taxable by default)",
+        )
+    
+    # Rule 5b: Pending transfers → non-taxable
+    if pattern == "pending_transfer":
+        return BundleTaxabilitySuggestion(
+            taxability=TaxabilityStatus.NON_TAXABLE,
+            reason="Pending transfer awaiting counterpart (non-taxable)",
+        )
+    
+    # Rule 9: Swaps → use config
+    if pattern == "swap":
+        if crypto_swap_taxable:
+            return BundleTaxabilitySuggestion(
+                taxability=TaxabilityStatus.TAXABLE,
+                reason="Crypto-to-crypto swap (taxable per configuration)",
+            )
+        else:
+            return BundleTaxabilitySuggestion(
+                taxability=TaxabilityStatus.NON_TAXABLE,
+                reason="Crypto-to-crypto swap (non-taxable per configuration)",
+            )
+    
+    # Unknown pattern
+    return BundleTaxabilitySuggestion(
+        taxability=TaxabilityStatus.UNKNOWN,
+        reason="Pattern not recognized; taxability will be computed during P&L calculation",
+    )
+
+
+# ============================================================================
+# Leg-Level Taxability Calculator (for P&L processing)
+# ============================================================================
+
+
 class LegLike(Protocol):
-    """Protocol for leg-like objects (CalculationUnitLeg or MockTransaction)."""
+    """Protocol for leg-like objects (CalculationUnitLeg)."""
     asset_id: int
     leg_type: str
     tx_disposal_taxable: bool
-    unit: Any  # CalculationUnit or MockGroup
+    unit: "CalculationUnit"
 
 
 class TaxabilityCalculator:

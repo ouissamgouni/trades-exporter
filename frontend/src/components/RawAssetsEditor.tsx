@@ -7,6 +7,8 @@ import {
 import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Asset, RawAsset } from '../types';
 import { AssetSelector } from './AssetSelector';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
 
 // Fuzzy matching utility for smart suggestions
@@ -67,6 +69,10 @@ export const RawAssetsEditor: React.FC = () => {
     const [newRawAsset, setNewRawAsset] = useState<Partial<RawAsset>>({});
     const [sourceFilter, setSourceFilter] = useState('');
     const [linkedFilter, setLinkedFilter] = useState<string>('');
+
+    // Confirmation dialogs
+    const deleteConfirm = useConfirmDialog<RawAsset>();
+    const autoMapConfirm = useConfirmDialog<{ count: number; items: { rawAsset: RawAsset; assetId: number }[] }>();
 
     useEffect(() => {
         fetchRawAssets();
@@ -155,7 +161,7 @@ export const RawAssetsEditor: React.FC = () => {
             setEditingKey(null);
             setEditAssetId(null);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
@@ -170,12 +176,12 @@ export const RawAssetsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to update raw asset');
             await fetchRawAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
     // Bulk auto-map all high-confidence suggestions
-    const autoMapAll = async () => {
+    const autoMapAll = () => {
         const toMap: { rawAsset: RawAsset; assetId: number }[] = [];
 
         rawAssets
@@ -190,20 +196,23 @@ export const RawAssetsEditor: React.FC = () => {
             });
 
         if (toMap.length === 0) {
-            alert('No high-confidence matches found to auto-map');
+            toaster.info({ title: 'No matches', description: 'No high-confidence matches found to auto-map' });
             return;
         }
 
-        if (!confirm(`Auto-map ${toMap.length} raw asset(s) with high confidence matches?`)) return;
+        autoMapConfirm.open({ count: toMap.length, items: toMap });
+    };
 
-        for (const { rawAsset, assetId } of toMap) {
+    const executeAutoMap = async () => {
+        if (!autoMapConfirm.data) return;
+        for (const { rawAsset, assetId } of autoMapConfirm.data.items) {
             await acceptSuggestion(rawAsset, assetId);
         }
     };
 
     const createRawAsset = async () => {
         if (!newRawAsset.symbol || !newRawAsset.source) {
-            alert('Symbol and Source are required');
+            toaster.error({ title: 'Validation error', description: 'Symbol and Source are required' });
             return;
         }
         try {
@@ -220,12 +229,17 @@ export const RawAssetsEditor: React.FC = () => {
             setNewRawAsset({});
             setShowCreateDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create' });
         }
     };
 
-    const deleteRawAsset = async (rawAsset: RawAsset) => {
-        if (!window.confirm(`Delete raw asset ${rawAsset.symbol} from ${rawAsset.source}?`)) return;
+    const deleteRawAsset = (rawAsset: RawAsset) => {
+        deleteConfirm.open(rawAsset);
+    };
+
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const rawAsset = deleteConfirm.data;
         try {
             const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
                 method: 'DELETE'
@@ -233,7 +247,7 @@ export const RawAssetsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to delete raw asset');
             await fetchRawAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete' });
         }
     };
 
@@ -247,7 +261,7 @@ export const RawAssetsEditor: React.FC = () => {
             if (!response.ok) throw new Error('Failed to unlink raw asset');
             await fetchRawAssets();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to unlink');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unlink' });
         }
     };
 
@@ -522,6 +536,27 @@ export const RawAssetsEditor: React.FC = () => {
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Raw Asset"
+                message={deleteConfirm.data ? `Delete raw asset ${deleteConfirm.data.symbol} from ${deleteConfirm.data.source}?` : ''}
+                confirmLabel="Delete"
+                isDestructive
+            />
+
+            {/* Auto-Map Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={autoMapConfirm.isOpen}
+                onClose={autoMapConfirm.close}
+                onConfirm={executeAutoMap}
+                title="Auto-Map Raw Assets"
+                message={autoMapConfirm.data ? `Auto-map ${autoMapConfirm.data.count} raw asset(s) with high confidence matches?` : ''}
+                confirmLabel="Auto-Map"
+            />
         </Box>
     );
 };

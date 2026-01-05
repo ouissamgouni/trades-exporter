@@ -14,12 +14,14 @@ from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 
 from tests.unit.pnl.conftest import (
     MockTransaction,
-    MockGroup,
     create_buy_group,
     create_sell_group,
     create_swap_group,
     create_transfer_group,
     create_split_group,
+    make_unit,
+    make_leg,
+    make_transaction,
 )
 
 
@@ -194,27 +196,12 @@ class TestPnLEngineIntegration:
         transfer_group.group_id = 2
 
         # Sell from account 2
-        sell_group = MockGroup(
-            group_id=3,
-            transactions=[
-                MockTransaction(
-                    id=10,
-                    direction="outflow",
-                    asset_id=2,
-                    quantity=Decimal("1"),
-                    date_time=day3,
-                    account_id=2,  # Selling from account 2
-                    total_in_base=Decimal("40000"),
-                ),
-                MockTransaction(
-                    id=11,
-                    direction="inflow",
-                    asset_id=1,
-                    quantity=Decimal("40000"),
-                    date_time=day3,
-                    account_id=2,
-                ),
-            ],
+        sell_group = create_sell_group(
+            base_dt=day3,
+            asset_id=2,
+            qty=Decimal("1"),
+            proceeds_in_base=Decimal("40000"),
+            account_id=2,
         )
 
         groups = [buy_group, transfer_group, sell_group]

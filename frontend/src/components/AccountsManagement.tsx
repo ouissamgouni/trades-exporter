@@ -8,6 +8,8 @@ import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiTrash2 } from 'react-
 import { Account, API_URL } from '../types';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 
 const AccountsManagement: React.FC = () => {
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -18,6 +20,8 @@ const AccountsManagement: React.FC = () => {
     const [editingAccount, setEditingAccount] = useState<Account | null>(null);
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
+
+    const deleteConfirm = useConfirmDialog<number>();
 
     const fetchAccounts = async () => {
         setLoading(true);
@@ -43,9 +47,13 @@ const AccountsManagement: React.FC = () => {
         fetchAccounts();
     }, [accountTypeFilter, searchText]);
 
-    const handleDelete = async (accountId: number) => {
-        if (!confirm('Are you sure you want to delete this account?')) return;
+    const handleDelete = (accountId: number) => {
+        deleteConfirm.open(accountId);
+    };
 
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const accountId = deleteConfirm.data;
         try {
             const response = await fetch(`${API_URL}/accounts/${accountId}`, {
                 method: 'DELETE',
@@ -55,7 +63,7 @@ const AccountsManagement: React.FC = () => {
             fetchAccounts();
         } catch (error) {
             console.error('Error deleting account:', error);
-            alert('Failed to delete account');
+            toaster.error({ title: 'Error', description: 'Failed to delete account' });
         }
     };
 
@@ -297,6 +305,17 @@ const AccountsManagement: React.FC = () => {
                 isOpen={isDialogOpen}
                 onClose={handleDialogClose}
                 account={editingAccount}
+            />
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Account"
+                message="Are you sure you want to delete this account?"
+                confirmLabel="Delete"
+                isDestructive
             />
         </Box>
     );

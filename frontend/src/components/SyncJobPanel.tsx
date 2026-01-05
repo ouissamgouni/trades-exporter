@@ -6,6 +6,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { API_URL, ConnectorsInfo, SyncJobProgress, SyncJobStartResponse } from '../types';
+import { toaster } from './ui/toaster';
 
 export const SyncJobPanel: React.FC = () => {
     const queryClient = useQueryClient();
@@ -63,13 +64,13 @@ export const SyncJobPanel: React.FC = () => {
     useEffect(() => {
         const currentStatus = jobStatus?.status;
         const prevStatus = prevStatusRef.current;
-        
+
         // Detect transition from running to completed
         if (prevStatus === 'running' && currentStatus === 'completed') {
             console.log('🔄 Sync completed, refreshing transactions...');
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
         }
-        
+
         prevStatusRef.current = currentStatus ?? null;
     }, [jobStatus?.status, queryClient]);
 
@@ -90,7 +91,7 @@ export const SyncJobPanel: React.FC = () => {
             // Immediately fetch status
             await fetchJobStatus();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to start job');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to start job' });
         } finally {
             setActionLoading(false);
         }
@@ -106,7 +107,7 @@ export const SyncJobPanel: React.FC = () => {
             if (!response.ok) throw new Error('Failed to abort job');
             await fetchJobStatus();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to abort job');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to abort job' });
         } finally {
             setActionLoading(false);
         }

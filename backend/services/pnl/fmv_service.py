@@ -111,17 +111,19 @@ class FMVService:
                     )
 
             try:
-                price = self.price_service.get_price(
+                # Use get_price_with_source to get actual provider name
+                price_result = self.price_service.get_price_with_source(
                     asset_id=asset_id,
                     dt=dt,
                     price_quote=self.config.base_currency_symbol,
                 )
-                if price:
+                if price_result and price_result.price:
+                    price = price_result.price
                     value = Decimal(str(qty)) * Decimal(str(price))
                     return FMVResult(
                         value=value,
                         success=True,
-                        source="price_service",
+                        source=price_result.source,  # Pass through actual source (coingecko, yahoo, etc.)
                         price=Decimal(str(price)),
                         timestamp=dt,
                     )

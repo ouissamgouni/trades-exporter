@@ -32,12 +32,6 @@ class MockTransaction:
             setattr(self, k, v)
 
 
-class MockGroup:
-    """Mock group for testing."""
-    def __init__(self, group_id: int, transactions: List[MockTransaction]):
-        self.group_id = group_id
-        self.transactions = transactions
-
 
 # ============================================================================
 # Configuration Fixtures

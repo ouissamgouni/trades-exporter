@@ -519,6 +519,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                 <Table.Header>
                                     <Table.Row>
                                         <Table.ColumnHeader fontSize="xs">TX ID</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="xs">Date</Table.ColumnHeader>
                                         <Table.ColumnHeader fontSize="xs">Direction</Table.ColumnHeader>
                                         <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
                                         <Table.ColumnHeader fontSize="xs" textAlign="right">Qty</Table.ColumnHeader>
@@ -537,7 +538,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                         const toAccount = tx.to_account_name || tx.source_to_account;
                                         // From/To Account: show from_account if inflow, to_account if outflow
                                         const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
-                                        
+
                                         return (
                                             <Table.Row key={tx.transaction_id}>
                                                 <Table.Cell>
@@ -548,6 +549,9 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                         prefix=""
                                                         size="xs"
                                                     />
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs">
+                                                    {tx.date_time ? formatDate(tx.date_time) : '-'}
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <Badge
@@ -643,12 +647,16 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                     <Card.Root size="sm" variant="outline" flex="1" minW="400px">
                         <Card.Body p={3}>
                             {(() => {
+                                // Consistent colors with CostLotEventsTab:
+                                // - created: green (positive lot addition)
+                                // - consumed: orange (lot consumption/reduction)
+                                // - settled, transferred, adjusted: distinct colors
                                 const eventTypeColors: Record<string, string> = {
                                     created: 'green',
-                                    consumed: 'red',
+                                    consumed: 'orange',
                                     settled: 'purple',
                                     transferred: 'blue',
-                                    adjusted: 'orange',
+                                    adjusted: 'blue',
                                 };
 
                                 return (
@@ -928,10 +936,10 @@ export const UnitsTab: React.FC<{
                                     // Transfer: show moved assets
                                     const assets = [...new Set([...outSymbols, ...inSymbols])];
                                     const assetLabel = formatAssets(assets) || 'assets';
-                                    return { 
-                                        mainLabel: assetLabel, 
+                                    return {
+                                        mainLabel: assetLabel,
                                         subLabel: 'moved between accounts',
-                                        icon: '⇄' 
+                                        icon: '⇄'
                                     };
                                 }
 
@@ -940,7 +948,7 @@ export const UnitsTab: React.FC<{
                                     const outPart = formatAssets(outSymbols);
                                     const inPart = formatAssets(inSymbols);
                                     const feePart = feeSymbols.length > 0 ? ` (fee: ${feeSymbols[0]})` : '';
-                                    
+
                                     if (outPart && inPart) {
                                         return { mainLabel: `${outPart} → ${inPart}${feePart}`, icon: '↔' };
                                     } else if (outPart) {
@@ -981,8 +989,8 @@ export const UnitsTab: React.FC<{
                                         <Table.Cell>
                                             <Flex direction="column" gap={0}>
                                                 <Flex align="center" gap={1}>
-                                                    <Text 
-                                                        fontSize="sm" 
+                                                    <Text
+                                                        fontSize="sm"
                                                         color={isTransfer ? 'blue.500' : isSwap ? 'orange.500' : 'gray.500'}
                                                         fontWeight="bold"
                                                     >
@@ -1621,7 +1629,6 @@ const RealizedPnLTab: React.FC<{
                             <Table.ColumnHeader>Asset</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Qty</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">FMV Price</Table.ColumnHeader>
-                            <Table.ColumnHeader textAlign="center">Source</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Proceeds</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Cost Basis</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">P&L</Table.ColumnHeader>
@@ -1631,86 +1638,99 @@ const RealizedPnLTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {sorted.slice(0, 200).map((entry) => (
-                            <Table.Row
-                                key={entry.id}
-                                bg={entry.warnings && entry.warnings.length > 0 ? 'orange.50' : undefined}
-                            >
-                                <Table.Cell fontSize="sm">{formatDate(entry.realized_at)}</Table.Cell>
-                                <Table.Cell>
-                                    <Badge size="sm">{entry.asset_symbol}</Badge>
-                                </Table.Cell>
-                                <Table.Cell textAlign="right" fontFamily="mono" fontSize="sm">
-                                    {formatQty(entry.qty)}
-                                </Table.Cell>
-                                <Table.Cell textAlign="right" fontSize="sm">
-                                    {entry.proceeds_price != null
-                                        ? formatCurrency(entry.proceeds_price, baseCurrency)
-                                        : entry.disposal_price_in_base
-                                            ? formatCurrency(entry.disposal_price_in_base, baseCurrency)
-                                            : entry.qty > 0
-                                                ? formatCurrency(entry.proceeds_in_base / entry.qty, baseCurrency)
-                                                : '-'
-                                    }
-                                </Table.Cell>
-                                <Table.Cell textAlign="center">
-                                    {entry.proceeds_source === 'fmv_lookup' ? (
-                                        <Badge size="xs" colorPalette="blue" title={entry.proceeds_price_source || 'FMV lookup'}>
-                                            {entry.proceeds_price_source || 'FMV'}
-                                        </Badge>
-                                    ) : entry.proceeds_source === 'base_currency' ? (
-                                        <Badge size="xs" colorPalette="green">base</Badge>
-                                    ) : entry.proceeds_source === 'transfer' ? (
-                                        <Badge size="xs" colorPalette="gray">transfer</Badge>
-                                    ) : (
-                                        <Text fontSize="xs" color="gray.400">-</Text>
-                                    )}
-                                </Table.Cell>
-                                <Table.Cell textAlign="right" fontSize="sm">
-                                    {formatCurrency(entry.proceeds_in_base, baseCurrency)}
-                                </Table.Cell>
-                                <Table.Cell textAlign="right" fontSize="sm">
-                                    {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
-                                </Table.Cell>
-                                <Table.Cell
-                                    textAlign="right"
-                                    fontWeight="bold"
-                                    color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
+                        {sorted.slice(0, 200).map((entry) => {
+                            // Compute FMV price and source display
+                            const fmvPrice = entry.proceeds_price != null
+                                ? entry.proceeds_price
+                                : entry.disposal_price_in_base
+                                    ? entry.disposal_price_in_base
+                                    : entry.qty > 0
+                                        ? entry.proceeds_in_base / entry.qty
+                                        : null;
+
+                            const sourceLabel = entry.proceeds_source === 'fmv_lookup'
+                                ? (entry.proceeds_price_source || 'FMV')
+                                : entry.proceeds_source === 'base_currency'
+                                    ? 'base'
+                                    : entry.proceeds_source === 'transfer'
+                                        ? 'transfer'
+                                        : null;
+
+                            const sourceColor = entry.proceeds_source === 'fmv_lookup'
+                                ? 'blue'
+                                : entry.proceeds_source === 'base_currency'
+                                    ? 'green'
+                                    : 'gray';
+
+                            return (
+                                <Table.Row
+                                    key={entry.id}
+                                    bg={entry.warnings && entry.warnings.length > 0 ? 'orange.50' : undefined}
                                 >
-                                    {formatCurrency(entry.pnl_in_base, baseCurrency)}
-                                </Table.Cell>
-                                <Table.Cell>
-                                    <Badge colorPalette={entry.disposal_taxable ? 'red' : 'green'} size="sm">
-                                        {entry.disposal_taxable ? 'Yes' : 'No'}
-                                    </Badge>
-                                </Table.Cell>
-                                <Table.Cell>
-                                    {entry.transaction_id ? (
-                                        <Flex direction="column" gap={0}>
-                                            <TransactionCell
-                                                txId={entry.transaction_id}
-                                                baseCurrency={baseCurrency}
-                                                onTransactionClick={onTransactionClick}
-                                            />
-                                            {(entry.origin_tx_type || entry.origin_tx_source) && (
-                                                <Text fontSize="xs" color="gray.500" pl={1}>
-                                                    {entry.origin_tx_type}{entry.origin_tx_source ? ` • ${entry.origin_tx_source}` : ''}
-                                                </Text>
+                                    <Table.Cell fontSize="sm">{formatDate(entry.realized_at)}</Table.Cell>
+                                    <Table.Cell>
+                                        <Badge size="sm">{entry.asset_symbol}</Badge>
+                                    </Table.Cell>
+                                    <Table.Cell textAlign="right" fontFamily="mono" fontSize="sm">
+                                        {formatQty(entry.qty)}
+                                    </Table.Cell>
+                                    {/* Combined FMV Price & Source column */}
+                                    <Table.Cell textAlign="right" fontSize="sm">
+                                        <Flex direction="column" align="flex-end" gap={0}>
+                                            <Text>{fmvPrice != null ? formatCurrency(fmvPrice, baseCurrency) : '-'}</Text>
+                                            {sourceLabel && (
+                                                <Badge size="xs" colorPalette={sourceColor} variant="subtle">
+                                                    {sourceLabel}
+                                                </Badge>
                                             )}
                                         </Flex>
-                                    ) : (
-                                        <Text fontSize="xs" color="gray.400">-</Text>
-                                    )}
-                                </Table.Cell>
-                                <Table.Cell>
-                                    {entry.warnings && entry.warnings.length > 0 && (
-                                        <Badge colorPalette="orange" size="sm" title={entry.warnings.map(w => w.message).join(', ')}>
-                                            {entry.warnings.length}
+                                    </Table.Cell>
+                                    <Table.Cell textAlign="right" fontSize="sm">
+                                        {formatCurrency(entry.proceeds_in_base, baseCurrency)}
+                                    </Table.Cell>
+                                    <Table.Cell textAlign="right" fontSize="sm">
+                                        {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
+                                    </Table.Cell>
+                                    <Table.Cell
+                                        textAlign="right"
+                                        fontWeight="bold"
+                                        color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
+                                    >
+                                        {formatCurrency(entry.pnl_in_base, baseCurrency)}
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                        <Badge colorPalette={entry.disposal_taxable ? 'red' : 'green'} size="sm">
+                                            {entry.disposal_taxable ? 'Yes' : 'No'}
                                         </Badge>
-                                    )}
-                                </Table.Cell>
-                            </Table.Row>
-                        ))}
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                        {entry.transaction_id ? (
+                                            <Flex direction="column" gap={0}>
+                                                <TransactionCell
+                                                    txId={entry.transaction_id}
+                                                    baseCurrency={baseCurrency}
+                                                    onTransactionClick={onTransactionClick}
+                                                />
+                                                {(entry.origin_tx_type || entry.origin_tx_source) && (
+                                                    <Text fontSize="xs" color="gray.500" pl={1}>
+                                                        {entry.origin_tx_type}{entry.origin_tx_source ? ` • ${entry.origin_tx_source}` : ''}
+                                                    </Text>
+                                                )}
+                                            </Flex>
+                                        ) : (
+                                            <Text fontSize="xs" color="gray.400">-</Text>
+                                        )}
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                        {entry.warnings && entry.warnings.length > 0 && (
+                                            <Badge colorPalette="orange" size="sm" title={entry.warnings.map(w => w.message).join(', ')}>
+                                                {entry.warnings.length}
+                                            </Badge>
+                                        )}
+                                    </Table.Cell>
+                                </Table.Row>
+                            );
+                        })}
                     </Table.Body>
                 </Table.Root>
             </Box>

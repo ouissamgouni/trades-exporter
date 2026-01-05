@@ -434,8 +434,8 @@ class TestPrepareTransactionsForPnl:
         _, units = prepare_transactions_for_pnl([tx])
 
         assert len(units) == 1
-        # Buy with fee: outflow + inflow + fee_leg = 3 members
-        assert len(units[0].members) == 3
+        # Buy with fee: outflow + inflow + fee_leg = 3 legs
+        assert len(units[0].legs) == 3
 
     def test_mixed_transactions(self):
         """Should handle mix of expandable and non-expandable."""
@@ -551,7 +551,7 @@ class TestFeeLegsAlwaysCreated:
         _, units = prepare_transactions_for_pnl([tx], base_currency_id=100)
 
         assert len(units) == 1
-        # Should have 3 members: outflow, inflow, fee_leg
-        assert len(units[0].members) == 3
-        fee_legs = [m for m in units[0].members if m.transaction_type == "fee"]
+        # Should have 3 legs: outflow, inflow, fee_leg
+        assert len(units[0].legs) == 3
+        fee_legs = [m for m in units[0].legs if m.transaction_type == "fee"]
         assert len(fee_legs) == 1

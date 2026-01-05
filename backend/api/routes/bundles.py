@@ -22,6 +22,8 @@ from backend.db.models import (
     ReviewStatus,
 )
 from backend.services.suggestion_service import SuggestionService, GroupingSuggestion
+from backend.services.pnl.taxability import suggest_bundle_taxability
+from backend.services.pnl.config import PnLConfig
 
 router = APIRouter(prefix="/bundles", tags=["Bundles"])
 
@@ -96,6 +98,11 @@ class SuggestionResponse(BaseModel):
     label: str
     reason: str
     taxability_suggestion: TaxabilityStatus
+    taxability_suggestion_reason: str = Field(
+        default="",
+        description="Explanation of taxability suggestion. This is a hint based on pattern; "
+        "actual per-leg taxability is computed during P&L calculation if not overridden.",
+    )
     total_quantity: Optional[float] = None
     asset_symbol: Optional[str] = None
     date_range: Optional[str] = None
@@ -161,41 +168,43 @@ def get_suggestions(
     """
     service = SuggestionService(session)
     suggestions = service.get_suggestions(max_suggestions=max_suggestions)
+    
+    # Load config for taxability suggestion (uses same logic as P&L engine)
+    config = PnLConfig()
 
-    return [
-        SuggestionResponse(
+    responses = []
+    for s in suggestions:
+        # Use shared taxability logic from P&L module
+        taxability_hint = suggest_bundle_taxability(
             pattern=s.pattern,
-            transaction_ids=s.transaction_ids,
-            confidence=s.confidence,
-            label=s.label,
-            reason=s.reason,
-            taxability_suggestion=_pattern_to_taxability(s.pattern),
-            transactions=[
-                TransactionSummary(
-                    id=t.get("id", 0),
-                    date_time=t.get("date_time", ""),
-                    source=t.get("source", ""),
-                    source_transaction_id=t.get("source_transaction_id", ""),
-                    direction=t.get("direction", ""),
-                    quantity=t.get("quantity", 0),
-                    symbol=t.get("symbol", ""),
-                )
-                for t in (s.transactions or [])
-            ],
+            crypto_swap_taxable=config.crypto_swap_taxable,
         )
-        for s in suggestions
-    ]
-
-
-def _pattern_to_taxability(pattern: str) -> TaxabilityStatus:
-    """Convert pattern to default taxability."""
-    if pattern == UnitPattern.TRANSFER.value or pattern == "transfer":
-        return TaxabilityStatus.NON_TAXABLE
-    elif pattern == UnitPattern.SPLIT.value or pattern == "split":
-        return TaxabilityStatus.NON_TAXABLE
-    elif pattern == UnitPattern.SWAP.value or pattern == "swap":
-        return TaxabilityStatus.TAXABLE
-    return TaxabilityStatus.UNKNOWN
+        
+        responses.append(
+            SuggestionResponse(
+                pattern=s.pattern,
+                transaction_ids=s.transaction_ids,
+                confidence=s.confidence,
+                label=s.label,
+                reason=s.reason,
+                taxability_suggestion=taxability_hint.taxability,
+                taxability_suggestion_reason=taxability_hint.reason,
+                transactions=[
+                    TransactionSummary(
+                        id=t.get("id", 0),
+                        date_time=t.get("date_time", ""),
+                        source=t.get("source", ""),
+                        source_transaction_id=t.get("source_transaction_id", ""),
+                        direction=t.get("direction", ""),
+                        quantity=t.get("quantity", 0),
+                        symbol=t.get("symbol", ""),
+                    )
+                    for t in (s.transactions or [])
+                ],
+            )
+        )
+    
+    return responses
 
 
 @router.post("/accept-suggestion", response_model=UnitResponse)
