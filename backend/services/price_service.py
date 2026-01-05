@@ -267,6 +267,40 @@ class PriceCache:
             return result.price
         return None
 
+    def get_with_source(
+        self,
+        session: Session,
+        asset_id: int,
+        quote_asset_id: Optional[int],
+        dt: datetime,
+        time_window_minutes: int = 15,
+    ) -> Optional[PriceSnapshot]:
+        """
+        Get cached price snapshot with source metadata.
+        
+        Returns the full PriceSnapshot object including source field.
+        """
+        dt_start = dt - timedelta(minutes=time_window_minutes)
+        dt_end = dt + timedelta(minutes=time_window_minutes)
+        
+        statement = select(PriceSnapshot).where(
+            PriceSnapshot.asset_id == asset_id,
+            PriceSnapshot.snapshot_time >= dt_start,
+            PriceSnapshot.snapshot_time <= dt_end,
+        )
+        
+        if quote_asset_id is not None:
+            statement = statement.where(
+                PriceSnapshot.quote_asset_id == quote_asset_id
+            )
+        
+        # Order by closest time
+        statement = statement.order_by(
+            func.abs(func.extract("epoch", PriceSnapshot.snapshot_time - dt))
+        ).limit(1)
+        
+        return session.exec(statement).first()
+
     def store(
         self,
         session: Session,
@@ -634,6 +668,82 @@ class PriceService:
                 f"{price} {requested_quote}"
             )
             return price
+            
+        finally:
+            self._close_session(session)
+
+    def get_price_with_source(
+        self,
+        asset_id: int,
+        dt: datetime,
+        price_quote: Optional[str] = None,
+    ) -> PriceResult:
+        """
+        Get asset price at specific datetime with source metadata.
+        
+        Args:
+            asset_id: Asset ID
+            dt: Datetime for price lookup
+            price_quote: Quote currency (defaults to base_currency)
+            
+        Returns:
+            PriceResult with price, source, timestamp, quote_currency
+        """
+        session = self._get_session()
+        try:
+            asset = self._get_asset(session, asset_id)
+            requested_quote = (
+                price_quote or self.default_base_currency or "USD"
+            ).upper()
+            
+            # Same currency = 1.0
+            if asset.symbol.upper() == requested_quote:
+                return PriceResult(
+                    price=1.0,
+                    quote_currency=requested_quote,
+                    source="same_currency",
+                    timestamp=dt,
+                )
+            
+            quote_asset_id = self._get_quote_asset_id(session, requested_quote)
+            
+            # Check cache first (including source)
+            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt)
+            if cached_snapshot is not None:
+                return PriceResult(
+                    price=float(cached_snapshot.price),
+                    quote_currency=requested_quote,
+                    source=cached_snapshot.source or "cached",
+                    timestamp=cached_snapshot.snapshot_time,
+                )
+            
+            # Get price getters for this asset
+            price_getters = self.resolver.resolve(session, asset)
+            
+            # Fetch price
+            result = self._fetch_price(session, asset, dt, price_getters)
+            price = result.price
+            native_quote = result.quote_currency.upper()
+            source = result.source
+            
+            # Convert if needed
+            if native_quote != requested_quote:
+                price = self.converter.convert(
+                    session, price, native_quote, requested_quote, dt
+                )
+            
+            # Cache the result
+            self.cache.store(
+                session, asset_id, quote_asset_id, price, dt, source
+            )
+            
+            return PriceResult(
+                price=price,
+                quote_currency=requested_quote,
+                source=source,
+                timestamp=dt,
+                ticker_used=result.ticker_used,
+            )
             
         finally:
             self._close_session(session)

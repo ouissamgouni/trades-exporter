@@ -18,6 +18,7 @@ import { TransactionEditorDialog } from './TransactionEditorDialog';
 import { BundleTransactionList } from './BundleTransactionList';
 import { BundleTable } from './BundleTable';
 import { TransactionDetailPanel } from './TransactionDetailPanel';
+import { toaster } from './ui/toaster';
 
 const ITEMS_PER_PAGE = 25;
 
@@ -251,7 +252,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             onDataChange?.();
         } catch (err) {
             console.error('Failed to update bundle:', err);
-            alert(err instanceof Error ? err.message : 'Failed to update bundle');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update bundle' });
         }
     };
 
@@ -267,7 +268,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             onDataChange?.();
         } catch (err) {
             console.error('Failed to delete bundle:', err);
-            alert(err instanceof Error ? err.message : 'Failed to delete bundle');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete bundle' });
         }
     };
 
@@ -285,7 +286,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             onDataChange?.();
         } catch (err) {
             console.error('Failed to remove transaction from bundle:', err);
-            alert(err instanceof Error ? err.message : 'Failed to remove transaction');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to remove transaction' });
         }
     };
 
@@ -312,7 +313,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
-            alert(`Failed to save ${field}`);
+            toaster.error({ title: 'Error', description: `Failed to save ${field}` });
         }
     };
 
@@ -415,7 +416,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         const values = editValuesRef.current;
         // Validate: cannot set status to "valid" if no asset_id
         if (values.review_status === 'valid' && !values.asset_id) {
-            alert('Cannot set status to "valid" without linking an asset. Please select or create an asset first.');
+            toaster.error({ title: 'Validation error', description: 'Cannot set status to "valid" without linking an asset. Please select or create an asset first.' });
             return;
         }
 
@@ -430,7 +431,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
@@ -445,7 +446,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to update');
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
@@ -499,7 +500,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             setBundleLabel('');
             setShowBundleDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create bundle');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create bundle' });
         }
     };
 
@@ -518,12 +519,12 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             });
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
-            alert(result.message);
+            toaster.success({ title: 'Success', description: result.message });
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkStatusDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -543,13 +544,13 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             });
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
-            alert(result.message);
+            toaster.success({ title: 'Success', description: result.message });
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkTypeDialog(false);
             setBulkType('');
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to update');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -568,12 +569,12 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             });
             if (!response.ok) throw new Error('Failed to delete transactions');
             const result = await response.json();
-            alert(result.message);
+            toaster.success({ title: 'Success', description: result.message });
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setSelectedIds(new Set());
             setShowBulkDeleteDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -592,12 +593,12 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             });
             if (!response.ok) throw new Error('Failed to delete transaction');
             const result = await response.json();
-            alert(result.message);
+            toaster.success({ title: 'Success', description: result.message });
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
             setShowDeleteDialog(false);
             setTransactionToDelete(null);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete transaction');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete transaction' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -1083,7 +1084,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
-                                                                        alert('Failed to save account');
+                                                                        toaster.error({ title: 'Error', description: 'Failed to save account' });
                                                                     }
                                                                 }}
                                                                 onBlur={() => {
@@ -1169,7 +1170,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
-                                                                        alert('Failed to save direction');
+                                                                        toaster.error({ title: 'Error', description: 'Failed to save direction' });
                                                                     }
                                                                 }}
                                                                 onBlur={() => {
@@ -1211,7 +1212,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                         setEditingCell(null);
                                                                         setEditValues({});
                                                                     } catch (err) {
-                                                                        alert('Failed to save type');
+                                                                        toaster.error({ title: 'Error', description: 'Failed to save type' });
                                                                     }
                                                                 }}
                                                                 onBlur={() => {

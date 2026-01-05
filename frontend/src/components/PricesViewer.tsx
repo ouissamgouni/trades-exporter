@@ -7,6 +7,8 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_URL, Asset, PriceSnapshot } from '../types';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 
 export const PricesViewer: React.FC = () => {
     const [prices, setPrices] = useState<PriceSnapshot[]>([]);
@@ -23,6 +25,8 @@ export const PricesViewer: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
     const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+
+    const deleteConfirm = useConfirmDialog<PriceSnapshot>();
 
     useEffect(() => {
         fetchPrices();
@@ -98,13 +102,13 @@ export const PricesViewer: React.FC = () => {
             setEditingKey(null);
             setEditValues({});
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to save');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
     const createPrice = async () => {
         if (!newPrice.asset_id || !newPrice.snapshot_time || newPrice.price === undefined) {
-            alert('Asset ID, Snapshot Time, and Price are required');
+            toaster.error({ title: 'Validation error', description: 'Asset ID, Snapshot Time, and Price are required' });
             return;
         }
         try {
@@ -121,12 +125,17 @@ export const PricesViewer: React.FC = () => {
             setNewPrice({});
             setShowCreateDialog(false);
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create price');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create price' });
         }
     };
 
-    const deletePrice = async (price: PriceSnapshot) => {
-        if (!window.confirm('Are you sure you want to delete this price record?')) return;
+    const deletePrice = (price: PriceSnapshot) => {
+        deleteConfirm.open(price);
+    };
+
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const price = deleteConfirm.data;
         try {
             const response = await fetch(`${API_URL}/price-snapshots/${price.snapshot_id}`, {
                 method: 'DELETE'
@@ -134,7 +143,7 @@ export const PricesViewer: React.FC = () => {
             if (!response.ok) throw new Error('Failed to delete price');
             await fetchPrices();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete price');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete price' });
         }
     };
 
@@ -176,12 +185,12 @@ export const PricesViewer: React.FC = () => {
                 throw new Error(errData.detail || 'Failed to delete prices');
             }
             const result = await response.json();
-            alert(`Successfully deleted ${result.affected_count} price record(s)`);
+            toaster.success({ title: 'Success', description: `Successfully deleted ${result.affected_count} price record(s)` });
             setShowBulkDeleteDialog(false);
             setSelectedIds(new Set());
             await fetchPrices();
         } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to delete prices');
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete prices' });
         } finally {
             setBulkDeleteLoading(false);
         }
@@ -553,6 +562,17 @@ export const PricesViewer: React.FC = () => {
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Price Record"
+                message="Are you sure you want to delete this price record?"
+                confirmLabel="Delete"
+                isDestructive
+            />
         </Box>
     );
 };

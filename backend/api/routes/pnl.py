@@ -1948,7 +1948,7 @@ def get_version_units(
             # Warnings
             selectinload(CalculationUnit.warnings),
         )
-        .order_by(CalculationUnit.timestamp)
+        .order_by(CalculationUnit.timestamp.desc())  # Most recent first
         .offset(offset)
         .limit(limit)
     )

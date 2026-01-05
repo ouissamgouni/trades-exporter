@@ -93,7 +93,7 @@ class PnLEngine:
             version: Optional CalculationVersion to attach to each unit.
 
         Returns:
-            List of CalculationUnit objects with members and legs populated.
+            List of CalculationUnit objects with legs populated.
         """
         from backend.db.models import CalculationUnitLeg
         
@@ -123,15 +123,12 @@ class PnLEngine:
             unit_data = {
                 'unit_origin': unit_origin,
                 'timestamp': timestamp,
-                'members': members,
             }
             
             # Copy properties from bundle if available
             if bundle:
                 unit_data['pattern'] = bundle.pattern
                 unit_data['bundle_taxability_override'] = bundle.taxability_override
-                if bundle.label:
-                    unit_data['unit_label'] = bundle.label
             
             unit = CalculationUnit(**unit_data)
             if version:
@@ -329,24 +326,15 @@ class PnLEngine:
         # Process units with version reference
         return self.process_calculation_units(units, version)
 
-    def _get_earliest_timestamp(self, unit: Any) -> datetime:
+    def _get_earliest_timestamp(self, unit: CalculationUnit) -> datetime:
         """Get earliest transaction timestamp in a calculation unit."""
-        transactions = self._get_unit_transactions(unit)
-        if not transactions:
-            return datetime.max
+        if not unit.legs:
+            raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs")
 
-        timestamps = [tx.date_time for tx in transactions if tx.date_time]
-        return min(timestamps) if timestamps else datetime.max
-
-    def _get_unit_transactions(self, unit: Any) -> List[Any]:
-        """Get transactions from a CalculationUnit."""
-        # CalculationUnit has .members list
-        if hasattr(unit, "members") and isinstance(unit.members, list):
-            return unit.members
-        # Fallback for transaction-like objects
-        if hasattr(unit, "transactions"):
-            return list(unit.transactions)
-        return []
+        timestamps = [leg.date_time for leg in unit.legs if leg.date_time]
+        if not timestamps:
+            raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs with date_time")
+        return min(timestamps)
 
     def persist_results(
         self, 

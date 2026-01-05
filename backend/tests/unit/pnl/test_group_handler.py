@@ -24,7 +24,6 @@ from backend.services.pnl.fmv_service import FMVService
 
 from tests.unit.pnl.conftest import (
     MockTransaction,
-    MockGroup,
     create_lot,
     seed_lot,
     create_buy_group,
@@ -34,6 +33,7 @@ from tests.unit.pnl.conftest import (
     create_split_group,
     create_airdrop_group,
     create_payment_group,
+    make_unit,
 )
 
 
@@ -615,12 +615,12 @@ class TestEdgeCases:
         fmv_service = FMVService(mock_price_service, fifo_config)
         
 
-        group = MockGroup(group_id=1, transactions=[])
+        group = make_unit(legs=[])
 
         result = handle_unit(group, lot_manager, fmv_service, fifo_config)
 
-        assert len(result.realized_entries) == 0
-        assert len(result.created_lots) == 0
+        assert len(result.realized_pnl_records or []) == 0
+        assert len(result.cost_lots or []) == 0
 
 
 class TestBaseCurrencyLotCreation:

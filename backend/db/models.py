@@ -1298,8 +1298,6 @@ class CalculationUnit(SQLModel, table=True):
         _label = data.pop('_label', None)
         bundle_taxability_override = data.pop('bundle_taxability_override', None)
         bundle_pattern = data.pop('bundle_pattern', None)
-        # Legacy support: pop members if passed but don't use it
-        data.pop('members', None)
         
         super().__init__(**data)
         
@@ -1379,7 +1377,8 @@ class CalculationUnit(SQLModel, table=True):
         """Generate a human-readable label from legs with quantities.
         
         Returns:
-            Label like '0.5 BTC → 10 ETH' for swaps, '1.5 BTC out' for spends, etc.
+            Label like '0.5 BTC → 10 ETH' for swaps, '1.5 BTC out' for spends,
+            '1 BTC: Binance → Ledger' for transfers, etc.
         """
         if not self.legs:
             return ""
@@ -1391,6 +1390,32 @@ class CalculationUnit(SQLModel, table=True):
             # Convert to float for cleaner display, then strip trailing zeros
             formatted = f"{float(qty):g}"
             return formatted
+        
+        def get_account_name(leg) -> str:
+            """Get account name from leg if available."""
+            if leg.account:
+                return leg.account.name
+            return ""
+        
+        # For transfers: show "{qty} {asset}: {from_account} → {to_account}"
+        if self.pattern == UnitPattern.TRANSFER.value:
+            outflow_legs = self.outflow_legs
+            inflow_legs = self.inflow_legs
+            
+            if outflow_legs and inflow_legs:
+                # Get the asset (same for both sides in transfer)
+                asset_symbol = outflow_legs[0].asset_symbol if outflow_legs else "?"
+                qty = sum(leg.quantity or Decimal(0) for leg in outflow_legs)
+                
+                # Get account names
+                from_accounts = list({get_account_name(leg) for leg in outflow_legs if get_account_name(leg)})
+                to_accounts = list({get_account_name(leg) for leg in inflow_legs if get_account_name(leg)})
+                
+                from_str = ", ".join(from_accounts[:2]) if from_accounts else "?"
+                to_str = ", ".join(to_accounts[:2]) if to_accounts else "?"
+                
+                if from_accounts and to_accounts:
+                    return f"{format_qty(qty)} {asset_symbol}: {from_str} → {to_str}"
         
         # Aggregate quantities by symbol for outflows
         outflow_by_symbol: dict[str, Decimal] = {}

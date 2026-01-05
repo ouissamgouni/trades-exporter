@@ -15,6 +15,8 @@ import { FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi';
 
 import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
 import ConnectorFormDialog from './ConnectorFormDialog';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 
 interface AccountConnectorsProps {
     account: Account;
@@ -27,6 +29,8 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
     const [loading, setLoading] = useState(false);
     const [editingConnector, setEditingConnector] = useState<AccountConnector | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+    const deleteConfirm = useConfirmDialog<AccountConnector>();
 
     const fetchConnectors = async () => {
         setLoading(true);
@@ -68,13 +72,17 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
             fetchConnectors();
         } catch (error) {
             console.error('Error toggling connector:', error);
-            alert('Failed to toggle connector');
+            toaster.error({ title: 'Error', description: 'Failed to toggle connector' });
         }
     };
 
-    const handleDelete = async (connector: AccountConnector) => {
-        if (!confirm(`Delete ${connector.connector_type} connector?`)) return;
+    const handleDelete = (connector: AccountConnector) => {
+        deleteConfirm.open(connector);
+    };
 
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const connector = deleteConfirm.data;
         try {
             const response = await fetch(
                 `${API_URL}/accounts/${account.id}/connectors/${connector.connector_type}`,
@@ -84,7 +92,7 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
             fetchConnectors();
         } catch (error) {
             console.error('Error deleting connector:', error);
-            alert('Failed to delete connector');
+            toaster.error({ title: 'Error', description: 'Failed to delete connector' });
         }
     };
 
@@ -296,6 +304,17 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                 connector={editingConnector}
                 connectorTypes={connectorTypes}
                 existingConnectorTypes={connectors.map(c => c.connector_type)}
+            />
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Connector"
+                message={deleteConfirm.data ? `Delete ${deleteConfirm.data.connector_type} connector?` : ''}
+                confirmLabel="Delete"
+                isDestructive
             />
         </Box>
     );

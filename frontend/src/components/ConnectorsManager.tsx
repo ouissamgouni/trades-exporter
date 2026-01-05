@@ -15,6 +15,8 @@ import {
 import { FiRefreshCw, FiTrash2, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 
 import { ConnectorWithAccount, ConnectorTypeInfo, API_URL } from '../types';
+import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { toaster } from './ui/toaster';
 
 interface ConnectorTypeGroup {
     type: string;
@@ -39,6 +41,8 @@ const ConnectorsManager: React.FC = () => {
     // Filters
     const [enabledFilter, setEnabledFilter] = useState<string>('');
     const [categoryFilter, setCategoryFilter] = useState<string>('');
+
+    const deleteConfirm = useConfirmDialog<ConnectorWithAccount>();
 
     const fetchConnectors = async () => {
         setLoading(true);
@@ -140,13 +144,17 @@ const ConnectorsManager: React.FC = () => {
             fetchConnectors();
         } catch (err) {
             console.error('Error toggling connector:', err);
-            alert('Failed to toggle connector');
+            toaster.error({ title: 'Error', description: 'Failed to toggle connector' });
         }
     };
 
-    const handleDelete = async (connector: ConnectorWithAccount) => {
-        if (!confirm(`Delete ${connector.connector_type} connector for ${connector.account_name}?`)) return;
+    const handleDelete = (connector: ConnectorWithAccount) => {
+        deleteConfirm.open(connector);
+    };
 
+    const executeDelete = async () => {
+        if (!deleteConfirm.data) return;
+        const connector = deleteConfirm.data;
         try {
             const response = await fetch(
                 `${API_URL}/connectors/${connector.id}`,
@@ -156,7 +164,7 @@ const ConnectorsManager: React.FC = () => {
             fetchConnectors();
         } catch (err) {
             console.error('Error deleting connector:', err);
-            alert('Failed to delete connector');
+            toaster.error({ title: 'Error', description: 'Failed to delete connector' });
         }
     };
 
@@ -447,6 +455,17 @@ const ConnectorsManager: React.FC = () => {
                     {categoryFilter && <Text as="span"> • Category: <strong>{categoryFilter.toUpperCase()}</strong></Text>}
                 </Text>
             </Box>
+
+            {/* Delete Confirmation Dialog */}
+            <ConfirmDialog
+                isOpen={deleteConfirm.isOpen}
+                onClose={deleteConfirm.close}
+                onConfirm={executeDelete}
+                title="Delete Connector"
+                message={deleteConfirm.data ? `Delete ${deleteConfirm.data.connector_type} connector for ${deleteConfirm.data.account_name}?` : ''}
+                confirmLabel="Delete"
+                isDestructive
+            />
         </Box>
     );
 };

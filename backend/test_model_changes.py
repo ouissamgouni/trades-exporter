@@ -11,15 +11,14 @@ unit = CalculationUnit(
     is_taxable=True,
 )
 print(f"✓ CalculationUnit created: unit_origin={unit.unit_origin}")
-print(f"  - members attribute: {hasattr(unit, 'members')}")
+print(f"  - legs attribute: {hasattr(unit, 'legs')}")
 print(f"  - outflows property: {hasattr(unit, 'outflows')}")
 
-# Test with members
+# Test CalculationUnit with legs (will be empty initially, populated via relationship)
 unit2 = CalculationUnit(
     unit_origin="bundle:1",
-    members=[{"fake": "member"}],
 )
-print(f"✓ CalculationUnit with members: {len(unit2.members)} members")
+print(f"✓ CalculationUnit legs: {unit2.legs}")
 
 # Test UserCalculationBundle
 bundle = UserCalculationBundle(

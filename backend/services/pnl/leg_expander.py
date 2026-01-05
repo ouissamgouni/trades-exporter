@@ -110,7 +110,7 @@ def _convert_to_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
     """
     Convert any NormalizedTransaction to an CalculationUnitLeg.
     
-    This ensures all transactions in unit.members are CalculationUnitLeg objects,
+    This ensures all transactions in unit.legs are CalculationUnitLeg objects,
     guaranteeing origin_transaction_id is always available for tracking.
     """
     direction = (tx.direction or "").lower()
@@ -334,7 +334,7 @@ def expand_transactions(transactions: List[Any]) -> List[CalculationUnitLeg]:
     ALL transactions are converted to CalculationUnitLeg objects to ensure:
     - Consistent interface for P&L engine
     - origin_transaction_id is always available for tracking
-    - No mixed types in unit.members
+    - No mixed types in unit.legs
     """
     result: List[CalculationUnitLeg] = []
     
