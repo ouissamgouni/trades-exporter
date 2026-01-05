@@ -23,7 +23,8 @@ from sqlalchemy.orm import selectinload
 from backend.db.database import get_session_dependency
 from backend.db.models import (
     Asset, NormalizedTransaction, CalculationUnit,
-    CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg
+    CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg,
+    AssetCategory, Category
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
@@ -341,6 +342,8 @@ class BalanceResponse(BaseModel):
     total_fees_in_base: float = 0.0  # Total fees at FMV (proceeds from fee disposals)
     # Unsettled negative lot tracking (for filter indicator)
     unsettled_negative_count: int = 0  # Number of unsettled negative lots excluded/included
+    # Category IDs for client-side filtering (populated when group_by_asset=true)
+    category_ids: List[int] = []  # Category IDs assigned to this asset
 
 
 class PriceResponse(BaseModel):
@@ -1501,6 +1504,18 @@ def get_version_balances(
         fee_results = session.exec(fee_query).all()
         fee_map = {r.related_asset_id: float(r.total_fees_fmv or 0) for r in fee_results}
         
+        # Query category IDs for all assets in the balance
+        asset_ids_in_balance = list(balance_map.keys())
+        category_query = (
+            select(AssetCategory.asset_id, AssetCategory.category_id)
+            .where(AssetCategory.asset_id.in_(asset_ids_in_balance))
+        )
+        category_results = session.exec(category_query).all()
+        # Build map of asset_id -> list of category_ids
+        category_map: Dict[int, List[int]] = defaultdict(list)
+        for row in category_results:
+            category_map[row.asset_id].append(row.category_id)
+        
         # Sort by cost basis descending
         sorted_balances = sorted(
             balance_map.items(),
@@ -1526,6 +1541,7 @@ def get_version_balances(
                 warning_count=warning_map.get(asset_id, 0),
                 total_fees_in_base=fee_map.get(asset_id, 0.0),
                 unsettled_negative_count=unsettled_negative_by_asset.get(asset_id, 0),
+                category_ids=sorted(category_map.get(asset_id, [])),
             )
             for asset_id, data in sorted_balances
         ]

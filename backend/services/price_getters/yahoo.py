@@ -4,7 +4,7 @@ Yahoo Finance Price Getter.
 Uses yfinance library to get current and historical prices.
 This is the default price getter.
 
-The asset_id should be the full Yahoo Finance ticker:
+The external_id should be the full Yahoo Finance ticker:
 - Crypto: "BTC-USD", "ETH-EUR"
 - Forex: "EURUSD=X", "GBPUSD=X"
 - Stocks: "AAPL", "MSFT"
@@ -39,15 +39,15 @@ class YahooPriceGetter(BasePriceGetter):
     Price getter implementation for Yahoo Finance API.
 
     Ticker Resolution:
-    - Uses config.asset_id from database (AssetPriceGetter.params.asset_id)
+    - Uses config.external_id from database (AssetPriceGetter.external_id)
     - Falls back to asset.symbol
 
-    The asset_id must be the full Yahoo Finance ticker including currency pair:
+    The external_id must be the full Yahoo Finance ticker including currency pair:
     - Crypto: "BTC-USD", "ETH-EUR", "SOL-USD"
     - Forex: "EURUSD=X", "GBPUSD=X"
     - Stocks/ETFs: "AAPL", "MSFT", "SPY"
 
-    Configure via UI: Assets > [asset] > Price Getters > Add Yahoo > Asset ID.
+    Configure via UI: Assets > [asset] > Price Getters > Add Yahoo > External ID.
 
     Quote Currency Config:
     - Set `native_quote_currency` in config.extra to specify what currency the ticker returns

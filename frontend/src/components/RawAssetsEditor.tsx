@@ -2,11 +2,59 @@ import {
     Badge, Box,
     Button, Dialog, Flex,
     Heading, Input, NativeSelect, Portal, Spinner,
-    Table, Text
+    Table, Text, HStack
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Asset, RawAsset } from '../types';
 import { AssetSelector } from './AssetSelector';
+import { Tooltip } from './ui/tooltip';
+
+// Fuzzy matching utility for smart suggestions
+const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase().trim();
+    const s2 = str2.toLowerCase().trim();
+
+    // Exact match
+    if (s1 === s2) return 1.0;
+
+    // Contains match (e.g., "BTCUSDT" contains "BTC")
+    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+
+    // Starts with match
+    if (s1.startsWith(s2) || s2.startsWith(s1)) return 0.7;
+
+    // Levenshtein-based similarity for short strings
+    const maxLen = Math.max(s1.length, s2.length);
+    if (maxLen === 0) return 1.0;
+
+    const distance = levenshteinDistance(s1, s2);
+    return 1 - (distance / maxLen);
+};
+
+const levenshteinDistance = (str1: string, str2: string): number => {
+    const m = str1.length;
+    const n = str2.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (str1[i - 1] === str2[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+            }
+        }
+    }
+    return dp[m][n];
+};
+
+interface SuggestedMatch {
+    asset: Asset;
+    confidence: number;
+}
 
 export const RawAssetsEditor: React.FC = () => {
     const [rawAssets, setRawAssets] = useState<RawAsset[]>([]);
@@ -46,7 +94,7 @@ export const RawAssetsEditor: React.FC = () => {
 
     const fetchAssets = async () => {
         try {
-            const response = await fetch(`${API_URL}/assets`);
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
             if (response.ok) {
                 const data = await response.json();
                 setAssets(data);
@@ -55,6 +103,32 @@ export const RawAssetsEditor: React.FC = () => {
             console.error('Failed to fetch assets:', err);
         }
     };
+
+    // Compute smart suggestions for unlinked raw assets
+    const suggestionsMap = useMemo(() => {
+        const map = new Map<string, SuggestedMatch[]>();
+
+        rawAssets
+            .filter(ra => ra.asset_id === null)
+            .forEach(rawAsset => {
+                const symbol = rawAsset.symbol;
+                const suggestions: SuggestedMatch[] = [];
+
+                for (const asset of assets) {
+                    const similarity = calculateSimilarity(symbol, asset.symbol);
+                    if (similarity >= 0.5) {
+                        suggestions.push({ asset, confidence: similarity });
+                    }
+                }
+
+                // Sort by confidence and take top 3
+                suggestions.sort((a, b) => b.confidence - a.confidence);
+                const key = `${rawAsset.source}:${rawAsset.symbol}`;
+                map.set(key, suggestions.slice(0, 3));
+            });
+
+        return map;
+    }, [rawAssets, assets]);
 
     const getAssetSymbol = (assetId: number | null | undefined) => {
         if (assetId === null || assetId === undefined) return null;
@@ -82,6 +156,48 @@ export const RawAssetsEditor: React.FC = () => {
             setEditAssetId(null);
         } catch (err) {
             alert(err instanceof Error ? err.message : 'Failed to save');
+        }
+    };
+
+    // Quick accept suggestion
+    const acceptSuggestion = async (rawAsset: RawAsset, assetId: number) => {
+        try {
+            const response = await fetch(`${API_URL}/raw-assets/${encodeURIComponent(rawAsset.source)}/${encodeURIComponent(rawAsset.symbol)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ asset_id: assetId })
+            });
+            if (!response.ok) throw new Error('Failed to update raw asset');
+            await fetchRawAssets();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to save');
+        }
+    };
+
+    // Bulk auto-map all high-confidence suggestions
+    const autoMapAll = async () => {
+        const toMap: { rawAsset: RawAsset; assetId: number }[] = [];
+
+        rawAssets
+            .filter(ra => ra.asset_id === null)
+            .forEach(rawAsset => {
+                const key = getEditKey(rawAsset);
+                const suggestions = suggestionsMap.get(key) || [];
+                // Only auto-map if confidence >= 0.9 (very likely match)
+                if (suggestions.length > 0 && suggestions[0].confidence >= 0.9) {
+                    toMap.push({ rawAsset, assetId: suggestions[0].asset.asset_id });
+                }
+            });
+
+        if (toMap.length === 0) {
+            alert('No high-confidence matches found to auto-map');
+            return;
+        }
+
+        if (!confirm(`Auto-map ${toMap.length} raw asset(s) with high confidence matches?`)) return;
+
+        for (const { rawAsset, assetId } of toMap) {
+            await acceptSuggestion(rawAsset, assetId);
         }
     };
 
@@ -138,6 +254,10 @@ export const RawAssetsEditor: React.FC = () => {
     // Get unique sources for filter
     const uniqueSources = [...new Set(rawAssets.map(ra => ra.source))];
 
+    // Count suggestions available
+    const suggestionsAvailableCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0).length;
+    const highConfidenceCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0 && s[0].confidence >= 0.9).length;
+
     if (loading) return (
         <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
             <Spinner size="xl" color="blue.500" />
@@ -164,6 +284,11 @@ export const RawAssetsEditor: React.FC = () => {
                     </Text>
                 </Box>
                 <Flex gap={2}>
+                    {highConfidenceCount > 0 && (
+                        <Button colorPalette="green" variant="outline" onClick={autoMapAll}>
+                            ✨ Auto-Map ({highConfidenceCount})
+                        </Button>
+                    )}
                     <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
@@ -172,6 +297,18 @@ export const RawAssetsEditor: React.FC = () => {
                     </Button>
                 </Flex>
             </Flex>
+
+            {/* Smart Suggestions Banner */}
+            {suggestionsAvailableCount > 0 && (
+                <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
+                    <HStack justify="space-between">
+                        <Text fontSize="sm" color="blue.700">
+                            💡 <strong>{suggestionsAvailableCount}</strong> unlinked asset(s) have suggested matches.
+                            {highConfidenceCount > 0 && ` ${highConfidenceCount} high-confidence match(es) can be auto-mapped.`}
+                        </Text>
+                    </HStack>
+                </Box>
+            )}
 
             <Flex gap={4} mb={6} align="center" flexWrap="wrap">
                 <Flex align="center" gap={2}>
@@ -215,7 +352,7 @@ export const RawAssetsEditor: React.FC = () => {
                             <Table.ColumnHeader>Source Symbol</Table.ColumnHeader>
                             <Table.ColumnHeader>Source</Table.ColumnHeader>
                             <Table.ColumnHeader>Linked Asset</Table.ColumnHeader>
-                            <Table.ColumnHeader>Status</Table.ColumnHeader>
+                            <Table.ColumnHeader>Suggestions</Table.ColumnHeader>
                             <Table.ColumnHeader>Actions</Table.ColumnHeader>
                         </Table.Row>
                     </Table.Header>
@@ -232,8 +369,11 @@ export const RawAssetsEditor: React.FC = () => {
                             rawAssets.map(rawAsset => {
                                 const key = getEditKey(rawAsset);
                                 const isEditing = editingKey === key;
+                                const suggestions = suggestionsMap.get(key) || [];
+                                const isUnlinked = rawAsset.asset_id === null;
+
                                 return (
-                                    <Table.Row key={key} bg={rawAsset.asset_id === null ? 'orange.50' : undefined}>
+                                    <Table.Row key={key} bg={isUnlinked ? 'orange.50' : undefined}>
                                         <Table.Cell maxW="200px">
                                             <Text fontWeight="medium" fontSize="sm" truncate title={rawAsset.symbol}>{rawAsset.symbol}</Text>
                                         </Table.Cell>
@@ -254,17 +394,34 @@ export const RawAssetsEditor: React.FC = () => {
                                                 </Box>
                                             ) : (
                                                 rawAsset.asset_id ? (
-                                                    <Badge colorPalette="blue">{getAssetSymbol(rawAsset.asset_id)}</Badge>
+                                                    <Badge colorPalette="green">{getAssetSymbol(rawAsset.asset_id)}</Badge>
                                                 ) : (
                                                     <Text fontSize="sm" color="gray.400">Not linked</Text>
                                                 )
                                             )}
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {rawAsset.asset_id !== null ? (
-                                                <Badge colorPalette="green">Linked</Badge>
+                                            {/* Smart Suggestions Column */}
+                                            {isUnlinked && suggestions.length > 0 && !isEditing ? (
+                                                <HStack gap={1} flexWrap="wrap">
+                                                    {suggestions.map((s, idx) => (
+                                                        <Tooltip key={idx} content={`${Math.round(s.confidence * 100)}% match - Click to accept`}>
+                                                            <Button
+                                                                size="xs"
+                                                                variant={s.confidence >= 0.9 ? "solid" : "outline"}
+                                                                colorPalette={s.confidence >= 0.9 ? "green" : s.confidence >= 0.7 ? "blue" : "gray"}
+                                                                onClick={() => acceptSuggestion(rawAsset, s.asset.asset_id)}
+                                                            >
+                                                                {s.asset.symbol}
+                                                                {s.confidence >= 0.9 && " ✓"}
+                                                            </Button>
+                                                        </Tooltip>
+                                                    ))}
+                                                </HStack>
+                                            ) : isUnlinked && !isEditing ? (
+                                                <Text fontSize="xs" color="gray.400">No matches</Text>
                                             ) : (
-                                                <Badge colorPalette="orange">Unlinked</Badge>
+                                                <Text fontSize="xs" color="gray.400">—</Text>
                                             )}
                                         </Table.Cell>
                                         <Table.Cell>

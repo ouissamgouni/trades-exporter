@@ -310,9 +310,14 @@ class AssetPriceGetter(SQLModel, table=True):
     Multiple price getters can be configured per asset with priority ordering.
     The price service will try each getter in priority order until a price is found.
 
+    Fields:
+    - external_id: The identifier used by the external API (e.g., "BTC-USD" for Yahoo,
+      "bitcoin" for CoinGecko). This is the primary override for ticker resolution.
+    - params: Additional getter-specific parameters (e.g., native_quote_currency, source).
+
     Example configurations:
-    - asset_id=1, price_getter="yahoo", priority=1, params={"ticker": "BTC-USD"}
-    - asset_id=1, price_getter="coingecko", priority=2, params={"coin_id": "bitcoin"}
+    - asset_id=1, price_getter="yahoo", external_id="BTC-USD", params={}
+    - asset_id=1, price_getter="coingecko", external_id="bitcoin", params={"native_quote_currency": "EUR"}
     """
 
     __tablename__ = "asset_price_getters"
@@ -323,13 +328,14 @@ class AssetPriceGetter(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     asset_id: int = Field(foreign_key="assets.asset_id", nullable=False, index=True)
     price_getter: str = Field(nullable=False, index=True)  # e.g., 'yahoo', 'coingecko'
+    external_id: Optional[str] = Field(default=None)  # API identifier: "BTC-USD", "bitcoin", "AAPL"
     priority: int = Field(default=100, index=True)  # Lower = higher priority
     enabled: bool = Field(default=True, index=True)
     params: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    # Common params:
-    # - ticker: Override ticker symbol (e.g., "BTC-USD", "AAPL")
-    # - coin_id: CoinGecko coin ID (e.g., "bitcoin", "ethereum")
-    # - asset_id: Generic asset ID override
+    # Extra params (getter-specific):
+    # - native_quote_currency: Currency the ticker returns (e.g., "USD", "EUR")
+    # - source: DataReader source (e.g., "stooq", "fred")
+    # - to_currency: Forex target currency
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -395,49 +401,54 @@ class RawAsset(SQLModel, table=True):
 # ============================================================================
 
 
-class Category(SQLModel, table=True):
+class Dimension(SQLModel, table=True):
     """
-    Flexible category for asset classification and reporting.
+    Dimension for asset classification (e.g., "Asset Class", "Sector", "Region").
     
-    Categories are grouped by dimension (e.g., "sector", "region", "asset_class").
-    Assets can belong to multiple categories across different dimensions.
-    
-    Display format: dimension:key (e.g., "sector:tech", "region:us")
-    
-    Fields:
-    - dimension: Internal key for the dimension (e.g., "asset_class")
-    - dimension_label: Display name for the dimension (e.g., "Asset Class")
-    - key: Internal key for the value (e.g., "crypto")
-    - label: Display name for the value (e.g., "Crypto Currency")
+    Dimensions are orthogonal facets for categorizing assets.
+    Each dimension can have multiple category values.
+    Assets can belong to at most one category per dimension.
     
     Examples:
-    - dimension="sector", dimension_label="Sector", key="tech", label="Technology"
-    - dimension="asset_class", dimension_label="Asset Class", key="stablecoin", label="Stablecoin"
+    - label="Asset Class" (with categories: Crypto, Stock, Fixed Income)
+    - label="Sector" (with categories: DeFi, Gaming, Infrastructure)
+    """
+
+    __tablename__ = "dimensions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    label: str = Field(nullable=False, unique=True)  # "Asset Class", "Sector", "Region"
+    ordinal: int = Field(default=0)  # Display order
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    categories: List["Category"] = Relationship(back_populates="dimension")
+
+
+class Category(SQLModel, table=True):
+    """
+    Category value within a dimension for asset classification.
+    
+    Examples:
+    - dimension_id=1 (Asset Class), label="Cryptocurrency"
+    - dimension_id=2 (Sector), label="DeFi"
     """
 
     __tablename__ = "categories"
     __table_args__ = (
-        UniqueConstraint("dimension", "key", name="uq_category_dimension_key"),
+        UniqueConstraint("dimension_id", "label", name="uq_category_dimension_label"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    dimension: str = Field(nullable=False, index=True)  # "sector", "region", "asset_class"
-    dimension_label: Optional[str] = Field(default=None)  # "Sector", "Region", "Asset Class"
-    key: str = Field(nullable=False, index=True)  # "tech", "us", "stablecoin"
-    label: str = Field(nullable=False)  # "Technology", "United States", "Stablecoin"
-    parent_id: Optional[int] = Field(default=None, foreign_key="categories.id", index=True)
+    dimension_id: int = Field(foreign_key="dimensions.id", nullable=False, index=True)
+    label: str = Field(nullable=False)  # "Cryptocurrency", "DeFi", "United States"
     color: Optional[str] = Field(default=None)  # Hex color for UI (e.g., "#3B82F6")
     ordinal: int = Field(default=0)  # Display order within dimension
     created_at: datetime = Field(default_factory=utc_now)
 
+    # Relationships
+    dimension: Optional[Dimension] = Relationship(back_populates="categories")
     # Note: Relationship to assets via AssetCategory junction table
-    # Access assets via: select(Asset).join(AssetCategory).where(AssetCategory.category_id == id)
-    parent: Optional["Category"] = Relationship(
-        sa_relationship_kwargs={
-            "remote_side": "Category.id",
-            "foreign_keys": "[Category.parent_id]",
-        }
-    )
 
 
 class AssetCategory(SQLModel, table=True):

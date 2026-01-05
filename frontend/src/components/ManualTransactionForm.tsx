@@ -145,12 +145,12 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     // Helper to convert transaction to form data for edit mode
     const transactionToFormData = (tx: import('../types').Transaction): FormData => {
         const simplifiedType = deriveSimplifiedType(tx.transaction_type);
-        const dateTime = tx.date_time 
+        const dateTime = tx.date_time
             ? new Date(typeof tx.date_time === 'number' ? tx.date_time * 1000 : tx.date_time)
             : new Date();
-        
+
         // Convert tags object to array format
-        const tagsArray: Tag[] = tx.tags 
+        const tagsArray: Tag[] = tx.tags
             ? Object.entries(tx.tags).map(([key, value]) => ({ key, value: String(value) }))
             : [];
 
@@ -246,16 +246,16 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         // Find EUR asset for comparison
         const eurAsset = assets.find(a => a.symbol === 'EUR');
         const eurAssetId = eurAsset?.asset_id;
-        
+
         // Check conditions: trade + outflow + has price value + price_quote_asset is EUR
-        const shouldBeChecked = 
+        const shouldBeChecked =
             formData.simplified_type === 'trade' &&
             formData.direction === 'outflow' &&
-            formData.price && 
+            formData.price &&
             parseFloat(formData.price) > 0 &&
             eurAssetId &&
             formData.price_quote_asset_id === eurAssetId;
-        
+
         if (shouldBeChecked && !formData.disposal_taxable) {
             setFormData(prev => ({ ...prev, disposal_taxable: true }));
         }
@@ -263,7 +263,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
     const fetchAssets = async (): Promise<Asset[] | null> => {
         try {
-            const response = await fetch(`${API_URL}/assets`);
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
             if (response.ok) {
                 const data = await response.json();
                 setAssets(data);
@@ -419,7 +419,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
             // Different API call for create vs edit mode
             const isEditMode = mode === 'edit' && transaction?.id;
-            const url = isEditMode 
+            const url = isEditMode
                 ? `${API_URL}/transactions/${transaction.id}`
                 : `${API_URL}/transactions`;
             const method = isEditMode ? 'PATCH' : 'POST';
@@ -436,7 +436,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             }
 
             const result = await response.json();
-            
+
             if (isEditMode) {
                 // Edit mode: single transaction updated
                 setSuccess('Transaction updated successfully!');
@@ -516,7 +516,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                     {isEditMode ? 'Edit Transaction' : 'Add Transaction'}
                 </Heading>
                 <Text color="gray.500" fontSize="sm">
-                    {isEditMode 
+                    {isEditMode
                         ? 'Update transaction details. Changes will be saved when you click Save.'
                         : 'Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.'}
                 </Text>
@@ -614,235 +614,235 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                 </Card.Header>
                                 <Card.Body p={4}>
                                     <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
-                                <GridItem>
-                                    <Label required>Type</Label>
-                                    <NativeSelect.Root size="sm">
-                                        <NativeSelect.Field
-                                            value={formData.simplified_type}
-                                            onChange={e => handleInputChange('simplified_type', e.target.value)}
-                                            borderRadius="md"
-                                        >
-                                            <option value="trade">💱 Trade (Buy/Sell/Swap)</option>
-                                            <option value="transfer">↔️ Transfer</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                </GridItem>
-                                <GridItem>
-                                    <Label required>Direction</Label>
-                                    <NativeSelect.Root size="sm">
-                                        <NativeSelect.Field
-                                            value={formData.direction}
-                                            onChange={e => handleInputChange('direction', e.target.value)}
-                                            borderRadius="md"
-                                        >
-                                            <option value="inflow">↓ Inflow (Receive)</option>
-                                            <option value="outflow">↑ Outflow (Send)</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                    <Text fontSize="xs" color="gray.500" mt={1}>
-                                        {formData.simplified_type === 'trade'
-                                            ? (formData.direction === 'inflow' ? '→ Acquisition' : '→ Disposal')
-                                            : (formData.direction === 'inflow' ? '→ Transfer In' : '→ Transfer Out')
-                                        }
-                                    </Text>
-                                </GridItem>
-                                <GridItem>
-                                    <Label>Review Status</Label>
-                                    <NativeSelect.Root size="sm">
-                                        <NativeSelect.Field
-                                            value={formData.review_status}
-                                            onChange={e => handleInputChange('review_status', e.target.value)}
-                                            borderRadius="md"
-                                        >
-                                            <option value="pending">🟡 Pending</option>
-                                            <option value="valid">🟢 Valid</option>
-                                            <option value="invalid">🔴 Invalid</option>
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                </GridItem>
-                            </Grid>
-
-                            {/* Transfer Destination Account - only show for transfers */}
-                            {formData.simplified_type === 'transfer' && (
-                                <Box bg="purple.50" p={4} borderRadius="lg" mb={4}>
-                                    <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={4} alignItems="end">
                                         <GridItem>
-                                            <Label required>
-                                                {formData.direction === 'outflow' ? 'Destination Account' : 'Origin Account'}
-                                            </Label>
-                                            {!creatingAccount ? (
-                                                <Flex gap={2}>
-                                                    <NativeSelect.Root size="sm" flex={1}>
-                                                        <NativeSelect.Field
-                                                            value={formData.direction === 'outflow' ? (formData.to_account_id || '') : (formData.from_account_id || '')}
-                                                            onChange={e => {
-                                                                const selectedId = e.target.value ? parseInt(e.target.value) : null;
-                                                                if (formData.direction === 'outflow') {
-                                                                    handleInputChange('to_account_id', selectedId);
-                                                                } else {
-                                                                    handleInputChange('from_account_id', selectedId);
-                                                                }
-                                                            }}
-                                                            borderRadius="md"
-                                                        >
-                                                            <option value="">Select account...</option>
-                                                            {accounts.map(acc => (
-                                                                <option key={acc.id} value={acc.id}>
-                                                                    {acc.name} ({acc.account_type}) {acc.owned ? '✓ Owned' : ''}
-                                                                </option>
-                                                            ))}
-                                                        </NativeSelect.Field>
-                                                    </NativeSelect.Root>
-                                                    <Button size="sm" variant="outline" onClick={() => setCreatingAccount(true)}>
-                                                        + New
-                                                    </Button>
-                                                </Flex>
-                                            ) : (
-                                                <Flex direction="column" gap={2}>
-                                                    <Input
-                                                        placeholder="New account name"
-                                                        value={newAccountName}
-                                                        onChange={e => setNewAccountName(e.target.value)}
-                                                        size="sm"
-                                                        borderRadius="md"
-                                                    />
-                                                    <Flex gap={2}>
-                                                        <NativeSelect.Root size="sm" flex={1}>
-                                                            <NativeSelect.Field
-                                                                value={newAccountType}
-                                                                onChange={e => setNewAccountType(e.target.value as 'cex' | 'broker' | 'wallet')}
-                                                                borderRadius="md"
-                                                            >
-                                                                <option value="wallet">Wallet</option>
-                                                                <option value="cex">CEX</option>
-                                                                <option value="broker">Broker</option>
-                                                            </NativeSelect.Field>
-                                                        </NativeSelect.Root>
-                                                        <Checkbox.Root
-                                                            checked={newAccountOwned}
-                                                            onCheckedChange={(e) => setNewAccountOwned(!!e.checked)}
-                                                            size="sm"
-                                                        >
-                                                            <Checkbox.HiddenInput />
-                                                            <Checkbox.Control />
-                                                            <Checkbox.Label fontSize="xs">Owned</Checkbox.Label>
-                                                        </Checkbox.Root>
-                                                    </Flex>
-                                                    <Flex gap={2}>
-                                                        <Button
-                                                            size="sm"
-                                                            colorPalette="green"
-                                                            onClick={async () => {
-                                                                if (newAccountName) {
-                                                                    const created = await createAccount(newAccountName, newAccountType, newAccountOwned);
-                                                                    if (created) {
-                                                                        if (formData.direction === 'outflow') {
-                                                                            handleInputChange('to_account_id', created.id);
-                                                                        } else {
-                                                                            handleInputChange('from_account_id', created.id);
-                                                                        }
-                                                                        setNewAccountName('');
-                                                                        setCreatingAccount(false);
-                                                                    }
-                                                                }
-                                                            }}
-                                                        >
-                                                            Create
-                                                        </Button>
-                                                        <Button size="sm" variant="ghost" onClick={() => {
-                                                            setCreatingAccount(false);
-                                                            setNewAccountName('');
-                                                        }}>
-                                                            Cancel
-                                                        </Button>
-                                                    </Flex>
-                                                </Flex>
-                                            )}
+                                            <Label required>Type</Label>
+                                            <NativeSelect.Root size="sm">
+                                                <NativeSelect.Field
+                                                    value={formData.simplified_type}
+                                                    onChange={e => handleInputChange('simplified_type', e.target.value)}
+                                                    borderRadius="md"
+                                                >
+                                                    <option value="trade">💱 Trade (Buy/Sell/Swap)</option>
+                                                    <option value="transfer">↔️ Transfer</option>
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
                                         </GridItem>
                                         <GridItem>
-                                            {/* Internal transfer indicator */}
-                                            {(() => {
-                                                const mainAcc = accounts.find(a => a.id === formData.account_id);
-                                                const counterpartyId = formData.direction === 'outflow' ? formData.to_account_id : formData.from_account_id;
-                                                const counterpartyAcc = accounts.find(a => a.id === counterpartyId);
-                                                const isInternal = mainAcc?.owned && counterpartyAcc?.owned;
-                                                const isExternal = (mainAcc?.owned && !counterpartyAcc?.owned) || (!mainAcc?.owned && counterpartyAcc?.owned);
-
-                                                if (counterpartyId && formData.account_id) {
-                                                    return (
-                                                        <Box p={3} borderRadius="md" bg={isInternal ? 'green.100' : isExternal ? 'orange.100' : 'gray.100'}>
-                                                            {isInternal ? (
-                                                                <Flex align="center" gap={2}>
-                                                                    <Text fontSize="lg">🏠</Text>
-                                                                    <Box>
-                                                                        <Text fontSize="sm" fontWeight="bold" color="green.700">Internal Transfer</Text>
-                                                                        <Text fontSize="xs" color="green.600">Both accounts are owned - no taxable event</Text>
-                                                                    </Box>
-                                                                </Flex>
-                                                            ) : isExternal ? (
-                                                                <Flex align="center" gap={2}>
-                                                                    <Text fontSize="lg">🌐</Text>
-                                                                    <Box>
-                                                                        <Text fontSize="sm" fontWeight="bold" color="orange.700">External Transfer</Text>
-                                                                        <Text fontSize="xs" color="orange.600">
-                                                                            {!counterpartyAcc?.owned ? 'To external party' : 'From external party'}
-                                                                        </Text>
-                                                                    </Box>
-                                                                </Flex>
-                                                            ) : (
-                                                                <Text fontSize="xs" color="gray.500">Select both accounts to see transfer type</Text>
-                                                            )}
-                                                        </Box>
-                                                    );
+                                            <Label required>Direction</Label>
+                                            <NativeSelect.Root size="sm">
+                                                <NativeSelect.Field
+                                                    value={formData.direction}
+                                                    onChange={e => handleInputChange('direction', e.target.value)}
+                                                    borderRadius="md"
+                                                >
+                                                    <option value="inflow">↓ Inflow (Receive)</option>
+                                                    <option value="outflow">↑ Outflow (Send)</option>
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
+                                            <Text fontSize="xs" color="gray.500" mt={1}>
+                                                {formData.simplified_type === 'trade'
+                                                    ? (formData.direction === 'inflow' ? '→ Acquisition' : '→ Disposal')
+                                                    : (formData.direction === 'inflow' ? '→ Transfer In' : '→ Transfer Out')
                                                 }
-                                                return null;
-                                            })()}
+                                            </Text>
+                                        </GridItem>
+                                        <GridItem>
+                                            <Label>Review Status</Label>
+                                            <NativeSelect.Root size="sm">
+                                                <NativeSelect.Field
+                                                    value={formData.review_status}
+                                                    onChange={e => handleInputChange('review_status', e.target.value)}
+                                                    borderRadius="md"
+                                                >
+                                                    <option value="pending">🟡 Pending</option>
+                                                    <option value="valid">🟢 Valid</option>
+                                                    <option value="invalid">🔴 Invalid</option>
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
                                         </GridItem>
                                     </Grid>
-                                </Box>
-                            )}
 
-                            {/* Asset Row */}
-                            <Box bg="gray.50" p={4} borderRadius="lg" mb={4}>
-                                <Grid templateColumns={{ base: "1fr", md: "2fr 1fr 1fr" }} gap={4} alignItems="end">
-                                    <GridItem>
-                                        <Label required>Asset</Label>
-                                        <AssetSelector
-                                            value={formData.asset_id}
-                                            onChange={(id) => handleInputChange('asset_id', id)}
-                                            assets={assets}
-                                            onAssetCreated={fetchAssets}
-                                            defaultSymbol=""
-                                            placeholder="Select or create asset..."
-                                            rawAssetSource="manual"
-                                            rawAssetSymbol={formData.source_asset_symbol}
-                                        />
-                                    </GridItem>
-                                    <GridItem>
-                                        <Label>Source Symbol</Label>
-                                        <Input
-                                            placeholder="Original symbol"
-                                            value={formData.source_asset_symbol}
-                                            onChange={e => handleInputChange('source_asset_symbol', e.target.value.toUpperCase())}
-                                            size="sm"
-                                            borderRadius="md"
-                                        />
-                                    </GridItem>
-                                    <GridItem>
-                                        <Label required>Quantity</Label>
-                                        <Input
-                                            type="number"
-                                            step="any"
-                                            placeholder="0.00"
-                                            value={formData.quantity}
-                                            onChange={e => handleInputChange('quantity', e.target.value)}
-                                            size="sm"
-                                            borderRadius="md"
-                                            fontWeight="semibold"
-                                        />
-                                    </GridItem>
-                                </Grid>
-                            </Box>
+                                    {/* Transfer Destination Account - only show for transfers */}
+                                    {formData.simplified_type === 'transfer' && (
+                                        <Box bg="purple.50" p={4} borderRadius="lg" mb={4}>
+                                            <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={4} alignItems="end">
+                                                <GridItem>
+                                                    <Label required>
+                                                        {formData.direction === 'outflow' ? 'Destination Account' : 'Origin Account'}
+                                                    </Label>
+                                                    {!creatingAccount ? (
+                                                        <Flex gap={2}>
+                                                            <NativeSelect.Root size="sm" flex={1}>
+                                                                <NativeSelect.Field
+                                                                    value={formData.direction === 'outflow' ? (formData.to_account_id || '') : (formData.from_account_id || '')}
+                                                                    onChange={e => {
+                                                                        const selectedId = e.target.value ? parseInt(e.target.value) : null;
+                                                                        if (formData.direction === 'outflow') {
+                                                                            handleInputChange('to_account_id', selectedId);
+                                                                        } else {
+                                                                            handleInputChange('from_account_id', selectedId);
+                                                                        }
+                                                                    }}
+                                                                    borderRadius="md"
+                                                                >
+                                                                    <option value="">Select account...</option>
+                                                                    {accounts.map(acc => (
+                                                                        <option key={acc.id} value={acc.id}>
+                                                                            {acc.name} ({acc.account_type}) {acc.owned ? '✓ Owned' : ''}
+                                                                        </option>
+                                                                    ))}
+                                                                </NativeSelect.Field>
+                                                            </NativeSelect.Root>
+                                                            <Button size="sm" variant="outline" onClick={() => setCreatingAccount(true)}>
+                                                                + New
+                                                            </Button>
+                                                        </Flex>
+                                                    ) : (
+                                                        <Flex direction="column" gap={2}>
+                                                            <Input
+                                                                placeholder="New account name"
+                                                                value={newAccountName}
+                                                                onChange={e => setNewAccountName(e.target.value)}
+                                                                size="sm"
+                                                                borderRadius="md"
+                                                            />
+                                                            <Flex gap={2}>
+                                                                <NativeSelect.Root size="sm" flex={1}>
+                                                                    <NativeSelect.Field
+                                                                        value={newAccountType}
+                                                                        onChange={e => setNewAccountType(e.target.value as 'cex' | 'broker' | 'wallet')}
+                                                                        borderRadius="md"
+                                                                    >
+                                                                        <option value="wallet">Wallet</option>
+                                                                        <option value="cex">CEX</option>
+                                                                        <option value="broker">Broker</option>
+                                                                    </NativeSelect.Field>
+                                                                </NativeSelect.Root>
+                                                                <Checkbox.Root
+                                                                    checked={newAccountOwned}
+                                                                    onCheckedChange={(e) => setNewAccountOwned(!!e.checked)}
+                                                                    size="sm"
+                                                                >
+                                                                    <Checkbox.HiddenInput />
+                                                                    <Checkbox.Control />
+                                                                    <Checkbox.Label fontSize="xs">Owned</Checkbox.Label>
+                                                                </Checkbox.Root>
+                                                            </Flex>
+                                                            <Flex gap={2}>
+                                                                <Button
+                                                                    size="sm"
+                                                                    colorPalette="green"
+                                                                    onClick={async () => {
+                                                                        if (newAccountName) {
+                                                                            const created = await createAccount(newAccountName, newAccountType, newAccountOwned);
+                                                                            if (created) {
+                                                                                if (formData.direction === 'outflow') {
+                                                                                    handleInputChange('to_account_id', created.id);
+                                                                                } else {
+                                                                                    handleInputChange('from_account_id', created.id);
+                                                                                }
+                                                                                setNewAccountName('');
+                                                                                setCreatingAccount(false);
+                                                                            }
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Create
+                                                                </Button>
+                                                                <Button size="sm" variant="ghost" onClick={() => {
+                                                                    setCreatingAccount(false);
+                                                                    setNewAccountName('');
+                                                                }}>
+                                                                    Cancel
+                                                                </Button>
+                                                            </Flex>
+                                                        </Flex>
+                                                    )}
+                                                </GridItem>
+                                                <GridItem>
+                                                    {/* Internal transfer indicator */}
+                                                    {(() => {
+                                                        const mainAcc = accounts.find(a => a.id === formData.account_id);
+                                                        const counterpartyId = formData.direction === 'outflow' ? formData.to_account_id : formData.from_account_id;
+                                                        const counterpartyAcc = accounts.find(a => a.id === counterpartyId);
+                                                        const isInternal = mainAcc?.owned && counterpartyAcc?.owned;
+                                                        const isExternal = (mainAcc?.owned && !counterpartyAcc?.owned) || (!mainAcc?.owned && counterpartyAcc?.owned);
+
+                                                        if (counterpartyId && formData.account_id) {
+                                                            return (
+                                                                <Box p={3} borderRadius="md" bg={isInternal ? 'green.100' : isExternal ? 'orange.100' : 'gray.100'}>
+                                                                    {isInternal ? (
+                                                                        <Flex align="center" gap={2}>
+                                                                            <Text fontSize="lg">🏠</Text>
+                                                                            <Box>
+                                                                                <Text fontSize="sm" fontWeight="bold" color="green.700">Internal Transfer</Text>
+                                                                                <Text fontSize="xs" color="green.600">Both accounts are owned - no taxable event</Text>
+                                                                            </Box>
+                                                                        </Flex>
+                                                                    ) : isExternal ? (
+                                                                        <Flex align="center" gap={2}>
+                                                                            <Text fontSize="lg">🌐</Text>
+                                                                            <Box>
+                                                                                <Text fontSize="sm" fontWeight="bold" color="orange.700">External Transfer</Text>
+                                                                                <Text fontSize="xs" color="orange.600">
+                                                                                    {!counterpartyAcc?.owned ? 'To external party' : 'From external party'}
+                                                                                </Text>
+                                                                            </Box>
+                                                                        </Flex>
+                                                                    ) : (
+                                                                        <Text fontSize="xs" color="gray.500">Select both accounts to see transfer type</Text>
+                                                                    )}
+                                                                </Box>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
+                                                </GridItem>
+                                            </Grid>
+                                        </Box>
+                                    )}
+
+                                    {/* Asset Row */}
+                                    <Box bg="gray.50" p={4} borderRadius="lg" mb={4}>
+                                        <Grid templateColumns={{ base: "1fr", md: "2fr 1fr 1fr" }} gap={4} alignItems="end">
+                                            <GridItem>
+                                                <Label required>Asset</Label>
+                                                <AssetSelector
+                                                    value={formData.asset_id}
+                                                    onChange={(id) => handleInputChange('asset_id', id)}
+                                                    assets={assets}
+                                                    onAssetCreated={fetchAssets}
+                                                    defaultSymbol=""
+                                                    placeholder="Select or create asset..."
+                                                    rawAssetSource="manual"
+                                                    rawAssetSymbol={formData.source_asset_symbol}
+                                                />
+                                            </GridItem>
+                                            <GridItem>
+                                                <Label>Source Symbol</Label>
+                                                <Input
+                                                    placeholder="Original symbol"
+                                                    value={formData.source_asset_symbol}
+                                                    onChange={e => handleInputChange('source_asset_symbol', e.target.value.toUpperCase())}
+                                                    size="sm"
+                                                    borderRadius="md"
+                                                />
+                                            </GridItem>
+                                            <GridItem>
+                                                <Label required>Quantity</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="any"
+                                                    placeholder="0.00"
+                                                    value={formData.quantity}
+                                                    onChange={e => handleInputChange('quantity', e.target.value)}
+                                                    size="sm"
+                                                    borderRadius="md"
+                                                    fontWeight="semibold"
+                                                />
+                                            </GridItem>
+                                        </Grid>
+                                    </Box>
 
                                 </Card.Body>
                             </Card.Root>
@@ -859,104 +859,104 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         Add key-value tags to categorize this transaction
                                     </Text>
 
-                            {/* Selected tags */}
-                            {formData.tags.length > 0 && (
-                                <Flex gap={2} wrap="wrap" mb={3}>
-                                    {formData.tags.map((tag, idx) => (
-                                        <Badge
-                                            key={idx}
-                                            colorPalette="purple"
-                                            variant="solid"
-                                            cursor="pointer"
-                                            onClick={() => handleInputChange('tags', formData.tags.filter((_, i) => i !== idx))}
-                                            title="Click to remove"
-                                        >
-                                            {tag.key}: {tag.value} ✕
-                                        </Badge>
-                                    ))}
-                                </Flex>
-                            )}
-
-                            {/* Add new tag */}
-                            <Flex gap={2} mb={3}>
-                                <Input
-                                    placeholder="Key (e.g., category)"
-                                    value={newTagKey}
-                                    onChange={e => setNewTagKey(e.target.value)}
-                                    size="sm"
-                                    borderRadius="md"
-                                    flex={1}
-                                />
-                                <Input
-                                    placeholder="Value (e.g., airdrop)"
-                                    value={newTagValue}
-                                    onChange={e => setNewTagValue(e.target.value)}
-                                    onKeyDown={e => {
-                                        if (e.key === 'Enter' && newTagKey.trim() && newTagValue.trim()) {
-                                            e.preventDefault();
-                                            const key = newTagKey.trim().toLowerCase();
-                                            const value = newTagValue.trim().toLowerCase();
-                                            if (!tagExists(formData.tags, key, value)) {
-                                                const newTag: Tag = { key, value };
-                                                handleInputChange('tags', [...formData.tags, newTag]);
-                                                if (!tagExists(availableTags, key, value)) {
-                                                    setAvailableTags(prev => [...prev, newTag]);
-                                                }
-                                            }
-                                            setNewTagKey('');
-                                            setNewTagValue('');
-                                        }
-                                    }}
-                                    size="sm"
-                                    borderRadius="md"
-                                    flex={1}
-                                />
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => {
-                                        if (newTagKey.trim() && newTagValue.trim()) {
-                                            const key = newTagKey.trim().toLowerCase();
-                                            const value = newTagValue.trim().toLowerCase();
-                                            if (!tagExists(formData.tags, key, value)) {
-                                                const newTag: Tag = { key, value };
-                                                handleInputChange('tags', [...formData.tags, newTag]);
-                                                if (!tagExists(availableTags, key, value)) {
-                                                    setAvailableTags(prev => [...prev, newTag]);
-                                                }
-                                            }
-                                            setNewTagKey('');
-                                            setNewTagValue('');
-                                        }
-                                    }}
-                                >
-                                    Add
-                                </Button>
-                            </Flex>
-
-                            {/* Existing tags suggestions */}
-                            {availableTags.length > 0 && (
-                                <Box>
-                                    <Text fontSize="xs" color="gray.500" mb={2}>Click to add existing tags:</Text>
-                                    <Flex gap={2} wrap="wrap">
-                                        {availableTags
-                                            .filter(tag => !tagExists(formData.tags, tag.key, tag.value))
-                                            .slice(0, 15)
-                                            .map((tag, idx) => (
+                                    {/* Selected tags */}
+                                    {formData.tags.length > 0 && (
+                                        <Flex gap={2} wrap="wrap" mb={3}>
+                                            {formData.tags.map((tag, idx) => (
                                                 <Badge
                                                     key={idx}
-                                                    colorPalette="gray"
-                                                    variant="subtle"
+                                                    colorPalette="purple"
+                                                    variant="solid"
                                                     cursor="pointer"
-                                                    onClick={() => handleInputChange('tags', [...formData.tags, tag])}
-                                                    _hover={{ bg: 'purple.100' }}
+                                                    onClick={() => handleInputChange('tags', formData.tags.filter((_, i) => i !== idx))}
+                                                    title="Click to remove"
                                                 >
-                                                    + {tag.key}: {tag.value}
+                                                    {tag.key}: {tag.value} ✕
                                                 </Badge>
                                             ))}
+                                        </Flex>
+                                    )}
+
+                                    {/* Add new tag */}
+                                    <Flex gap={2} mb={3}>
+                                        <Input
+                                            placeholder="Key (e.g., category)"
+                                            value={newTagKey}
+                                            onChange={e => setNewTagKey(e.target.value)}
+                                            size="sm"
+                                            borderRadius="md"
+                                            flex={1}
+                                        />
+                                        <Input
+                                            placeholder="Value (e.g., airdrop)"
+                                            value={newTagValue}
+                                            onChange={e => setNewTagValue(e.target.value)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter' && newTagKey.trim() && newTagValue.trim()) {
+                                                    e.preventDefault();
+                                                    const key = newTagKey.trim().toLowerCase();
+                                                    const value = newTagValue.trim().toLowerCase();
+                                                    if (!tagExists(formData.tags, key, value)) {
+                                                        const newTag: Tag = { key, value };
+                                                        handleInputChange('tags', [...formData.tags, newTag]);
+                                                        if (!tagExists(availableTags, key, value)) {
+                                                            setAvailableTags(prev => [...prev, newTag]);
+                                                        }
+                                                    }
+                                                    setNewTagKey('');
+                                                    setNewTagValue('');
+                                                }
+                                            }}
+                                            size="sm"
+                                            borderRadius="md"
+                                            flex={1}
+                                        />
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => {
+                                                if (newTagKey.trim() && newTagValue.trim()) {
+                                                    const key = newTagKey.trim().toLowerCase();
+                                                    const value = newTagValue.trim().toLowerCase();
+                                                    if (!tagExists(formData.tags, key, value)) {
+                                                        const newTag: Tag = { key, value };
+                                                        handleInputChange('tags', [...formData.tags, newTag]);
+                                                        if (!tagExists(availableTags, key, value)) {
+                                                            setAvailableTags(prev => [...prev, newTag]);
+                                                        }
+                                                    }
+                                                    setNewTagKey('');
+                                                    setNewTagValue('');
+                                                }
+                                            }}
+                                        >
+                                            Add
+                                        </Button>
                                     </Flex>
-                                </Box>
-                            )}
+
+                                    {/* Existing tags suggestions */}
+                                    {availableTags.length > 0 && (
+                                        <Box>
+                                            <Text fontSize="xs" color="gray.500" mb={2}>Click to add existing tags:</Text>
+                                            <Flex gap={2} wrap="wrap">
+                                                {availableTags
+                                                    .filter(tag => !tagExists(formData.tags, tag.key, tag.value))
+                                                    .slice(0, 15)
+                                                    .map((tag, idx) => (
+                                                        <Badge
+                                                            key={idx}
+                                                            colorPalette="gray"
+                                                            variant="subtle"
+                                                            cursor="pointer"
+                                                            onClick={() => handleInputChange('tags', [...formData.tags, tag])}
+                                                            _hover={{ bg: 'purple.100' }}
+                                                        >
+                                                            + {tag.key}: {tag.value}
+                                                        </Badge>
+                                                    ))}
+                                            </Flex>
+                                        </Box>
+                                    )}
                                 </Card.Body>
                             </Card.Root>
                         </Box>
@@ -1209,8 +1209,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             px={8}
                         >
                             {loading ? <Spinner size="sm" mr={2} /> : null}
-                            {loading 
-                                ? (isEditMode ? 'Saving...' : 'Creating...') 
+                            {loading
+                                ? (isEditMode ? 'Saving...' : 'Creating...')
                                 : (isEditMode ? '💾 Save Changes' : '➕ Create Transaction')}
                         </Button>
                     </Flex>

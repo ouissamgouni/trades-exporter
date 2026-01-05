@@ -241,23 +241,43 @@ class PriceGetterConfig:
     Configuration for a price getter call.
 
     Contains parameters that override default behavior for a specific asset.
-    Parameters are loaded from AssetPriceGetter.params in the database.
-
-    The main parameter is `asset_id` which is the identifier used by the
-    specific price getter API (e.g., "BTC-USD" for Yahoo, "bitcoin" for CoinGecko).
+    
+    Fields:
+    - external_id: The identifier used by the external price API
+      (e.g., "BTC-USD" for Yahoo, "bitcoin" for CoinGecko). This is the
+      primary override for ticker resolution. Stored in the external_id
+      column of asset_price_getters table.
+    - extra: Additional getter-specific parameters from the params JSON column
+      (e.g., native_quote_currency, source, to_currency).
     """
 
-    asset_id: Optional[str] = (
-        None  # The identifier for this asset in the price getter's API
-    )
-    extra: Dict[str, Any] = field(
-        default_factory=dict
-    )  # Any additional getter-specific params
+    external_id: Optional[str] = None  # The identifier for this asset in the price getter's API
+    extra: Dict[str, Any] = field(default_factory=dict)  # Additional getter-specific params
+
+    @classmethod
+    def from_db(cls, external_id: Optional[str], params: Optional[Dict[str, Any]]) -> "PriceGetterConfig":
+        """
+        Create PriceGetterConfig from database fields.
+
+        Args:
+            external_id: The external_id column value (API identifier).
+            params: The params JSON column value (extra parameters).
+
+        Returns:
+            PriceGetterConfig instance.
+        """
+        return cls(
+            external_id=external_id,
+            extra=params or {},
+        )
 
     @classmethod
     def from_dict(cls, params: Optional[Dict[str, Any]]) -> "PriceGetterConfig":
         """
-        Create PriceGetterConfig from a dictionary (e.g., from database JSON).
+        Create PriceGetterConfig from a dictionary.
+        
+        DEPRECATED: Use from_db() with separate external_id and params.
+        Kept for backward compatibility during migration.
 
         Args:
             params: Dictionary of parameters. Can be None.
@@ -268,8 +288,9 @@ class PriceGetterConfig:
         if not params:
             return cls()
 
+        # Support legacy params.asset_id format during migration
         return cls(
-            asset_id=params.get("asset_id"),
+            external_id=params.get("asset_id"),
             extra={k: v for k, v in params.items() if k != "asset_id"},
         )
 
@@ -354,7 +375,7 @@ class BasePriceGetter(ABC):
         Resolve the ticker symbol for an asset using config overrides.
 
         Priority order:
-        1. config.asset_id (explicit override from AssetPriceGetter.params)
+        1. config.external_id (explicit override from AssetPriceGetter.external_id)
         2. get_ticker_symbol(asset) (subclass implementation using asset.symbol)
 
         Args:
@@ -364,8 +385,8 @@ class BasePriceGetter(ABC):
         Returns:
             str: Resolved ticker symbol.
         """
-        if config and config.asset_id:
-            return config.asset_id
+        if config and config.external_id:
+            return config.external_id
 
         return self.get_ticker_symbol(asset)
 

@@ -127,7 +127,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const [bulkType, setBulkType] = useState<string>('');
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
-    
+
     // Transaction editor dialog state
     const [showEditorDialog, setShowEditorDialog] = useState(false);
     const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
@@ -182,7 +182,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
 
     const fetchAssets = async () => {
         try {
-            const response = await fetch(`${API_URL}/assets`);
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
             if (response.ok) {
                 const data = await response.json();
                 setAssets(data);

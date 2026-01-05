@@ -144,6 +144,7 @@ export interface AggregatedBalanceItem {
     warning_count: number;
     unsettled_negative_count: number;  // Count of unsettled negative lots (excluded when filter active)
     total_fees_in_base?: number;  // Total fees at FMV (proceeds from fee disposals)
+    category_ids: number[];  // Category IDs assigned to this asset (for client-side filtering)
 }
 
 // ============================================================================
@@ -180,6 +181,9 @@ export interface AssetPnLRow {
 
     // Account tracking for filtering
     account_ids: number[];  // All accounts holding this asset
+
+    // Category tracking for filtering
+    category_ids: number[];  // All category IDs assigned to this asset
 
     // Current position
     quantity: number;
@@ -675,4 +679,122 @@ export interface TransactionSummary {
     fee_in_base?: number;
     unit_id?: number;  // CalculationUnit this transaction belongs to
     pnl_impact?: number;
+}
+
+// ============================================================================
+// Pie Chart Types (Market Value by Category)
+// ============================================================================
+
+/**
+ * Data point for the market value pie chart.
+ * Represents a single slice of the pie (one category or "Uncategorized").
+ */
+export interface PieChartDataPoint {
+    categoryId: number | null;  // null = uncategorized
+    label: string;
+    color: string;
+    value: number;  // Market value in base currency
+    percentage: number;  // Percentage of total
+    assetCount: number;  // Number of assets in this category
+}
+
+/**
+ * Aggregates market value by category within a selected dimension.
+ * 
+ * @param assets - Array of AssetPnLRow with market_value and category_ids
+ * @param dimensionId - The dimension to group by (e.g., "Asset Class")
+ * @param categories - All categories (will be filtered to the selected dimension)
+ * @returns Array of PieChartDataPoint sorted by value descending
+ */
+export function aggregateMarketValueByCategory(
+    assets: AssetPnLRow[],
+    dimensionId: number,
+    categories: { id: number; dimension_id: number; label: string; color?: string | null }[]
+): PieChartDataPoint[] {
+    // Filter categories to the selected dimension
+    const dimensionCategories = categories.filter(c => c.dimension_id === dimensionId);
+
+    // Build a map: categoryId -> { label, color, value, assetIds }
+    const categoryMap = new Map<number, {
+        label: string;
+        color: string;
+        value: number;
+        assetIds: Set<number>;
+    }>();
+
+    // Initialize all categories in this dimension
+    for (const cat of dimensionCategories) {
+        categoryMap.set(cat.id, {
+            label: cat.label,
+            color: cat.color || '#888888',
+            value: 0,
+            assetIds: new Set(),
+        });
+    }
+
+    // Track uncategorized assets (no category in selected dimension)
+    let uncategorizedValue = 0;
+    const uncategorizedAssetIds = new Set<number>();
+
+    // Aggregate market value by category
+    for (const asset of assets) {
+        // Find categories for this asset within the selected dimension
+        const matchingCategoryIds = asset.category_ids.filter(catId =>
+            dimensionCategories.some(c => c.id === catId)
+        );
+
+        if (matchingCategoryIds.length === 0) {
+            // Asset has no category in this dimension -> uncategorized
+            uncategorizedValue += asset.market_value;
+            uncategorizedAssetIds.add(asset.asset_id);
+        } else {
+            // Asset belongs to one or more categories in this dimension
+            // Split value evenly if multiple categories (rare edge case)
+            const valuePerCategory = asset.market_value / matchingCategoryIds.length;
+            for (const catId of matchingCategoryIds) {
+                const entry = categoryMap.get(catId);
+                if (entry) {
+                    entry.value += valuePerCategory;
+                    entry.assetIds.add(asset.asset_id);
+                }
+            }
+        }
+    }
+
+    // Calculate total for percentages
+    const totalValue = assets.reduce((sum, a) => sum + a.market_value, 0);
+
+    // Build result array
+    const result: PieChartDataPoint[] = [];
+
+    // Add category entries (filter out zero values)
+    for (const [catId, entry] of categoryMap.entries()) {
+        if (entry.value > 0) {
+            result.push({
+                categoryId: catId,
+                label: entry.label,
+                color: entry.color,
+                value: entry.value,
+                percentage: totalValue > 0 ? (entry.value / totalValue) * 100 : 0,
+                assetCount: entry.assetIds.size,
+            });
+        }
+    }
+
+    // Add uncategorized if any
+    if (uncategorizedValue > 0) {
+        result.push({
+            categoryId: null,
+            label: 'Uncategorized',
+            color: '#9CA3AF',  // Gray-400
+            value: uncategorizedValue,
+            percentage: totalValue > 0 ? (uncategorizedValue / totalValue) * 100 : 0,
+            assetCount: uncategorizedAssetIds.size,
+        });
+    }
+
+    // Sort by value descending
+    result.sort((a, b) => b.value - a.value);
+
+    return result;
 }

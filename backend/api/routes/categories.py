@@ -1,6 +1,6 @@
 """
 Category endpoints for the Trade Exporter API.
-Provides CRUD operations for asset categories used in reporting.
+Provides CRUD operations for dimensions and categories used in asset classification.
 """
 
 from datetime import datetime, timezone
@@ -8,10 +8,10 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
-from backend.db.models import Category, AssetCategory, Asset
+from backend.db.models import Category, AssetCategory, Asset, Dimension
 
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
@@ -22,22 +22,41 @@ router = APIRouter(prefix="/categories", tags=["Categories"])
 # ============================================================================
 
 
+class DimensionCreate(BaseModel):
+    """Request model for creating a dimension."""
+    label: str  # Display name like "Asset Class"
+    ordinal: int = 0
+
+
+class DimensionUpdate(BaseModel):
+    """Request model for updating a dimension."""
+    label: Optional[str] = None
+    ordinal: Optional[int] = None
+
+
+class DimensionResponse(BaseModel):
+    """Response model for a dimension."""
+    id: int
+    label: str
+    ordinal: int
+    category_count: int = 0
+    asset_count: int = 0  # Total assets across all categories in this dimension
+    
+    class Config:
+        from_attributes = True
+
+
 class CategoryCreate(BaseModel):
     """Request model for creating a category."""
-    dimension: str
-    dimension_label: Optional[str] = None  # Display name like "Asset Class"
-    key: str
+    dimension_id: int
     label: str
-    parent_id: Optional[int] = None
     color: Optional[str] = None
     ordinal: int = 0
 
 
 class CategoryUpdate(BaseModel):
     """Request model for updating a category."""
-    dimension_label: Optional[str] = None  # Update dimension display name
     label: Optional[str] = None
-    parent_id: Optional[int] = None
     color: Optional[str] = None
     ordinal: Optional[int] = None
 
@@ -45,27 +64,39 @@ class CategoryUpdate(BaseModel):
 class CategoryResponse(BaseModel):
     """Response model for a category."""
     id: int
-    dimension: str
-    dimension_label: Optional[str] = None  # "Asset Class", "Sector", etc.
-    key: str
+    dimension_id: int
+    dimension_label: str  # Convenience field from dimension
     label: str
-    parent_id: Optional[int]
     color: Optional[str]
     ordinal: int
+    asset_count: int = 0  # Number of assets linked to this category
     
     class Config:
         from_attributes = True
 
 
-class CategoryWithChildren(CategoryResponse):
-    """Category with nested children for hierarchy display."""
-    children: List["CategoryWithChildren"] = []
+class LinkedAssetResponse(BaseModel):
+    """Response model for an asset linked to a category."""
+    asset_id: int
+    symbol: str
+    label: Optional[str] = None
 
 
-class DimensionResponse(BaseModel):
+class CategoryAssetsResponse(BaseModel):
+    """Response model for assets linked to a category."""
+    category_id: int
+    category_label: str
+    dimension_id: int
+    dimension_label: str
+    assets: List[LinkedAssetResponse]
+    count: int
+
+
+class DimensionWithCategoriesResponse(BaseModel):
     """Response model for a dimension with its categories."""
-    dimension: str
-    dimension_label: str  # "Asset Class", "Sector", etc.
+    id: int
+    label: str
+    ordinal: int
     categories: List[CategoryResponse]
 
 
@@ -80,153 +111,192 @@ class AssetCategoriesResponse(BaseModel):
     categories: List[CategoryResponse]
 
 
+class UnclassifiedResponse(BaseModel):
+    """Response for unclassified assets in a dimension."""
+    dimension_id: int
+    dimension_label: str
+    count: int
+    assets: List[LinkedAssetResponse]
+
+
 # ============================================================================
-# Category CRUD Endpoints
+# Helper Functions
 # ============================================================================
 
 
-@router.get("", response_model=List[CategoryResponse])
-def list_categories(
-    dimension: Optional[str] = Query(None, description="Filter by dimension"),
-    session: Session = Depends(get_db)
-):
-    """
-    List all categories, optionally filtered by dimension.
-    
-    Args:
-        dimension: Optional filter (e.g., "sector", "asset_class", "region")
-    """
-    query = select(Category).order_by(Category.dimension, Category.ordinal, Category.label)
-    
-    if dimension:
-        query = query.where(Category.dimension == dimension)
-    
-    categories = session.exec(query).all()
-    return categories
+def _build_category_response(category: Category, dimension: Dimension, asset_count: int = 0) -> CategoryResponse:
+    """Build a CategoryResponse from a Category and its Dimension."""
+    return CategoryResponse(
+        id=category.id,
+        dimension_id=category.dimension_id,
+        dimension_label=dimension.label,
+        label=category.label,
+        color=category.color,
+        ordinal=category.ordinal,
+        asset_count=asset_count
+    )
+
+
+# ============================================================================
+# Dimension CRUD Endpoints
+# ============================================================================
 
 
 @router.get("/dimensions", response_model=List[DimensionResponse])
 def list_dimensions(session: Session = Depends(get_db)):
-    """
-    List all unique dimensions with their labels.
-    
-    Returns dimensions with info like: [{"dimension": "asset_class", "dimension_label": "Asset Class", "categories": []}]
-    """
-    # Get all categories to extract unique dimensions with labels
-    categories = session.exec(
-        select(Category).order_by(Category.dimension)
+    """List all dimensions with category and asset counts."""
+    dimensions = session.exec(
+        select(Dimension).order_by(Dimension.ordinal, Dimension.label)
     ).all()
     
-    dimensions_map: dict[str, str] = {}
-    for cat in categories:
-        if cat.dimension not in dimensions_map:
-            dimensions_map[cat.dimension] = cat.dimension_label or cat.dimension.replace('_', ' ').title()
+    # Get category counts per dimension
+    cat_counts = dict(session.exec(
+        select(Category.dimension_id, func.count(Category.id))
+        .group_by(Category.dimension_id)
+    ).all())
+    
+    # Get asset counts per dimension (distinct assets)
+    # This requires joining through categories
+    asset_counts_query = (
+        select(Category.dimension_id, func.count(func.distinct(AssetCategory.asset_id)))
+        .join(AssetCategory, AssetCategory.category_id == Category.id)
+        .group_by(Category.dimension_id)
+    )
+    asset_counts = dict(session.exec(asset_counts_query).all())
     
     return [
-        DimensionResponse(dimension=dim, dimension_label=label, categories=[])
-        for dim, label in sorted(dimensions_map.items())
+        DimensionResponse(
+            id=d.id,
+            label=d.label,
+            ordinal=d.ordinal,
+            category_count=cat_counts.get(d.id, 0),
+            asset_count=asset_counts.get(d.id, 0)
+        )
+        for d in dimensions
     ]
-
-
-class DimensionCreate(BaseModel):
-    """Request model for creating a dimension."""
-    dimension: str  # Key like "asset_class"
-    dimension_label: str  # Display like "Asset Class"
-
-
-class DimensionUpdate(BaseModel):
-    """Request model for updating a dimension."""
-    dimension_label: str  # New display name
 
 
 @router.post("/dimensions", response_model=DimensionResponse, status_code=201)
 def create_dimension(data: DimensionCreate, session: Session = Depends(get_db)):
-    """
-    Create a new dimension by creating a placeholder category.
-    
-    The dimension will appear in the UI even without categories.
-    """
-    # Check if dimension already exists
+    """Create a new dimension."""
+    # Check if dimension with same label exists
     existing = session.exec(
-        select(Category).where(Category.dimension == data.dimension)
+        select(Dimension).where(Dimension.label == data.label)
     ).first()
     
     if existing:
         raise HTTPException(
             status_code=400,
-            detail=f"Dimension '{data.dimension}' already exists"
+            detail=f"Dimension '{data.label}' already exists"
         )
     
-    # Create a placeholder category to establish the dimension
-    # This will be the first category users can then add values to
-    category = Category(
-        dimension=data.dimension,
-        dimension_label=data.dimension_label,
-        key="_placeholder",
-        label="(Add values to this dimension)",
-        ordinal=-1,  # Will be at the top
+    dimension = Dimension(
+        label=data.label,
+        ordinal=data.ordinal
     )
     
-    session.add(category)
+    session.add(dimension)
     session.commit()
+    session.refresh(dimension)
     
     return DimensionResponse(
-        dimension=data.dimension,
-        dimension_label=data.dimension_label,
-        categories=[]
+        id=dimension.id,
+        label=dimension.label,
+        ordinal=dimension.ordinal,
+        category_count=0,
+        asset_count=0
     )
 
 
-@router.put("/dimensions/{dimension}", response_model=DimensionResponse)
-def update_dimension(dimension: str, data: DimensionUpdate, session: Session = Depends(get_db)):
-    """
-    Update a dimension's label.
+@router.get("/dimensions/{dimension_id}", response_model=DimensionResponse)
+def get_dimension(dimension_id: int, session: Session = Depends(get_db)):
+    """Get a specific dimension by ID."""
+    dimension = session.get(Dimension, dimension_id)
+    if not dimension:
+        raise HTTPException(status_code=404, detail="Dimension not found")
     
-    This updates the dimension_label for all categories in this dimension.
-    """
-    categories = session.exec(
-        select(Category).where(Category.dimension == dimension)
-    ).all()
+    # Get counts
+    cat_count = session.exec(
+        select(func.count(Category.id)).where(Category.dimension_id == dimension_id)
+    ).one()
     
-    if not categories:
-        raise HTTPException(status_code=404, detail=f"Dimension '{dimension}' not found")
-    
-    for cat in categories:
-        cat.dimension_label = data.dimension_label
-        session.add(cat)
-    
-    session.commit()
+    asset_count = session.exec(
+        select(func.count(func.distinct(AssetCategory.asset_id)))
+        .join(Category, Category.id == AssetCategory.category_id)
+        .where(Category.dimension_id == dimension_id)
+    ).one() or 0
     
     return DimensionResponse(
-        dimension=dimension,
-        dimension_label=data.dimension_label,
-        categories=[CategoryResponse.model_validate(c) for c in categories]
+        id=dimension.id,
+        label=dimension.label,
+        ordinal=dimension.ordinal,
+        category_count=cat_count,
+        asset_count=asset_count
     )
 
 
-@router.delete("/dimensions/{dimension}")
-def delete_dimension(dimension: str, session: Session = Depends(get_db)):
+@router.put("/dimensions/{dimension_id}", response_model=DimensionResponse)
+def update_dimension(dimension_id: int, data: DimensionUpdate, session: Session = Depends(get_db)):
+    """Update a dimension."""
+    dimension = session.get(Dimension, dimension_id)
+    if not dimension:
+        raise HTTPException(status_code=404, detail="Dimension not found")
+    
+    if data.label is not None:
+        # Check for duplicate label
+        existing = session.exec(
+            select(Dimension).where(Dimension.label == data.label, Dimension.id != dimension_id)
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Dimension '{data.label}' already exists")
+        dimension.label = data.label
+    
+    if data.ordinal is not None:
+        dimension.ordinal = data.ordinal
+    
+    session.add(dimension)
+    session.commit()
+    session.refresh(dimension)
+    
+    # Get counts for response
+    cat_count = session.exec(
+        select(func.count(Category.id)).where(Category.dimension_id == dimension_id)
+    ).one()
+    
+    asset_count = session.exec(
+        select(func.count(func.distinct(AssetCategory.asset_id)))
+        .join(Category, Category.id == AssetCategory.category_id)
+        .where(Category.dimension_id == dimension_id)
+    ).one() or 0
+    
+    return DimensionResponse(
+        id=dimension.id,
+        label=dimension.label,
+        ordinal=dimension.ordinal,
+        category_count=cat_count,
+        asset_count=asset_count
+    )
+
+
+@router.delete("/dimensions/{dimension_id}", status_code=204)
+def delete_dimension(dimension_id: int, session: Session = Depends(get_db)):
     """
     Delete a dimension and all its categories.
-    
-    This also removes all asset-category associations for this dimension.
+    Also removes all asset-category associations for this dimension.
     """
+    dimension = session.get(Dimension, dimension_id)
+    if not dimension:
+        raise HTTPException(status_code=404, detail="Dimension not found")
+    
+    # Get all categories in this dimension
     categories = session.exec(
-        select(Category).where(Category.dimension == dimension)
+        select(Category).where(Category.dimension_id == dimension_id)
     ).all()
     
-    if not categories:
-        raise HTTPException(status_code=404, detail=f"Dimension '{dimension}' not found")
-    
-    # Delete asset-category associations first
-    category_ids = [c.id for c in categories]
-    for cat_id in category_ids:
-        session.exec(
-            select(AssetCategory).where(AssetCategory.category_id == cat_id)
-        )
-        # Delete associations
+    # Delete asset-category associations
+    for cat in categories:
         assocs = session.exec(
-            select(AssetCategory).where(AssetCategory.category_id == cat_id)
+            select(AssetCategory).where(AssetCategory.category_id == cat.id)
         ).all()
         for assoc in assocs:
             session.delete(assoc)
@@ -235,92 +305,124 @@ def delete_dimension(dimension: str, session: Session = Depends(get_db)):
     for cat in categories:
         session.delete(cat)
     
+    # Delete dimension
+    session.delete(dimension)
     session.commit()
     
-    return {"message": f"Dimension '{dimension}' and {len(categories)} categories deleted"}
+    return None
 
 
-@router.get("/by-dimension", response_model=List[DimensionResponse])
-def list_categories_by_dimension(session: Session = Depends(get_db)):
-    """
-    List all categories grouped by dimension.
+@router.get("/dimensions/{dimension_id}/unclassified", response_model=UnclassifiedResponse)
+def get_unclassified_assets(dimension_id: int, session: Session = Depends(get_db)):
+    """Get assets that have no category assigned in the specified dimension."""
+    dimension = session.get(Dimension, dimension_id)
+    if not dimension:
+        raise HTTPException(status_code=404, detail="Dimension not found")
     
-    Returns a list of dimensions, each with its categories.
-    """
-    # Get all categories ordered
-    categories = session.exec(
-        select(Category).order_by(Category.dimension, Category.ordinal, Category.label)
+    # Get category IDs for this dimension
+    category_ids = session.exec(
+        select(Category.id).where(Category.dimension_id == dimension_id)
     ).all()
     
-    # Group by dimension
-    dimensions_map: dict[str, dict] = {}
-    for cat in categories:
-        if cat.dimension not in dimensions_map:
-            # Get dimension_label from first category or generate from dimension
-            dim_label = cat.dimension_label or cat.dimension.replace('_', ' ').title()
-            dimensions_map[cat.dimension] = {
-                'dimension_label': dim_label,
-                'categories': []
-            }
-        dimensions_map[cat.dimension]['categories'].append(CategoryResponse.model_validate(cat))
+    # Get assets that have a category from this dimension
+    if category_ids:
+        assets_with_dim_ids = set(session.exec(
+            select(AssetCategory.asset_id).where(AssetCategory.category_id.in_(category_ids))
+        ).all())
+    else:
+        assets_with_dim_ids = set()
+    
+    # Get all assets
+    all_assets = session.exec(select(Asset).order_by(Asset.symbol)).all()
+    
+    # Filter unclassified
+    unclassified = [a for a in all_assets if a.asset_id not in assets_with_dim_ids]
+    
+    return UnclassifiedResponse(
+        dimension_id=dimension_id,
+        dimension_label=dimension.label,
+        count=len(unclassified),
+        assets=[LinkedAssetResponse(asset_id=a.asset_id, symbol=a.symbol, label=a.label) for a in unclassified]
+    )
+
+
+# ============================================================================
+# Category CRUD Endpoints
+# ============================================================================
+
+
+@router.get("", response_model=List[CategoryResponse])
+def list_categories(
+    dimension_id: Optional[int] = Query(None, description="Filter by dimension ID"),
+    session: Session = Depends(get_db)
+):
+    """List all categories, optionally filtered by dimension."""
+    query = select(Category).order_by(Category.dimension_id, Category.ordinal, Category.label)
+    
+    if dimension_id:
+        query = query.where(Category.dimension_id == dimension_id)
+    
+    categories = session.exec(query).all()
+    
+    # Get dimensions for labels
+    dimension_ids = list(set(c.dimension_id for c in categories))
+    dimensions = {d.id: d for d in session.exec(
+        select(Dimension).where(Dimension.id.in_(dimension_ids))
+    ).all()} if dimension_ids else {}
+    
+    # Get asset counts per category
+    count_results = session.exec(
+        select(AssetCategory.category_id, func.count(AssetCategory.asset_id))
+        .group_by(AssetCategory.category_id)
+    ).all()
+    asset_counts = {row[0]: row[1] for row in count_results}
     
     return [
-        DimensionResponse(
-            dimension=dim, 
-            dimension_label=data['dimension_label'],
-            categories=data['categories']
-        )
-        for dim, data in sorted(dimensions_map.items())
+        _build_category_response(c, dimensions.get(c.dimension_id), asset_counts.get(c.id, 0))
+        for c in categories
+        if c.dimension_id in dimensions
     ]
 
 
-@router.get("/hierarchy", response_model=List[DimensionResponse])
-def list_categories_hierarchy(session: Session = Depends(get_db)):
-    """
-    List categories with hierarchy (parent-child relationships).
-    
-    Categories with parent_id are nested under their parent.
-    """
-    categories = session.exec(
-        select(Category).order_by(Category.dimension, Category.ordinal, Category.label)
+@router.get("/by-dimension", response_model=List[DimensionWithCategoriesResponse])
+def list_categories_by_dimension(session: Session = Depends(get_db)):
+    """List all categories grouped by dimension."""
+    # Get all dimensions
+    dimensions = session.exec(
+        select(Dimension).order_by(Dimension.ordinal, Dimension.label)
     ).all()
     
-    # Build hierarchy per dimension
-    def build_tree(cats: List[Category], parent_id: Optional[int] = None) -> List[CategoryWithChildren]:
-        result = []
-        for cat in cats:
-            if cat.parent_id == parent_id:
-                children = build_tree(cats, cat.id)
-                result.append(CategoryWithChildren(
-                    id=cat.id,
-                    dimension=cat.dimension,
-                    key=cat.key,
-                    label=cat.label,
-                    parent_id=cat.parent_id,
-                    color=cat.color,
-                    ordinal=cat.ordinal,
-                    children=children
-                ))
-        return result
+    # Get all categories
+    categories = session.exec(
+        select(Category).order_by(Category.dimension_id, Category.ordinal, Category.label)
+    ).all()
     
-    # Group by dimension first
-    dimensions_map: dict[str, List[Category]] = {}
+    # Get asset counts per category
+    count_results = session.exec(
+        select(AssetCategory.category_id, func.count(AssetCategory.asset_id))
+        .group_by(AssetCategory.category_id)
+    ).all()
+    asset_counts = {row[0]: row[1] for row in count_results}
+    
+    # Group categories by dimension
+    categories_by_dim = {}
     for cat in categories:
-        if cat.dimension not in dimensions_map:
-            dimensions_map[cat.dimension] = []
-        dimensions_map[cat.dimension].append(cat)
+        if cat.dimension_id not in categories_by_dim:
+            categories_by_dim[cat.dimension_id] = []
+        categories_by_dim[cat.dimension_id].append(cat)
     
-    # Build hierarchy for each dimension
-    result = []
-    for dim, cats in sorted(dimensions_map.items()):
-        tree = build_tree(cats, None)
-        # Flatten for response (hierarchy is shown via parent_id)
-        flat_cats = [CategoryResponse.model_validate(c) for c in cats]
-        # Get dimension_label from first category
-        dim_label = cats[0].dimension_label if cats else dim.replace('_', ' ').title()
-        result.append(DimensionResponse(dimension=dim, dimension_label=dim_label, categories=flat_cats))
-    
-    return result
+    return [
+        DimensionWithCategoriesResponse(
+            id=dim.id,
+            label=dim.label,
+            ordinal=dim.ordinal,
+            categories=[
+                _build_category_response(c, dim, asset_counts.get(c.id, 0))
+                for c in categories_by_dim.get(dim.id, [])
+            ]
+        )
+        for dim in dimensions
+    ]
 
 
 @router.get("/{category_id}", response_model=CategoryResponse)
@@ -329,58 +431,69 @@ def get_category(category_id: int, session: Session = Depends(get_db)):
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-    return category
+    
+    dimension = session.get(Dimension, category.dimension_id)
+    
+    # Get asset count
+    count = session.exec(
+        select(func.count(AssetCategory.asset_id))
+        .where(AssetCategory.category_id == category_id)
+    ).one()
+    
+    return _build_category_response(category, dimension, count)
+
+
+@router.get("/{category_id}/assets", response_model=CategoryAssetsResponse)
+def get_category_assets(category_id: int, session: Session = Depends(get_db)):
+    """Get all assets linked to a category."""
+    category = session.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    
+    dimension = session.get(Dimension, category.dimension_id)
+    
+    assets = session.exec(
+        select(Asset)
+        .join(AssetCategory, AssetCategory.asset_id == Asset.asset_id)
+        .where(AssetCategory.category_id == category_id)
+        .order_by(Asset.symbol)
+    ).all()
+    
+    return CategoryAssetsResponse(
+        category_id=category_id,
+        category_label=category.label,
+        dimension_id=category.dimension_id,
+        dimension_label=dimension.label,
+        assets=[LinkedAssetResponse(asset_id=a.asset_id, symbol=a.symbol, label=a.label) for a in assets],
+        count=len(assets)
+    )
 
 
 @router.post("", response_model=CategoryResponse, status_code=201)
 def create_category(data: CategoryCreate, session: Session = Depends(get_db)):
-    """
-    Create a new category.
+    """Create a new category within a dimension."""
+    # Check dimension exists
+    dimension = session.get(Dimension, data.dimension_id)
+    if not dimension:
+        raise HTTPException(status_code=404, detail="Dimension not found")
     
-    The combination of (dimension, key) must be unique.
-    """
-    # Check for duplicate
+    # Check for duplicate label in same dimension
     existing = session.exec(
         select(Category).where(
-            Category.dimension == data.dimension,
-            Category.key == data.key
+            Category.dimension_id == data.dimension_id,
+            Category.label == data.label
         )
     ).first()
     
     if existing:
         raise HTTPException(
             status_code=400,
-            detail=f"Category with dimension '{data.dimension}' and key '{data.key}' already exists"
+            detail=f"Category '{data.label}' already exists in dimension '{dimension.label}'"
         )
     
-    # Validate parent if provided
-    if data.parent_id:
-        parent = session.get(Category, data.parent_id)
-        if not parent:
-            raise HTTPException(status_code=400, detail="Parent category not found")
-        if parent.dimension != data.dimension:
-            raise HTTPException(
-                status_code=400,
-                detail="Parent must be in the same dimension"
-            )
-    
-    # Get dimension_label from existing categories in same dimension, or use provided value
-    dimension_label = data.dimension_label
-    if not dimension_label:
-        existing_in_dim = session.exec(
-            select(Category).where(Category.dimension == data.dimension).limit(1)
-        ).first()
-        if existing_in_dim and existing_in_dim.dimension_label:
-            dimension_label = existing_in_dim.dimension_label
-        else:
-            dimension_label = data.dimension.replace('_', ' ').title()
-    
     category = Category(
-        dimension=data.dimension,
-        dimension_label=dimension_label,
-        key=data.key,
+        dimension_id=data.dimension_id,
         label=data.label,
-        parent_id=data.parent_id,
         color=data.color,
         ordinal=data.ordinal
     )
@@ -389,7 +502,7 @@ def create_category(data: CategoryCreate, session: Session = Depends(get_db)):
     session.commit()
     session.refresh(category)
     
-    return category
+    return _build_category_response(category, dimension, 0)
 
 
 @router.put("/{category_id}", response_model=CategoryResponse)
@@ -403,30 +516,24 @@ def update_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     
-    # Validate parent if changing
-    if data.parent_id is not None:
-        if data.parent_id == category_id:
-            raise HTTPException(status_code=400, detail="Category cannot be its own parent")
-        if data.parent_id != 0:  # 0 means remove parent
-            parent = session.get(Category, data.parent_id)
-            if not parent:
-                raise HTTPException(status_code=400, detail="Parent category not found")
-            if parent.dimension != category.dimension:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Parent must be in the same dimension"
-                )
+    dimension = session.get(Dimension, category.dimension_id)
     
-    # Apply updates
-    if data.dimension_label is not None:
-        # Update dimension_label for all categories in this dimension
-        for cat in session.exec(select(Category).where(Category.dimension == category.dimension)).all():
-            cat.dimension_label = data.dimension_label
-            session.add(cat)
     if data.label is not None:
+        # Check for duplicate label in same dimension
+        existing = session.exec(
+            select(Category).where(
+                Category.dimension_id == category.dimension_id,
+                Category.label == data.label,
+                Category.id != category_id
+            )
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Category '{data.label}' already exists in dimension '{dimension.label}'"
+            )
         category.label = data.label
-    if data.parent_id is not None:
-        category.parent_id = data.parent_id if data.parent_id != 0 else None
+    
     if data.color is not None:
         category.color = data.color
     if data.ordinal is not None:
@@ -436,37 +543,53 @@ def update_category(
     session.commit()
     session.refresh(category)
     
-    return category
+    # Get asset count
+    count = session.exec(
+        select(func.count(AssetCategory.asset_id))
+        .where(AssetCategory.category_id == category_id)
+    ).one()
+    
+    return _build_category_response(category, dimension, count)
 
 
 @router.delete("/{category_id}", status_code=204)
 def delete_category(category_id: int, session: Session = Depends(get_db)):
-    """
-    Delete a category.
-    
-    Will also remove all asset-category associations.
-    Children categories will be orphaned (parent_id set to NULL).
-    """
+    """Delete a category and all its asset associations."""
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     
     # Remove asset associations
-    session.exec(
-        select(AssetCategory).where(AssetCategory.category_id == category_id)
-    )
     for ac in session.exec(select(AssetCategory).where(AssetCategory.category_id == category_id)).all():
         session.delete(ac)
-    
-    # Orphan children (set parent_id to NULL)
-    for child in session.exec(select(Category).where(Category.parent_id == category_id)).all():
-        child.parent_id = None
-        session.add(child)
     
     session.delete(category)
     session.commit()
     
     return None
+
+
+@router.delete("/{category_id}/assets/{asset_id}", status_code=200)
+def unlink_asset_from_category(
+    category_id: int, 
+    asset_id: int, 
+    session: Session = Depends(get_db)
+):
+    """Remove an asset from a category (unlink)."""
+    ac = session.exec(
+        select(AssetCategory).where(
+            AssetCategory.asset_id == asset_id,
+            AssetCategory.category_id == category_id
+        )
+    ).first()
+    
+    if not ac:
+        raise HTTPException(status_code=404, detail="Asset-category link not found")
+    
+    session.delete(ac)
+    session.commit()
+    
+    return {"message": "Asset unlinked from category"}
 
 
 # ============================================================================
@@ -485,12 +608,30 @@ def get_asset_categories(asset_id: int, session: Session = Depends(get_db)):
         select(Category)
         .join(AssetCategory, AssetCategory.category_id == Category.id)
         .where(AssetCategory.asset_id == asset_id)
-        .order_by(Category.dimension, Category.ordinal)
+        .order_by(Category.dimension_id, Category.ordinal)
     ).all()
+    
+    # Get dimensions for labels
+    dimension_ids = list(set(c.dimension_id for c in categories))
+    dimensions = {d.id: d for d in session.exec(
+        select(Dimension).where(Dimension.id.in_(dimension_ids))
+    ).all()} if dimension_ids else {}
+    
+    # Get asset counts per category
+    count_results = session.exec(
+        select(AssetCategory.category_id, func.count(AssetCategory.asset_id))
+        .where(AssetCategory.category_id.in_([c.id for c in categories]))
+        .group_by(AssetCategory.category_id)
+    ).all() if categories else []
+    asset_counts = {row[0]: row[1] for row in count_results}
     
     return AssetCategoriesResponse(
         asset_id=asset_id,
-        categories=[CategoryResponse.model_validate(c) for c in categories]
+        categories=[
+            _build_category_response(c, dimensions.get(c.dimension_id), asset_counts.get(c.id, 0))
+            for c in categories
+            if c.dimension_id in dimensions
+        ]
     )
 
 
@@ -500,11 +641,7 @@ def set_asset_categories(
     data: AssetCategoryAssignment,
     session: Session = Depends(get_db)
 ):
-    """
-    Set categories for an asset (replaces existing assignments).
-    
-    Pass an array of category_ids to assign to the asset.
-    """
+    """Set categories for an asset (replaces existing assignments)."""
     asset = session.get(Asset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -512,10 +649,7 @@ def set_asset_categories(
     # Validate all category IDs exist
     for cat_id in data.category_ids:
         if not session.get(Category, cat_id):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Category with id {cat_id} not found"
-            )
+            raise HTTPException(status_code=400, detail=f"Category with id {cat_id} not found")
     
     # Remove existing assignments
     existing = session.exec(
@@ -532,17 +666,7 @@ def set_asset_categories(
     session.commit()
     
     # Return updated categories
-    categories = session.exec(
-        select(Category)
-        .join(AssetCategory, AssetCategory.category_id == Category.id)
-        .where(AssetCategory.asset_id == asset_id)
-        .order_by(Category.dimension, Category.ordinal)
-    ).all()
-    
-    return AssetCategoriesResponse(
-        asset_id=asset_id,
-        categories=[CategoryResponse.model_validate(c) for c in categories]
-    )
+    return get_asset_categories(asset_id, session)
 
 
 @router.post("/asset/{asset_id}/add/{category_id}", response_model=AssetCategoriesResponse)
@@ -573,18 +697,7 @@ def add_category_to_asset(
         session.add(ac)
         session.commit()
     
-    # Return updated categories
-    categories = session.exec(
-        select(Category)
-        .join(AssetCategory, AssetCategory.category_id == Category.id)
-        .where(AssetCategory.asset_id == asset_id)
-        .order_by(Category.dimension, Category.ordinal)
-    ).all()
-    
-    return AssetCategoriesResponse(
-        asset_id=asset_id,
-        categories=[CategoryResponse.model_validate(c) for c in categories]
-    )
+    return get_asset_categories(asset_id, session)
 
 
 @router.delete("/asset/{asset_id}/remove/{category_id}", response_model=AssetCategoriesResponse)
@@ -598,7 +711,6 @@ def remove_category_from_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     
-    # Find and remove assignment
     ac = session.exec(
         select(AssetCategory).where(
             AssetCategory.asset_id == asset_id,
@@ -610,15 +722,4 @@ def remove_category_from_asset(
         session.delete(ac)
         session.commit()
     
-    # Return updated categories
-    categories = session.exec(
-        select(Category)
-        .join(AssetCategory, AssetCategory.category_id == Category.id)
-        .where(AssetCategory.asset_id == asset_id)
-        .order_by(Category.dimension, Category.ordinal)
-    ).all()
-    
-    return AssetCategoriesResponse(
-        asset_id=asset_id,
-        categories=[CategoryResponse.model_validate(c) for c in categories]
-    )
+    return get_asset_categories(asset_id, session)

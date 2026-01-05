@@ -16,6 +16,8 @@ export { FeesPanel } from './FeesPanel';
 export { WarningsPanel } from './WarningsPanel';
 export { DataExplorerPanel, DataExplorerContent, PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 export { SlidePanel } from './SlidePanel';
+export { CategoryFilterBar } from './CategoryFilterBar';
+export { MarketValuePieChart } from './MarketValuePieChart';
 
 // Types
 export type {
@@ -39,4 +41,8 @@ export type {
     CalculationUnit,
     BundleSummary,
     TransactionSummary,
+    PieChartDataPoint,
 } from './types';
+
+// Utility functions
+export { aggregateMarketValueByCategory } from './types';

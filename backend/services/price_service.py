@@ -110,7 +110,7 @@ class PriceGetterResolver:
         
         result = []
         for apg in asset_getters:
-            config = PriceGetterConfig.from_dict(apg.params)
+            config = PriceGetterConfig.from_db(apg.external_id, apg.params)
             result.append((apg.price_getter, config))
         
         return result
@@ -190,7 +190,7 @@ class CurrencyConverter:
         
         # Configure forex getter to return rate in to_currency
         config = PriceGetterConfig(
-            asset_id=from_upper,
+            external_id=from_upper,
             extra={"to_currency": to_upper}
         )
         

@@ -1,0 +1,159 @@
+transactions:
+  - source: manual
+    source_transaction_id: manual_fa8cc018b4b9
+    account_name: Binance Main
+    asset_symbol: BTC
+    quantity: "0.015000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-04-15T14:12:00"
+    price: "115000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "3.500000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    disposal_taxable: false
+    total: "1725.000000000000000000"
+  - source: mexc-transactions
+    source_transaction_id: manual_bcd389849ce4
+    account_name: MEXC Main
+    asset_symbol: ETH
+    quantity: "0.150000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-01-06T20:22:00"
+    price: "3000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "2.500000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    disposal_taxable: false
+    total: "450.000000000000000000"
+  - source: manual
+    source_transaction_id: manual_8848157c8ab2
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "3.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-11-10T18:35:00"
+    price: "200.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "8.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    disposal_taxable: false
+    total: "600.000000000000000000"
+    tags:
+      expanded: true
+      leg_type: acquired
+  - source: manual
+    source_transaction_id: manual_3ea22bbb8d9a
+    account_name: Degiro
+    asset_symbol: MSFT
+    quantity: "4.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-10-22T18:49:00"
+    price: "200.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    disposal_taxable: false
+    total: "900.000000000000000000"
+    tags:
+      expanded: true
+      leg_type: acquired
+  - source: manual
+    source_transaction_id: manual_40e70a6739b6
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "1.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-11-30T17:59:00"
+    price: "242.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    disposal_taxable: false
+    total: "875.000000000000000000"
+    tags:
+      expanded: true
+      leg_type: acquired
+  - source: manual
+    source_transaction_id: manual_3bb5e6392673
+    account_name: Binance Main
+    asset_symbol: BTC
+    quantity: "0.001000000000000000"
+    direction: outflow
+    transaction_type: transfer
+    date_time: "2025-11-19T04:00:00"
+    price_quote_asset_symbol: EUR
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    disposal_taxable: false
+    from_account_name: Binance Main
+    to_account_name: MEXC Main
+    bundle_id: 1
+  - source: manual
+    source_transaction_id: manual_38937c79f698
+    account_name: MEXC Main
+    asset_symbol: BTC
+    quantity: "0.001000000000000000"
+    direction: inflow
+    transaction_type: transfer
+    date_time: "2025-11-19T04:00:00"
+    price_quote_asset_symbol: EUR
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    disposal_taxable: false
+    from_account_name: Binance Main
+    to_account_name: MEXC Main
+    bundle_id: 1
+  - source: manual
+    source_transaction_id: manual_63f6a93c340a
+    account_name: Degiro
+    asset_symbol: GOOGL
+    quantity: "2.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-09-15T19:05:00"
+    price: "250.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    disposal_taxable: false
+    total: "625.000000000000000000"
+    tags:
+      expanded: true
+      leg_type: acquired
+  - source: manual
+    source_transaction_id: manual_a917a01369fe
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "2.500000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-11-20T19:07:00"
+    price: "300.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "8.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    disposal_taxable: true
+    total: "750.000000000000000000"
+    tags:
+      expanded: true
+      leg_type: disposed

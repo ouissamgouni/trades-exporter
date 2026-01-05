@@ -4,7 +4,7 @@ Pandas DataReader Price Getter.
 Uses pandas_datareader to fetch prices from various data sources.
 Supports stocks, ETFs, and other securities available via FRED, Stooq, etc.
 
-The asset_id should be the ticker symbol appropriate for the data source:
+The external_id should be the ticker symbol appropriate for the data source:
 - Stocks: "AAPL", "MSFT", "GOOGL"
 - ETFs: "SPY", "QQQ"
 
@@ -38,7 +38,7 @@ class DataReaderPriceGetter(BasePriceGetter):
     Price getter implementation using pandas_datareader.
 
     Ticker Resolution:
-    - Uses config.asset_id from database (AssetPriceGetter.params.asset_id)
+    - Uses config.external_id from database (AssetPriceGetter.external_id)
     - Falls back to asset.symbol
 
     Data Sources:
@@ -51,7 +51,7 @@ class DataReaderPriceGetter(BasePriceGetter):
     - tiingo: Requires API key in config.extra["api_key"]
     - alphavantage: Requires API key
 
-    Configure via UI: Assets > [asset] > Price Getters > Add DataReader > Asset ID.
+    Configure via UI: Assets > [asset] > Price Getters > Add DataReader > External ID.
 
     Quote Currency Config:
     - Set `native_quote_currency` in config.extra to specify what currency the ticker returns
@@ -85,8 +85,8 @@ class DataReaderPriceGetter(BasePriceGetter):
             Tuple of (ticker_symbol, data_source, native_quote_currency)
         """
         # Determine ticker
-        if config and config.asset_id:
-            ticker = config.asset_id
+        if config and config.external_id:
+            ticker = config.external_id
         else:
             ticker = asset.symbol.upper()
 
