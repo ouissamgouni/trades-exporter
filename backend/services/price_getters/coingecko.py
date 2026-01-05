@@ -2,9 +2,9 @@
 CoinGecko Price Getter.
 
 Uses CoinGecko API to get current and historical cryptocurrency prices.
-Requires asset_id to be configured in database (AssetPriceGetter.params.asset_id).
+Requires external_id to be configured in database (AssetPriceGetter.external_id).
 
-The asset_id should be the CoinGecko coin ID (e.g., "bitcoin", "ethereum", "solana").
+The external_id should be the CoinGecko coin ID (e.g., "bitcoin", "ethereum", "solana").
 """
 
 import requests
@@ -33,11 +33,11 @@ class CoinGeckoPriceGetter(BasePriceGetter):
     Price getter implementation for CoinGecko API.
 
     Ticker Resolution:
-    - Uses config.asset_id from database (AssetPriceGetter.params.asset_id)
+    - Uses config.external_id from database (AssetPriceGetter.external_id)
     - Falls back to asset.symbol (lowercase) as the CoinGecko coin ID
 
-    The asset_id must be a valid CoinGecko coin ID (e.g., "bitcoin", "ethereum").
-    Configure via UI: Assets > [asset] > Price Getters > Add CoinGecko > Asset ID.
+    The external_id must be a valid CoinGecko coin ID (e.g., "bitcoin", "ethereum").
+    Configure via UI: Assets > [asset] > Price Getters > Add CoinGecko > External ID.
 
     Features:
     - API key rotation on rate limits

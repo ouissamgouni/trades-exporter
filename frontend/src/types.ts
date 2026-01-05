@@ -204,30 +204,69 @@ export interface AssetPriceGetter {
     id: number;
     asset_id: number;
     price_getter: string;
+    external_id?: string | null;  // API identifier: "BTC-USD", "bitcoin", "AAPL"
     priority: number;
     enabled: boolean;
-    params: Record<string, any>;
+    params: Record<string, any>;  // Extra params: native_quote_currency, source, etc.
     created_at?: string;
     updated_at?: string;
+}
+
+// Dimension for asset classification (e.g., "Asset Class", "Sector")
+export interface Dimension {
+    id: number;
+    label: string;           // Display name: "Asset Class", "Sector", "Region"
+    ordinal: number;
+    category_count?: number; // Number of categories in this dimension
+    asset_count?: number;    // Number of unique assets classified in this dimension
 }
 
 // Category for flexible asset classification and reporting
 export interface Category {
     id: number;
-    dimension: string;       // Internal key: "sector", "region", "asset_class"
-    dimension_label?: string; // Display name: "Sector", "Region", "Asset Class"
-    key: string;             // Internal value key: "tech", "us", "stablecoin"
-    label: string;           // Display value: "Technology", "United States", "Stablecoin"
-    parent_id?: number | null;
+    dimension_id: number;    // FK to Dimension
+    dimension_label: string; // Display name from parent dimension (convenience field)
+    label: string;           // Display value: "Cryptocurrency", "DeFi", "United States"
     color?: string | null;
     ordinal: number;
+    asset_count?: number;    // Number of assets linked to this category
 }
 
-export interface DimensionCategories {
-    dimension: string;
-    dimension_label: string;  // Display name for the dimension
+// Linked asset (minimal info for display in category drawer)
+export interface LinkedAsset {
+    asset_id: number;
+    symbol: string;
+    label?: string;
+}
+
+// Response from /categories/{id}/assets endpoint
+export interface CategoryAssetsResponse {
+    category_id: number;
+    category_label: string;
+    dimension_id: number;
+    dimension_label: string;
+    assets: LinkedAsset[];
+    count: number;
+}
+
+// Response from /categories/dimensions/{dimension_id}/unclassified endpoint
+export interface UnclassifiedAssetsResponse {
+    dimension_id: number;
+    dimension_label: string;
+    count: number;
+    assets: LinkedAsset[];
+}
+
+// Dimension with its categories (from /categories/by-dimension endpoint)
+export interface DimensionWithCategories {
+    id: number;
+    label: string;
+    ordinal: number;
     categories: Category[];
 }
+
+// Legacy type alias for backward compatibility
+export type DimensionCategories = DimensionWithCategories;
 
 export interface AssetCategories {
     asset_id: number;

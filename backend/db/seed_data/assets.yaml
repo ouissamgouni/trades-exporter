@@ -1,0 +1,58 @@
+# Asset Configuration
+# ===================
+# This file defines assets to seed into the database.
+# All assets (including defaults) are defined here - this is the single source of truth.
+#
+# Fields:
+#   - symbol: (required) Unique asset symbol
+#   - label: Human-readable name
+#   - price_type: 'crypto', 'stock', or 'fiat' - determines price getter
+#   - tags: Optional list of tags for categorization
+#
+# Run: python -m backend.db.seed --all to seed the database
+
+assets:
+  # =========================================================================
+  # Fiat Currencies (Default)
+  # =========================================================================
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: USD
+    label: US Dollar
+    price_type: fiat
+
+  # =========================================================================
+  # Cryptocurrencies (Default)
+  # =========================================================================
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto
+
+  - symbol: ETH
+    label: Ethereum
+    price_type: crypto
+
+  - symbol: USDT
+    label: Tether
+    price_type: crypto
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  # =========================================================================
+  # Stocks (Test Data)
+  # =========================================================================
+  - symbol: AAPL
+    label: Apple Inc.
+    price_type: stock
+
+  - symbol: MSFT
+    label: Microsoft Corporation
+    price_type: stock
+
+  - symbol: GOOGL
+    label: Alphabet Inc.
+    price_type: stock

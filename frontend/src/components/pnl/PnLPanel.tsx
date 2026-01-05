@@ -24,7 +24,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Badge, Box, Button, Flex, Heading, Switch, Tabs, Text } from '@chakra-ui/react';
 import { FiLayers, FiSave, FiRefreshCw, FiEyeOff, FiEye } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
-import { Account, API_URL, PnLPreviewResponse, PricesResponse, PriceResponse } from '../../types';
+import { Account, API_URL, PnLPreviewResponse, PricesResponse, PriceResponse, DimensionWithCategories } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
@@ -36,6 +36,8 @@ import { AssetPnLTable } from './AssetPnLTable';
 import AssetDetailView from './AssetDetailView';
 import { PnLImpactPanel } from './PnLImpactPanel';
 import { PnLAuditView } from './DataExplorerPanel';
+import { CategoryFilterBar } from './CategoryFilterBar';
+import { MarketValuePieChart } from './MarketValuePieChart';
 
 // Types
 import {
@@ -108,6 +110,11 @@ export const PnLPanel: React.FC = () => {
     const [showUnsettledNegative, setShowUnsettledNegative] = useState(false);
     const [totalUnsettledNegativeCount, setTotalUnsettledNegativeCount] = useState(0);
 
+    // Category filter state (post-calculation display filter)
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+    const [dimensions, setDimensions] = useState<DimensionWithCategories[]>([]);
+    const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+
     // Account data for filter (account_ids is in config)
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
@@ -145,14 +152,116 @@ export const PnLPanel: React.FC = () => {
         fetchAccounts();
     }, []);
 
+    // Fetch categories on mount (for filter bar)
+    useEffect(() => {
+        const fetchCategories = async () => {
+            setIsLoadingCategories(true);
+            try {
+                const response = await fetch(`${API_URL}/categories/by-dimension`);
+                if (response.ok) {
+                    const data: DimensionWithCategories[] = await response.json();
+                    setDimensions(data);
+                }
+            } catch (err) {
+                console.error('Failed to fetch categories:', err);
+            } finally {
+                setIsLoadingCategories(false);
+            }
+        };
+        fetchCategories();
+    }, []);
+
+    // Read category_ids from URL on init (for shareable links)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const urlCategories = params.get('categories');
+        if (urlCategories) {
+            const ids = urlCategories.split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+            if (ids.length > 0) setSelectedCategoryIds(ids);
+        }
+    }, []);
+
+    // Update URL when category filter changes (for shareable links)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (selectedCategoryIds.length > 0) {
+            params.set('categories', selectedCategoryIds.join(','));
+        } else {
+            params.delete('categories');
+        }
+        const newUrl = params.toString()
+            ? `${window.location.pathname}?${params.toString()}`
+            : window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+    }, [selectedCategoryIds]);
+
     // Result data
     const [summary, setSummary] = useState<PnLSummary | null>(null);
     const [assets, setAssets] = useState<AssetPnLRow[]>([]);
 
-    // Note: No client-side filtering needed - filtering happens at calculation time
-    // These aliases maintain compatibility with existing code
-    const filteredAssets = assets;
-    const filteredSummary = summary;
+    // Category filter: filter assets client-side by selected categories
+    // An asset matches if it has at least one category_id in selectedCategoryIds
+    const filteredAssets = useMemo(() => {
+        if (selectedCategoryIds.length === 0) return assets;
+        return assets.filter(asset =>
+            asset.category_ids.some(catId => selectedCategoryIds.includes(catId))
+        );
+    }, [assets, selectedCategoryIds]);
+
+    // Recompute summary from filtered assets
+    const filteredSummary = useMemo((): PnLSummary | null => {
+        if (!summary) return null;
+        if (selectedCategoryIds.length === 0) return summary;
+
+        // Recompute totals from filtered assets
+        const totalPortfolioValue = filteredAssets.reduce((sum, a) => sum + a.cost_basis, 0);
+        const totalUnrealizedPnL = filteredAssets.reduce((sum, a) => sum + a.unrealized_pnl, 0);
+        const totalRealizedPnL = filteredAssets.reduce((sum, a) => sum + a.realized_pnl, 0);
+        const totalFees = filteredAssets.reduce((sum, a) => sum + a.total_fees, 0);
+        const warningCount = filteredAssets.reduce((sum, a) => sum + a.warning_count, 0);
+        const lotsCount = filteredAssets.reduce((sum, a) => sum + a.lot_count, 0);
+        const realizedEventCount = filteredAssets.reduce((sum, a) => sum + a.realized_event_count, 0);
+
+        return {
+            ...summary,
+            total_portfolio_value: totalPortfolioValue,
+            total_unrealized_pnl: totalUnrealizedPnL,
+            total_realized_pnl: totalRealizedPnL,
+            total_fees: totalFees,
+            warning_count: warningCount,
+            lots_created_count: lotsCount,
+            consumed_slices_count: realizedEventCount,
+        };
+    }, [summary, filteredAssets, selectedCategoryIds]);
+
+    // Compute available category IDs (categories that have assets in current results)
+    const availableCategoryIds = useMemo(() => {
+        const ids = new Set<number>();
+        assets.forEach(asset => {
+            asset.category_ids.forEach(catId => ids.add(catId));
+        });
+        return ids;
+    }, [assets]);
+
+    // Handler for pie chart category click - toggles category filter
+    const handlePieCategoryClick = useCallback((categoryId: number | null) => {
+        if (categoryId === null) {
+            // Clicking "Uncategorized" clears all filters to show uncategorized assets
+            // Or we could show only uncategorized - for now, clear filter
+            setSelectedCategoryIds([]);
+        } else {
+            // Toggle the category in selection
+            setSelectedCategoryIds(prev => {
+                if (prev.includes(categoryId)) {
+                    // Remove if already selected
+                    return prev.filter(id => id !== categoryId);
+                } else {
+                    // Add to selection (allows multi-select)
+                    return [...prev, categoryId];
+                }
+            });
+        }
+    }, []);
 
     // View state
     const [currentView, setCurrentView] = useState<PnLView>('summary');
@@ -274,6 +383,7 @@ export const PnLPanel: React.FC = () => {
             asset_id: balance.asset.id,
             asset_symbol: balance.asset.name,
             account_ids: balance.account_ids || [],  // All accounts holding this asset
+            category_ids: balance.category_ids || [],  // All categories assigned to this asset
             quantity: balance.qty,
             market_value: 0, // Updated by prices
             cost_basis: balance.cost_basis_in_base,
@@ -1354,6 +1464,19 @@ export const PnLPanel: React.FC = () => {
                         </Flex>
                     )}
 
+                    {/* Category Filter Bar (post-calculation display filter) - before summary cards */}
+                    {currentView !== 'asset-detail' && dimensions.length > 0 && availableCategoryIds.size > 0 && (
+                        <CategoryFilterBar
+                            dimensions={dimensions}
+                            selectedCategoryIds={selectedCategoryIds}
+                            onSelectionChange={setSelectedCategoryIds}
+                            availableCategoryIds={availableCategoryIds}
+                            totalAssetCount={assets.length}
+                            filteredAssetCount={filteredAssets.length}
+                            isLoading={isLoadingCategories}
+                        />
+                    )}
+
                     {/* Summary Cards (always visible except in asset detail) */}
                     {currentView !== 'asset-detail' && filteredSummary && (
                         <SummaryCards
@@ -1367,6 +1490,17 @@ export const PnLPanel: React.FC = () => {
                                 setMainTab('audit');
                                 setAuditSubTab('warnings');
                             }}
+                        />
+                    )}
+
+                    {/* Market Value Pie Chart (after summary cards, before asset table) */}
+                    {currentView !== 'asset-detail' && dimensions.length > 0 && assets.length > 0 && (
+                        <MarketValuePieChart
+                            assets={assets}
+                            dimensions={dimensions}
+                            baseCurrency={config.base_currency_symbol}
+                            selectedCategoryIds={selectedCategoryIds}
+                            onCategoryClick={handlePieCategoryClick}
                         />
                     )}
 

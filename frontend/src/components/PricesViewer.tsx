@@ -1,11 +1,11 @@
 
 import {
     Badge, Box,
-    Button, Dialog, Flex,
+    Button, Checkbox, Dialog, Flex,
     Heading, Input, NativeSelect, Portal, Spinner,
     Table, Text
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { API_URL, Asset, PriceSnapshot } from '../types';
 
 export const PricesViewer: React.FC = () => {
@@ -19,19 +19,34 @@ export const PricesViewer: React.FC = () => {
     const [newPrice, setNewPrice] = useState<Partial<PriceSnapshot>>({});
     const [assetIdFilter, setAssetIdFilter] = useState<string>('');
     const [quoteAssetIdFilter, setQuoteAssetIdFilter] = useState<string>('');
+    const [sourceFilter, setSourceFilter] = useState<string>('');
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+    const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
 
     useEffect(() => {
         fetchPrices();
         fetchAssets();
-    }, [assetIdFilter, quoteAssetIdFilter]);
+    }, [assetIdFilter, quoteAssetIdFilter, sourceFilter]);
+
+    // Extract unique sources from fetched prices for filter dropdown
+    const availableSources = useMemo(() => {
+        const sources = new Set<string>();
+        prices.forEach(p => {
+            if (p.source) sources.add(p.source);
+        });
+        return Array.from(sources).sort();
+    }, [prices]);
 
     const fetchPrices = async () => {
         setLoading(true);
         setError(null);
+        setSelectedIds(new Set()); // Clear selection on refresh
         try {
             const params = new URLSearchParams();
             if (assetIdFilter) params.append('asset_id', assetIdFilter);
             if (quoteAssetIdFilter) params.append('quote_asset_id', quoteAssetIdFilter);
+            if (sourceFilter) params.append('source', sourceFilter);
             const response = await fetch(`${API_URL}/price-snapshots?${params}`);
             if (!response.ok) throw new Error('Failed to fetch prices');
             const data = await response.json();
@@ -45,7 +60,7 @@ export const PricesViewer: React.FC = () => {
 
     const fetchAssets = async () => {
         try {
-            const response = await fetch(`${API_URL}/assets`);
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
             if (response.ok) {
                 const data = await response.json();
                 setAssets(data);
@@ -123,6 +138,55 @@ export const PricesViewer: React.FC = () => {
         }
     };
 
+    const toggleSelection = (snapshotId: number) => {
+        setSelectedIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(snapshotId)) {
+                newSet.delete(snapshotId);
+            } else {
+                newSet.add(snapshotId);
+            }
+            return newSet;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === prices.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(prices.map(p => p.snapshot_id)));
+        }
+    };
+
+    const clearSelection = () => {
+        setSelectedIds(new Set());
+    };
+
+    const bulkDelete = async () => {
+        if (selectedIds.size === 0) return;
+        setBulkDeleteLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/price-snapshots/bulk/delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshot_ids: Array.from(selectedIds) })
+            });
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Failed to delete prices');
+            }
+            const result = await response.json();
+            alert(`Successfully deleted ${result.affected_count} price record(s)`);
+            setShowBulkDeleteDialog(false);
+            setSelectedIds(new Set());
+            await fetchPrices();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to delete prices');
+        } finally {
+            setBulkDeleteLoading(false);
+        }
+    };
+
     if (loading) return (
         <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
             <Spinner size="xl" color="blue.500" />
@@ -188,8 +252,24 @@ export const PricesViewer: React.FC = () => {
                         </NativeSelect.Field>
                     </NativeSelect.Root>
                 </Flex>
-                {(assetIdFilter || quoteAssetIdFilter) && (
-                    <Button size="sm" variant="outline" onClick={() => { setAssetIdFilter(''); setQuoteAssetIdFilter(''); }}>
+                <Flex align="center" gap={2}>
+                    <Text fontWeight="medium" fontSize="sm">Source:</Text>
+                    <NativeSelect.Root size="sm" width="150px">
+                        <NativeSelect.Field
+                            value={sourceFilter}
+                            onChange={e => setSourceFilter(e.target.value)}
+                        >
+                            <option value="">All Sources</option>
+                            {availableSources.map(source => (
+                                <option key={source} value={source}>
+                                    {source}
+                                </option>
+                            ))}
+                        </NativeSelect.Field>
+                    </NativeSelect.Root>
+                </Flex>
+                {(assetIdFilter || quoteAssetIdFilter || sourceFilter) && (
+                    <Button size="sm" variant="outline" onClick={() => { setAssetIdFilter(''); setQuoteAssetIdFilter(''); setSourceFilter(''); }}>
                         Clear Filters
                     </Button>
                 )}
@@ -199,12 +279,20 @@ export const PricesViewer: React.FC = () => {
                 <Table.Root size="sm">
                     <Table.Header>
                         <Table.Row>
+                            <Table.ColumnHeader width="40px">
+                                <Checkbox.Root
+                                    checked={prices.length > 0 && selectedIds.size === prices.length}
+                                    onCheckedChange={toggleSelectAll}
+                                >
+                                    <Checkbox.HiddenInput />
+                                    <Checkbox.Control />
+                                </Checkbox.Root>
+                            </Table.ColumnHeader>
                             <Table.ColumnHeader>Asset</Table.ColumnHeader>
                             <Table.ColumnHeader>Quote Asset</Table.ColumnHeader>
                             <Table.ColumnHeader>Snapshot Time</Table.ColumnHeader>
                             <Table.ColumnHeader>Price</Table.ColumnHeader>
                             <Table.ColumnHeader>Source</Table.ColumnHeader>
-                            <Table.ColumnHeader>Created</Table.ColumnHeader>
                             <Table.ColumnHeader>Actions</Table.ColumnHeader>
                         </Table.Row>
                     </Table.Header>
@@ -221,7 +309,16 @@ export const PricesViewer: React.FC = () => {
                             prices.map((price, index) => {
                                 const key = price.snapshot_id ? getEditKey(price) : `price-${index}`;
                                 return (
-                                    <Table.Row key={key}>
+                                    <Table.Row key={key} bg={selectedIds.has(price.snapshot_id) ? 'blue.50' : undefined}>
+                                        <Table.Cell>
+                                            <Checkbox.Root
+                                                checked={selectedIds.has(price.snapshot_id)}
+                                                onCheckedChange={() => toggleSelection(price.snapshot_id)}
+                                            >
+                                                <Checkbox.HiddenInput />
+                                                <Checkbox.Control />
+                                            </Checkbox.Root>
+                                        </Table.Cell>
                                         <Table.Cell>
                                             <Badge colorPalette="blue">{price.asset_symbol || getAssetSymbol(price.asset_id)}</Badge>
                                         </Table.Cell>
@@ -254,9 +351,6 @@ export const PricesViewer: React.FC = () => {
                                             ) : (
                                                 <Text fontSize="sm">{price.source || '-'}</Text>
                                             )}
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Text fontSize="sm">{price.created_at || '-'}</Text>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Flex gap={1}>
@@ -292,8 +386,87 @@ export const PricesViewer: React.FC = () => {
             <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
                 <Text fontSize="sm" color="gray.600">
                     <strong>Total:</strong> {prices.length} price records
+                    {selectedIds.size > 0 && (
+                        <> | <strong>Selected:</strong> {selectedIds.size}</>
+                    )}
                 </Text>
             </Box>
+
+            {/* Bulk Action Bar */}
+            {selectedIds.size > 0 && (
+                <Box
+                    position="fixed"
+                    bottom={4}
+                    left="50%"
+                    transform="translateX(-50%)"
+                    bg="gray.800"
+                    color="white"
+                    px={6}
+                    py={3}
+                    borderRadius="lg"
+                    boxShadow="lg"
+                    zIndex={10}
+                >
+                    <Flex align="center" gap={4}>
+                        <Text fontWeight="medium">
+                            {selectedIds.size} selected
+                        </Text>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            colorPalette="whiteAlpha"
+                            onClick={clearSelection}
+                        >
+                            Clear Selection
+                        </Button>
+                        <Button
+                            size="sm"
+                            colorPalette="red"
+                            onClick={() => setShowBulkDeleteDialog(true)}
+                        >
+                            🗑️ Delete Selected
+                        </Button>
+                    </Flex>
+                </Box>
+            )}
+
+            {/* Bulk Delete Confirmation Dialog */}
+            <Dialog.Root open={showBulkDeleteDialog} onOpenChange={(e) => setShowBulkDeleteDialog(e.open)}>
+                <Portal>
+                    <Dialog.Backdrop />
+                    <Dialog.Positioner>
+                        <Dialog.Content>
+                            <Dialog.Header>
+                                <Dialog.Title>Confirm Bulk Delete</Dialog.Title>
+                            </Dialog.Header>
+                            <Dialog.Body>
+                                <Text>
+                                    Are you sure you want to delete <strong>{selectedIds.size}</strong> price record(s)?
+                                    This action cannot be undone.
+                                </Text>
+                            </Dialog.Body>
+                            <Dialog.Footer>
+                                <Flex gap={2}>
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => setShowBulkDeleteDialog(false)}
+                                        disabled={bulkDeleteLoading}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        colorPalette="red"
+                                        onClick={bulkDelete}
+                                        disabled={bulkDeleteLoading}
+                                    >
+                                        {bulkDeleteLoading ? <Spinner size="sm" /> : 'Delete'}
+                                    </Button>
+                                </Flex>
+                            </Dialog.Footer>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
 
             {/* Create Price Dialog */}
             <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>

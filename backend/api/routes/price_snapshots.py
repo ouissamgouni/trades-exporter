@@ -15,6 +15,21 @@ from backend.db.models import PriceSnapshot, Asset, ensure_utc
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
 
 
+class BulkDeleteRequest(BaseModel):
+    """Request model for bulk deleting price snapshots."""
+
+    snapshot_ids: List[int]
+
+
+class BulkOperationResponse(BaseModel):
+    """Response model for bulk operations."""
+
+    success: bool
+    affected_count: int
+    message: str
+    errors: List[str] = []
+
+
 def parse_datetime(dt_str: str) -> datetime:
     """Parse datetime string to timezone-aware datetime object."""
     try:
@@ -306,6 +321,50 @@ def update_price_snapshot(
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.post("/bulk/delete", response_model=BulkOperationResponse)
+def bulk_delete_price_snapshots(
+    request: BulkDeleteRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Delete multiple price snapshots by their IDs.
+
+    - **snapshot_ids**: List of snapshot IDs to delete
+    """
+    if not request.snapshot_ids:
+        return BulkOperationResponse(
+            success=True,
+            affected_count=0,
+            message="No snapshot IDs provided",
+            errors=[],
+        )
+
+    errors = []
+    deleted_count = 0
+
+    try:
+        for snapshot_id in request.snapshot_ids:
+            snapshot = session.get(PriceSnapshot, snapshot_id)
+            if snapshot:
+                session.delete(snapshot)
+                deleted_count += 1
+            else:
+                errors.append(f"Snapshot ID {snapshot_id} not found")
+
+        session.commit()
+
+        return BulkOperationResponse(
+            success=len(errors) == 0,
+            affected_count=deleted_count,
+            message=f"Deleted {deleted_count} price snapshot(s)",
+            errors=errors,
+        )
+
+    except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 

@@ -1,10 +1,10 @@
 import {
     Badge, Box,
-    Button, Collapsible, Heading, HStack, IconButton, Input,
+    Button, Card, Collapsible, Heading, HStack, IconButton, Input,
     Table, Text, useDisclosure, VStack
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
-import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiSettings, FiTrash2 } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
 import { Account, API_URL } from '../types';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
@@ -16,7 +16,7 @@ const AccountsManagement: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const [accountTypeFilter, setAccountTypeFilter] = useState<string>('');
     const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-    const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
+    const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
 
     const fetchAccounts = async () => {
@@ -85,7 +85,32 @@ const AccountsManagement: React.FC = () => {
     };
 
     const toggleExpand = (accountId: number) => {
-        setExpandedAccountId(prev => prev === accountId ? null : accountId);
+        setExpandedAccountIds(prev => {
+            const next = new Set(prev);
+            if (next.has(accountId)) {
+                next.delete(accountId);
+            } else {
+                next.add(accountId);
+            }
+            return next;
+        });
+    };
+
+    const expandAll = () => {
+        setExpandedAccountIds(new Set(filteredAccounts.map(a => a.id)));
+    };
+
+    const collapseAll = () => {
+        setExpandedAccountIds(new Set());
+    };
+
+    const getAccountTypeIcon = (type: string) => {
+        switch (type) {
+            case 'cex': return '🏦';
+            case 'broker': return '📈';
+            case 'wallet': return '👛';
+            default: return '📁';
+        }
     };
 
     return (
@@ -93,13 +118,26 @@ const AccountsManagement: React.FC = () => {
             <VStack align="stretch" gap={4}>
                 {/* Header */}
                 <HStack justify="space-between">
-                    <Heading size="lg">Accounts Management</Heading>
-                    <Button
-                        colorScheme="blue"
-                        onClick={handleCreate}
-                    >
-                        <FiPlus /> Add Account
-                    </Button>
+                    <Box>
+                        <Heading size="lg">Accounts & Connectors</Heading>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                            Manage accounts with their data connectors inline. Click an account to configure connectors.
+                        </Text>
+                    </Box>
+                    <HStack gap={2}>
+                        <Button size="sm" variant="ghost" onClick={expandAll}>
+                            Expand All
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={collapseAll}>
+                            Collapse All
+                        </Button>
+                        <Button
+                            colorScheme="blue"
+                            onClick={handleCreate}
+                        >
+                            <FiPlus /> Add Account
+                        </Button>
+                    </HStack>
                 </HStack>
 
                 {/* Filters */}
@@ -145,135 +183,108 @@ const AccountsManagement: React.FC = () => {
                     </HStack>
                 </HStack>
 
-                {/* Table */}
-                <Box overflowX="auto" borderWidth="1px" borderRadius="lg">
-                    <Table.Root size="sm">
-                        <Table.Header>
-                            <Table.Row>
-                                <Table.ColumnHeader>Name</Table.ColumnHeader>
-                                <Table.ColumnHeader>Type</Table.ColumnHeader>
-                                <Table.ColumnHeader>Address/Identifier</Table.ColumnHeader>
-                                <Table.ColumnHeader>Tags</Table.ColumnHeader>
-                                <Table.ColumnHeader>Created</Table.ColumnHeader>
-                                <Table.ColumnHeader textAlign="right">Actions</Table.ColumnHeader>
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                            {loading ? (
-                                <Table.Row>
-                                    <Table.Cell colSpan={6}>
-                                        <Text textAlign="center" py={4}>Loading accounts...</Text>
-                                    </Table.Cell>
-                                </Table.Row>
-                            ) : filteredAccounts.length === 0 ? (
-                                <Table.Row>
-                                    <Table.Cell colSpan={6}>
-                                        <Text textAlign="center" py={4}>No accounts found</Text>
-                                    </Table.Cell>
-                                </Table.Row>
-                            ) : (
-                                filteredAccounts.map((account) => {
-                                    const getRowBgColor = (type: string) => {
-                                        switch (type) {
-                                            case 'cex': return 'blue.50';
-                                            case 'broker': return 'green.50';
-                                            case 'wallet': return 'purple.50';
-                                            default: return undefined;
-                                        }
-                                    };
-                                    return (
-                                        <React.Fragment key={account.id}>
-                                            <Table.Row
-                                                cursor="pointer"
-                                                bg={getRowBgColor(account.account_type)}
-                                                _hover={{ bg: 'gray.100' }}
-                                                onClick={() => toggleExpand(account.id)}
-                                            >
-                                                <Table.Cell>
-                                                    <HStack>
-                                                        {expandedAccountId === account.id ? (
-                                                            <FiChevronDown />
-                                                        ) : (
-                                                            <FiChevronRight />
-                                                        )}
-                                                        <Text fontWeight="medium">{account.name}</Text>
-                                                    </HStack>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <Badge colorScheme={getAccountTypeBadgeColor(account.account_type)}>
-                                                        {account.account_type.toUpperCase()}
-                                                    </Badge>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <Text fontSize="sm" color="gray.600" truncate maxW="300px">
-                                                        {account.address_or_identifier || '-'}
-                                                    </Text>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <HStack gap={1} flexWrap="wrap">
-                                                        {account.tags?.slice(0, 3).map((tag, idx) => (
-                                                            <Badge key={idx} size="sm" variant="subtle">
-                                                                {tag}
+                {/* Accounts as Expandable Cards */}
+                <VStack align="stretch" gap={3}>
+                    {loading ? (
+                        <Box textAlign="center" py={8}>
+                            <Text>Loading accounts...</Text>
+                        </Box>
+                    ) : filteredAccounts.length === 0 ? (
+                        <Box textAlign="center" py={8} bg="gray.50" borderRadius="lg">
+                            <Text color="gray.600" mb={4}>No accounts found</Text>
+                            <Button colorScheme="blue" onClick={handleCreate}>
+                                <FiPlus /> Create Your First Account
+                            </Button>
+                        </Box>
+                    ) : (
+                        filteredAccounts.map((account) => {
+                            const isExpanded = expandedAccountIds.has(account.id);
+                            const bgColor = {
+                                cex: 'blue.50',
+                                broker: 'green.50',
+                                wallet: 'purple.50'
+                            }[account.account_type] || 'gray.50';
+
+                            return (
+                                <Card.Root key={account.id} variant="outline">
+                                    {/* Account Header - Clickable */}
+                                    <Card.Body p={0}>
+                                        <Box
+                                            p={4}
+                                            cursor="pointer"
+                                            bg={bgColor}
+                                            borderBottomWidth={isExpanded ? 1 : 0}
+                                            borderColor="gray.200"
+                                            onClick={() => toggleExpand(account.id)}
+                                            _hover={{ opacity: 0.9 }}
+                                            transition="all 0.15s"
+                                        >
+                                            <HStack justify="space-between">
+                                                <HStack gap={3}>
+                                                    {isExpanded ? <FiChevronDown /> : <FiChevronRight />}
+                                                    <Text fontSize="lg">{getAccountTypeIcon(account.account_type)}</Text>
+                                                    <Box>
+                                                        <HStack gap={2}>
+                                                            <Text fontWeight="semibold">{account.name}</Text>
+                                                            <Badge colorScheme={getAccountTypeBadgeColor(account.account_type)}>
+                                                                {account.account_type.toUpperCase()}
                                                             </Badge>
-                                                        ))}
-                                                        {account.tags?.length > 3 && (
-                                                            <Badge size="sm" variant="subtle">
-                                                                +{account.tags.length - 3}
-                                                            </Badge>
+                                                        </HStack>
+                                                        {account.address_or_identifier && (
+                                                            <Text fontSize="xs" color="gray.600" fontFamily="mono">
+                                                                {account.address_or_identifier.length > 40
+                                                                    ? `${account.address_or_identifier.slice(0, 20)}...${account.address_or_identifier.slice(-10)}`
+                                                                    : account.address_or_identifier}
+                                                            </Text>
                                                         )}
-                                                    </HStack>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <Text fontSize="sm" color="gray.600">
-                                                        {new Date(account.created_at).toLocaleDateString()}
-                                                    </Text>
-                                                </Table.Cell>
-                                                <Table.Cell textAlign="right">
-                                                    <HStack justify="flex-end" gap={2} onClick={(e) => e.stopPropagation()}>
-                                                        <IconButton
-                                                            aria-label="Configure connectors"
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            colorScheme="purple"
-                                                            onClick={() => toggleExpand(account.id)}
-                                                        >
-                                                            <FiSettings />
-                                                        </IconButton>
-                                                        <IconButton
-                                                            aria-label="Edit account"
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            onClick={() => handleEdit(account)}
-                                                        >
-                                                            <FiEdit2 />
-                                                        </IconButton>
-                                                        <IconButton
-                                                            aria-label="Delete account"
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            colorScheme="red"
-                                                            onClick={() => handleDelete(account.id)}
-                                                        >
-                                                            <FiTrash2 />
-                                                        </IconButton>
-                                                    </HStack>
-                                                </Table.Cell>
-                                            </Table.Row>
-                                            {/* Expanded Connectors Panel */}
-                                            {expandedAccountId === account.id && (
-                                                <Table.Row>
-                                                    <Table.Cell colSpan={6} bg="gray.50" p={4}>
-                                                        <AccountConnectors account={account} />
-                                                    </Table.Cell>
-                                                </Table.Row>
+                                                    </Box>
+                                                </HStack>
+                                                <HStack gap={2} onClick={(e) => e.stopPropagation()}>
+                                                    {account.tags?.slice(0, 2).map((tag, idx) => (
+                                                        <Badge key={idx} size="sm" variant="subtle">
+                                                            {tag}
+                                                        </Badge>
+                                                    ))}
+                                                    <IconButton
+                                                        aria-label="Edit account"
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => handleEdit(account)}
+                                                    >
+                                                        <FiEdit2 />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        aria-label="Delete account"
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        colorScheme="red"
+                                                        onClick={() => handleDelete(account.id)}
+                                                    >
+                                                        <FiTrash2 />
+                                                    </IconButton>
+                                                </HStack>
+                                            </HStack>
+                                            {!isExpanded && (
+                                                <Text fontSize="xs" color="gray.500" ml={10} mt={1}>
+                                                    Click to configure connectors →
+                                                </Text>
                                             )}
-                                        </React.Fragment>
-                                    )
-                                })
-                            )}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
+                                        </Box>
+
+                                        {/* Inline Connectors Panel */}
+                                        <Collapsible.Root open={isExpanded}>
+                                            <Collapsible.Content>
+                                                <Box p={4} bg="white">
+                                                    <AccountConnectors account={account} />
+                                                </Box>
+                                            </Collapsible.Content>
+                                        </Collapsible.Root>
+                                    </Card.Body>
+                                </Card.Root>
+                            );
+                        })
+                    )}
+                </VStack>
 
                 {/* Summary */}
                 <Text fontSize="sm" color="gray.600">

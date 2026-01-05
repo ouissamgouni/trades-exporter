@@ -2,10 +2,70 @@ import {
     Badge, Box,
     Button, Dialog, Flex,
     Heading, Input, NativeSelect, Portal, Spinner,
-    Table, Text
+    Table, Text, HStack
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Account, RawAccount } from '../types';
+import { Tooltip } from './ui/tooltip';
+
+// Fuzzy matching utility for smart suggestions
+const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase().trim();
+    const s2 = str2.toLowerCase().trim();
+
+    // Exact match
+    if (s1 === s2) return 1.0;
+
+    // Contains match
+    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+
+    // Starts/ends with match (good for addresses)
+    if (s1.startsWith(s2) || s2.startsWith(s1)) return 0.7;
+    if (s1.endsWith(s2) || s2.endsWith(s1)) return 0.6;
+
+    // For blockchain addresses, compare first and last chars
+    if (s1.length > 10 && s2.length > 10) {
+        const prefix1 = s1.slice(0, 6);
+        const prefix2 = s2.slice(0, 6);
+        const suffix1 = s1.slice(-4);
+        const suffix2 = s2.slice(-4);
+        if (prefix1 === prefix2 && suffix1 === suffix2) return 0.95;
+        if (prefix1 === prefix2 || suffix1 === suffix2) return 0.5;
+    }
+
+    // Levenshtein for short strings
+    const maxLen = Math.max(s1.length, s2.length);
+    if (maxLen === 0) return 1.0;
+    if (maxLen > 20) return 0; // Skip for long addresses
+
+    const distance = levenshteinDistance(s1, s2);
+    return 1 - (distance / maxLen);
+};
+
+const levenshteinDistance = (str1: string, str2: string): number => {
+    const m = str1.length;
+    const n = str2.length;
+    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            if (str1[i - 1] === str2[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1];
+            } else {
+                dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+            }
+        }
+    }
+    return dp[m][n];
+};
+
+interface SuggestedMatch {
+    account: Account;
+    confidence: number;
+}
 
 export const RawAccountsEditor: React.FC = () => {
     const [rawAccounts, setRawAccounts] = useState<RawAccount[]>([]);
@@ -55,6 +115,37 @@ export const RawAccountsEditor: React.FC = () => {
         }
     };
 
+    // Compute smart suggestions for unlinked raw accounts
+    const suggestionsMap = useMemo(() => {
+        const map = new Map<string, SuggestedMatch[]>();
+
+        rawAccounts
+            .filter(ra => ra.account_id === null || ra.account_id === undefined)
+            .forEach(rawAccount => {
+                const label = rawAccount.label;
+                const suggestions: SuggestedMatch[] = [];
+
+                for (const account of accounts) {
+                    // Compare against account name and address
+                    const nameSim = calculateSimilarity(label, account.name);
+                    const addrSim = account.address_or_identifier
+                        ? calculateSimilarity(label, account.address_or_identifier)
+                        : 0;
+                    const similarity = Math.max(nameSim, addrSim);
+
+                    if (similarity >= 0.5) {
+                        suggestions.push({ account, confidence: similarity });
+                    }
+                }
+
+                suggestions.sort((a, b) => b.confidence - a.confidence);
+                const key = `${rawAccount.source}:${rawAccount.label}`;
+                map.set(key, suggestions.slice(0, 3));
+            });
+
+        return map;
+    }, [rawAccounts, accounts]);
+
     const getAccountName = (accountId: number | null | undefined) => {
         if (accountId === null || accountId === undefined) return null;
         const account = accounts.find(a => a.id === accountId);
@@ -81,6 +172,47 @@ export const RawAccountsEditor: React.FC = () => {
             setEditAccountId(null);
         } catch (err) {
             alert(err instanceof Error ? err.message : 'Failed to save');
+        }
+    };
+
+    // Quick accept suggestion
+    const acceptSuggestion = async (rawAccount: RawAccount, accountId: number) => {
+        try {
+            const response = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account_id: accountId })
+            });
+            if (!response.ok) throw new Error('Failed to update raw account');
+            await fetchRawAccounts();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'Failed to save');
+        }
+    };
+
+    // Bulk auto-map all high-confidence suggestions
+    const autoMapAll = async () => {
+        const toMap: { rawAccount: RawAccount; accountId: number }[] = [];
+
+        rawAccounts
+            .filter(ra => ra.account_id === null || ra.account_id === undefined)
+            .forEach(rawAccount => {
+                const key = getEditKey(rawAccount);
+                const suggestions = suggestionsMap.get(key) || [];
+                if (suggestions.length > 0 && suggestions[0].confidence >= 0.9) {
+                    toMap.push({ rawAccount, accountId: suggestions[0].account.id });
+                }
+            });
+
+        if (toMap.length === 0) {
+            alert('No high-confidence matches found to auto-map');
+            return;
+        }
+
+        if (!confirm(`Auto-map ${toMap.length} raw account(s) with high confidence matches?`)) return;
+
+        for (const { rawAccount, accountId } of toMap) {
+            await acceptSuggestion(rawAccount, accountId);
         }
     };
 
@@ -143,6 +275,10 @@ export const RawAccountsEditor: React.FC = () => {
     // Get unique sources for filter
     const uniqueSources = [...new Set(rawAccounts.map(ra => ra.source))];
 
+    // Count suggestions available
+    const suggestionsAvailableCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0).length;
+    const highConfidenceCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0 && s[0].confidence >= 0.9).length;
+
     if (loading) return (
         <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
             <Spinner size="xl" color="blue.500" />
@@ -169,6 +305,11 @@ export const RawAccountsEditor: React.FC = () => {
                     </Text>
                 </Box>
                 <Flex gap={2}>
+                    {highConfidenceCount > 0 && (
+                        <Button colorPalette="green" variant="outline" onClick={autoMapAll}>
+                            ✨ Auto-Map ({highConfidenceCount})
+                        </Button>
+                    )}
                     <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
@@ -177,6 +318,18 @@ export const RawAccountsEditor: React.FC = () => {
                     </Button>
                 </Flex>
             </Flex>
+
+            {/* Smart Suggestions Banner */}
+            {suggestionsAvailableCount > 0 && (
+                <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
+                    <HStack justify="space-between">
+                        <Text fontSize="sm" color="blue.700">
+                            💡 <strong>{suggestionsAvailableCount}</strong> unlinked account(s) have suggested matches.
+                            {highConfidenceCount > 0 && ` ${highConfidenceCount} high-confidence match(es) can be auto-mapped.`}
+                        </Text>
+                    </HStack>
+                </Box>
+            )}
 
             <Flex gap={4} mb={6} align="center" flexWrap="wrap">
                 <Flex align="center" gap={2}>
@@ -220,7 +373,7 @@ export const RawAccountsEditor: React.FC = () => {
                             <Table.ColumnHeader>Label / Address</Table.ColumnHeader>
                             <Table.ColumnHeader>Source</Table.ColumnHeader>
                             <Table.ColumnHeader>Linked Account</Table.ColumnHeader>
-                            <Table.ColumnHeader>Status</Table.ColumnHeader>
+                            <Table.ColumnHeader>Suggestions</Table.ColumnHeader>
                             <Table.ColumnHeader>Actions</Table.ColumnHeader>
                         </Table.Row>
                     </Table.Header>
@@ -237,8 +390,11 @@ export const RawAccountsEditor: React.FC = () => {
                             rawAccounts.map(rawAccount => {
                                 const key = getEditKey(rawAccount);
                                 const isEditing = editingKey === key;
+                                const suggestions = suggestionsMap.get(key) || [];
+                                const isUnlinked = rawAccount.account_id === null || rawAccount.account_id === undefined;
+
                                 return (
-                                    <Table.Row key={key} bg={rawAccount.account_id === null || rawAccount.account_id === undefined ? 'orange.50' : undefined}>
+                                    <Table.Row key={key} bg={isUnlinked ? 'orange.50' : undefined}>
                                         <Table.Cell>
                                             <Text
                                                 fontWeight="medium"
@@ -269,17 +425,34 @@ export const RawAccountsEditor: React.FC = () => {
                                                 </NativeSelect.Root>
                                             ) : (
                                                 rawAccount.account_id ? (
-                                                    <Badge colorPalette="blue">{getAccountName(rawAccount.account_id)}</Badge>
+                                                    <Badge colorPalette="green">{getAccountName(rawAccount.account_id)}</Badge>
                                                 ) : (
                                                     <Text fontSize="sm" color="gray.400">Not linked</Text>
                                                 )
                                             )}
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {rawAccount.account_id !== null && rawAccount.account_id !== undefined ? (
-                                                <Badge colorPalette="green">Linked</Badge>
+                                            {/* Smart Suggestions Column */}
+                                            {isUnlinked && suggestions.length > 0 && !isEditing ? (
+                                                <HStack gap={1} flexWrap="wrap">
+                                                    {suggestions.map((s, idx) => (
+                                                        <Tooltip key={idx} content={`${Math.round(s.confidence * 100)}% match - Click to accept`}>
+                                                            <Button
+                                                                size="xs"
+                                                                variant={s.confidence >= 0.9 ? "solid" : "outline"}
+                                                                colorPalette={s.confidence >= 0.9 ? "green" : s.confidence >= 0.7 ? "blue" : "gray"}
+                                                                onClick={() => acceptSuggestion(rawAccount, s.account.id)}
+                                                            >
+                                                                {s.account.name}
+                                                                {s.confidence >= 0.9 && " ✓"}
+                                                            </Button>
+                                                        </Tooltip>
+                                                    ))}
+                                                </HStack>
+                                            ) : isUnlinked && !isEditing ? (
+                                                <Text fontSize="xs" color="gray.400">No matches</Text>
                                             ) : (
-                                                <Badge colorPalette="orange">Unlinked</Badge>
+                                                <Text fontSize="xs" color="gray.400">—</Text>
                                             )}
                                         </Table.Cell>
                                         <Table.Cell>
