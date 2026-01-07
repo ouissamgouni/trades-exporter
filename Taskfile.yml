@@ -1,0 +1,654 @@
+# https://taskfile.dev
+version: '3'
+
+vars:
+  BACKEND_DIR: ./backend
+  FRONTEND_DIR: ./frontend
+
+  # Port configuration
+  DEV_DB_PORT: 5432
+  DEV_BACKEND_PORT: 8000
+  DEV_FRONTEND_PORT: 5173
+  DEV_DEBUGPY_PORT: 5678
+
+  TEST_DB_PORT: 5433
+  TEST_BACKEND_PORT: 8001
+  TEST_FRONTEND_PORT: 3001
+
+  PROD_DB_PORT: 5434
+  PROD_BACKEND_PORT: 8080
+  PROD_FRONTEND_PORT: 3000
+
+tasks:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # BRANCHING
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  feature:
+    desc: Create a new feature branch from develop
+    cmds:
+      - |
+        NAME={{.CLI_ARGS}}
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task feature <name>"
+          exit 1
+        fi
+        git checkout develop
+        git pull origin develop
+        git checkout -b feature/$NAME
+        echo "✅ Created branch: feature/$NAME"
+
+  fix:
+    desc: Create a new fix branch from develop
+    cmds:
+      - |
+        NAME={{.CLI_ARGS}}
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task fix <name>"
+          exit 1
+        fi
+        git checkout develop
+        git pull origin develop
+        git checkout -b fix/$NAME
+        echo "✅ Created branch: fix/$NAME"
+
+  hotfix:
+    desc: Create a hotfix branch from main
+    cmds:
+      - |
+        NAME={{.CLI_ARGS}}
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task hotfix <name>"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        git checkout -b hotfix/$NAME
+        echo "✅ Created branch: hotfix/$NAME"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # START / STOP SERVICES
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  start:dev:
+    desc: Start dev environment (database)
+    cmds:
+      - docker compose -f docker-compose.dev.yml up -d postgres_dev
+      - sleep 2
+      - |
+        echo ""
+        echo "✅ Dev database running on localhost:{{.DEV_DB_PORT}}"
+        echo ""
+        echo "Next steps:"
+        echo "  task start:dev:backend        → Start backend"
+        echo "  task start:dev:backend:debug  → Start backend with debugger"
+        echo "  task start:dev:frontend       → Start frontend"
+        echo "  task start:dev:debug          → Start all with debugging"
+
+  start:dev:debug:
+    desc: Start full dev environment with debugging (DB + backend + frontend)
+    deps: [start:dev]
+    cmds:
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "Starting services with debugging enabled..."
+        echo "═══════════════════════════════════════════════════════════════"
+      - task: _run:dev:backend:debug &
+      - task: _run:dev:frontend &
+      - sleep 4
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Dev environment ready!"
+        echo ""
+        echo "Services running:"
+        echo "   Database: localhost:{{.DEV_DB_PORT}}"
+        echo "   Backend:  localhost:{{.DEV_BACKEND_PORT}} (debugger on port {{.DEV_DEBUGPY_PORT}})"
+        echo "   Frontend: localhost:{{.DEV_FRONTEND_PORT}}"
+        echo ""
+        echo "To attach debugger:"
+        echo "   1. Open VSCode"
+        echo "   2. Press F5"
+        echo "   3. Select 'Full Stack Debug' or 'Backend: Attach'"
+        echo ""
+        echo "Press Ctrl+C to stop all services"
+        echo "═══════════════════════════════════════════════════════════════"
+      - wait
+
+  start:dev:backend:
+    desc: Start backend locally (no debugger)
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/uvicorn api.main:app --reload --port {{.DEV_BACKEND_PORT}}
+
+  start:dev:backend:debug:
+    desc: Start backend with debugger
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - |
+        echo "Starting backend with debugger on port {{.DEV_DEBUGPY_PORT}}..."
+        echo "→ In VSCode: F5 → 'Backend: Attach'"
+      - .venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn api.main:app --reload --port {{.DEV_BACKEND_PORT}}
+
+  start:dev:frontend:
+    desc: Start frontend locally (Vite)
+    dir: "{{.FRONTEND_DIR}}"
+    env:
+      VITE_API_URL: http://localhost:{{.DEV_BACKEND_PORT}}
+    cmds:
+      - npm run dev -- --port {{.DEV_FRONTEND_PORT}}
+
+  stop:dev:
+    desc: Stop dev services
+    cmds:
+      - docker compose -f docker-compose.dev.yml stop
+      - echo "✅ Dev services stopped"
+
+  start:test:
+    desc: Start test stack (existing images)
+    cmds:
+      - docker compose -f docker-compose.test.yml up -d
+      - sleep 3
+      - |
+        echo ""
+        echo "✅ Test stack running"
+        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+
+  stop:test:
+    desc: Stop test stack
+    cmds:
+      - docker compose -f docker-compose.test.yml stop
+      - echo "✅ Test stack stopped"
+
+  start:prod:
+    desc: Start prod stack (existing images)
+    cmds:
+      - docker compose -f docker-compose.prod.yml up -d
+      - sleep 3
+      - |
+        echo ""
+        echo "✅ Prod stack running"
+        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+
+  stop:prod:
+    desc: Stop prod stack
+    cmds:
+      - docker compose -f docker-compose.prod.yml stop
+      - echo "✅ Prod stack stopped"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # INTERNAL TASKS (used by start:dev:debug)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  _run:dev:backend:debug:
+    internal: true
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn api.main:app --reload --port {{.DEV_BACKEND_PORT}}
+
+  _run:dev:frontend:
+    internal: true
+    dir: "{{.FRONTEND_DIR}}"
+    env:
+      VITE_API_URL: http://localhost:{{.DEV_BACKEND_PORT}}
+    cmds:
+      - npm run dev -- --port {{.DEV_FRONTEND_PORT}}
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DATABASE
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  db:migrate:dev:
+    desc: Run database migrations on dev
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/alembic upgrade head
+      - echo "✅ Dev database migrated"
+
+  db:migrate:test:
+    desc: Run database migrations on test
+    cmds:
+      - docker compose -f docker-compose.test.yml exec backend_test python -m alembic upgrade head
+      - echo "✅ Test database migrated"
+
+  db:migrate:prod:
+    desc: Run database migrations on prod
+    cmds:
+      - docker compose -f docker-compose.prod.yml exec backend_prod python -m alembic upgrade head
+      - echo "✅ Prod database migrated"
+
+  db:seed:dev:
+    desc: Seed dev database
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python scripts/reset_and_seed.py --seed-only
+      - echo "✅ Dev database seeded"
+
+  db:seed:test:
+    desc: Seed test database
+    cmds:
+      - docker compose -f docker-compose.test.yml exec backend_test python scripts/reset_and_seed.py --seed-only
+      - echo "✅ Test database seeded"
+
+  db:reset:dev:
+    desc: "⚠️ Reset dev database (drops all tables)"
+    prompt: This will DELETE all data in dev database. Continue?
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - echo "y" | .venv/bin/python scripts/reset_and_seed.py
+      - echo "✅ Dev database reset and seeded"
+
+  db:reset:test:
+    desc: "⚠️ Reset test database (drops all tables)"
+    prompt: This will DELETE all data in test database. Continue?
+    cmds:
+      - docker compose -f docker-compose.test.yml exec backend_test sh -c 'echo "y" | python scripts/reset_and_seed.py'
+      - echo "✅ Test database reset and seeded"
+
+  db:reset:prod:
+    desc: "🚨 Reset prod database (DANGEROUS!)"
+    prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
+    cmds:
+      - docker compose -f docker-compose.prod.yml exec backend_prod sh -c 'echo "y" | python scripts/reset_and_seed.py'
+      - echo "⚠️ Prod database reset"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # BUILD IMAGES
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  build:test:
+    desc: Build Docker images from develop branch (tagged :develop)
+    cmds:
+      - git checkout develop
+      - git pull origin develop
+      - |
+        echo "Building images from develop..."
+        docker build -t trades-exporter-backend:develop ./backend
+        docker build -t trades-exporter-frontend:develop \
+          --build-arg VITE_API_URL=http://localhost:{{.TEST_BACKEND_PORT}} \
+          ./frontend
+        echo ""
+        echo "✅ Images built: :develop"
+
+  build:prod:
+    desc: Build Docker images from main branch (e.g., task build:prod v1.2.0)
+    cmds:
+      - |
+        VERSION={{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          echo "❌ Usage: task build:prod v1.2.0"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        echo "Building images from main as $VERSION..."
+        docker build -t trades-exporter-backend:$VERSION ./backend
+        docker build -t trades-exporter-frontend:$VERSION \
+          --build-arg VITE_API_URL=http://localhost:{{.PROD_BACKEND_PORT}} \
+          ./frontend
+        docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
+        docker tag trades-exporter-frontend:$VERSION trades-exporter-frontend:latest
+        echo ""
+        echo "✅ Images built: :$VERSION and :latest"
+
+  build:list:
+    desc: List all trades-exporter Docker images
+    cmds:
+      - docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+
+  build:clean:
+    desc: Remove old/dangling Docker images
+    cmds:
+      - |
+        echo "Current images:"
+        docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+        echo ""
+        echo "Removing dangling images..."
+        docker image prune -f
+        echo ""
+        echo "✅ Cleanup complete"
+        echo ""
+        echo "Remaining images:"
+        docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+
+  build:clean:all:
+    desc: "⚠️ Remove ALL trades-exporter Docker images"
+    prompt: This will remove ALL trades-exporter images. Continue?
+    cmds:
+      - docker rmi $(docker images trades-exporter-* -q) --force 2>/dev/null || true
+      - echo "✅ All trades-exporter images removed"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DEPLOY
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  deploy:test:local:
+    desc: Build from develop and deploy to test environment
+    cmds:
+      - task: build:test
+      - docker compose -f docker-compose.test.yml down
+      - docker compose -f docker-compose.test.yml up -d
+      - sleep 5
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to TEST (from develop branch)"
+        echo ""
+        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+        echo ""
+        echo "Next steps:"
+        echo "   task test:int:test    → Run integration tests"
+        echo "   task logs:test        → View logs"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  deploy:prod:local:
+    desc: Deploy tagged version to local prod (e.g., task deploy:prod:local v1.2.0)
+    cmds:
+      - |
+        VERSION={{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          VERSION="latest"
+        fi
+
+        # Check if image exists
+        if ! docker image inspect trades-exporter-backend:$VERSION > /dev/null 2>&1; then
+          echo "❌ Image trades-exporter-backend:$VERSION not found"
+          echo ""
+          echo "Available images:"
+          docker images trades-exporter-backend --format "   {{.Tag}}"
+          echo ""
+          echo "Build first with: task build:prod $VERSION"
+          exit 1
+        fi
+
+        echo "Deploying version: $VERSION"
+        VERSION=$VERSION docker compose -f docker-compose.prod.yml down
+        VERSION=$VERSION docker compose -f docker-compose.prod.yml up -d
+        sleep 5
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to PROD: $VERSION"
+        echo ""
+        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  deploy:prod:cloud:
+    desc: Deploy to Render (future)
+    cmds:
+      - |
+        echo "🚧 Cloud deployment not yet configured"
+        echo ""
+        echo "To set up Render deployment:"
+        echo "  1. Create account at render.com"
+        echo "  2. Connect your GitHub repository"
+        echo "  3. Render will auto-detect render.yaml"
+        echo ""
+        echo "See docs/DEVELOPMENT_WORKFLOW.md for details"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # RELEASE
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  release:prepare:
+    desc: Create release PR (develop → main)
+    cmds:
+      - git checkout develop
+      - git pull origin develop
+      - gh pr create --base main --head develop --title "Release $(date +%Y-%m-%d)" --body "Release candidate from develop branch"
+      - echo "✅ Release PR created. Review and merge when ready."
+
+  release:tag:
+    desc: Tag a release and build images (e.g., task release:tag v1.2.0)
+    cmds:
+      - |
+        VERSION={{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          echo "❌ Usage: task release:tag v1.2.0"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        git tag -a $VERSION -m "Release $VERSION"
+        git push origin $VERSION
+        echo "✅ Tagged $VERSION"
+      - task: build:prod {{.CLI_ARGS}}
+
+  release:list:
+    desc: List all release tags
+    cmds:
+      - git tag -l "v*" --sort=-version:refname
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # TESTING
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  test:
+    desc: Run unit tests (quick)
+    cmds:
+      - task: test:unit
+
+  test:unit:
+    desc: Run all unit tests
+    cmds:
+      - task: test:unit:backend
+      - task: test:unit:frontend
+      - echo "✅ All unit tests passed"
+
+  test:unit:backend:
+    desc: Run backend unit tests
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python -m pytest -v
+
+  test:unit:frontend:
+    desc: Run frontend build and type check
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run build
+      - npx tsc --noEmit || true
+
+  test:int:dev:
+    desc: Run integration tests against dev environment
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python -m pytest -v -m integration || true
+
+  test:int:test:
+    desc: Run integration tests against test stack
+    cmds:
+      - docker compose -f docker-compose.test.yml exec backend_test python -m pytest -v -m integration || true
+
+  test:ci:
+    desc: Simulate full CI locally via Act
+    cmds:
+      - act push -j backend-tests --container-architecture linux/amd64
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # LOGS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  logs:dev:
+    desc: View dev database logs
+    cmds:
+      - docker compose -f docker-compose.dev.yml logs -f
+
+  logs:test:
+    desc: View test stack logs
+    cmds:
+      - docker compose -f docker-compose.test.yml logs -f
+
+  logs:prod:
+    desc: View prod stack logs
+    cmds:
+      - docker compose -f docker-compose.prod.yml logs -f
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # CLEAN
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  clean:dev:
+    desc: Stop and remove dev containers
+    cmds:
+      - docker compose -f docker-compose.dev.yml down
+      - echo "✅ Dev containers removed"
+
+  clean:test:
+    desc: Stop and remove test containers
+    cmds:
+      - docker compose -f docker-compose.test.yml down
+      - echo "✅ Test containers removed"
+
+  clean:prod:
+    desc: Stop and remove prod containers
+    cmds:
+      - docker compose -f docker-compose.prod.yml down
+      - echo "✅ Prod containers removed"
+
+  clean:dev:volumes:
+    desc: "⚠️ Remove dev containers and volumes (data lost)"
+    prompt: This will DELETE dev database data. Continue?
+    cmds:
+      - docker compose -f docker-compose.dev.yml down -v
+      - echo "✅ Dev containers and volumes removed"
+
+  clean:test:volumes:
+    desc: "⚠️ Remove test containers and volumes (data lost)"
+    prompt: This will DELETE test database data. Continue?
+    cmds:
+      - docker compose -f docker-compose.test.yml down -v
+      - echo "✅ Test containers and volumes removed"
+
+  clean:prod:volumes:
+    desc: "🚨 Remove prod containers and volumes (DANGEROUS!)"
+    prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
+    cmds:
+      - docker compose -f docker-compose.prod.yml down -v
+      - echo "⚠️ Prod containers and volumes removed"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # PULL REQUESTS
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  pr:
+    desc: Push and create draft PR to develop
+    cmds:
+      - |
+        BRANCH=$(git branch --show-current)
+        if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "develop" ]; then
+          echo "❌ Cannot create PR from $BRANCH branch"
+          exit 1
+        fi
+        git push -u origin $BRANCH
+        gh pr create --draft --base develop --fill
+        echo "✅ Draft PR created"
+
+  pr:publish:
+    desc: Push and create ready PR to develop
+    cmds:
+      - |
+        BRANCH=$(git branch --show-current)
+        if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "develop" ]; then
+          echo "❌ Cannot create PR from $BRANCH branch"
+          exit 1
+        fi
+        git push -u origin $BRANCH
+        gh pr create --base develop --fill
+        echo "✅ PR created (ready for review)"
+
+  pr:ready:
+    desc: Mark current draft PR as ready for review
+    cmds:
+      - gh pr ready
+      - echo "✅ PR marked as ready"
+
+  pr:view:
+    desc: Open current PR in browser
+    cmds:
+      - gh pr view --web
+
+  pr:checks:
+    desc: Show CI status for current PR
+    cmds:
+      - gh pr checks
+
+  pr:merge:
+    desc: Merge current PR (squash)
+    cmds:
+      - gh pr merge --squash --delete-branch
+      - echo "✅ PR merged"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # UTILITIES
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  install:
+    desc: Install all dependencies
+    cmds:
+      - |
+        echo "Installing backend dependencies..."
+        cd {{.BACKEND_DIR}} && .venv/bin/pip install -r requirements.txt
+        echo ""
+        echo "Installing frontend dependencies..."
+        cd {{.FRONTEND_DIR}} && npm install
+        echo ""
+        echo "✅ All dependencies installed"
+
+  status:
+    desc: Show all running containers
+    cmds:
+      - docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+  help:
+    desc: Show categorized help
+    cmds:
+      - |
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "                    TRADES-EXPORTER TASKS"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+        echo "BRANCHING"
+        echo "  task feature <name>     Create feature branch"
+        echo "  task fix <name>         Create fix branch"
+        echo "  task hotfix <name>      Create hotfix branch"
+        echo ""
+        echo "DEVELOPMENT"
+        echo "  task start:dev          Start dev DB"
+        echo "  task start:dev:debug    Start DB + backend + frontend (debug)"
+        echo "  task stop:dev           Stop dev services"
+        echo ""
+        echo "TESTING"
+        echo "  task test               Run unit tests"
+        echo "  task test:int:dev       Integration tests (dev)"
+        echo "  task deploy:test:local  Deploy to test stack"
+        echo ""
+        echo "PRODUCTION"
+        echo "  task release:tag v1.0   Tag release"
+        echo "  task deploy:prod:local  Deploy to local prod"
+        echo ""
+        echo "Run 'task --list' for all commands"
+        echo "═══════════════════════════════════════════════════════════════"

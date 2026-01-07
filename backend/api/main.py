@@ -26,24 +26,19 @@ from backend.api.routes import (
     categories,
     fixtures,
 )
-from backend.config.loader import set_test_mode, is_test_mode
+from backend.config.loader import get_database_url
 from backend.db import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
-    # Startup: Set test mode from environment variable if provided
-    test_mode_env = os.environ.get("TEST_MODE", "").lower()
-    if test_mode_env in ("1", "true", "yes"):
-        set_test_mode(True)
-    elif test_mode_env in ("0", "false", "no"):
-        set_test_mode(False)
-    # else: use value from settings.yaml (no override)
-
-    print(
-        f"🚀 Trade Exporter API starting in {'TEST' if is_test_mode() else 'LIVE'} mode"
-    )
+    # Log current database connection
+    db_url = get_database_url()
+    # Mask password in log output
+    masked_url = db_url.replace(db_url.split('@')[0].split(':')[-1], '****') if '@' in db_url else db_url
+    print(f"🚀 Trade Exporter API starting")
+    print(f"   Database: {masked_url}")
 
     # Initialize database (creates tables + seeds default data)
     init_db()
@@ -61,9 +56,16 @@ app = FastAPI(
 )
 
 # Configure CORS
+# Get allowed origins from environment, default to allowing all in dev
+cors_origins_env = os.environ.get("CORS_ORIGINS", "*")
+if cors_origins_env == "*":
+    allow_origins = ["*"]
+else:
+    allow_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,3 +98,9 @@ def root():
         "docs": "/docs",
         "openapi": "/openapi.json",
     }
+
+
+@app.get("/api/v1/health")
+def health_check():
+    """Health check endpoint for Docker/load balancer health probes"""
+    return {"status": "healthy"}
