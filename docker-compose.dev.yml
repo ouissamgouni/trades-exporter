@@ -1,0 +1,28 @@
+# Docker Compose - Development Environment
+# Only runs database, code runs locally with VSCode debugger
+#
+# Usage: docker compose -f docker-compose.dev.yml up -d
+#        or: task start:dev
+
+services:
+  postgres_dev:
+    image: postgres:15-alpine
+    container_name: trades_db_dev
+    environment:
+      POSTGRES_USER: trades_user
+      POSTGRES_PASSWORD: trades_password
+      POSTGRES_DB: trades_db_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - trades_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trades_user -d trades_db_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  trades_dev_data:
+    name: trades_dev_data

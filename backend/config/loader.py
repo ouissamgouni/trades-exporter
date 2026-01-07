@@ -6,6 +6,10 @@ This module provides configuration loading from both:
 - YAML files - for non-sensitive settings
 
 Environment variables take precedence over YAML settings.
+
+DATABASE_URL: The primary way to configure the database connection.
+If DATABASE_URL is set, it is used directly. Otherwise, falls back to
+constructing URL from individual POSTGRES_* environment variables.
 """
 
 import os
@@ -22,18 +26,71 @@ load_dotenv()
 
 CONFIG_DIR = Path(__file__).parent
 
-# Global test mode state (can be set by API startup or environment)
+# Default database URL for local development
+DEFAULT_DATABASE_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
+
+
+def get_database_url() -> str:
+    """
+    Get the PostgreSQL database URL.
+
+    Priority:
+    1. DATABASE_URL environment variable (recommended)
+    2. Constructed from individual POSTGRES_* vars (legacy support)
+
+    Returns:
+        PostgreSQL connection URL
+    """
+    # Primary: Use DATABASE_URL if set
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url
+
+    # Fallback: Construct from individual vars (legacy support)
+    user = os.getenv("POSTGRES_USER", "trades_user")
+    password = os.getenv("POSTGRES_PASSWORD", "trades_password")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db_name = os.getenv("POSTGRES_DB", "trades_db_dev")
+
+    return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+
+
+def get_database_path() -> str:
+    """
+    Legacy function for backward compatibility.
+    Returns the database URL for PostgreSQL.
+
+    Note: This is kept for backward compatibility with existing code.
+    New code should use get_database_url() directly.
+    """
+    return get_database_url()
+
+
+# Legacy functions for backward compatibility during migration
+# TODO: Remove these after full migration to DATABASE_URL
+
 _test_mode_override: bool | None = None
 
 
 def set_test_mode(enabled: bool):
-    """Set global test mode override."""
+    """
+    DEPRECATED: Use DATABASE_URL environment variable instead.
+    Set global test mode override.
+    """
     global _test_mode_override
     _test_mode_override = enabled
+    # Log deprecation warning
+    logging.warning(
+        "set_test_mode() is deprecated. Use DATABASE_URL environment variable instead."
+    )
 
 
 def is_test_mode() -> bool:
-    """Check if test mode is enabled (via override, env var, or settings)."""
+    """
+    DEPRECATED: Use DATABASE_URL environment variable instead.
+    Check if test mode is enabled (via override, env var, or settings).
+    """
     global _test_mode_override
     if _test_mode_override is not None:
         return _test_mode_override
@@ -48,44 +105,6 @@ def is_test_mode() -> bool:
     # Fall back to settings.yaml
     settings = load_settings()
     return settings.get("test_mode", False)
-
-
-def get_database_url(test_mode: bool = None) -> str:
-    """
-    Get the PostgreSQL database URL.
-
-    Args:
-        test_mode: Override test mode. If None, uses is_test_mode().
-
-    Returns:
-        PostgreSQL connection URL
-    """
-    if test_mode is None:
-        test_mode = is_test_mode()
-
-    user = os.getenv("POSTGRES_USER", "trades_user")
-    password = os.getenv("POSTGRES_PASSWORD", "trades_password")
-    host = os.getenv("POSTGRES_HOST", "localhost")
-
-    if test_mode:
-        port = os.getenv("POSTGRES_TEST_PORT", "5433")
-        db_name = os.getenv("POSTGRES_DB_TEST", "trades_db_test")
-    else:
-        port = os.getenv("POSTGRES_PORT", "5432")
-        db_name = os.getenv("POSTGRES_DB", "trades_db")
-
-    return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
-
-
-def get_database_path() -> str:
-    """
-    Legacy function for backward compatibility.
-    Returns the database URL for PostgreSQL.
-
-    Note: This is kept for backward compatibility with existing code.
-    New code should use get_database_url() directly.
-    """
-    return get_database_url()
 
 
 def load_settings(path: str | None = None) -> dict:

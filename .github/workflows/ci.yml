@@ -51,24 +51,14 @@ jobs:
       - name: Run database migrations
         working-directory: backend
         env:
-          TEST_MODE: "true"
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: "5432"
-          POSTGRES_USER: trades_user
-          POSTGRES_PASSWORD: trades_password
-          POSTGRES_DB_TEST: trades_db_test
+          DATABASE_URL: postgresql://trades_user:trades_password@localhost:5432/trades_db_test
         run: |
           .venv/bin/alembic upgrade head || true
 
       - name: Run tests
         working-directory: backend
         env:
-          TEST_MODE: "true"
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: "5432"
-          POSTGRES_USER: trades_user
-          POSTGRES_PASSWORD: trades_password
-          POSTGRES_DB_TEST: trades_db_test
+          DATABASE_URL: postgresql://trades_user:trades_password@localhost:5432/trades_db_test
         run: .venv/bin/python -m pytest -v --tb=short
 
   # ========== FRONTEND BUILD ==========
