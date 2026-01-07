@@ -60,16 +60,19 @@ task start:dev:debug
 | **Prod**    | Production (local or cloud) | 5434 | 8080 | 3000 |
 
 ### Dev Environment
+
 - **Database**: Docker container
 - **Backend**: Local Python process (debuggable)
 - **Frontend**: Vite dev server (hot reload)
 
 ### Test Environment
+
 - Fully containerized (Docker Compose)
 - Built from `develop` branch
 - Uses `:develop` tagged images
 
 ### Prod Environment
+
 - Fully containerized (Docker Compose)
 - Built from `main` branch with semantic version tags
 - Uses versioned images (e.g., `:v1.2.0`)
@@ -97,9 +100,10 @@ task start:dev:debug
 ```
 
 Services running:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
-- Swagger Docs: http://localhost:8000/docs
+
+- Frontend: <http://localhost:5173>
+- Backend API: <http://localhost:8000>
+- Swagger Docs: <http://localhost:8000/docs>
 - Debugger: Port 5678 (attach from VSCode)
 
 ### 3. Attach VSCode Debugger
@@ -195,11 +199,12 @@ task deploy:test:local
 ```
 
 This will:
+
 1. Checkout `develop` branch
 2. Build Docker images tagged `:develop`
 3. Start the test stack on ports 8001/3001
 
-Access: http://localhost:3001
+Access: <http://localhost:3001>
 
 ### Deploy to Production
 
@@ -216,7 +221,7 @@ task release:tag v1.2.0
 task deploy:prod:local v1.2.0
 ```
 
-Access: http://localhost:3000
+Access: <http://localhost:3000>
 
 ### Cloud Deployment (Render)
 
