@@ -31,6 +31,7 @@ class BaseConnector(ABC):
         self,
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
+        config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the connector.
@@ -38,13 +39,19 @@ class BaseConnector(ABC):
         Args:
             account_id: The Account ID this connector belongs to (from accounts table)
             connector_id: The AccountConnector ID for this specific connector instance
+            config: Connector configuration dict (may include test_mode, test_file_path)
 
-        Note: Test mode is determined by the TEST_MODE environment variable.
+        Note: Test mode priority:
+            1. Per-connector config["test_mode"] (if set)
+            2. Global TEST_MODE environment variable / settings.yaml
         """
         self.account_id = account_id
         self.connector_id = connector_id
+        self.config = config or {}
         self.exchange = None
-        self.test_mode = is_test_mode()
+        
+        # Per-connector test mode takes priority over global setting
+        self._test_mode = self.config.get("test_mode", None)
 
         mode_str = "TEST MODE" if self.test_mode else "LIVE MODE"
         account_info = f" (account_id={account_id})" if account_id else ""
@@ -87,6 +94,19 @@ class BaseConnector(ABC):
             NormalizedTransaction: Typed dataclass with all transaction fields
         """
 
+    @property
+    def test_mode(self) -> bool:
+        """
+        Check if connector is in test mode.
+        
+        Priority:
+            1. Per-connector config["test_mode"] (if explicitly set)
+            2. Global TEST_MODE from environment/settings
+        """
+        if self._test_mode is not None:
+            return self._test_mode
+        return is_test_mode()
+
     def _get_raws(self) -> List[Dict[str, Any]]:
         """
         Get raw data, checking test mode first.
@@ -112,7 +132,11 @@ class BaseConnector(ABC):
         """
         Get the path to test data file for this connector.
 
-        Uses the connector's connector_name property for the filename.
+        Priority:
+            1. Per-connector config["test_file_path"] (uploaded fixture)
+            2. Default path: tests/e2e/fixtures/{connector_name}.json
+
+        Uses the connector's connector_name property for the default filename.
         For example:
             - connector_name="binance_trx" -> binance_trx.json
             - connector_name="blockscout_normal_tx_base" -> blockscout_normal_tx_base.json
@@ -133,9 +157,14 @@ class BaseConnector(ABC):
         backend_dir = os.path.dirname(connectors_dir)  # backend
         workspace_root = os.path.dirname(backend_dir)  # workspace root
 
-        # Path: workspace_root/tests/e2e/fixtures/{connector_name}.json
+        # Priority 1: Per-connector uploaded fixture from config
+        if self.config.get("test_file_path"):
+            return os.path.join(backend_dir, self.config["test_file_path"])
+
+        # Priority 2: Default path based on connector_name
+        # Path: workspace_root/backend/tests/e2e/fixtures/{connector_name}.json
         return os.path.join(
-            workspace_root, "tests", "e2e", "fixtures", f"{self.connector_name}.json"
+            workspace_root, "backend", "tests", "e2e", "fixtures", f"{self.connector_name}.json"
         )
 
     def _load_test_data(self) -> List[Dict[str, Any]]:

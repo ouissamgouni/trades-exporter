@@ -6,12 +6,18 @@ import {
     Table, Text
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
-import { API_URL, Asset, PriceSnapshot } from '../types';
+import { API_URL, Asset, PaginatedPriceSnapshotsResponse, PriceSnapshot } from '../types';
+import { AssetBadge } from './AssetBadge';
+import { AssetSelector } from './AssetSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 100;
+
 export const PricesViewer: React.FC = () => {
     const [prices, setPrices] = useState<PriceSnapshot[]>([]);
+    const [totalItems, setTotalItems] = useState(0);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -19,19 +25,31 @@ export const PricesViewer: React.FC = () => {
     const [editValues, setEditValues] = useState<Partial<PriceSnapshot>>({});
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [newPrice, setNewPrice] = useState<Partial<PriceSnapshot>>({});
-    const [assetIdFilter, setAssetIdFilter] = useState<string>('');
-    const [quoteAssetIdFilter, setQuoteAssetIdFilter] = useState<string>('');
+    const [assetIdFilter, setAssetIdFilter] = useState<number | null>(null);
+    const [quoteAssetIdFilter, setQuoteAssetIdFilter] = useState<number | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('');
+    const [snapshotTimeFrom, setSnapshotTimeFrom] = useState<string>('');
+    const [snapshotTimeTo, setSnapshotTimeTo] = useState<string>('');
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
     const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_PAGE_SIZE);
 
     const deleteConfirm = useConfirmDialog<PriceSnapshot>();
 
+    // Calculate pagination
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+    const offset = (currentPage - 1) * itemsPerPage;
+
     useEffect(() => {
         fetchPrices();
+    }, [assetIdFilter, quoteAssetIdFilter, sourceFilter, snapshotTimeFrom, snapshotTimeTo, currentPage, itemsPerPage]);
+
+    useEffect(() => {
         fetchAssets();
-    }, [assetIdFilter, quoteAssetIdFilter, sourceFilter]);
+    }, []);
 
     // Extract unique sources from fetched prices for filter dropdown
     const availableSources = useMemo(() => {
@@ -48,13 +66,18 @@ export const PricesViewer: React.FC = () => {
         setSelectedIds(new Set()); // Clear selection on refresh
         try {
             const params = new URLSearchParams();
-            if (assetIdFilter) params.append('asset_id', assetIdFilter);
-            if (quoteAssetIdFilter) params.append('quote_asset_id', quoteAssetIdFilter);
+            if (assetIdFilter) params.append('asset_id', String(assetIdFilter));
+            if (quoteAssetIdFilter) params.append('quote_asset_id', String(quoteAssetIdFilter));
             if (sourceFilter) params.append('source', sourceFilter);
+            if (snapshotTimeFrom) params.append('snapshot_time_from', snapshotTimeFrom);
+            if (snapshotTimeTo) params.append('snapshot_time_to', snapshotTimeTo);
+            params.append('limit', String(itemsPerPage));
+            params.append('offset', String(offset));
             const response = await fetch(`${API_URL}/price-snapshots?${params}`);
             if (!response.ok) throw new Error('Failed to fetch prices');
-            const data = await response.json();
-            setPrices(data);
+            const data: PaginatedPriceSnapshotsResponse = await response.json();
+            setPrices(data.items);
+            setTotalItems(data.total);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
@@ -79,6 +102,44 @@ export const PricesViewer: React.FC = () => {
         const asset = assets.find(a => a.asset_id === assetId);
         return asset?.symbol || `ID:${assetId}`;
     };
+
+    const formatSnapshotTime = (isoString: string): string => {
+        try {
+            const date = new Date(isoString);
+            return date.toLocaleString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            });
+        } catch {
+            return isoString;
+        }
+    };
+
+    const goToPage = (page: number) => {
+        if (page >= 1 && page <= totalPages) {
+            setCurrentPage(page);
+        }
+    };
+
+    const handleItemsPerPageChange = (newSize: number) => {
+        setItemsPerPage(newSize);
+        setCurrentPage(1); // Reset to first page when changing page size
+    };
+
+    const clearFilters = () => {
+        setAssetIdFilter(null);
+        setQuoteAssetIdFilter(null);
+        setSourceFilter('');
+        setSnapshotTimeFrom('');
+        setSnapshotTimeTo('');
+        setCurrentPage(1);
+    };
+
+    const hasActiveFilters = assetIdFilter !== null || quoteAssetIdFilter !== null || sourceFilter || snapshotTimeFrom || snapshotTimeTo;
 
     const getEditKey = (price: PriceSnapshot) => `${price.snapshot_id}`;
 
@@ -231,42 +292,34 @@ export const PricesViewer: React.FC = () => {
             <Flex gap={4} mb={6} align="center" flexWrap="wrap">
                 <Flex align="center" gap={2}>
                     <Text fontWeight="medium" fontSize="sm">Asset:</Text>
-                    <NativeSelect.Root size="sm" width="150px">
-                        <NativeSelect.Field
+                    <Box width="180px">
+                        <AssetSelector
                             value={assetIdFilter}
-                            onChange={e => setAssetIdFilter(e.target.value)}
-                        >
-                            <option value="">All Assets</option>
-                            {assets.map(asset => (
-                                <option key={asset.asset_id} value={asset.asset_id}>
-                                    {asset.symbol}
-                                </option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
+                            onChange={(id) => { setAssetIdFilter(id); setCurrentPage(1); }}
+                            assets={assets}
+                            placeholder="All Assets"
+                            size="sm"
+                        />
+                    </Box>
                 </Flex>
                 <Flex align="center" gap={2}>
                     <Text fontWeight="medium" fontSize="sm">Quote Asset:</Text>
-                    <NativeSelect.Root size="sm" width="150px">
-                        <NativeSelect.Field
+                    <Box width="180px">
+                        <AssetSelector
                             value={quoteAssetIdFilter}
-                            onChange={e => setQuoteAssetIdFilter(e.target.value)}
-                        >
-                            <option value="">All Quote Assets</option>
-                            {assets.map(asset => (
-                                <option key={asset.asset_id} value={asset.asset_id}>
-                                    {asset.symbol}
-                                </option>
-                            ))}
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
+                            onChange={(id) => { setQuoteAssetIdFilter(id); setCurrentPage(1); }}
+                            assets={assets}
+                            placeholder="All Quote Assets"
+                            size="sm"
+                        />
+                    </Box>
                 </Flex>
                 <Flex align="center" gap={2}>
                     <Text fontWeight="medium" fontSize="sm">Source:</Text>
                     <NativeSelect.Root size="sm" width="150px">
                         <NativeSelect.Field
                             value={sourceFilter}
-                            onChange={e => setSourceFilter(e.target.value)}
+                            onChange={e => { setSourceFilter(e.target.value); setCurrentPage(1); }}
                         >
                             <option value="">All Sources</option>
                             {availableSources.map(source => (
@@ -277,8 +330,28 @@ export const PricesViewer: React.FC = () => {
                         </NativeSelect.Field>
                     </NativeSelect.Root>
                 </Flex>
-                {(assetIdFilter || quoteAssetIdFilter || sourceFilter) && (
-                    <Button size="sm" variant="outline" onClick={() => { setAssetIdFilter(''); setQuoteAssetIdFilter(''); setSourceFilter(''); }}>
+                <Flex align="center" gap={2}>
+                    <Text fontWeight="medium" fontSize="sm">Snapshot Time:</Text>
+                    <Input
+                        type="datetime-local"
+                        size="sm"
+                        width="180px"
+                        placeholder="From"
+                        value={snapshotTimeFrom}
+                        onChange={e => { setSnapshotTimeFrom(e.target.value); setCurrentPage(1); }}
+                    />
+                    <Text fontSize="sm">to</Text>
+                    <Input
+                        type="datetime-local"
+                        size="sm"
+                        width="180px"
+                        placeholder="To"
+                        value={snapshotTimeTo}
+                        onChange={e => { setSnapshotTimeTo(e.target.value); setCurrentPage(1); }}
+                    />
+                </Flex>
+                {hasActiveFilters && (
+                    <Button size="sm" variant="outline" onClick={clearFilters}>
                         Clear Filters
                     </Button>
                 )}
@@ -329,13 +402,30 @@ export const PricesViewer: React.FC = () => {
                                             </Checkbox.Root>
                                         </Table.Cell>
                                         <Table.Cell>
-                                            <Badge colorPalette="blue">{price.asset_symbol || getAssetSymbol(price.asset_id)}</Badge>
+                                            <AssetBadge
+                                                asset={{
+                                                    asset_id: price.asset_id,
+                                                    symbol: price.asset_symbol || getAssetSymbol(price.asset_id),
+                                                    label: price.asset_label,
+                                                }}
+                                                colorPalette="blue"
+                                                size="xs"
+                                            />
                                         </Table.Cell>
                                         <Table.Cell>
-                                            <Badge colorPalette="green">{price.quote_asset_symbol || getAssetSymbol(price.quote_asset_id)}</Badge>
+                                            <AssetBadge
+                                                asset={price.quote_asset_id ? {
+                                                    asset_id: price.quote_asset_id,
+                                                    symbol: price.quote_asset_symbol || getAssetSymbol(price.quote_asset_id),
+                                                    label: price.quote_asset_label,
+                                                } : null}
+                                                colorPalette="green"
+                                                size="xs"
+                                                fallback="-"
+                                            />
                                         </Table.Cell>
                                         <Table.Cell>
-                                            <Text fontSize="sm">{price.snapshot_time}</Text>
+                                            <Text fontSize="sm">{formatSnapshotTime(price.snapshot_time)}</Text>
                                         </Table.Cell>
                                         <Table.Cell>
                                             {editingKey === key ? (
@@ -393,12 +483,92 @@ export const PricesViewer: React.FC = () => {
             </Box>
 
             <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                <Text fontSize="sm" color="gray.600">
-                    <strong>Total:</strong> {prices.length} price records
-                    {selectedIds.size > 0 && (
-                        <> | <strong>Selected:</strong> {selectedIds.size}</>
+                <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
+                    {/* Left side: Info */}
+                    <Text fontSize="sm" color="gray.600">
+                        Showing {totalItems === 0 ? 0 : offset + 1}-{Math.min(offset + itemsPerPage, totalItems)} of <strong>{totalItems}</strong> records
+                        {selectedIds.size > 0 && (
+                            <> | <strong>Selected:</strong> {selectedIds.size}</>
+                        )}
+                    </Text>
+
+                    {/* Center: Pagination controls */}
+                    {totalPages > 1 && (
+                        <Flex align="center" gap={2}>
+                            <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => goToPage(1)}
+                                disabled={currentPage === 1}
+                            >
+                                ⟪
+                            </Button>
+                            <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => goToPage(currentPage - 1)}
+                                disabled={currentPage === 1}
+                            >
+                                ←
+                            </Button>
+                            {/* Page numbers */}
+                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                let pageNum: number;
+                                if (totalPages <= 5) {
+                                    pageNum = i + 1;
+                                } else if (currentPage <= 3) {
+                                    pageNum = i + 1;
+                                } else if (currentPage >= totalPages - 2) {
+                                    pageNum = totalPages - 4 + i;
+                                } else {
+                                    pageNum = currentPage - 2 + i;
+                                }
+                                return (
+                                    <Button
+                                        key={pageNum}
+                                        size="xs"
+                                        variant={currentPage === pageNum ? 'solid' : 'outline'}
+                                        colorPalette={currentPage === pageNum ? 'blue' : undefined}
+                                        onClick={() => goToPage(pageNum)}
+                                    >
+                                        {pageNum}
+                                    </Button>
+                                );
+                            })}
+                            <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => goToPage(currentPage + 1)}
+                                disabled={currentPage === totalPages}
+                            >
+                                →
+                            </Button>
+                            <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => goToPage(totalPages)}
+                                disabled={currentPage === totalPages}
+                            >
+                                ⟫
+                            </Button>
+                        </Flex>
                     )}
-                </Text>
+
+                    {/* Right side: Items per page */}
+                    <Flex align="center" gap={2}>
+                        <Text fontSize="sm" color="gray.600">Items per page:</Text>
+                        <NativeSelect.Root size="sm" width="80px">
+                            <NativeSelect.Field
+                                value={itemsPerPage}
+                                onChange={e => handleItemsPerPageChange(Number(e.target.value))}
+                            >
+                                {PAGE_SIZE_OPTIONS.map(size => (
+                                    <option key={size} value={size}>{size}</option>
+                                ))}
+                            </NativeSelect.Field>
+                        </NativeSelect.Root>
+                    </Flex>
+                </Flex>
             </Box>
 
             {/* Bulk Action Bar */}

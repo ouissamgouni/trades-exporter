@@ -32,10 +32,11 @@ class BinanceTrxConnector(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         symbols: List[str] = None,
+        config: Dict[str, Any] = None,
         **kwargs,
     ):
         """Initialize Binance connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
 
         # Store symbols filter (if provided, only fetch trades for these symbols)
         self._symbols_filter = symbols
@@ -226,6 +227,7 @@ class BinanceTrxConnector(BaseConnector):
             return NormalizedTransaction(
                 source="binance-transactions",
                 account_id=self.account_id,
+                source_account=self.connector_name,  # Raw account identifier for mapping
                 source_transaction_id=trade_id,
                 date_time=dt,
                 direction="inflow" if source_transaction_type == "buy" else "outflow",

@@ -1,14 +1,27 @@
 import {
     Badge, Box,
     Button, Card, Checkbox, Collapsible, Flex, Grid,
-    GridItem, Heading, Input, NativeSelect, Spinner, Text
+    GridItem, Heading, HStack, Input, NativeSelect, Spinner, Text
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Account, API_URL, Asset } from '../types';
 import { Direction, ReviewStatus, TransactionType } from '../enums';
 import { AssetSelector } from './AssetSelector';
+import { AccountSelector } from './AccountSelector';
 import { ComboSelect, SOURCE_OPTIONS } from './ComboSelect';
+import { Tooltip } from './ui/tooltip';
+import {
+    toDateTimeLocalString,
+    dateTimeLocalToISO,
+    formatDateTimeLocale,
+} from '../utils/dateUtils';
+import {
+    getAssetSuggestions,
+    getAccountSuggestions,
+    getConfidenceColor,
+    formatConfidence,
+} from '../utils/similarity';
 
 // Simplified transaction category using enum values
 type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER;
@@ -27,6 +40,7 @@ interface FormData {
     source_transaction_type: string;
     source_transaction_id: string;
     source: string;
+    source_account: string;  // Raw account identifier for suggestions
     account_id: number | null;
     from_account_id: number | null;  // For transfers
     to_account_id: number | null;    // For transfers
@@ -60,6 +74,7 @@ const initialFormData: FormData = {
     source_transaction_type: '',
     source_transaction_id: '',
     source: 'manual',
+    source_account: '',
     account_id: null,
     from_account_id: null,
     to_account_id: null,
@@ -102,15 +117,7 @@ const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
     return TransactionType.TRADE;
 };
 
-// Helper to format date as local datetime-local input value (avoids UTC timezone shift)
-const toLocalDateTimeString = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
+// Date utilities imported from utils/dateUtils
 
 // Props for supporting both create and edit modes
 export interface ManualTransactionFormProps {
@@ -145,9 +152,6 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     // Helper to convert transaction to form data for edit mode
     const transactionToFormData = (tx: import('../types').Transaction): FormData => {
         const simplifiedType = deriveSimplifiedType(tx.transaction_type);
-        const dateTime = tx.date_time
-            ? new Date(typeof tx.date_time === 'number' ? tx.date_time * 1000 : tx.date_time)
-            : new Date();
 
         // Convert tags object to array format
         const tagsArray: Tag[] = tx.tags
@@ -155,13 +159,14 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             : [];
 
         return {
-            date_time: toLocalDateTimeString(dateTime),
+            date_time: toDateTimeLocalString(tx.date_time) || toDateTimeLocalString(new Date()),
             direction: tx.direction || Direction.INFLOW,
             simplified_type: simplifiedType,
             transaction_type: tx.transaction_type || TransactionType.TRADE,
             source_transaction_type: tx.source_transaction_type || '',
             source_transaction_id: tx.source_transaction_id || '',
             source: tx.source || 'manual',
+            source_account: tx.source_account || '',
             account_id: tx.account_id || null,
             from_account_id: tx.from_account_id || null,
             to_account_id: tx.to_account_id || null,
@@ -210,7 +215,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
             setFormData(prev => ({
                 ...prev,
-                date_time: toLocalDateTimeString(now),
+                date_time: toDateTimeLocalString(now),
                 price_quote_asset_id: eurAssetId,
                 fee_quote_asset_id: eurAssetId,
             }));
@@ -358,7 +363,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         if (!formData.quantity || parseFloat(formData.quantity) <= 0) return 'Quantity must be greater than 0';
         if (!formData.asset_id) return 'Link to Asset is required';
         if (!formData.price_quote_asset_id) return 'Link to Price Quote Asset is required';
-        if (!formData.fee_quote_asset_id) return 'Link to Fee Quote Asset is required';
+        // Fee quote asset is only required if there's actually a fee
+        if (formData.fee && parseFloat(formData.fee) > 0 && !formData.fee_quote_asset_id) return 'Link to Fee Quote Asset is required when fee is specified';
         if (formData.simplified_type === 'transfer') {
             if (!formData.from_account_id || !formData.to_account_id) {
                 return 'Both origin and destination accounts are required for transfers';
@@ -384,18 +390,25 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         setSuccess(null);
 
         try {
+            const isEditMode = mode === 'edit' && transaction?.id;
+
+            // Build payload - for PATCH, only include fields that have values
             const payload: any = {
-                date_time: new Date(formData.date_time).toISOString(),
+                date_time: dateTimeLocalToISO(formData.date_time),
                 direction: formData.direction,
                 transaction_type: formData.transaction_type,
                 quantity: parseFloat(formData.quantity),
                 asset_id: formData.asset_id,
                 price_quote_asset_id: formData.price_quote_asset_id,
-                fee_quote_asset_id: formData.fee_quote_asset_id,
                 review_status: formData.review_status,
                 include_fee: formData.include_fee,
                 disposal_taxable: formData.disposal_taxable,
             };
+
+            // Only include fee_quote_asset_id if it has a value (don't send null to avoid overwriting)
+            if (formData.fee_quote_asset_id) {
+                payload.fee_quote_asset_id = formData.fee_quote_asset_id;
+            }
 
             // Add optional fields only if they have values
             if (formData.source) payload.source = formData.source;
@@ -418,7 +431,6 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             if (formData.tags.length > 0) payload.tags = formData.tags;
 
             // Different API call for create vs edit mode
-            const isEditMode = mode === 'edit' && transaction?.id;
             const url = isEditMode
                 ? `${API_URL}/transactions/${transaction.id}`
                 : `${API_URL}/transactions`;
@@ -456,12 +468,11 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
                 // Reset form but keep date near current time and EUR defaults
                 const now = new Date();
-                now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
                 const eurAsset = assets.find(a => a.symbol === 'EUR');
                 const eurAssetId = eurAsset?.asset_id || null;
                 setFormData({
                     ...initialFormData,
-                    date_time: now.toISOString().slice(0, 16),
+                    date_time: toDateTimeLocalString(now),
                     price_quote_asset_id: eurAssetId,
                     fee_quote_asset_id: eurAssetId,
                 });
@@ -483,12 +494,11 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         } else {
             // In create mode, reset to defaults
             const now = new Date();
-            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
             const eurAsset = assets.find(a => a.symbol === 'EUR');
             const eurAssetId = eurAsset?.asset_id || null;
             setFormData({
                 ...initialFormData,
-                date_time: now.toISOString().slice(0, 16),
+                date_time: toDateTimeLocalString(now),
                 price_quote_asset_id: eurAssetId,
                 fee_quote_asset_id: eurAssetId,
             });
@@ -545,20 +555,41 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             <Grid templateColumns={{ base: "1fr", md: "repeat(5, 1fr)" }} gap={4}>
                                 <GridItem>
                                     <Label required>Account</Label>
-                                    <NativeSelect.Root size="sm">
-                                        <NativeSelect.Field
-                                            value={formData.account_id || ''}
-                                            onChange={e => handleInputChange('account_id', e.target.value ? parseInt(e.target.value) : null)}
-                                            borderRadius="md"
-                                        >
-                                            <option value="">Select account...</option>
-                                            {accounts.map(acc => (
-                                                <option key={acc.id} value={acc.id}>
-                                                    {acc.name} ({acc.account_type})
-                                                </option>
-                                            ))}
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
+                                    <AccountSelector
+                                        value={formData.account_id}
+                                        onChange={(id) => handleInputChange('account_id', id)}
+                                        accounts={accounts}
+                                        onAccountCreated={fetchAccounts}
+                                        placeholder="Select or create account..."
+                                        rawAccountSource={formData.source}
+                                        rawAccountLabel={undefined}
+                                    />
+                                    {/* Show account suggestions when source_account has a related account */}
+                                    {formData.source_account && !formData.account_id && (() => {
+                                        const suggestions = getAccountSuggestions(formData.source_account, accounts, 0.5, 3);
+                                        return suggestions.length > 0 ? (
+                                            <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                {suggestions.map((s, idx) => (
+                                                    <Tooltip
+                                                        key={idx}
+                                                        content={`${formatConfidence(s.confidence)} match`}
+                                                        openDelay={100}
+                                                    >
+                                                        <Badge
+                                                            size="xs"
+                                                            colorPalette={getConfidenceColor(s.confidence)}
+                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                            cursor="pointer"
+                                                            onClick={() => handleInputChange('account_id', s.item.id)}
+                                                        >
+                                                            {s.item.name}{s.confidence >= 0.9 && ' ✓'}
+                                                        </Badge>
+                                                    </Tooltip>
+                                                ))}
+                                            </HStack>
+                                        ) : null;
+                                    })()}
                                 </GridItem>
                                 <GridItem>
                                     <Label required>Source</Label>
@@ -817,6 +848,32 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     rawAssetSource="manual"
                                                     rawAssetSymbol={formData.source_asset_symbol}
                                                 />
+                                                {/* Show asset suggestions when source symbol is provided */}
+                                                {formData.source_asset_symbol && !formData.asset_id && (() => {
+                                                    const suggestions = getAssetSuggestions(formData.source_asset_symbol, assets, 0.5, 3);
+                                                    return suggestions.length > 0 ? (
+                                                        <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                            <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                            {suggestions.map((s, idx) => (
+                                                                <Tooltip
+                                                                    key={idx}
+                                                                    content={`${formatConfidence(s.confidence)} match`}
+                                                                    openDelay={100}
+                                                                >
+                                                                    <Badge
+                                                                        size="xs"
+                                                                        colorPalette={getConfidenceColor(s.confidence)}
+                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                        cursor="pointer"
+                                                                        onClick={() => handleInputChange('asset_id', s.item.asset_id!)}
+                                                                    >
+                                                                        {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
+                                                                    </Badge>
+                                                                </Tooltip>
+                                                            ))}
+                                                        </HStack>
+                                                    ) : null;
+                                                })()}
                                             </GridItem>
                                             <GridItem>
                                                 <Label>Source Symbol</Label>
@@ -997,6 +1054,32 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 rawAssetSource="manual"
                                                 rawAssetSymbol={formData.source_price_quote_asset_symbol}
                                             />
+                                            {/* Show suggestions when source symbol is provided */}
+                                            {formData.source_price_quote_asset_symbol && !formData.price_quote_asset_id && (() => {
+                                                const suggestions = getAssetSuggestions(formData.source_price_quote_asset_symbol, assets, 0.5, 3);
+                                                return suggestions.length > 0 ? (
+                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                        <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                        {suggestions.map((s, idx) => (
+                                                            <Tooltip
+                                                                key={idx}
+                                                                content={`${formatConfidence(s.confidence)} match`}
+                                                                openDelay={100}
+                                                            >
+                                                                <Badge
+                                                                    size="xs"
+                                                                    colorPalette={getConfidenceColor(s.confidence)}
+                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                    cursor="pointer"
+                                                                    onClick={() => handleInputChange('price_quote_asset_id', s.item.asset_id!)}
+                                                                >
+                                                                    {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
+                                                                </Badge>
+                                                            </Tooltip>
+                                                        ))}
+                                                    </HStack>
+                                                ) : null;
+                                            })()}
                                         </GridItem>
                                     </Grid>
                                     <Box mt={3}>
@@ -1042,6 +1125,32 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 rawAssetSource="manual"
                                                 rawAssetSymbol={formData.source_fee_quote_asset_symbol}
                                             />
+                                            {/* Show suggestions when source symbol is provided */}
+                                            {formData.source_fee_quote_asset_symbol && !formData.fee_quote_asset_id && (() => {
+                                                const suggestions = getAssetSuggestions(formData.source_fee_quote_asset_symbol, assets, 0.5, 3);
+                                                return suggestions.length > 0 ? (
+                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                        <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                        {suggestions.map((s, idx) => (
+                                                            <Tooltip
+                                                                key={idx}
+                                                                content={`${formatConfidence(s.confidence)} match`}
+                                                                openDelay={100}
+                                                            >
+                                                                <Badge
+                                                                    size="xs"
+                                                                    colorPalette={getConfidenceColor(s.confidence)}
+                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                    cursor="pointer"
+                                                                    onClick={() => handleInputChange('fee_quote_asset_id', s.item.asset_id!)}
+                                                                >
+                                                                    {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
+                                                                </Badge>
+                                                            </Tooltip>
+                                                        ))}
+                                                    </HStack>
+                                                ) : null;
+                                            })()}
                                         </GridItem>
                                     </Grid>
                                 </Box>
@@ -1248,7 +1357,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                     <Text color="gray.600">{tx.linked_asset_symbol || tx.source_asset_symbol || 'Unknown'}</Text>
                                     <Badge variant="outline">{tx.transaction_type}</Badge>
                                     <Text color="gray.400" fontSize="xs" ml="auto">
-                                        {new Date(tx.date_time).toLocaleString()}
+                                        {formatDateTimeLocale(tx.date_time)}
                                     </Text>
                                 </Flex>
                             ))}

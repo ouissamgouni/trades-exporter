@@ -1,10 +1,17 @@
 /**
- * TransactionDetailPanel - Tabbed panel for expanded transaction details
+ * TransactionDetailPanel - Nested collapsible accordion sections
  * 
- * Displays transaction details in a clean tabbed interface:
- * - Overview: Key info, tags, and notes
- * - Details: Source vs Linked info comparison
- * - Raw Data: On-demand fetch of original exchange data
+ * Structure:
+ * - Overview (main section)
+ *   - Key Infos: datetime, account, source, type, asset, qty, price, total, fee, review
+ *   - P&L: include fees, taxability
+ *   - Network: from/to account, network, network tx id
+ *   - Tags
+ *   - Notes
+ * - Details (main section)
+ *   - Source: all source_ prefixed fields
+ *   - Source-Mappings: source vs resolved with alerts
+ *   - Raw Data: raw data id + content
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -12,16 +19,15 @@ import {
     Badge,
     Box,
     Button,
-    Card,
     Flex,
     Input,
-    Tabs,
     Text,
     Textarea,
-    Code,
 } from '@chakra-ui/react';
-import { FiCopy, FiCheck, FiLoader, FiExternalLink, FiTag, FiX } from 'react-icons/fi';
+import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle } from 'react-icons/fi';
 import { Transaction, Account, API_URL } from '../types';
+import { AssetBadge } from './AssetBadge';
+import { formatDateTimeLocale } from '../utils/dateUtils';
 
 // ============================================================================
 // Types
@@ -57,15 +63,10 @@ const formatCurrency = (value: number | null | undefined, decimals = 2): string 
 const formatQty = (value: number | null | undefined): string => {
     if (value == null) return '-';
     if (value === 0) return '0';
-    // Show up to 8 decimal places, trimming trailing zeros
     return value.toFixed(8).replace(/\.?0+$/, '');
 };
 
-const formatDate = (dateStr: string | number | null | undefined): string => {
-    if (!dateStr) return '-';
-    const date = new Date(dateStr);
-    return date.toLocaleString();
-};
+// Using formatDateTimeLocale from utils/dateUtils for consistent date formatting
 
 // ============================================================================
 // Sub-components
@@ -75,16 +76,79 @@ interface InfoRowProps {
     label: string;
     value: React.ReactNode;
     muted?: boolean;
+    alert?: boolean;
 }
 
-const InfoRow: React.FC<InfoRowProps> = ({ label, value, muted }) => (
-    <Flex justify="space-between" py={1} borderBottom="1px solid" borderColor="gray.100">
-        <Text fontSize="xs" color="gray.500" fontWeight="medium">{label}</Text>
-        <Text fontSize="xs" color={muted ? 'gray.400' : 'gray.700'} fontFamily="mono">
-            {value}
-        </Text>
+const InfoRow: React.FC<InfoRowProps> = ({ label, value, muted, alert }) => (
+    <Flex justify="space-between" py={0.5} gap={2} align="center">
+        <Text fontSize="10px" color="gray.500" flexShrink={0}>{label}</Text>
+        <Flex align="center" gap={1}>
+            {alert && <FiAlertTriangle size={10} color="orange" />}
+            <Text
+                fontSize="10px"
+                color={alert ? 'orange.500' : muted ? 'gray.400' : 'gray.700'}
+                fontFamily="mono"
+                textAlign="right"
+                wordBreak="break-all"
+            >
+                {value}
+            </Text>
+        </Flex>
     </Flex>
 );
+
+interface SectionProps {
+    title: string;
+    icon?: string;
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+    level?: 'main' | 'sub';
+    colorScheme?: string;
+}
+
+const Section: React.FC<SectionProps> = ({
+    title,
+    icon,
+    children,
+    defaultOpen = true,
+    level = 'sub',
+    colorScheme = 'gray'
+}) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+
+    const isMain = level === 'main';
+
+    return (
+        <Box mb={isMain ? 2 : 1}>
+            <Flex
+                align="center"
+                gap={1}
+                py={isMain ? 1.5 : 1}
+                px={2}
+                bg={isMain ? `${colorScheme}.100` : `${colorScheme}.50`}
+                borderRadius="sm"
+                cursor="pointer"
+                onClick={() => setIsOpen(!isOpen)}
+                _hover={{ bg: isMain ? `${colorScheme}.200` : `${colorScheme}.100` }}
+            >
+                {isOpen ? <FiChevronDown size={isMain ? 14 : 12} /> : <FiChevronRight size={isMain ? 14 : 12} />}
+                <Text
+                    fontSize={isMain ? "11px" : "10px"}
+                    fontWeight="bold"
+                    color={`${colorScheme}.700`}
+                    textTransform={isMain ? "uppercase" : "none"}
+                >
+                    {icon && `${icon} `}{title}
+                </Text>
+            </Flex>
+            {isOpen && (
+                <Box px={isMain ? 1 : 2} py={1} ml={isMain ? 0 : 2}>
+                    {children}
+                </Box>
+            )}
+        </Box>
+    );
+};
 
 interface TagChipProps {
     tag: Record<string, unknown>;
@@ -93,7 +157,6 @@ interface TagChipProps {
 }
 
 const TagChip: React.FC<TagChipProps> = ({ tag, onRemove, editable }) => {
-    // Tags can be {key: value} or just strings converted to {value: string}
     const displayText = Object.entries(tag)
         .map(([k, v]) => k === 'value' ? String(v) : `${k}: ${v}`)
         .join(', ');
@@ -106,21 +169,21 @@ const TagChip: React.FC<TagChipProps> = ({ tag, onRemove, editable }) => {
             display="flex"
             alignItems="center"
             gap={0.5}
-            px={1.5}
+            px={1}
             py={0.5}
-            fontSize="10px"
+            fontSize="9px"
         >
             <FiTag size={8} />
-            <Text fontSize="10px">{displayText}</Text>
+            <Text fontSize="9px">{displayText}</Text>
             {editable && onRemove && (
                 <Box
                     as="button"
-                    onClick={onRemove}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRemove(); }}
                     ml={0.5}
                     cursor="pointer"
                     _hover={{ color: 'red.500' }}
                 >
-                    <FiX size={10} />
+                    <FiX size={8} />
                 </Box>
             )}
         </Badge>
@@ -137,8 +200,6 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     onNotesChange,
     onTagsChange,
 }) => {
-    const [activeTab, setActiveTab] = useState('overview');
-    
     // Raw data state
     const [rawData, setRawData] = useState<RawTransactionData | null>(null);
     const [rawDataLoading, setRawDataLoading] = useState(false);
@@ -157,7 +218,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     // Fetch raw transaction data on-demand
     const fetchRawData = useCallback(async () => {
         if (!tx.raw_transaction_id || hasFetchedRaw || rawDataLoading) return;
-        
+
         setRawDataLoading(true);
         setHasFetchedRaw(true);
         try {
@@ -171,13 +232,6 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
             setRawDataLoading(false);
         }
     }, [tx.raw_transaction_id, hasFetchedRaw, rawDataLoading]);
-
-    // Fetch raw data when switching to raw tab
-    useEffect(() => {
-        if (activeTab === 'raw' && !hasFetchedRaw) {
-            fetchRawData();
-        }
-    }, [activeTab, hasFetchedRaw, fetchRawData]);
 
     // Copy JSON to clipboard
     const copyJson = async () => {
@@ -198,11 +252,11 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     // Add tag
     const addTag = () => {
         if (!newTagValue.trim()) return;
-        const newTag = newTagKey.trim() 
+        const newTag = newTagKey.trim()
             ? { [newTagKey.trim()]: newTagValue.trim() }
             : { value: newTagValue.trim() };
-        
-        const currentTags = tx.tags || [];
+
+        const currentTags = (tx.tags || []) as Record<string, unknown>[];
         if (onTagsChange) {
             onTagsChange(tx.id, [...currentTags, newTag]);
         }
@@ -212,9 +266,9 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
 
     // Remove tag
     const removeTag = (index: number) => {
-        const currentTags = tx.tags || [];
+        const currentTags = (tx.tags || []) as Record<string, unknown>[];
         if (onTagsChange) {
-            onTagsChange(tx.id, currentTags.filter((_, i) => i !== index));
+            onTagsChange(tx.id, currentTags.filter((_: Record<string, unknown>, i: number) => i !== index));
         }
     };
 
@@ -226,376 +280,472 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     };
 
     return (
-        <Box bg="gray.50" borderRadius="md" overflow="hidden">
-            <Tabs.Root 
-                value={activeTab} 
-                onValueChange={(e) => setActiveTab(e.value)}
-                size="sm"
-            >
-                <Tabs.List bg="white" borderBottom="1px solid" borderColor="gray.200" px={2}>
-                    <Tabs.Trigger value="overview" fontSize="xs" px={3} py={2}>
-                        📊 Overview
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="details" fontSize="xs" px={3} py={2}>
-                        📋 Details
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="raw" fontSize="xs" px={3} py={2}>
-                        🔗 Raw Data
-                        {tx.raw_transaction_id && (
-                            <Badge ml={1} size="xs" colorPalette="gray">#{tx.raw_transaction_id}</Badge>
-                        )}
-                    </Tabs.Trigger>
-                </Tabs.List>
+        <Box>
+            {/* ============================================================ */}
+            {/* OVERVIEW SECTION */}
+            {/* ============================================================ */}
+            <Section title="Overview" level="main" defaultOpen={true} colorScheme="blue">
 
-                {/* Overview Tab */}
-                <Tabs.Content value="overview" p={3}>
-                    <Flex gap={4} wrap="wrap">
-                        {/* Key Info Card */}
-                        <Card.Root size="sm" flex="1" minW="200px">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                    📊 Key Information
-                                </Text>
-                                <InfoRow 
-                                    label="Asset" 
-                                    value={
-                                        <Badge size="sm" colorPalette="purple">
-                                            {tx.linked_asset_symbol || tx.source_asset_symbol || '-'}
-                                        </Badge>
-                                    } 
+                {/* Key Infos */}
+                <Section title="Key Infos" icon="📊" defaultOpen={true} colorScheme="purple">
+                    <InfoRow label="Date/Time" value={formatDateTimeLocale(tx.date_time)} />
+                    <InfoRow label="Account" value={getAccountName(tx.account_id ?? null)} />
+                    <InfoRow label="Source" value={tx.source || '-'} muted />
+                    <InfoRow
+                        label="Type"
+                        value={
+                            <Badge size="xs" colorPalette="gray" fontSize="9px">
+                                {tx.transaction_type || '-'}
+                            </Badge>
+                        }
+                    />
+                    <InfoRow
+                        label="Asset"
+                        value={
+                            <AssetBadge
+                                asset={tx.linked_asset}
+                                sourceSymbol={tx.source_asset_symbol}
+                                size="xs"
+                                colorPalette="purple"
+                                maxLength={18}
+                            />
+                        }
+                    />
+                    <InfoRow label="Quantity" value={formatQty(tx.quantity)} />
+                    <InfoRow
+                        label="Price"
+                        value={
+                            <Flex align="center" gap={1}>
+                                <Text fontSize="10px" fontFamily="mono">{formatCurrency(tx.price)}</Text>
+                                <AssetBadge
+                                    asset={tx.price_quote_asset}
+                                    sourceSymbol={tx.source_price_quote_asset_symbol}
+                                    size="xs"
+                                    colorPalette="cyan"
+                                    maxLength={12}
                                 />
-                                <InfoRow label="Quantity" value={formatQty(tx.quantity)} />
-                                <InfoRow 
-                                    label="Price" 
-                                    value={`${formatCurrency(tx.price)} ${tx.linked_price_quote_asset_symbol || tx.source_price_quote_asset_symbol || ''}`} 
-                                />
-                                <InfoRow 
-                                    label="Total" 
-                                    value={`${formatCurrency(tx.total)} ${tx.linked_price_quote_asset_symbol || tx.source_price_quote_asset_symbol || ''}`} 
-                                />
-                                <InfoRow 
-                                    label="Fee" 
-                                    value={tx.fee ? `${formatQty(tx.fee)} ${tx.linked_fee_quote_asset_symbol || tx.source_fee_quote_asset_symbol || ''}` : '-'} 
-                                />
-                                <InfoRow 
-                                    label="Include Fee" 
-                                    value={tx.include_fee ? '✓ Yes' : '✗ No'} 
-                                    muted={!tx.include_fee}
-                                />
-                            </Card.Body>
-                        </Card.Root>
-
-                        {/* Type & Status Card */}
-                        <Card.Root size="sm" flex="1" minW="180px">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                    🏷️ Type & Status
-                                </Text>
-                                <InfoRow 
-                                    label="Direction" 
-                                    value={
-                                        <Badge 
-                                            size="sm" 
-                                            colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
-                                        >
-                                            {tx.direction}
-                                        </Badge>
-                                    } 
-                                />
-                                <InfoRow label="Type" value={tx.transaction_type || '-'} />
-                                <InfoRow label="Source Type" value={tx.source_transaction_type || '-'} muted />
-                                <InfoRow 
-                                    label="Review" 
-                                    value={
-                                        <Badge 
-                                            size="sm" 
-                                            colorPalette={tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow'}
-                                        >
-                                            {tx.review_status}
-                                        </Badge>
-                                    } 
-                                />
-                                <InfoRow label="Synced" value={formatDate(tx.synced_at)} muted />
-                            </Card.Body>
-                        </Card.Root>
-
-                        {/* Accounts Card */}
-                        <Card.Root size="sm" flex="1" minW="180px">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                    👤 Accounts
-                                </Text>
-                                <InfoRow label="Account" value={getAccountName(tx.account_id ?? null)} />
-                                <InfoRow label="From" value={getAccountName(tx.from_account_id)} />
-                                <InfoRow label="To" value={getAccountName(tx.to_account_id)} />
-                                {tx.network && (
-                                    <InfoRow label="Network" value={tx.network} />
-                                )}
-                            </Card.Body>
-                        </Card.Root>
-
-                        {/* Tags Card */}
-                        <Card.Root size="sm" flex="1" minW="200px">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                    🏷️ Tags
-                                </Text>
-                                <Flex gap={1} wrap="wrap" mb={2}>
-                                    {tx.tags && tx.tags.length > 0 ? (
-                                        tx.tags.map((tag, i) => (
-                                            <TagChip 
-                                                key={i} 
-                                                tag={tag} 
-                                                editable={!!onTagsChange}
-                                                onRemove={() => removeTag(i)}
-                                            />
-                                        ))
-                                    ) : (
-                                        <Text fontSize="xs" color="gray.400">No tags</Text>
-                                    )}
-                                </Flex>
-                                {onTagsChange && (
-                                    <Flex gap={1} mt={2}>
-                                        <Input 
-                                            size="xs" 
-                                            placeholder="Key (optional)" 
-                                            value={newTagKey}
-                                            onChange={(e) => setNewTagKey(e.target.value)}
-                                            width="80px"
-                                        />
-                                        <Input 
-                                            size="xs" 
-                                            placeholder="Value" 
-                                            value={newTagValue}
-                                            onChange={(e) => setNewTagValue(e.target.value)}
-                                            flex="1"
-                                            onKeyDown={(e) => e.key === 'Enter' && addTag()}
-                                        />
-                                        <Button size="xs" onClick={addTag} disabled={!newTagValue.trim()}>
-                                            Add
-                                        </Button>
-                                    </Flex>
-                                )}
-                            </Card.Body>
-                        </Card.Root>
-                    </Flex>
-
-                    {/* Notes Section */}
-                    <Card.Root size="sm" mt={3}>
-                        <Card.Body p={3}>
-                            <Flex justify="space-between" align="center" mb={2}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600">
-                                    📝 Notes
-                                </Text>
-                                {!isEditingNotes && onNotesChange && (
-                                    <Button size="xs" variant="ghost" onClick={() => setIsEditingNotes(true)}>
-                                        Edit
-                                    </Button>
-                                )}
                             </Flex>
-                            {isEditingNotes ? (
-                                <Flex direction="column" gap={2}>
-                                    <Textarea
-                                        size="sm"
-                                        value={notesValue}
-                                        onChange={(e) => setNotesValue(e.target.value)}
-                                        placeholder="Add notes..."
-                                        rows={3}
-                                        fontSize="xs"
+                        }
+                    />
+                    <InfoRow
+                        label="Total"
+                        value={
+                            <Flex align="center" gap={1}>
+                                <Text fontSize="10px" fontFamily="mono">{formatCurrency(tx.total)}</Text>
+                                <AssetBadge
+                                    asset={tx.price_quote_asset}
+                                    sourceSymbol={tx.source_price_quote_asset_symbol}
+                                    size="xs"
+                                    colorPalette="cyan"
+                                    maxLength={12}
+                                />
+                            </Flex>
+                        }
+                    />
+                    <InfoRow
+                        label="Fee"
+                        value={tx.fee ? (
+                            <Flex align="center" gap={1}>
+                                <Text fontSize="10px" fontFamily="mono">{formatQty(tx.fee)}</Text>
+                                <AssetBadge
+                                    asset={tx.fee_quote_asset}
+                                    sourceSymbol={tx.source_fee_quote_asset_symbol}
+                                    size="xs"
+                                    colorPalette="orange"
+                                    maxLength={12}
+                                />
+                            </Flex>
+                        ) : '-'}
+                    />
+                    <InfoRow
+                        label="Review"
+                        value={
+                            <Badge
+                                size="xs"
+                                colorPalette={tx.review_status === 'valid' ? 'green' : tx.review_status === 'invalid' ? 'red' : 'yellow'}
+                                fontSize="9px"
+                            >
+                                {tx.review_status}
+                            </Badge>
+                        }
+                    />
+                </Section>
+
+                {/* P&L */}
+                <Section title="P&L" icon="💰" defaultOpen={true} colorScheme="green">
+                    <InfoRow
+                        label="Include Fees"
+                        value={tx.include_fee ? '✓ Yes' : '✗ No'}
+                        muted={!tx.include_fee}
+                    />
+                    <InfoRow
+                        label="Taxability"
+                        value={
+                            <Badge
+                                size="xs"
+                                colorPalette={tx.taxability_status === 'taxable' ? 'orange' : tx.taxability_status === 'non_taxable' ? 'green' : 'yellow'}
+                                fontSize="9px"
+                            >
+                                {(tx.taxability_status || 'unknown').toUpperCase()}
+                            </Badge>
+                        }
+                    />
+                </Section>
+
+                {/* Network */}
+                <Section title="Network" icon="🌐" defaultOpen={false} colorScheme="cyan">
+                    <InfoRow label="From Account" value={getAccountName(tx.from_account_id)} />
+                    <InfoRow label="To Account" value={getAccountName(tx.to_account_id)} />
+                    <InfoRow label="Network" value={tx.network || '-'} />
+                    <InfoRow label="Network TX ID" value={
+                        tx.network_transaction_id ? (
+                            <Text fontSize="9px" maxW="150px" truncate title={tx.network_transaction_id}>
+                                {tx.network_transaction_id}
+                            </Text>
+                        ) : '-'
+                    } />
+                </Section>
+
+                {/* Tags */}
+                <Section title="Tags" icon="🏷️" defaultOpen={false} colorScheme="blue">
+                    <Flex gap={1} wrap="wrap" mb={1}>
+                        {tx.tags && (tx.tags as Record<string, unknown>[]).length > 0 ? (
+                            (tx.tags as Record<string, unknown>[]).map((tag: Record<string, unknown>, i: number) => (
+                                <TagChip
+                                    key={i}
+                                    tag={tag}
+                                    editable={!!onTagsChange}
+                                    onRemove={() => removeTag(i)}
+                                />
+                            ))
+                        ) : (
+                            <Text fontSize="9px" color="gray.400">No tags</Text>
+                        )}
+                    </Flex>
+                    {onTagsChange && (
+                        <Flex gap={1} mt={1}>
+                            <Input
+                                size="xs"
+                                placeholder="Key"
+                                value={newTagKey}
+                                onChange={(e) => setNewTagKey(e.target.value)}
+                                width="50px"
+                                fontSize="9px"
+                            />
+                            <Input
+                                size="xs"
+                                placeholder="Value"
+                                value={newTagValue}
+                                onChange={(e) => setNewTagValue(e.target.value)}
+                                flex="1"
+                                fontSize="9px"
+                                onKeyDown={(e) => e.key === 'Enter' && addTag()}
+                            />
+                            <Button size="xs" onClick={addTag} disabled={!newTagValue.trim()} px={2}>
+                                +
+                            </Button>
+                        </Flex>
+                    )}
+                </Section>
+
+                {/* Notes */}
+                <Section title="Notes" icon="📝" defaultOpen={false} colorScheme="orange">
+                    {isEditingNotes ? (
+                        <Flex direction="column" gap={1}>
+                            <Textarea
+                                size="xs"
+                                value={notesValue}
+                                onChange={(e) => setNotesValue(e.target.value)}
+                                placeholder="Add notes..."
+                                rows={2}
+                                fontSize="10px"
+                            />
+                            <Flex gap={1} justify="flex-end">
+                                <Button size="xs" variant="ghost" onClick={() => {
+                                    setNotesValue(tx.review_notes || '');
+                                    setIsEditingNotes(false);
+                                }} fontSize="9px" px={2}>
+                                    Cancel
+                                </Button>
+                                <Button size="xs" colorPalette="blue" onClick={saveNotes} fontSize="9px" px={2}>
+                                    Save
+                                </Button>
+                            </Flex>
+                        </Flex>
+                    ) : (
+                        <Flex justify="space-between" align="flex-start">
+                            <Text
+                                fontSize="10px"
+                                color={tx.review_notes ? 'gray.700' : 'gray.400'}
+                                whiteSpace="pre-wrap"
+                                flex="1"
+                            >
+                                {tx.review_notes || 'No notes'}
+                            </Text>
+                            {onNotesChange && (
+                                <Button size="xs" variant="ghost" onClick={() => setIsEditingNotes(true)} px={1} fontSize="9px">
+                                    Edit
+                                </Button>
+                            )}
+                        </Flex>
+                    )}
+                </Section>
+            </Section>
+
+            {/* ============================================================ */}
+            {/* DETAILS SECTION */}
+            {/* ============================================================ */}
+            <Section title="Details" level="main" defaultOpen={false} colorScheme="gray">
+
+                {/* Source Data */}
+                <Section title="Source" icon="📤" defaultOpen={true} colorScheme="orange">
+                    <InfoRow label="Source" value={tx.source || '-'} />
+                    <InfoRow label="Source TX ID" value={
+                        <Text fontSize="9px" maxW="150px" truncate title={tx.source_transaction_id || ''}>
+                            {tx.source_transaction_id || '-'}
+                        </Text>
+                    } />
+                    <InfoRow label="Account" value={
+                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_account || ''}>
+                            {tx.source_account || '-'}
+                        </Text>
+                    } />
+                    <InfoRow label="Asset" value={tx.source_asset_symbol || '-'} />
+                    <InfoRow label="Type" value={tx.source_transaction_type || '-'} />
+                    <InfoRow label="Price Quote" value={tx.source_price_quote_asset_symbol || '-'} />
+                    <InfoRow label="Fee Quote" value={tx.source_fee_quote_asset_symbol || '-'} />
+                    <InfoRow label="From Address" value={
+                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_from_account || ''}>
+                            {tx.source_from_account || '-'}
+                        </Text>
+                    } />
+                    <InfoRow label="To Address" value={
+                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_to_account || ''}>
+                            {tx.source_to_account || '-'}
+                        </Text>
+                    } />
+                </Section>
+
+                {/* Source Mappings */}
+                <Section title="Source-Mappings" icon="🔗" defaultOpen={true} colorScheme="blue">
+                    <Text fontSize="9px" color="gray.500" mb={1}>Source value → Resolved ID</Text>
+
+                    <InfoRow
+                        label="Account"
+                        value={
+                            tx.account_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_account || '-'}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                        #{tx.account_id} {getAccountName(tx.account_id)}
+                                    </Badge>
+                                </Flex>
+                            ) : tx.source_account ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_account}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            ) : '-'
+                        }
+                        alert={!tx.account_id && !!tx.source_account}
+                    />
+
+                    <InfoRow
+                        label="Asset"
+                        value={
+                            tx.asset_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_asset_symbol}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <AssetBadge
+                                        asset={tx.linked_asset}
+                                        size="xs"
+                                        colorPalette="purple"
+                                        maxLength={15}
                                     />
-                                    <Flex gap={2} justify="flex-end">
-                                        <Button size="xs" variant="ghost" onClick={() => {
-                                            setNotesValue(tx.review_notes || '');
-                                            setIsEditingNotes(false);
-                                        }}>
-                                            Cancel
-                                        </Button>
-                                        <Button size="xs" colorPalette="blue" onClick={saveNotes}>
-                                            Save
-                                        </Button>
-                                    </Flex>
                                 </Flex>
                             ) : (
-                                <Text 
-                                    fontSize="xs" 
-                                    color={tx.review_notes ? 'gray.700' : 'gray.400'}
-                                    whiteSpace="pre-wrap"
-                                >
-                                    {tx.review_notes || 'No notes added'}
-                                </Text>
-                            )}
-                        </Card.Body>
-                    </Card.Root>
-                </Tabs.Content>
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_asset_symbol || '-'}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            )
+                        }
+                        alert={!tx.asset_id && !!tx.source_asset_symbol}
+                    />
 
-                {/* Details Tab */}
-                <Tabs.Content value="details" p={3}>
-                    <Flex gap={4}>
-                        {/* Source Data */}
-                        <Card.Root size="sm" flex="1">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="orange.600" mb={2}>
-                                    📤 Source Data (Raw)
-                                </Text>
-                                <InfoRow label="Source" value={tx.source || '-'} />
-                                <InfoRow label="Source TX ID" value={tx.source_transaction_id || '-'} />
-                                <InfoRow label="Asset Symbol" value={tx.source_asset_symbol || '-'} />
-                                <InfoRow label="Price Quote" value={tx.source_price_quote_asset_symbol || '-'} />
-                                <InfoRow label="Fee Quote" value={tx.source_fee_quote_asset_symbol || '-'} />
-                                <InfoRow label="TX Type" value={tx.source_transaction_type || '-'} />
-                                <InfoRow label="From Address" value={
-                                    <Text fontSize="xs" maxW="150px" truncate title={tx.source_from_account || ''}>
-                                        {tx.source_from_account || '-'}
-                                    </Text>
-                                } />
-                                <InfoRow label="To Address" value={
-                                    <Text fontSize="xs" maxW="150px" truncate title={tx.source_to_account || ''}>
-                                        {tx.source_to_account || '-'}
-                                    </Text>
-                                } />
-                            </Card.Body>
-                        </Card.Root>
+                    <InfoRow
+                        label="Price Quote"
+                        value={
+                            tx.price_quote_asset_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_price_quote_asset_symbol}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <AssetBadge
+                                        asset={tx.price_quote_asset}
+                                        size="xs"
+                                        colorPalette="green"
+                                        maxLength={15}
+                                    />
+                                </Flex>
+                            ) : (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_price_quote_asset_symbol || '-'}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            )
+                        }
+                        alert={!tx.price_quote_asset_id && !!tx.source_price_quote_asset_symbol}
+                    />
 
-                        {/* Linked/Resolved Data */}
-                        <Card.Root size="sm" flex="1">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="blue.600" mb={2}>
-                                    🔗 Linked Data (Resolved)
-                                </Text>
-                                <InfoRow label="Asset" value={
-                                    tx.asset_id ? (
-                                        <Badge size="sm" colorPalette="purple">
-                                            {tx.linked_asset_symbol || `#${tx.asset_id}`}
-                                        </Badge>
-                                    ) : <Text color="orange.500">Not linked</Text>
-                                } />
-                                <InfoRow label="Asset ID" value={tx.asset_id ?? 'Not linked'} muted={!tx.asset_id} />
-                                <InfoRow label="Price Quote" value={
-                                    tx.price_quote_asset_id ? (
-                                        <Badge size="sm" colorPalette="green">
-                                            {tx.linked_price_quote_asset_symbol || `#${tx.price_quote_asset_id}`}
-                                        </Badge>
-                                    ) : <Text color="orange.500">Not linked</Text>
-                                } />
-                                <InfoRow label="Fee Quote" value={
-                                    tx.fee_quote_asset_id ? (
-                                        <Badge size="sm" colorPalette="green">
-                                            {tx.linked_fee_quote_asset_symbol || `#${tx.fee_quote_asset_id}`}
-                                        </Badge>
-                                    ) : <Text color="orange.500">Not linked</Text>
-                                } />
-                                <InfoRow label="TX Type" value={tx.transaction_type || '-'} />
-                                <InfoRow label="From Account" value={getAccountName(tx.from_account_id)} />
-                                <InfoRow label="To Account" value={getAccountName(tx.to_account_id)} />
-                            </Card.Body>
-                        </Card.Root>
+                    <InfoRow
+                        label="Fee Quote"
+                        value={
+                            tx.fee_quote_asset_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_fee_quote_asset_symbol}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <AssetBadge
+                                        asset={tx.fee_quote_asset}
+                                        size="xs"
+                                        colorPalette="green"
+                                        maxLength={15}
+                                    />
+                                </Flex>
+                            ) : tx.source_fee_quote_asset_symbol ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500">{tx.source_fee_quote_asset_symbol}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            ) : '-'
+                        }
+                        alert={!tx.fee_quote_asset_id && !!tx.source_fee_quote_asset_symbol}
+                    />
 
-                        {/* IDs & Metadata */}
-                        <Card.Root size="sm" flex="1">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                    🆔 Identifiers
-                                </Text>
-                                <InfoRow label="Transaction ID" value={tx.id} />
-                                <InfoRow label="Raw TX ID" value={tx.raw_transaction_id ?? 'None'} muted={!tx.raw_transaction_id} />
-                                <InfoRow label="Network TX" value={
-                                    tx.network_transaction_id ? (
-                                        <Text fontSize="xs" maxW="120px" truncate title={tx.network_transaction_id}>
-                                            {tx.network_transaction_id}
-                                        </Text>
-                                    ) : '-'
-                                } />
-                                <InfoRow label="Contract" value={
-                                    tx.token_contract_address ? (
-                                        <Text fontSize="xs" maxW="120px" truncate title={tx.token_contract_address}>
-                                            {tx.token_contract_address}
-                                        </Text>
-                                    ) : '-'
-                                } />
-                                <InfoRow label="Network" value={tx.network || '-'} />
-                            </Card.Body>
-                        </Card.Root>
-                    </Flex>
-                </Tabs.Content>
+                    <InfoRow
+                        label="From Account"
+                        value={
+                            tx.from_account_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_from_account || '-'}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                        #{tx.from_account_id} {getAccountName(tx.from_account_id)}
+                                    </Badge>
+                                </Flex>
+                            ) : tx.source_from_account ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_from_account}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            ) : '-'
+                        }
+                    />
 
-                {/* Raw Data Tab */}
-                <Tabs.Content value="raw" p={3}>
+                    <InfoRow
+                        label="To Account"
+                        value={
+                            tx.to_account_id ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_to_account || '-'}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                        #{tx.to_account_id} {getAccountName(tx.to_account_id)}
+                                    </Badge>
+                                </Flex>
+                            ) : tx.source_to_account ? (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_to_account}</Text>
+                                    <Text fontSize="9px">→</Text>
+                                    <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
+                                </Flex>
+                            ) : '-'
+                        }
+                    />
+                </Section>
+
+                {/* Raw Data */}
+                <Section title="Raw Data" icon="🗄️" defaultOpen={false} colorScheme="gray">
+                    <InfoRow label="Transaction ID" value={tx.id} />
+                    <InfoRow label="Raw TX ID" value={tx.raw_transaction_id ?? 'None'} muted={!tx.raw_transaction_id} />
+
                     {!tx.raw_transaction_id ? (
-                        <Card.Root size="sm">
-                            <Card.Body p={4} textAlign="center">
-                                <Text fontSize="sm" color="gray.500">
-                                    No raw transaction linked to this transaction.
-                                </Text>
-                                <Text fontSize="xs" color="gray.400" mt={1}>
-                                    This may be a manually created transaction.
-                                </Text>
-                            </Card.Body>
-                        </Card.Root>
+                        <Box p={2} bg="gray.50" borderRadius="md" textAlign="center" mt={2}>
+                            <Text fontSize="9px" color="gray.500">
+                                No raw transaction linked (manual entry)
+                            </Text>
+                        </Box>
+                    ) : !hasFetchedRaw ? (
+                        <Button
+                            size="xs"
+                            mt={2}
+                            onClick={fetchRawData}
+                            fontSize="9px"
+                            w="100%"
+                        >
+                            Load Raw Data
+                        </Button>
                     ) : rawDataLoading ? (
-                        <Flex align="center" justify="center" py={8} gap={2}>
-                            <FiLoader className="animate-spin" />
-                            <Text fontSize="sm" color="gray.500">Loading raw transaction data...</Text>
+                        <Flex align="center" justify="center" py={2} gap={2}>
+                            <FiLoader className="animate-spin" size={12} />
+                            <Text fontSize="9px" color="gray.500">Loading...</Text>
                         </Flex>
                     ) : rawDataError ? (
-                        <Card.Root size="sm" borderColor="red.200">
-                            <Card.Body p={4}>
-                                <Text fontSize="sm" color="red.500">
-                                    Error loading raw data: {rawDataError}
-                                </Text>
-                                <Button 
-                                    size="xs" 
-                                    mt={2} 
-                                    onClick={() => {
-                                        setHasFetchedRaw(false);
-                                        setRawDataError(null);
-                                        fetchRawData();
-                                    }}
-                                >
-                                    Retry
-                                </Button>
-                            </Card.Body>
-                        </Card.Root>
+                        <Box p={2} bg="red.50" borderRadius="md" mt={2}>
+                            <Text fontSize="9px" color="red.500">Error: {rawDataError}</Text>
+                            <Button
+                                size="xs"
+                                mt={1}
+                                fontSize="9px"
+                                onClick={() => {
+                                    setHasFetchedRaw(false);
+                                    setRawDataError(null);
+                                }}
+                            >
+                                Retry
+                            </Button>
+                        </Box>
                     ) : rawData ? (
-                        <Card.Root size="sm">
-                            <Card.Body p={3}>
-                                <Flex justify="space-between" align="center" mb={2}>
-                                    <Flex align="center" gap={2}>
-                                        <Text fontSize="xs" fontWeight="bold" color="gray.600">
-                                            Raw Transaction #{rawData.id}
-                                        </Text>
-                                        <Badge size="xs" colorPalette="gray">{rawData.source}</Badge>
-                                    </Flex>
-                                    <Button 
-                                        size="xs" 
-                                        variant="ghost" 
-                                        onClick={copyJson}
-                                        leftIcon={copied ? <FiCheck /> : <FiCopy />}
-                                    >
-                                        {copied ? 'Copied!' : 'Copy JSON'}
-                                    </Button>
+                        <Box mt={2}>
+                            <Flex justify="space-between" align="center" mb={1}>
+                                <Flex align="center" gap={1}>
+                                    <Badge size="xs" colorPalette="gray" fontSize="8px">{rawData.source}</Badge>
+                                    <Text fontSize="8px" color="gray.500">ID: {rawData.source_transaction_id}</Text>
                                 </Flex>
-                                <Text fontSize="xs" color="gray.500" mb={2}>
-                                    Source ID: {rawData.source_transaction_id} • Ingested: {formatDate(rawData.ingestion_time)}
-                                </Text>
-                                <Box
-                                    bg="gray.900"
-                                    color="green.300"
-                                    p={3}
-                                    borderRadius="md"
-                                    fontSize="xs"
-                                    fontFamily="mono"
-                                    maxH="300px"
-                                    overflowY="auto"
-                                    whiteSpace="pre-wrap"
-                                    wordBreak="break-all"
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    onClick={copyJson}
+                                    px={1}
+                                    fontSize="9px"
                                 >
-                                    {JSON.stringify(rawData.raw_data, null, 2)}
-                                </Box>
-                            </Card.Body>
-                        </Card.Root>
+                                    {copied ? <FiCheck size={10} /> : <FiCopy size={10} />}
+                                </Button>
+                            </Flex>
+                            <Box
+                                bg="gray.900"
+                                color="green.300"
+                                p={2}
+                                borderRadius="md"
+                                fontSize="8px"
+                                fontFamily="mono"
+                                maxH="200px"
+                                overflowY="auto"
+                                whiteSpace="pre-wrap"
+                                wordBreak="break-all"
+                            >
+                                {JSON.stringify(rawData.raw_data, null, 2)}
+                            </Box>
+                        </Box>
                     ) : null}
-                </Tabs.Content>
-            </Tabs.Root>
+                </Section>
+            </Section>
         </Box>
     );
 };

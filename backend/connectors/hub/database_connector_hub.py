@@ -11,7 +11,6 @@ from sqlmodel import Session
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.connectors.onchain.connector_onchain_hub import ConnectorOnchainHub
 from backend.config.loader import configure_logging, is_test_mode
 from backend.db.models import AccountConnector
 from backend.services.connector_loader_service import ConnectorLoaderService
@@ -77,31 +76,26 @@ class DatabaseConnectorHub(BaseHubConnector):
             connector_key = f"{account.name}_{connector_type}_{account_connector.id}"
 
             try:
-                # Build config from database
-                config = self.loader_service.build_connector_config(
-                    account_connector, account
-                )
-
                 if registry.is_onchain(connector_type):
-                    # Collect on-chain configs for batch initialization
+                    # Build config for on-chain connector
+                    config = self.loader_service.build_connector_config(
+                        account_connector, account
+                    )
+                    # Store config with account context for batch initialization
+                    config["_connector_key"] = connector_key
+                    config["_account_connector"] = account_connector
                     onchain_configs.append(config)
                     log.info(f"✅ Queued on-chain connector: {connector_key}")
                 else:
-                    # Try to get connector class from registry
-                    hub_key = registry.get_hub_key(connector_type)
-                    if hub_key:
-                        connector_class = registry.get_class(connector_type)
-                        if connector_class:
-                            # Initialize CEX connector
-                            # TODO: Pass config to connector constructor when supported
-                            instance = connector_class()
-                            self.connector_instances[connector_key] = instance
-                            self._account_connector_map[connector_key] = (
-                                account_connector
-                            )
-                            log.info(f"✅ Initialized connector: {connector_key}")
-                        else:
-                            log.warning(f"⚠️ Unknown connector type: {connector_type}")
+                    # Use instantiate_connector for CEX connectors
+                    # This properly passes account_id, connector_id, and config
+                    instance = self.loader_service.instantiate_connector(
+                        account_connector, account
+                    )
+                    if instance:
+                        self.connector_instances[connector_key] = instance
+                        self._account_connector_map[connector_key] = account_connector
+                        log.info(f"✅ Initialized connector: {connector_key}")
                     else:
                         log.warning(f"⚠️ Unknown connector type: {connector_type}")
 
@@ -113,18 +107,31 @@ class DatabaseConnectorHub(BaseHubConnector):
                 )
                 continue
 
-        # Initialize on-chain hub if we have on-chain configs
+        # Initialize on-chain connectors individually (not via hub)
         if onchain_configs:
-            try:
-                # For now, use the default ConnectorOnchainHub
-                # TODO: Pass address configs when supported
-                onchain_hub = ConnectorOnchainHub()
-                self.connector_instances["on-chain"] = onchain_hub
-                log.info(
-                    f"✅ Initialized on-chain hub with {len(onchain_configs)} addresses"
-                )
-            except Exception as e:
-                log.error(f"❌ Failed to initialize on-chain hub: {e}")
+            for config in onchain_configs:
+                connector_key = config.pop("_connector_key")
+                account_connector = config.pop("_account_connector")
+                try:
+                    connector_type = account_connector.connector_type
+                    connector_class = registry.get_class(connector_type)
+                    if connector_class:
+                        instance = connector_class(
+                            wallet_address=config.get("address", ""),
+                            chain_name=config.get("chain", ""),
+                            api_key=config.get("api_key"),
+                            account_id=config.get("_account_id"),
+                            connector_id=config.get("_connector_id"),
+                            config=config,
+                        )
+                        self.connector_instances[connector_key] = instance
+                        self._account_connector_map[connector_key] = account_connector
+                        log.info(f"✅ Initialized on-chain connector: {connector_key}")
+                except Exception as e:
+                    log.error(f"❌ Failed to initialize on-chain {connector_key}: {e}")
+                    self.loader_service.update_sync_status(
+                        account_connector.id, "failed", str(e)
+                    )
 
         log.info(
             f"✅ {len(self.connector_instances)} connectors initialized from database"

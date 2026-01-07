@@ -19,6 +19,7 @@ import {
 import { FiExternalLink, FiSearch, FiDownload } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { FeeEntry, FeeSummary } from './types';
+import { formatDateLocale } from '../../utils/dateUtils';
 
 interface FeesPanelProps {
     fees: FeeEntry[];
@@ -42,9 +43,7 @@ const formatQty = (value: number): string => {
     return value.toFixed(8).replace(/\.?0+$/, '');
 };
 
-const formatDate = (dateStr: string): string => {
-    return new Date(dateStr).toLocaleDateString();
-};
+// Using formatDateLocale from utils/dateUtils for date formatting
 
 export const FeesPanel: React.FC<FeesPanelProps> = ({
     fees,
@@ -186,7 +185,7 @@ export const FeesPanel: React.FC<FeesPanelProps> = ({
                                     filtered.map((fee) => (
                                         <Table.Row key={fee.id}>
                                             <Table.Cell>
-                                                <Text fontSize="sm">{formatDate(fee.date)}</Text>
+                                                <Text fontSize="sm">{formatDateLocale(fee.date)}</Text>
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <Badge size="sm" variant="subtle">

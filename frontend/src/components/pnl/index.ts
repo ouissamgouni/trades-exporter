@@ -18,6 +18,7 @@ export { DataExplorerPanel, DataExplorerContent, PnLAuditView, UnitsTab, CostLot
 export { SlidePanel } from './SlidePanel';
 export { CategoryFilterBar } from './CategoryFilterBar';
 export { MarketValuePieChart } from './MarketValuePieChart';
+export { PerformanceBarChart } from './PerformanceBarChart';
 
 // Types
 export type {

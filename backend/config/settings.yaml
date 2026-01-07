@@ -8,6 +8,9 @@ source_base: "data/input"
 export_base: "data/output"
 database_path: "data/trades.db"
 
+# Use database-configured connectors (respects Account.enabled and AccountConnector.enabled)
+use_database_connectors: true
+
 log_level_root: "WARNING"
 log_level_trade_exporter: "DEBUG"
 

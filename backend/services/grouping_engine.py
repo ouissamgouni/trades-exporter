@@ -6,6 +6,7 @@ This engine analyzes ungrouped transactions and suggests CalculationUnit groupin
 - Rule 2: Same asset transfer between owned accounts
 - Rule 3: Same source_transaction_id grouping (swap detection)
 - Rule 4: Swap detection (different assets, same account, short time window)
+- Rule 4b: Split detection (same asset, different quantities, same total value)
 - Rule 5: Bridge detection (same asset, different accounts, not to_account match)
 - Rule 6: Catch-all for remaining ungrouped transactions
 
@@ -15,10 +16,10 @@ Returns GroupingSuggestion objects that can be converted to CalculationUnit for 
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, TYPE_CHECKING
 
 from backend.config.loader import configure_logging, load_settings
-from backend.db.models import CalculationUnit, UnitPattern
+from backend.db.models import CalculationUnit, UnitPattern, NormalizedTransaction
 
 log = configure_logging("grouping_engine")
 
@@ -68,29 +69,6 @@ class GroupingConfig:
 
 
 @dataclass
-class TransactionData:
-    """Simplified transaction data for grouping analysis."""
-
-    id: int
-    source: str
-    source_transaction_id: Optional[str]
-    network_transaction_id: Optional[str]
-    date_time: datetime
-    direction: str  # 'inflow', 'outflow'
-    transaction_type: str
-    asset_id: Optional[int]
-    source_asset_symbol: str
-    quantity: Decimal
-    total_in_base: Optional[Decimal]
-    account_id: Optional[int]
-    to_account_id: Optional[int]
-    from_account_id: Optional[int]
-    source_to_account: Optional[str]
-    source_from_account: Optional[str]
-    network: Optional[str]
-
-
-@dataclass
 class GroupingSuggestion:
     """
     Grouping suggestion result.
@@ -102,32 +80,14 @@ class GroupingSuggestion:
     label: str
     reason: str
     confidence: float
-    transaction_ids: List[int]
     transactions: List[Dict[str, Any]] = field(default_factory=list)
     
-    def to_calculation_unit(self) -> CalculationUnit:
-        """Convert to CalculationUnit (DB model) for persistence."""
-        return CalculationUnit(
-            label=self.label,
-            pattern=self.pattern,
-            confidence=self.confidence,
-            reason=self.reason,
-        )
+    @property
+    def transaction_ids(self) -> List[int]:
+        """Get transaction IDs from transactions list."""
+        return [tx["id"] for tx in self.transactions]
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to API-friendly dictionary."""
-        return {
-            "pattern": self.pattern,
-            "label": self.label,
-            "reason": self.reason,
-            "confidence": self.confidence,
-            "transaction_ids": self.transaction_ids,
-            "transactions": self.transactions,
-        }
 
-
-# Backward compatibility alias
-SuggestedGroupResult = GroupingSuggestion
 
 
 class GroupingEngine:
@@ -143,7 +103,7 @@ class GroupingEngine:
         self._used_tx_ids: Set[int] = set()
 
     def suggest_groups(
-        self, transactions: List[TransactionData]
+        self, transactions: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Analyze transactions and suggest groupings.
@@ -153,11 +113,12 @@ class GroupingEngine:
         2. Same asset transfer between accounts
         3. Same source_transaction_id grouping
         4. Swap detection (different assets, same account)
+        4b. Split detection (same asset, different qty, same value)
         5. Bridge detection (same asset, different chains/accounts)
         6. Catch-all for remaining transactions
 
         Args:
-            transactions: List of ungrouped transactions to analyze
+            transactions: List of ungrouped NormalizedTransaction to analyze
 
         Returns:
             List of GroupingSuggestion objects
@@ -172,14 +133,19 @@ class GroupingEngine:
         # Rule 1: Network TX ID exact match
         suggestions.extend(self._rule1_network_tx_match(outflows, inflows))
 
-        # Rule 2: Same asset transfer between owned accounts
-        suggestions.extend(self._rule2_same_asset_transfer(outflows, inflows))
+        # Rule 4b: Split detection (same asset, different qty, same value)
+        suggestions.extend(self._rule4b_split_detection(outflows, inflows))
 
         # Rule 3: Same source_transaction_id grouping
         suggestions.extend(self._rule3_same_source_tx_id(transactions))
 
+        # Rule 2: Same asset transfer between owned accounts
+        suggestions.extend(self._rule2_same_asset_transfer(outflows, inflows))
+
+    
         # Rule 4: Swap detection
         suggestions.extend(self._rule4_swap_detection(outflows, inflows))
+
 
         # Rule 5: Bridge detection
         suggestions.extend(self._rule5_bridge_detection(outflows, inflows))
@@ -195,7 +161,7 @@ class GroupingEngine:
         return suggestions
 
     def _rule1_network_tx_match(
-        self, outflows: List[TransactionData], inflows: List[TransactionData]
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Rule 1: If outflow has network_transaction_id, find inflow where
@@ -230,7 +196,6 @@ class GroupingEngine:
                             label=f"{symbol} Transfer",
                             reason=f"Exact network TX hash match: outflow.network_tx_id == inflow.source_tx_id",
                             confidence=self.config.exact_match_confidence,
-                            transaction_ids=[outflow.id, inflow.id],
                             transactions=[
                                 self._make_tx_summary(outflow),
                                 self._make_tx_summary(inflow),
@@ -242,7 +207,7 @@ class GroupingEngine:
         return suggestions
 
     def _rule2_same_asset_transfer(
-        self, outflows: List[TransactionData], inflows: List[TransactionData]
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Rule 2: Same asset transfer between owned accounts.
@@ -304,7 +269,6 @@ class GroupingEngine:
                         label=f"{symbol} Transfer",
                         reason=f"Same asset transfer between owned accounts (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
-                        transaction_ids=[outflow.id, inflow.id],
                         transactions=[
                             self._make_tx_summary(outflow),
                             self._make_tx_summary(inflow),
@@ -316,7 +280,7 @@ class GroupingEngine:
         return suggestions
 
     def _rule3_same_source_tx_id(
-        self, transactions: List[TransactionData]
+        self, transactions: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Rule 3: Group all transactions with same source_transaction_id.
@@ -329,7 +293,7 @@ class GroupingEngine:
         suggestions = []
 
         # Group by source_transaction_id
-        by_source_tx: Dict[str, List[TransactionData]] = {}
+        by_source_tx: Dict[str, List[NormalizedTransaction]] = {}
         for tx in transactions:
             if tx.id in self._used_tx_ids:
                 continue
@@ -365,7 +329,6 @@ class GroupingEngine:
                         label=f"{out_symbol} → {in_symbol} Swap",
                         reason=f"Same source_transaction_id with 1 inflow + 1 outflow",
                         confidence=0.9,
-                        transaction_ids=[tx.id for tx in group_txs],
                         transactions=[self._make_tx_summary(tx) for tx in group_txs],
                     )
                 )
@@ -378,7 +341,6 @@ class GroupingEngine:
                         label=f"Multi-leg Trade ({', '.join(symbols)})",
                         reason=f"Multiple transactions with same source_transaction_id ({len(inflows)} in, {len(outflows)} out)",
                         confidence=0.8,
-                        transaction_ids=[tx.id for tx in group_txs],
                         transactions=[self._make_tx_summary(tx) for tx in group_txs],
                     )
                 )
@@ -386,20 +348,18 @@ class GroupingEngine:
         return suggestions
 
     def _rule4_swap_detection(
-        self, outflows: List[TransactionData], inflows: List[TransactionData]
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Rule 4: Swap detection for different assets on same account.
 
         Conditions:
-        - outflow.address NOT owned (external)
-        - inflow.address NOT owned (external)
         - inflow.account_id == outflow.account_id
         - asset_out != asset_in (different canonical assets)
         - time difference <= 1 minute (configurable)
 
         Confidence:
-        - Value match (total_in_base diff <= 10%) = 0.9
+        - Value match (total diff <= 10%) = 0.9
         - Only time match = 0.7
         """
         suggestions = []
@@ -437,7 +397,103 @@ class GroupingEngine:
                         label=f"{outflow.source_asset_symbol} → {inflow.source_asset_symbol} Swap",
                         reason=f"Different assets exchanged on same account within {time_diff:.0f}s",
                         confidence=confidence,
-                        transaction_ids=[outflow.id, inflow.id],
+                        transactions=[
+                            self._make_tx_summary(outflow),
+                            self._make_tx_summary(inflow),
+                        ],
+                    )
+                )
+                break
+
+        return suggestions
+
+    def _rule4b_split_detection(
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+    ) -> List[GroupingSuggestion]:
+        """
+        Rule 4b: Split detection - same asset with different quantities but same total value.
+
+        This detects stock/crypto splits where you receive a different quantity of the
+        same asset (e.g., 2-for-1 split: send 100 shares, receive 200 shares, same total value).
+
+        Conditions:
+        - Same asset (asset_id or symbol match)
+        - Same account
+        - 1 outflow + 1 inflow
+        - Different quantities
+        - Same total value (within tolerance)
+        - Time difference <= swap_time_window
+
+        Pattern: SWAP (P&L handles splits as swaps - non-taxable same-asset exchange)
+        Confidence: 0.85-0.90 depending on value match closeness
+        """
+        suggestions = []
+
+        for outflow in outflows:
+            if outflow.id in self._used_tx_ids:
+                continue
+
+            for inflow in inflows:
+                if inflow.id in self._used_tx_ids:
+                    continue
+
+                # Must be same account
+                if outflow.account_id != inflow.account_id:
+                    continue
+
+                # Must be same asset
+                if not self._assets_match(outflow, inflow):
+                    continue
+
+                # Must have different quantities (otherwise it's a transfer, not a split)
+                if outflow.quantity == inflow.quantity:
+                    continue
+
+                # Check time window (use swap_time_window)
+                time_diff = abs((inflow.date_time - outflow.date_time).total_seconds())
+                if time_diff > self.config.swap_time_window:
+                    continue
+
+                # Must have same total value (qty * unit_price) within tolerance
+                if not outflow.total or not inflow.total:
+                    continue
+
+                out_val = float(outflow.total)
+                in_val = float(inflow.total)
+
+                if out_val == 0:
+                    continue
+
+                value_diff = abs(out_val - in_val) / out_val
+                if value_diff > self.config.value_tolerance:
+                    continue
+
+                # Calculate confidence based on value match closeness
+                confidence = 0.90 - (value_diff * 0.5)
+                confidence = max(self.config.medium_confidence, confidence)
+
+                self._used_tx_ids.add(outflow.id)
+                self._used_tx_ids.add(inflow.id)
+
+                # Determine split ratio for label
+                out_qty = float(outflow.quantity)
+                in_qty = float(inflow.quantity)
+                if out_qty > 0 and in_qty > 0:
+                    if in_qty > out_qty:
+                        ratio = in_qty / out_qty
+                        label = f"{outflow.source_asset_symbol} Split ({ratio:.2g}:1)"
+                    else:
+                        ratio = out_qty / in_qty
+                        label = f"{outflow.source_asset_symbol} Reverse Split (1:{ratio:.2g})"
+                else:
+                    label = f"{outflow.source_asset_symbol} Split"
+
+                suggestions.append(
+                    GroupingSuggestion(
+                        pattern=PATTERN_SWAP,  # Reuse swap pattern for P&L compatibility
+                        label=label,
+                        reason=f"Same asset with different quantities but same total value (qty: {out_qty:.4g} → {in_qty:.4g}, value diff: {value_diff:.2%})",
+                        confidence=confidence,
                         transactions=[
                             self._make_tx_summary(outflow),
                             self._make_tx_summary(inflow),
@@ -449,7 +505,7 @@ class GroupingEngine:
         return suggestions
 
     def _rule5_bridge_detection(
-        self, outflows: List[TransactionData], inflows: List[TransactionData]
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
         Rule 5: Bridge detection for same asset across different chains/accounts.
@@ -536,7 +592,6 @@ class GroupingEngine:
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
-                        transaction_ids=[outflow.id, inflow.id],
                         transactions=[
                             self._make_tx_summary(outflow),
                             self._make_tx_summary(inflow),
@@ -548,7 +603,7 @@ class GroupingEngine:
         return suggestions
 
     def _rule6_review_group(
-        self, remaining: List[TransactionData]
+        self, remaining: List[NormalizedTransaction]
     ) -> GroupingSuggestion:
         """
         Rule 6: Catch-all group for remaining ungrouped transactions.
@@ -563,7 +618,6 @@ class GroupingEngine:
             label="Ungrouped Transactions",
             reason=f"{len(remaining)} transaction(s) could not be automatically grouped - requires manual review",
             confidence=0.0,
-            transaction_ids=[tx.id for tx in remaining],
             transactions=[self._make_tx_summary(tx) for tx in remaining],
         )
 
@@ -571,7 +625,7 @@ class GroupingEngine:
     # Helper methods
     # =========================================================================
 
-    def _assets_match(self, tx1: TransactionData, tx2: TransactionData) -> bool:
+    def _assets_match(self, tx1: NormalizedTransaction, tx2: NormalizedTransaction) -> bool:
         """Check if two transactions have matching assets."""
         # First check by asset_id if both have it
         if tx1.asset_id is not None and tx2.asset_id is not None:
@@ -610,13 +664,13 @@ class GroupingEngine:
         )
 
     def _calculate_swap_confidence(
-        self, outflow: TransactionData, inflow: TransactionData
+        self, outflow: NormalizedTransaction, inflow: NormalizedTransaction
     ) -> float:
         """Calculate confidence for swap grouping based on value match."""
         # Check if we have value data
-        if outflow.total_in_base and inflow.total_in_base:
-            out_val = float(outflow.total_in_base)
-            in_val = float(inflow.total_in_base)
+        if outflow.total and inflow.total:
+            out_val = float(outflow.total)
+            in_val = float(inflow.total)
 
             if out_val > 0:
                 value_diff = abs(out_val - in_val) / out_val
@@ -626,7 +680,7 @@ class GroupingEngine:
         # Only time match
         return self.config.low_confidence
 
-    def _make_tx_summary(self, tx: TransactionData) -> Dict[str, Any]:
+    def _make_tx_summary(self, tx: NormalizedTransaction) -> Dict[str, Any]:
         """Create a summary dict for displaying in UI."""
         return {
             "id": tx.id,
@@ -634,39 +688,18 @@ class GroupingEngine:
             if tx.date_time
             else "unknown",
             "symbol": tx.source_asset_symbol or "",
+            "asset_symbol": tx.source_asset_symbol or "",
             "source": tx.source or "",
             "source_transaction_id": tx.source_transaction_id or "",
             "direction": tx.direction or "",
+            "transaction_type": tx.transaction_type or "",
             "quantity": float(tx.quantity) if tx.quantity else 0,
+            "price": float(tx.price) if tx.price else None,
+            "total": float(tx.total) if tx.total else None,
             "network": tx.network or "",
+            "account_id": tx.account_id,
+            "from_account_id": tx.from_account_id,
+            "to_account_id": tx.to_account_id,
+            "source_from_account": tx.source_from_account or "",
+            "source_to_account": tx.source_to_account or "",
         }
-
-
-def from_db_transaction(tx) -> TransactionData:
-    """Convert a database NormalizedTransaction to TransactionData."""
-    # Handle datetime parsing
-    dt = tx.date_time
-    if isinstance(dt, int):
-        dt = datetime.fromtimestamp(dt)
-    elif isinstance(dt, str):
-        dt = datetime.fromisoformat(dt)
-
-    return TransactionData(
-        id=tx.id,
-        source=tx.source,
-        source_transaction_id=tx.source_transaction_id,
-        network_transaction_id=tx.network_transaction_id,
-        date_time=dt,
-        direction=tx.direction,
-        transaction_type=tx.transaction_type,
-        asset_id=tx.asset_id,
-        source_asset_symbol=tx.source_asset_symbol,
-        quantity=tx.quantity or Decimal(0),
-        total_in_base=tx.total_in_base,
-        account_id=tx.account_id,
-        to_account_id=tx.to_account_id,
-        from_account_id=tx.from_account_id,
-        source_to_account=tx.source_to_account,
-        source_from_account=tx.source_from_account,
-        network=tx.network,
-    )

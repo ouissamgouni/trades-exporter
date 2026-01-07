@@ -21,7 +21,7 @@ def base_config():
         lot_mode=LotMode.LOT_TRAVEL,
         base_currency_id=1,  # EUR
         base_currency_symbol="EUR",
-        crypto_swap_taxable=False,
+        crypto_swap_taxable_by_default=False,
         fee_taxable_by_default=True,
     )
 
@@ -34,7 +34,7 @@ def taxable_swap_config():
         lot_mode=LotMode.LOT_TRAVEL,
         base_currency_id=1,
         base_currency_symbol="EUR",
-        crypto_swap_taxable=True,
+        crypto_swap_taxable_by_default=True,
         fee_taxable_by_default=True,
     )
 

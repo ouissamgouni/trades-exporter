@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box,
     Button,
@@ -9,10 +9,6 @@ import {
     Text,
 } from '@chakra-ui/react';
 import { API_URL, Asset } from '../types';
-
-// Local storage keys for persisting base currency
-const BASE_CURRENCY_KEY = 'trades_exporter_base_currency';
-const BASE_CURRENCY_ID_KEY = 'trades_exporter_base_currency_id';
 
 interface BaseCurrencySelectorProps {
     compact?: boolean;
@@ -25,51 +21,74 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
 }) => {
     const [fiatAssets, setFiatAssets] = useState<Asset[]>([]);
     const [loading, setLoading] = useState(true);
-    const [baseCurrency, setBaseCurrency] = useState<string>(() => {
-        // Load from localStorage or default to EUR
-        return localStorage.getItem(BASE_CURRENCY_KEY) || 'EUR';
-    });
+    const [baseCurrency, setBaseCurrency] = useState<string>('EUR');
+    const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
 
     useEffect(() => {
-        fetchFiatAssets();
-    }, []);
-
-    const fetchFiatAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=500`);
-            if (response.ok) {
-                const assets: Asset[] = await response.json();
-                // Filter to fiat assets only
-                const fiats = assets.filter(a => a.price_type === 'fiat');
-                setFiatAssets(fiats);
+        // Fetch both settings and fiat assets on mount
+        Promise.all([
+            fetch(`${API_URL}/config/settings`).then(r => r.ok ? r.json() : null),
+            fetch(`${API_URL}/assets?limit=500`).then(r => r.ok ? r.json() : []),
+        ]).then(([settings, assets]) => {
+            if (settings?.base_currency) {
+                setBaseCurrency(settings.base_currency);
             }
-        } catch (err) {
-            console.error('Failed to fetch fiat assets:', err);
-        } finally {
+            const fiats = (assets as Asset[]).filter(a => a.price_type === 'fiat');
+            setFiatAssets(fiats);
+        }).catch(err => {
+            console.error('Failed to fetch settings/assets:', err);
+        }).finally(() => {
             setLoading(false);
-        }
-    };
+        });
+    }, []);
 
     const handleCurrencyChange = (currency: string) => {
         setBaseCurrency(currency);
         setSaved(false);
     };
 
-    const handleSave = () => {
-        localStorage.setItem(BASE_CURRENCY_KEY, baseCurrency);
-        // Also save the asset ID
-        const asset = fiatAssets.find(a => a.symbol === baseCurrency);
-        if (asset?.asset_id) {
-            localStorage.setItem(BASE_CURRENCY_ID_KEY, String(asset.asset_id));
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            const response = await fetch(`${API_URL}/config/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ base_currency: baseCurrency }),
+            });
+            if (response.ok) {
+                setSaved(true);
+                onCurrencyChange?.(baseCurrency);
+                // Notify other components via custom event
+                window.dispatchEvent(new CustomEvent('baseCurrencyChanged', { detail: baseCurrency }));
+                setTimeout(() => setSaved(false), 2000);
+            } else {
+                const err = await response.json();
+                console.error('Failed to save:', err.detail);
+            }
+        } catch (err) {
+            console.error('Failed to save base currency:', err);
+        } finally {
+            setSaving(false);
         }
-        setSaved(true);
-        onCurrencyChange?.(baseCurrency);
-        // Dispatch storage event for other components
-        window.dispatchEvent(new Event('storage'));
+    };
 
-        // Auto-hide saved message after 2 seconds
-        setTimeout(() => setSaved(false), 2000);
+    // Compact mode: save immediately on change
+    const handleCompactChange = async (symbol: string) => {
+        setBaseCurrency(symbol);
+        try {
+            const response = await fetch(`${API_URL}/config/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ base_currency: symbol }),
+            });
+            if (response.ok) {
+                onCurrencyChange?.(symbol);
+                window.dispatchEvent(new CustomEvent('baseCurrencyChanged', { detail: symbol }));
+            }
+        } catch (err) {
+            console.error('Failed to save base currency:', err);
+        }
     };
 
     if (loading) {
@@ -88,18 +107,7 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
                 <Text fontSize="sm" fontWeight="medium">Base Currency:</Text>
                 <select
                     value={baseCurrency}
-                    onChange={(e) => {
-                        const symbol = e.target.value;
-                        const asset = fiatAssets.find(a => a.symbol === symbol);
-                        handleCurrencyChange(symbol);
-                        localStorage.setItem(BASE_CURRENCY_KEY, symbol);
-                        if (asset?.asset_id) {
-                            localStorage.setItem(BASE_CURRENCY_ID_KEY, String(asset.asset_id));
-                        }
-                        onCurrencyChange?.(symbol);
-                        // Dispatch storage event for other components
-                        window.dispatchEvent(new Event('storage'));
-                    }}
+                    onChange={(e) => handleCompactChange(e.target.value)}
                     style={{
                         padding: '4px 8px',
                         borderRadius: '4px',
@@ -175,6 +183,7 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
                         <Button
                             colorPalette="blue"
                             onClick={handleSave}
+                            loading={saving}
                         >
                             Save
                         </Button>
@@ -226,43 +235,94 @@ export const BaseCurrencySelector: React.FC<BaseCurrencySelectorProps> = ({
     );
 };
 
-// Hook to get and set the current base currency from anywhere in the app
+// Hook to get the current base currency from the database
+// Single source of truth - no localStorage
 export const useBaseCurrency = (): {
     baseCurrency: string;
     baseCurrencyId: number | null;
-    setBaseCurrency: (currency: string, id?: number) => void;
+    isLoading: boolean;
+    setBaseCurrency: (currency: string) => Promise<void>;
 } => {
-    const [baseCurrency, setBaseCurrencyState] = useState<string>(() => {
-        return localStorage.getItem(BASE_CURRENCY_KEY) || 'EUR';
-    });
-    const [baseCurrencyId, setBaseCurrencyIdState] = useState<number | null>(() => {
-        const stored = localStorage.getItem(BASE_CURRENCY_ID_KEY);
-        return stored ? parseInt(stored, 10) : null;
-    });
+    const [baseCurrency, setBaseCurrencyState] = useState<string>('EUR');
+    const [baseCurrencyId, setBaseCurrencyIdState] = useState<number | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
-    useEffect(() => {
-        const handleStorageChange = () => {
-            setBaseCurrencyState(localStorage.getItem(BASE_CURRENCY_KEY) || 'EUR');
-            const storedId = localStorage.getItem(BASE_CURRENCY_ID_KEY);
-            setBaseCurrencyIdState(storedId ? parseInt(storedId, 10) : null);
-        };
+    // Fetch settings and asset ID from backend on mount
+    const fetchSettings = useCallback(async () => {
+        try {
+            const settingsRes = await fetch(`${API_URL}/config/settings`);
+            if (settingsRes.ok) {
+                const settings = await settingsRes.json();
+                const symbol = settings.base_currency || 'EUR';
+                setBaseCurrencyState(symbol);
 
-        window.addEventListener('storage', handleStorageChange);
-        return () => window.removeEventListener('storage', handleStorageChange);
+                // Fetch the asset ID for this symbol
+                const assetRes = await fetch(`${API_URL}/assets?symbol=${symbol}&limit=1`);
+                if (assetRes.ok) {
+                    const assets: Asset[] = await assetRes.json();
+                    if (assets.length > 0 && assets[0].asset_id) {
+                        setBaseCurrencyIdState(assets[0].asset_id);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Failed to fetch base currency settings:', err);
+        } finally {
+            setIsLoading(false);
+        }
     }, []);
 
-    const setBaseCurrency = (currency: string, id?: number) => {
-        localStorage.setItem(BASE_CURRENCY_KEY, currency);
-        setBaseCurrencyState(currency);
-        if (id !== undefined) {
-            localStorage.setItem(BASE_CURRENCY_ID_KEY, String(id));
-            setBaseCurrencyIdState(id);
+    useEffect(() => {
+        fetchSettings();
+    }, [fetchSettings]);
+
+    // Listen for changes from other components
+    useEffect(() => {
+        const handleChange = (e: Event) => {
+            const customEvent = e as CustomEvent<string>;
+            if (customEvent.detail) {
+                setBaseCurrencyState(customEvent.detail);
+                // Refetch ID for the new symbol
+                fetch(`${API_URL}/assets?symbol=${customEvent.detail}&limit=1`)
+                    .then(r => r.ok ? r.json() : [])
+                    .then((assets: Asset[]) => {
+                        if (assets.length > 0 && assets[0].asset_id) {
+                            setBaseCurrencyIdState(assets[0].asset_id);
+                        }
+                    })
+                    .catch(console.error);
+            }
+        };
+        window.addEventListener('baseCurrencyChanged', handleChange);
+        return () => window.removeEventListener('baseCurrencyChanged', handleChange);
+    }, []);
+
+    const setBaseCurrency = async (currency: string) => {
+        try {
+            const response = await fetch(`${API_URL}/config/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ base_currency: currency }),
+            });
+            if (response.ok) {
+                setBaseCurrencyState(currency);
+                // Fetch the asset ID for this symbol
+                const assetRes = await fetch(`${API_URL}/assets?symbol=${currency}&limit=1`);
+                if (assetRes.ok) {
+                    const assets: Asset[] = await assetRes.json();
+                    if (assets.length > 0 && assets[0].asset_id) {
+                        setBaseCurrencyIdState(assets[0].asset_id);
+                    }
+                }
+                window.dispatchEvent(new CustomEvent('baseCurrencyChanged', { detail: currency }));
+            }
+        } catch (err) {
+            console.error('Failed to update base currency:', err);
+            throw err;
         }
-        // Dispatch storage event for other components
-        window.dispatchEvent(new Event('storage'));
     };
 
-    return { baseCurrency, baseCurrencyId, setBaseCurrency };
+    return { baseCurrency, baseCurrencyId, isLoading, setBaseCurrency };
 };
 
 export default BaseCurrencySelector;

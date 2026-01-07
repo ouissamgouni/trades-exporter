@@ -32,10 +32,11 @@ class BinanceWithdrawalsConnector(BaseConnector):
         api_secret: str = None,
         account_id: int = None,
         connector_id: int = None,
+        config: Dict[str, Any] = None,
         **kwargs,
     ):
         """Initialize Binance withdrawals connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
 
         # In test mode, skip all API configuration
         if self.test_mode:
@@ -159,6 +160,7 @@ class BinanceWithdrawalsConnector(BaseConnector):
         return NormalizedTransaction(
             source="binance-withdrawals",
             account_id=self.account_id,
+            source_account=self.connector_name,  # Raw account identifier for mapping
             source_transaction_id=withdrawal_id,
             date_time=dt,
             direction="outflow",

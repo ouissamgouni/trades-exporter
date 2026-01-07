@@ -38,6 +38,9 @@ import { PnLImpactPanel } from './PnLImpactPanel';
 import { PnLAuditView } from './DataExplorerPanel';
 import { CategoryFilterBar } from './CategoryFilterBar';
 import { MarketValuePieChart } from './MarketValuePieChart';
+import { PerformanceBarChart } from './PerformanceBarChart';
+import { PriceStatusList } from './PriceStatusList';
+import { SlidePanel } from './SlidePanel';
 
 // Types
 import {
@@ -84,8 +87,15 @@ export const PnLPanel: React.FC = () => {
         base_currency_symbol: baseCurrency,
         base_currency_id: baseCurrencyId,
         residual_tolerance_pct: 0.05,
-        allow_negative_balances: false,
+        allow_negative_balances: true,
         account_ids: getInitialAccountIds(),
+        // Advanced settings
+        compute_residuals: false,
+        crypto_swap_taxable_by_default: false,
+        fee_taxable_by_default: false,
+        // Price fallback settings
+        use_price_fallback: true,
+        price_staleness_window_days: 7,
     });
     const [isCalculating, setIsCalculating] = useState(false);
     const [isPersisting, setIsPersisting] = useState(false);
@@ -327,6 +337,8 @@ export const PnLPanel: React.FC = () => {
     const [prices, setPrices] = useState<PriceResponse[]>([]);
     const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
     const [lastPriceRefresh, setLastPriceRefresh] = useState<Date | null>(null);
+    const [loadingPriceAssetIds, setLoadingPriceAssetIds] = useState<Set<number>>(new Set());
+    const [showPriceDrawer, setShowPriceDrawer] = useState(false);
     const [isLoadingBalances, setIsLoadingBalances] = useState(false);
 
     // Config change handler
@@ -417,6 +429,8 @@ export const PnLPanel: React.FC = () => {
                 // Apply prices to new asset rows
                 const assetsWithPrices = assetRows.map(asset => {
                     const priceObj = fullPriceMap.get(asset.asset_id);
+                    const isPriceLoading = loadingPriceAssetIds.has(asset.asset_id);
+
                     if (!priceObj || priceObj.price == null) {
                         return {
                             ...asset,
@@ -424,6 +438,7 @@ export const PnLPanel: React.FC = () => {
                             price_source: priceObj?.source,
                             price_fetched_at: priceObj?.fetched_at,
                             price_error: priceObj?.error,
+                            price_loading: isPriceLoading,
                         };
                     }
                     const marketValue = asset.quantity * priceObj.price;
@@ -438,6 +453,7 @@ export const PnLPanel: React.FC = () => {
                         price_source: priceObj.source,
                         price_fetched_at: priceObj.fetched_at,
                         price_error: priceObj.error,
+                        price_loading: isPriceLoading,
                     };
                 });
 
@@ -458,53 +474,160 @@ export const PnLPanel: React.FC = () => {
                 });
             });
         }
-    }, [showUnsettledNegative, currentVersionId, loadBalances, transformBalances, prices]);
+    }, [showUnsettledNegative, currentVersionId, loadBalances, transformBalances, prices, loadingPriceAssetIds]);
 
-    // Fetch prices for all assets in balances
+    // Fetch prices for all assets in balances (Individually with concurrency control)
     const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string) => {
         if (!balances || balances.length === 0) return;
+
+        // Extract asset IDs from AssetRef
+        const assetIds = balances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
+        if (assetIds.length === 0) return;
+
         setIsRefreshingPrices(true);
-        try {
-            // Extract asset IDs from AssetRef
-            const assetIds = balances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
-            if (assetIds.length === 0) return;
+        setLoadingPriceAssetIds(new Set(assetIds));
+        setLastPriceRefresh(new Date());
 
-            const response = await fetch(`${API_URL}/pnl/prices`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ asset_ids: assetIds, base_currency: baseCurrency }),
-            });
-            if (!response.ok) {
-                throw new Error('Failed to fetch prices');
-            }
-            const data: PricesResponse = await response.json();
-            setPrices(data.prices);
-            setLastPriceRefresh(new Date());
+        // Helper to fetch single price
+        const fetchSinglePrice = async (assetId: number) => {
+            try {
+                // Include fallback params from config
+                const response = await fetch(
+                    `${API_URL}/pnl/prices/${assetId}?base_currency=${baseCurrency}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}`
+                );
 
-            // Show warning only if some prices are missing
-            const missing = data.prices.filter(p => p.price == null);
-            if (missing.length > 0) {
-                const found = data.prices.filter(p => p.price != null);
-                const missingSymbols = missing.map(p => p.asset.name).join(', ');
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch price`);
+                }
 
-                toaster.create({
-                    title: `Prices: ${found.length} found, ${missing.length} missing`,
-                    description: `Missing: ${missingSymbols}`,
-                    type: 'warning',
-                    duration: 8000,
+                const data: PriceResponse = await response.json();
+
+                // Update specific price in state
+                setPrices(prev => {
+                    const idx = prev.findIndex(p => p.asset.id === assetId);
+                    if (idx >= 0) {
+                        const next = [...prev];
+                        next[idx] = data;
+                        return next;
+                    }
+                    return [...prev, data];
+                });
+            } catch (err) {
+                console.error(`Fetch failed for asset ${assetId}`, err);
+
+                // Create error entry
+                const errorItem: PriceResponse = {
+                    asset: { id: assetId, name: 'Unknown' },
+                    price: null,
+                    price_quote: baseCurrency,
+                    error: err instanceof Error ? err.message : 'Unknown error',
+                    fetched_at: new Date().toISOString()
+                };
+
+                // Try to find name from balances
+                const balance = balances.find(b => b.asset.id === assetId);
+                if (balance) {
+                    errorItem.asset.name = balance.asset.name;
+                }
+
+                setPrices(prev => {
+                    const idx = prev.findIndex(p => p.asset.id === assetId);
+                    if (idx >= 0) {
+                        const next = [...prev];
+                        next[idx] = errorItem;
+                        return next;
+                    }
+                    return [...prev, errorItem];
+                });
+            } finally {
+                setLoadingPriceAssetIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(assetId);
+                    return next;
                 });
             }
-        } catch (err) {
-            toaster.create({
-                title: 'Price Refresh Failed',
-                description: 'Failed to refresh prices',
-                type: 'error',
-                duration: 5000,
-            });
+        };
+
+        // Concurrency control (5 parallel requests)
+        const CONCURRENCY = 5;
+        const queue = [...assetIds];
+        const active: Promise<void>[] = [];
+
+        try {
+            while (queue.length > 0 || active.length > 0) {
+                while (queue.length > 0 && active.length < CONCURRENCY) {
+                    const id = queue.shift();
+                    if (id !== undefined) {
+                        const promise = fetchSinglePrice(id).then(() => {
+                            active.splice(active.indexOf(promise), 1);
+                        });
+                        active.push(promise);
+                    }
+                }
+                if (active.length > 0) {
+                    await Promise.race(active);
+                }
+            }
         } finally {
             setIsRefreshingPrices(false);
         }
+    }, [config.use_price_fallback, config.price_staleness_window_days]);
+
+    // Refresh a single asset price (used after manual price entry)
+    const refreshSinglePrice = useCallback(async (assetId: number) => {
+        try {
+            setLoadingPriceAssetIds(prev => new Set(prev).add(assetId));
+
+            const response = await fetch(
+                `${API_URL}/pnl/prices/${assetId}?base_currency=${config.base_currency_symbol}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}`
+            );
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch price`);
+            }
+
+            const data: PriceResponse = await response.json();
+
+            // Update specific price in state
+            setPrices(prev => {
+                const idx = prev.findIndex(p => p.asset.id === assetId);
+                if (idx >= 0) {
+                    const next = [...prev];
+                    next[idx] = data;
+                    return next;
+                }
+                return [...prev, data];
+            });
+        } catch (err) {
+            console.error(`Refresh failed for asset ${assetId}`, err);
+        } finally {
+            setLoadingPriceAssetIds(prev => {
+                const next = new Set(prev);
+                next.delete(assetId);
+                return next;
+            });
+        }
+    }, [config.base_currency_symbol, config.use_price_fallback, config.price_staleness_window_days]);
+
+    // Remove a warning by ID (used after manual price fixes the issue)
+    const removeWarning = useCallback((warningId: string) => {
+        setWarnings(prev => prev.filter(w => w.id !== warningId));
+        // Also update summary warning count
+        setSummary(prev => prev ? {
+            ...prev,
+            warning_count: Math.max(0, (prev.warning_count ?? 0) - 1),
+        } : prev);
     }, []);
+
+    // Callback for manual price added from PriceStatusList or WarningsPanel
+    const handlePriceAdded = useCallback((assetId: number, warningId?: string) => {
+        // Refresh the single price to show updated status
+        refreshSinglePrice(assetId);
+        // Remove the warning if provided
+        if (warningId) {
+            removeWarning(warningId);
+        }
+    }, [refreshSinglePrice, removeWarning]);
 
     // Transform API response to our types (non-balance data only)
     // Assets are now built separately from loadBalances + transformBalances
@@ -601,13 +724,17 @@ export const PnLPanel: React.FC = () => {
         try {
             // Step 1: Calculate and persist as draft
             // Pass all config including account_ids filter
+            // Note: Only send base_currency_symbol (not ID) to avoid stale ID issues after DB reset
             const requestBody: Record<string, unknown> = {
                 lot_method: config.lot_method,
                 lot_mode: config.lot_mode,
-                base_currency_id: config.base_currency_id,
                 base_currency_symbol: config.base_currency_symbol,
                 residual_tolerance_pct: config.residual_tolerance_pct,
                 allow_negative_balances: config.allow_negative_balances,
+                // Advanced settings
+                compute_residuals: config.compute_residuals,
+                crypto_swap_taxable_by_default: config.crypto_swap_taxable_by_default,
+                fee_taxable_by_default: config.fee_taxable_by_default,
             };
 
             // Only pass account_ids if filter is active (non-empty selection)
@@ -1444,11 +1571,39 @@ export const PnLPanel: React.FC = () => {
 
                             {/* Right side: Refresh Prices button */}
                             <Flex gap={2} align="center">
-                                {lastPriceRefresh && (
-                                    <Text fontSize="xs" color="gray.500">
-                                        Prices: {lastPriceRefresh.toLocaleTimeString()}
-                                    </Text>
+                                {/* Price Status Badges */}
+                                {prices.length > 0 && (
+                                    <Flex gap={2} align="center">
+                                        <Badge
+                                            colorPalette="green"
+                                            variant="solid"
+                                            cursor="pointer"
+                                            onClick={() => setShowPriceDrawer(true)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            <Flex align="center" gap={1}>
+                                                <Box as="span">✅</Box>
+                                                <Text>{prices.filter(p => !p.error && p.price != null).length}</Text>
+                                            </Flex>
+                                        </Badge>
+
+                                        {prices.some(p => !!p.error || p.price == null) && (
+                                            <Badge
+                                                colorPalette="red"
+                                                variant="solid"
+                                                cursor="pointer"
+                                                onClick={() => setShowPriceDrawer(true)}
+                                                _hover={{ opacity: 0.8 }}
+                                            >
+                                                <Flex align="center" gap={1}>
+                                                    <Box as="span">⚠️</Box>
+                                                    <Text>{prices.filter(p => !!p.error || p.price == null).length}</Text>
+                                                </Flex>
+                                            </Badge>
+                                        )}
+                                    </Flex>
                                 )}
+
                                 <Button
                                     onClick={handleRefreshPrices}
                                     loading={isRefreshingPrices || isLoadingBalances}
@@ -1493,15 +1648,34 @@ export const PnLPanel: React.FC = () => {
                         />
                     )}
 
-                    {/* Market Value Pie Chart (after summary cards, before asset table) */}
+                    {/* Charts Section: Pie Chart + Performance Bar Chart side by side */}
                     {currentView !== 'asset-detail' && dimensions.length > 0 && assets.length > 0 && (
-                        <MarketValuePieChart
-                            assets={assets}
-                            dimensions={dimensions}
-                            baseCurrency={config.base_currency_symbol}
-                            selectedCategoryIds={selectedCategoryIds}
-                            onCategoryClick={handlePieCategoryClick}
-                        />
+                        <Box
+                            display="grid"
+                            gridTemplateColumns={{ base: '1fr', lg: '6fr 3fr' }}
+                            gap={4}
+                            mb={4}
+                        >
+                            <MarketValuePieChart
+                                assets={assets}
+                                dimensions={dimensions}
+                                baseCurrency={config.base_currency_symbol}
+                                selectedCategoryIds={selectedCategoryIds}
+                                onCategoryClick={handlePieCategoryClick}
+                            />
+                            <PerformanceBarChart
+                                assets={assets}
+                                dimensions={dimensions}
+                                baseCurrency={config.base_currency_symbol}
+                                onItemClick={(itemId: number, type: 'asset' | 'category') => {
+                                    if (type === 'asset') {
+                                        handleAssetClick(itemId);
+                                    } else {
+                                        handlePieCategoryClick(itemId);
+                                    }
+                                }}
+                            />
+                        </Box>
                     )}
 
                     {/* Compact summary bar when in detail view */}
@@ -1557,6 +1731,9 @@ export const PnLPanel: React.FC = () => {
                                     isLoadingWarnings={isLoadingWarnings}
                                     isLoadingEvents={isLoadingEvents}
                                     idCounts={idCounts}
+                                    quoteAssetId={config.base_currency_id ?? undefined}
+                                    onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
+                                    assets={assets.map(a => ({ id: a.asset_id, name: a.asset_symbol }))}
                                 />
                             </Tabs.Content>
                         </Tabs.Root>
@@ -1590,6 +1767,20 @@ export const PnLPanel: React.FC = () => {
                     onUnitClick={handleUnitClick}
                 />
             )}
+
+            <SlidePanel
+                isOpen={showPriceDrawer}
+                onClose={() => setShowPriceDrawer(false)}
+                title="Price Fetch Results"
+                width="600px"
+            >
+                <PriceStatusList
+                    prices={prices}
+                    baseCurrency={config.base_currency_symbol}
+                    quoteAssetId={config.base_currency_id ?? undefined}
+                    onPriceAdded={(assetId) => handlePriceAdded(assetId)}
+                />
+            </SlidePanel>
         </Box>
     );
 };

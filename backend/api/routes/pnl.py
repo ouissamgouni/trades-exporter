@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from sqlalchemy import func
@@ -72,6 +72,16 @@ class PnLCalculateRequest(BaseModel):
     # Cross-account transfers are included if ANY leg belongs to a selected account
     account_ids: Optional[List[int]] = Field(
         default=None, description="Filter by account IDs. None means all accounts."
+    )
+    # Advanced settings
+    compute_residuals: bool = Field(
+        default=False, description="Compute residual lots"
+    )
+    crypto_swap_taxable_by_default: bool = Field(
+        default=False, description="Treat crypto-to-crypto swaps as taxable by default"
+    )
+    fee_taxable_by_default: bool = Field(
+        default=False, description="Treat fees as taxable by default"
     )
 
 
@@ -166,6 +176,8 @@ class WarningResponse(BaseModel):
     transaction_id: Optional[int] = None
     unit_id: Optional[int] = None
     unit_label: Optional[str] = None  # Human-readable unit label for display
+    asset_id: Optional[int] = None  # Asset involved in the warning (for price errors)
+    details: Optional[Dict[str, Any]] = None  # Additional context (transaction_date, error, etc.)
 
 
 class SettlementResponse(BaseModel):
@@ -355,6 +367,12 @@ class PriceResponse(BaseModel):
     fetched_at: Optional[datetime] = None
     source: Optional[str] = None
     error: Optional[str] = None  # Error message if price fetch failed
+    # Staleness/fallback fields
+    is_fallback: bool = False  # True if fallback price was used
+    is_stale: bool = False  # True if price is outside staleness window
+    actual_price_date: Optional[datetime] = None  # The actual date of the price used
+    staleness_days: Optional[int] = None  # Days between requested and actual price date
+    warning: Optional[str] = None  # Warning message for stale prices
 
 
 # =============================================================================
@@ -441,6 +459,8 @@ def build_warning_response(warning: PnlWarning, unit_label: Optional[str] = None
         transaction_id=warning.transaction_id,
         unit_id=warning.unit_id,
         unit_label=unit_label,
+        asset_id=warning.asset_id,
+        details=warning.details,
     )
 
 
@@ -756,16 +776,9 @@ def calculate_pnl(
     - Supports preview → review → save workflow
     """
     try:
-        # Get base currency asset - accept either ID or symbol
+        # Get base currency asset - prefer symbol over ID (symbol is stable across DB resets)
         base_currency = None
-        if request.base_currency_id:
-            base_currency = session.get(Asset, request.base_currency_id)
-            if not base_currency:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Base currency asset ID {request.base_currency_id} not found",
-                )
-        elif request.base_currency_symbol:
+        if request.base_currency_symbol:
             base_currency = session.exec(
                 select(Asset).where(Asset.symbol == request.base_currency_symbol)
             ).first()
@@ -773,6 +786,13 @@ def calculate_pnl(
                 raise HTTPException(
                     status_code=400,
                     detail=f"Base currency '{request.base_currency_symbol}' not found",
+                )
+        elif request.base_currency_id:
+            base_currency = session.get(Asset, request.base_currency_id)
+            if not base_currency:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Base currency asset ID {request.base_currency_id} not found",
                 )
         else:
             raise HTTPException(
@@ -788,6 +808,9 @@ def calculate_pnl(
             base_currency_symbol=base_currency.symbol,
             residual_tolerance_pct=Decimal(request.residual_tolerance_pct),
             allow_negative_balances=request.allow_negative_balances,
+            compute_residuals=request.compute_residuals,
+            crypto_swap_taxable_by_default=request.crypto_swap_taxable_by_default,
+            fee_taxable_by_default=request.fee_taxable_by_default,  
         )
 
         # Create engine 
@@ -866,11 +889,77 @@ def calculate_pnl(
 # =============================================================================
 
 
+@router.get("/prices/{asset_id}", response_model=PriceResponse)
+def get_asset_price(
+    asset_id: int,
+    base_currency: str = Query("EUR", description="Quote currency for price"),
+    use_fallback: bool = Query(True, description="Fall back to latest known price if fetch fails"),
+    staleness_window_days: int = Query(7, description="Max days to consider price fresh (for fallback)"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Fetch current price for a single asset.
+    
+    If use_fallback is True and the live price fetch fails, will return the latest
+    cached price. If that cached price is older than staleness_window_days, the
+    response will include is_stale=True and a warning message.
+    """
+    from datetime import datetime
+    price_service = PriceService(session=session)
+    
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        return PriceResponse(
+            asset=AssetRef(id=asset_id, name=f"#{asset_id}"),
+            price=None,
+            price_quote=base_currency,
+            error=f"Asset {asset_id} not found",
+        )
+    
+    try:
+        # Use fallback method for current price
+        result = price_service.get_price_with_fallback(
+            asset_id=asset_id,
+            dt=datetime.utcnow(),
+            price_quote=base_currency,
+            use_fallback=use_fallback,
+            staleness_window_days=staleness_window_days,
+        )
+        
+        warning_msg = None
+        if result.is_stale:
+            warning_msg = f"Using stale price from {result.actual_price_date.strftime('%Y-%m-%d') if result.actual_price_date else 'unknown'} ({result.staleness_days} days old)"
+        
+        return PriceResponse(
+            asset=AssetRef(id=asset.asset_id, name=asset.symbol or f"#{asset.asset_id}"),
+            price=result.price,
+            price_quote=base_currency,
+            fetched_at=result.timestamp,
+            source=result.source,
+            error=None,
+            is_fallback=result.is_fallback,
+            is_stale=result.is_stale,
+            actual_price_date=result.actual_price_date,
+            staleness_days=result.staleness_days,
+            warning=warning_msg,
+        )
+    except Exception as e:
+        log.error(f"Failed to fetch price for asset {asset_id}: {e}")
+        return PriceResponse(
+            asset=AssetRef(id=asset.asset_id, name=asset.symbol or f"#{asset.asset_id}"),
+            price=None,
+            price_quote=base_currency,
+            error=str(e),
+        )
+
+
 class PriceRequest(BaseModel):
     """Request for bulk price lookup."""
     
     asset_ids: List[int] = Field(..., description="List of asset IDs to fetch prices for")
     base_currency: str = Field(default="EUR", description="Quote currency for prices")
+    use_fallback: bool = Field(default=True, description="Fall back to latest known price if fetch fails")
+    staleness_window_days: int = Field(default=7, description="Max days to consider price fresh (for fallback)")
 
 
 @router.post("/prices", response_model=PricesResponse)
@@ -888,7 +977,11 @@ def get_current_prices(
     
     This endpoint is designed to be called frequently (e.g., every 30s).
     Price fetching is best-effort - failures are reported per-asset.
+    
+    If use_fallback is True and live fetch fails, returns the latest cached price.
+    Stale prices (older than staleness_window_days) will have is_stale=True and a warning.
     """
+    from datetime import datetime
     price_service = PriceService(session=session)
     fetched_at = datetime.utcnow()
     
@@ -901,6 +994,7 @@ def get_current_prices(
     prices = []
     successful = 0
     failed = 0
+    stale_count = 0
     
     for asset_id in request.asset_ids:
         asset = asset_map.get(asset_id)
@@ -915,16 +1009,30 @@ def get_current_prices(
             continue
         
         try:
-            result = price_service.get_current_price_with_metadata(
+            result = price_service.get_price_with_fallback(
                 asset_id=asset_id,
+                dt=fetched_at,
                 price_quote=request.base_currency,
+                use_fallback=request.use_fallback,
+                staleness_window_days=request.staleness_window_days,
             )
+            
+            warning_msg = None
+            if result.is_stale:
+                warning_msg = f"Using stale price from {result.actual_price_date.strftime('%Y-%m-%d') if result.actual_price_date else 'unknown'} ({result.staleness_days} days old)"
+                stale_count += 1
+            
             prices.append(PriceResponse(
                 asset=AssetRef(id=asset_id, name=asset.symbol),
                 price=result.price,
                 price_quote=request.base_currency,
                 fetched_at=result.timestamp or fetched_at,
                 source=result.source,
+                is_fallback=result.is_fallback,
+                is_stale=result.is_stale,
+                actual_price_date=result.actual_price_date,
+                staleness_days=result.staleness_days,
+                warning=warning_msg,
             ))
             successful += 1
         except Exception as e:
@@ -938,8 +1046,14 @@ def get_current_prices(
             failed += 1
     
     warning = None
+    warnings = []
     if failed > 0:
-        warning = f"{failed} price(s) could not be retrieved. See 'prices' for details."
+        warnings.append(f"{failed} price(s) could not be retrieved")
+    if stale_count > 0:
+        warnings.append(f"{stale_count} price(s) are stale (older than {request.staleness_window_days} days)")
+    if warnings:
+        warning = ". ".join(warnings) + ". See 'prices' for details."
+    
     return PricesResponse(
         prices=prices,
         base_currency=request.base_currency,

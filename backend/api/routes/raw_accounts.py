@@ -5,7 +5,7 @@ Maps source-specific account labels/addresses to normalized accounts.
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from sqlalchemy import update
 
@@ -36,6 +36,107 @@ class RawAccountResponse(BaseModel):
     source: str
     label: str
     account_id: Optional[int] = None
+
+
+class BulkMapAccountItem(BaseModel):
+    """Single item for bulk account mapping."""
+    raw_account_id: int = Field(..., description="Raw account ID")
+    account_id: int = Field(..., description="Target account_id to map to")
+
+
+class BulkMapAccountRequest(BaseModel):
+    """Request model for bulk account mapping."""
+    mappings: List[BulkMapAccountItem] = Field(..., description="List of mappings to apply")
+
+
+class BulkMapAccountResponse(BaseModel):
+    """Response model for bulk mapping operations."""
+    success_count: int = Field(..., description="Number of successful mappings")
+    failed_count: int = Field(..., description="Number of failed mappings")
+    errors: List[str] = Field(default_factory=list, description="Error messages for failed mappings")
+
+
+@router.post("/bulk-map", response_model=BulkMapAccountResponse)
+def bulk_map_accounts(
+    request: BulkMapAccountRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Bulk map multiple raw accounts to normalized accounts.
+    
+    Each mapping updates the raw_account record and propagates to all linked transactions.
+    Used by "Apply All Suggestions" feature in Data Health Check.
+    """
+    success_count = 0
+    failed_count = 0
+    errors = []
+    
+    try:
+        for item in request.mappings:
+            try:
+                # Find the raw account by ID
+                raw_account = session.get(RawAccount, item.raw_account_id)
+                
+                if not raw_account:
+                    failed_count += 1
+                    errors.append(f"Raw account ID {item.raw_account_id} not found")
+                    continue
+                
+                source = raw_account.source
+                label = raw_account.label
+                raw_account.account_id = item.account_id
+                
+                # Propagate to transactions
+                # Update from_account_id for transactions matching source_from_account
+                stmt_from = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == source,
+                        NormalizedTransaction.source_from_account == label,
+                    )
+                    .values(from_account_id=item.account_id)
+                )
+                session.exec(stmt_from)
+                
+                # Update to_account_id for transactions matching source_to_account
+                stmt_to = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == source,
+                        NormalizedTransaction.source_to_account == label,
+                    )
+                    .values(to_account_id=item.account_id)
+                )
+                session.exec(stmt_to)
+                
+                # Update account_id for transactions matching source_account
+                stmt_account = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == source,
+                        NormalizedTransaction.source_account == label,
+                    )
+                    .values(account_id=item.account_id)
+                )
+                session.exec(stmt_account)
+                
+                success_count += 1
+                
+            except Exception as e:
+                failed_count += 1
+                errors.append(f"Raw account ID {item.raw_account_id}: {str(e)}")
+        
+        session.commit()
+        
+        return BulkMapAccountResponse(
+            success_count=success_count,
+            failed_count=failed_count,
+            errors=errors
+        )
+        
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Bulk mapping failed: {str(e)}")
 
 
 @router.get("", response_model=List[RawAccountResponse])
@@ -257,6 +358,17 @@ def update_raw_account(
                 .values(to_account_id=new_account_id)
             )
             session.exec(stmt_to)
+
+            # Update account_id for transactions matching source_account (ownership)
+            stmt_account = (
+                update(NormalizedTransaction)
+                .where(
+                    NormalizedTransaction.source == source,
+                    NormalizedTransaction.source_account == label,
+                )
+                .values(account_id=new_account_id)
+            )
+            session.exec(stmt_account)
 
         session.add(existing)
         session.commit()

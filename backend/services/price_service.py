@@ -301,6 +301,49 @@ class PriceCache:
         
         return session.exec(statement).first()
 
+    def get_latest_before(
+        self,
+        session: Session,
+        asset_id: int,
+        quote_asset_id: Optional[int],
+        dt: datetime,
+        max_days_back: int = 7,
+    ) -> Optional[PriceSnapshot]:
+        """
+        Get the latest cached price before a given datetime within a max lookback window.
+        
+        Used for fallback when exact price fetch fails.
+        
+        Args:
+            session: Database session
+            asset_id: Asset ID
+            quote_asset_id: Quote asset ID
+            dt: Target datetime (search for prices before this)
+            max_days_back: Maximum days to look back
+            
+        Returns:
+            Latest PriceSnapshot before dt within window, or None
+        """
+        dt_min = dt - timedelta(days=max_days_back)
+        
+        statement = select(PriceSnapshot).where(
+            PriceSnapshot.asset_id == asset_id,
+            PriceSnapshot.snapshot_time <= dt,
+            PriceSnapshot.snapshot_time >= dt_min,
+        )
+        
+        if quote_asset_id is not None:
+            statement = statement.where(
+                PriceSnapshot.quote_asset_id == quote_asset_id
+            )
+        
+        # Order by most recent first
+        statement = statement.order_by(
+            PriceSnapshot.snapshot_time.desc()
+        ).limit(1)
+        
+        return session.exec(statement).first()
+
     def store(
         self,
         session: Session,
@@ -747,6 +790,195 @@ class PriceService:
             
         finally:
             self._close_session(session)
+
+    def get_price_with_fallback(
+        self,
+        asset_id: int,
+        dt: datetime,
+        price_quote: Optional[str] = None,
+        use_fallback: bool = True,
+        staleness_window_days: int = 7,
+    ) -> PriceResult:
+        """
+        Get asset price with fallback to latest known price if fetch fails.
+        
+        This method attempts to fetch the price normally, and if that fails
+        and use_fallback is True, it will look for the most recent cached
+        price before the requested date.
+        
+        Args:
+            asset_id: Asset ID
+            dt: Datetime for price lookup
+            price_quote: Quote currency (defaults to base_currency)
+            use_fallback: If True, fall back to latest cached price on failure
+            staleness_window_days: Max days to look back for fallback price
+            
+        Returns:
+            PriceResult with price and staleness metadata:
+            - is_fallback: True if fallback price was used
+            - is_stale: True if fallback price is outside staleness window
+            - actual_price_date: The actual date of the price used
+            - staleness_days: Days between requested and actual price date
+            - fallback_error: Original error that triggered fallback
+        """
+        session = self._get_session()
+        try:
+            asset = self._get_asset(session, asset_id)
+            requested_quote = (
+                price_quote or self.default_base_currency or "USD"
+            ).upper()
+            
+            # Same currency = 1.0
+            if asset.symbol.upper() == requested_quote:
+                return PriceResult(
+                    price=1.0,
+                    quote_currency=requested_quote,
+                    source="same_currency",
+                    timestamp=dt,
+                )
+            
+            quote_asset_id = self._get_quote_asset_id(session, requested_quote)
+            
+            # Check cache first (including source)
+            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt)
+            if cached_snapshot is not None:
+                return PriceResult(
+                    price=float(cached_snapshot.price),
+                    quote_currency=requested_quote,
+                    source=cached_snapshot.source or "cached",
+                    timestamp=cached_snapshot.snapshot_time,
+                    actual_price_date=cached_snapshot.snapshot_time,
+                )
+            
+            # Get price getters for this asset
+            price_getters = self.resolver.resolve(session, asset)
+            
+            # Try to fetch price normally
+            original_error: Optional[str] = None
+            try:
+                result = self._fetch_price(session, asset, dt, price_getters)
+                price = result.price
+                native_quote = result.quote_currency.upper()
+                source = result.source
+                
+                # Convert if needed
+                if native_quote != requested_quote:
+                    price = self.converter.convert(
+                        session, price, native_quote, requested_quote, dt
+                    )
+                
+                # Cache the result
+                self.cache.store(
+                    session, asset_id, quote_asset_id, price, dt, source
+                )
+                
+                return PriceResult(
+                    price=price,
+                    quote_currency=requested_quote,
+                    source=source,
+                    timestamp=dt,
+                    ticker_used=result.ticker_used,
+                    actual_price_date=dt,
+                )
+                
+            except (PriceGetterAggregateError, Exception) as e:
+                original_error = str(e)
+                log.warning(
+                    f"Price fetch failed for {asset.symbol} at {dt.date()}: {original_error}"
+                )
+                
+                if not use_fallback:
+                    raise
+            
+            # Fallback: look for latest cached price before requested date
+            log.info(
+                f"Attempting fallback lookup for {asset.symbol}, "
+                f"looking back up to {staleness_window_days} days"
+            )
+            
+            # Look back for any cached price (use large window for fallback search)
+            fallback_snapshot = self.cache.get_latest_before(
+                session, asset_id, quote_asset_id, dt, max_days_back=365  # Search up to 1 year
+            )
+            
+            if fallback_snapshot is None:
+                # No fallback available, re-raise original error
+                log.warning(
+                    f"No fallback price found for {asset.symbol} before {dt.date()}"
+                )
+                raise PriceGetterAggregateError(
+                    asset_symbol=asset.symbol,
+                    errors=[PriceGetterError(
+                        message=f"Price fetch failed and no fallback available: {original_error}",
+                        getter_name="fallback",
+                        asset_symbol=asset.symbol,
+                    )],
+                )
+            
+            # Calculate staleness
+            actual_price_date = fallback_snapshot.snapshot_time
+            days_diff = (dt - actual_price_date).days
+            is_stale = days_diff > staleness_window_days
+            
+            log.info(
+                f"Using fallback price for {asset.symbol}: "
+                f"{fallback_snapshot.price} from {actual_price_date.date()} "
+                f"({days_diff} days ago, stale={is_stale})"
+            )
+            
+            return PriceResult(
+                price=float(fallback_snapshot.price),
+                quote_currency=requested_quote,
+                source=f"fallback:{fallback_snapshot.source or 'cached'}",
+                timestamp=actual_price_date,
+                is_fallback=True,
+                is_stale=is_stale,
+                actual_price_date=actual_price_date,
+                staleness_days=days_diff,
+                fallback_error=original_error,
+            )
+            
+        finally:
+            self._close_session(session)
+
+    def get_staleness_window_for_asset(
+        self,
+        session: Session,
+        asset: Asset,
+        default_window_days: int = 7,
+    ) -> int:
+        """
+        Get the staleness window for an asset, checking for per-asset overrides.
+        
+        Priority:
+        1. Per-asset override in AssetPriceGetter.staleness_window_days
+        2. Provided default_window_days
+        
+        Args:
+            session: Database session
+            asset: Asset to check
+            default_window_days: Default window if no override found
+            
+        Returns:
+            Staleness window in days
+        """
+        # Check for per-asset override
+        statement = (
+            select(AssetPriceGetter)
+            .where(
+                AssetPriceGetter.asset_id == asset.asset_id,
+                AssetPriceGetter.enabled,
+                AssetPriceGetter.staleness_window_days.isnot(None),
+            )
+            .order_by(AssetPriceGetter.priority)
+            .limit(1)
+        )
+        
+        asset_getter = session.exec(statement).first()
+        if asset_getter and asset_getter.staleness_window_days is not None:
+            return asset_getter.staleness_window_days
+        
+        return default_window_days
 
 
 # ============================================================================

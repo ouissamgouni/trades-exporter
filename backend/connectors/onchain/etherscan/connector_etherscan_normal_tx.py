@@ -39,6 +39,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         api_key: str = None,
         account_id: int = None,
         connector_id: int = None,
+        config: Dict[str, Any] = None,
         **kwargs,
     ):
         """
@@ -50,6 +51,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
             api_key: Etherscan API key (loaded from settings if not provided)
             account_id: Optional account ID for database linking
             connector_id: Optional connector ID for database linking
+            config: Optional connector configuration dict
             **kwargs: Additional configuration parameters
         """
         # Set variables needed for connector_name BEFORE super().__init__()
@@ -62,7 +64,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         self.chain_id = get_chain_id(self.chain_name)
 
         # Initialize base (sets self.test_mode and logs)
-        super().__init__(account_id=account_id, connector_id=connector_id)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
 
         # Validate wallet configuration (required in both test and live mode)
         if not self.wallet_address:
@@ -218,6 +220,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
             return NormalizedTransaction(
                 source=f"etherscan_normal_tx_{self.chain_name.lower()}",
                 account_id=self.account_id,
+                source_account=self.wallet_address,  # Raw account identifier for mapping
                 source_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,

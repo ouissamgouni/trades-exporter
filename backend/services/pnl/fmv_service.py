@@ -31,6 +31,11 @@ class FMVResult:
     price: Optional[Decimal] = None  # Unit price used (if applicable)
     timestamp: Optional[datetime] = None  # When price was fetched/valid
     error: Optional[str] = None
+    # Staleness/fallback metadata
+    is_fallback: bool = False  # True if fallback price was used
+    is_stale: bool = False  # True if price is outside staleness window (warning should be raised)
+    actual_price_date: Optional[datetime] = None  # The actual date of the price used
+    staleness_days: Optional[int] = None  # Days between requested and actual price date
 
 
 class FMVService:
@@ -111,33 +116,62 @@ class FMVService:
                     )
 
             try:
-                # Use get_price_with_source to get actual provider name
-                price_result = self.price_service.get_price_with_source(
-                    asset_id=asset_id,
-                    dt=dt,
-                    price_quote=self.config.base_currency_symbol,
-                )
-                if price_result and price_result.price:
-                    price = price_result.price
-                    value = Decimal(str(qty)) * Decimal(str(price))
-                    return FMVResult(
-                        value=value,
-                        success=True,
-                        source=price_result.source,  # Pass through actual source (coingecko, yahoo, etc.)
-                        price=Decimal(str(price)),
-                        timestamp=dt,
+                # Use get_price_with_fallback if fallback is enabled in config
+                if self.config.use_price_fallback and hasattr(self.price_service, 'get_price_with_fallback'):
+                    # Get staleness window based on asset type (would need asset info)
+                    staleness_window = self.config.price_staleness_window_days
+                    
+                    price_result = self.price_service.get_price_with_fallback(
+                        asset_id=asset_id,
+                        dt=dt,
+                        price_quote=self.config.base_currency_symbol,
+                        use_fallback=True,
+                        staleness_window_days=staleness_window,
                     )
-                else:
-                    error = f"No price found for asset {asset_id}"
-                    self._failed_lookups[cache_key] = error
-                    if skip_on_error:
+                    
+                    if price_result and price_result.price:
+                        price = price_result.price
+                        value = Decimal(str(qty)) * Decimal(str(price))
                         return FMVResult(
-                            value=Decimal("0"),
-                            success=False,
-                            source="fallback",
-                            error=error,
+                            value=value,
+                            success=True,
+                            source=price_result.source,
+                            price=Decimal(str(price)),
+                            timestamp=price_result.actual_price_date or dt,
+                            is_fallback=price_result.is_fallback,
+                            is_stale=price_result.is_stale,
+                            actual_price_date=price_result.actual_price_date,
+                            staleness_days=price_result.staleness_days,
                         )
-                    raise ValueError(error)
+                else:
+                    # Use standard get_price_with_source (no fallback)
+                    price_result = self.price_service.get_price_with_source(
+                        asset_id=asset_id,
+                        dt=dt,
+                        price_quote=self.config.base_currency_symbol,
+                    )
+                    if price_result and price_result.price:
+                        price = price_result.price
+                        value = Decimal(str(qty)) * Decimal(str(price))
+                        return FMVResult(
+                            value=value,
+                            success=True,
+                            source=price_result.source,
+                            price=Decimal(str(price)),
+                            timestamp=dt,
+                        )
+                
+                # No price found
+                error = f"No price found for asset {asset_id}"
+                self._failed_lookups[cache_key] = error
+                if skip_on_error:
+                    return FMVResult(
+                        value=Decimal("0"),
+                        success=False,
+                        source="fallback",
+                        error=error,
+                    )
+                raise ValueError(error)
 
             except Exception as e:
                 error = f"Price fetch failed: {str(e)}"

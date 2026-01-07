@@ -128,7 +128,7 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
             <MetricCard
                 label="Total Fees"
                 value={formatCurrency(summary.total_fees, baseCurrency)}
-                subValue={summary.fee_pnl !== 0 ? `P&L: ${formatCurrency(summary.fee_pnl, baseCurrency)}` : `${summary.fee_entry_count} fee events`}
+                subValue={`${summary.fee_entry_count} fee events`}
                 onClick={onFeesClick}
                 clickable={!!onFeesClick}
                 badge={onFeesClick ? { label: 'Click for details', colorPalette: 'gray' } : undefined}
@@ -198,11 +198,6 @@ export const SummaryBar: React.FC<{
                 <Text fontSize="sm" fontWeight="bold">
                     {formatCurrency(summary.total_fees, baseCurrency)}
                 </Text>
-                {summary.fee_pnl !== 0 && (
-                    <Text fontSize="xs" color={summary.fee_pnl >= 0 ? 'green.500' : 'red.500'}>
-                        P&L: {formatCurrency(summary.fee_pnl, baseCurrency)}
-                    </Text>
-                )}
             </Box>
             {summary.warning_count > 0 && (
                 <Badge colorPalette="orange" size="sm">

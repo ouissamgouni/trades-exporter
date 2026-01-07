@@ -27,9 +27,11 @@ import {
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { FiChevronDown, FiChevronRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader } from 'react-icons/fi';
-import { Bundle, TransactionSummary, TaxabilityStatus, API_URL } from '../types';
+import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, TransactionAssetRef } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
+import { AssetBadge } from './AssetBadge';
+import { formatDateNumeric, getDateRangeDisplay, parseApiDate } from '../utils/dateUtils';
 
 // ============================================================================
 // Types
@@ -42,6 +44,7 @@ interface BundleTableProps {
     onBundleDelete?: (bundleId: number) => Promise<void>;
     onRemoveTransaction?: (bundleId: number, transactionId: number) => Promise<void>;
     onRefresh?: () => void;
+    onTransactionClick?: (txId: number) => void;
 }
 
 interface BundleFilters {
@@ -70,6 +73,11 @@ interface TransactionDetail {
     to_account_name?: string;
     source_from_account?: string;
     source_to_account?: string;
+    // Nested asset references (preferred)
+    linked_asset?: TransactionAssetRef | null;
+    price_quote_asset?: TransactionAssetRef | null;
+    fee_quote_asset?: TransactionAssetRef | null;
+    // Legacy flat fields for fallback
     asset_id?: number;
     asset_symbol?: string;
     quantity?: number;
@@ -80,6 +88,10 @@ interface TransactionDetail {
     fee?: number;
     fee_quote_asset_id?: number;
     fee_quote_asset_symbol?: string;
+    // Source symbols for unlinked fallback
+    source_asset_symbol?: string;
+    source_price_quote_asset_symbol?: string;
+    source_fee_quote_asset_symbol?: string;
 }
 
 // ============================================================================
@@ -94,11 +106,7 @@ const patternColors: Record<string, string> = {
     [UnitPattern.UNKNOWN]: 'gray',
 };
 
-const formatDate = (dateStr: string): string => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-};
+// Using formatDateNumeric from dateUtils for consistent date formatting
 
 const formatQty = (value: number): string => {
     if (value === 0) return '0';
@@ -114,27 +122,24 @@ const formatCurrency = (value: number, currency: string): string => {
     }).format(value);
 };
 
-const getDateRange = (transactions: TransactionSummary[]): string => {
-    if (!transactions || transactions.length === 0) return '-';
-    const dates = transactions
-        .map(t => new Date(t.date_time).getTime())
-        .filter(d => !isNaN(d));
-    if (dates.length === 0) return '-';
-    const minDate = new Date(Math.min(...dates));
-    const maxDate = new Date(Math.max(...dates));
-    const minStr = formatDate(minDate.toISOString());
-    const maxStr = formatDate(maxDate.toISOString());
-    return minStr === maxStr ? minStr : `${minStr} - ${maxStr}`;
-};
+// Using getDateRangeDisplay from dateUtils for consistent date range display
 
-const getUniqueAssets = (transactions: TransactionSummary[]): string[] => {
+const getUniqueAssets = (transactions: TransactionSummary[]): TransactionAssetRef[] => {
     if (!transactions) return [];
-    const assets = new Set<string>();
+    const assetMap = new Map<string, TransactionAssetRef>();
     transactions.forEach(t => {
-        const symbol = t.symbol || t.asset_symbol;
-        if (symbol) assets.add(symbol);
+        // Prefer nested asset ref
+        if (t.linked_asset?.symbol) {
+            assetMap.set(t.linked_asset.symbol, t.linked_asset);
+        } else {
+            // Fallback to flat symbol
+            const symbol = t.symbol || t.asset_symbol;
+            if (symbol && !assetMap.has(symbol)) {
+                assetMap.set(symbol, { symbol });
+            }
+        }
     });
-    return Array.from(assets);
+    return Array.from(assetMap.values());
 };
 
 // ============================================================================
@@ -242,12 +247,14 @@ interface TransactionBadgesProps {
     transactions: TransactionSummary[];
     baseCurrency: string;
     maxVisible?: number;
+    onTransactionClick?: (txId: number) => void;
 }
 
 const TransactionBadges: React.FC<TransactionBadgesProps> = ({
     transactions,
     baseCurrency,
     maxVisible = 3,
+    onTransactionClick,
 }) => {
     if (!transactions || transactions.length === 0) {
         return <Text fontSize="2xs" color="gray.400">-</Text>;
@@ -259,7 +266,7 @@ const TransactionBadges: React.FC<TransactionBadgesProps> = ({
     return (
         <Flex gap={1} flexWrap="wrap" align="center">
             {visibleTxs.map(tx => (
-                <TransactionTooltip key={tx.id} txId={tx.id} baseCurrency={baseCurrency}>
+                <TransactionTooltip key={tx.id} txId={tx.id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
                     <Badge
                         size="xs"
                         colorPalette="gray"
@@ -287,6 +294,7 @@ interface ExpandedTransactionTableProps {
     bundleId: number;
     baseCurrency: string;
     onRemoveTransaction?: (bundleId: number, transactionId: number) => Promise<void>;
+    onTransactionClick?: (txId: number) => void;
 }
 
 const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
@@ -294,6 +302,7 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
     bundleId,
     baseCurrency,
     onRemoveTransaction,
+    onTransactionClick,
 }) => {
     const [txDetails, setTxDetails] = useState<TransactionDetail[]>([]);
     const [loading, setLoading] = useState(false);
@@ -329,6 +338,11 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                         to_account_name: data.to_account_name,
                         source_from_account: data.source_from_account,
                         source_to_account: data.source_to_account,
+                        // Nested asset refs
+                        linked_asset: data.linked_asset,
+                        price_quote_asset: data.price_quote_asset,
+                        fee_quote_asset: data.fee_quote_asset,
+                        // Legacy flat fields
                         asset_id: data.asset_id,
                         asset_symbol: data.linked_asset_symbol || data.source_asset_symbol,
                         quantity: data.quantity,
@@ -339,6 +353,10 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                         fee: data.fee,
                         fee_quote_asset_id: data.fee_quote_asset_id,
                         fee_quote_asset_symbol: data.linked_fee_quote_asset_symbol || data.source_fee_quote_asset_symbol,
+                        // Source symbols for fallback
+                        source_asset_symbol: data.source_asset_symbol,
+                        source_price_quote_asset_symbol: data.source_price_quote_asset_symbol,
+                        source_fee_quote_asset_symbol: data.source_fee_quote_asset_symbol,
                     });
                 }
                 setTxDetails(details);
@@ -412,7 +430,7 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                             return (
                                 <Table.Row key={tx.transaction_id}>
                                     <Table.Cell>
-                                        <TransactionTooltip txId={tx.transaction_id} baseCurrency={baseCurrency}>
+                                        <TransactionTooltip txId={tx.transaction_id} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
                                             <Badge size="xs" colorPalette="gray" variant="subtle" cursor="pointer">
                                                 #{tx.transaction_id}
                                             </Badge>
@@ -427,7 +445,12 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                         </Badge>
                                     </Table.Cell>
                                     <Table.Cell>
-                                        <Badge size="xs">{tx.asset_symbol || '-'}</Badge>
+                                        <AssetBadge
+                                            asset={tx.linked_asset}
+                                            sourceSymbol={tx.source_asset_symbol || tx.asset_symbol}
+                                            size="xs"
+                                            maxLength={15}
+                                        />
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right" fontFamily="mono">
                                         {formatQty(tx.quantity || 0)}
@@ -440,9 +463,16 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right">
                                         {tx.fee ? (
-                                            <Text color="orange.600">
-                                                {formatQty(tx.fee)} {tx.fee_quote_asset_symbol || ''}
-                                            </Text>
+                                            <Flex align="center" gap={1} justify="flex-end">
+                                                <Text color="orange.600">{formatQty(tx.fee)}</Text>
+                                                <AssetBadge
+                                                    asset={tx.fee_quote_asset}
+                                                    sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
+                                                    size="xs"
+                                                    colorPalette="orange"
+                                                    maxLength={10}
+                                                />
+                                            </Flex>
                                         ) : '-'}
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs">{tx.account_name || '-'}</Table.Cell>
@@ -571,6 +601,7 @@ interface BundleRowProps {
     onUpdate: (updates: Partial<Bundle>) => Promise<void>;
     onDelete: () => Promise<void>;
     onRemoveTransaction?: (bundleId: number, transactionId: number) => Promise<void>;
+    onTransactionClick?: (txId: number) => void;
 }
 
 const BundleRow: React.FC<BundleRowProps> = ({
@@ -583,6 +614,7 @@ const BundleRow: React.FC<BundleRowProps> = ({
     onUpdate,
     onDelete,
     onRemoveTransaction,
+    onTransactionClick,
 }) => {
     const [deleting, setDeleting] = useState(false);
     const [editingNotes, setEditingNotes] = useState(false);
@@ -590,7 +622,7 @@ const BundleRow: React.FC<BundleRowProps> = ({
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const assets = getUniqueAssets(bundle.transactions);
-    const dateRange = getDateRange(bundle.transactions);
+    const dateRange = getDateRangeDisplay(bundle.transactions?.map(t => t.date_time) || []);
 
     const openDeleteConfirm = () => setShowDeleteConfirm(true);
 
@@ -669,16 +701,21 @@ const BundleRow: React.FC<BundleRowProps> = ({
                         transactions={bundle.transactions}
                         baseCurrency={baseCurrency}
                         maxVisible={3}
+                        onTransactionClick={onTransactionClick}
                     />
                 </Table.Cell>
 
                 {/* Assets */}
                 <Table.Cell p={1} maxW="120px">
                     <Flex gap={1} flexWrap="wrap">
-                        {assets.slice(0, 3).map(asset => (
-                            <Badge key={asset} size="xs" colorPalette="purple" variant="subtle">
-                                {asset}
-                            </Badge>
+                        {assets.slice(0, 3).map((asset, idx) => (
+                            <AssetBadge
+                                key={asset.symbol || idx}
+                                asset={asset}
+                                size="xs"
+                                colorPalette="purple"
+                                maxLength={12}
+                            />
                         ))}
                         {assets.length > 3 && (
                             <Text fontSize="10px" color="gray.500">+{assets.length - 3}</Text>
@@ -777,6 +814,7 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                     bundleId={bundle.id}
                                     baseCurrency={baseCurrency}
                                     onRemoveTransaction={onRemoveTransaction}
+                                    onTransactionClick={onTransactionClick}
                                 />
                             </Box>
                         </Box>
@@ -851,6 +889,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
     onBundleDelete,
     onRemoveTransaction,
     onRefresh,
+    onTransactionClick,
 }) => {
     const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -1010,6 +1049,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                                     onUpdate={(updates) => handleUpdate(bundle.id, updates)}
                                     onDelete={() => handleDelete(bundle.id)}
                                     onRemoveTransaction={onRemoveTransaction}
+                                    onTransactionClick={onTransactionClick}
                                 />
                             ))
                         )}

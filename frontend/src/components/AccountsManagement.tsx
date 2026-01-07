@@ -1,7 +1,7 @@
 import {
     Badge, Box,
     Button, Card, Collapsible, Heading, HStack, IconButton, Input,
-    Table, Text, useDisclosure, VStack
+    Switch, Table, Text, useDisclosure, VStack
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
 import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
@@ -121,6 +121,33 @@ const AccountsManagement: React.FC = () => {
         }
     };
 
+    const toggleAccountEnabled = async (accountId: number, currentEnabled: boolean) => {
+        try {
+            const response = await fetch(`${API_URL}/accounts/${accountId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: !currentEnabled }),
+            });
+            if (!response.ok) throw new Error('Failed to update account');
+
+            // Update local state
+            setAccounts(prev => prev.map(a =>
+                a.id === accountId ? { ...a, enabled: !currentEnabled } : a
+            ));
+            setFilteredAccounts(prev => prev.map(a =>
+                a.id === accountId ? { ...a, enabled: !currentEnabled } : a
+            ));
+
+            toaster.success({
+                title: 'Account Updated',
+                description: `Account ${!currentEnabled ? 'enabled' : 'disabled'} for syncing`,
+            });
+        } catch (error) {
+            console.error('Error toggling account enabled:', error);
+            toaster.error({ title: 'Error', description: 'Failed to update account' });
+        }
+    };
+
     return (
         <Box p={6}>
             <VStack align="stretch" gap={4}>
@@ -207,14 +234,15 @@ const AccountsManagement: React.FC = () => {
                     ) : (
                         filteredAccounts.map((account) => {
                             const isExpanded = expandedAccountIds.has(account.id);
-                            const bgColor = {
+                            const isEnabled = account.enabled !== false;
+                            const bgColor = isEnabled ? ({
                                 cex: 'blue.50',
                                 broker: 'green.50',
                                 wallet: 'purple.50'
-                            }[account.account_type] || 'gray.50';
+                            }[account.account_type] || 'gray.50') : 'gray.100';
 
                             return (
-                                <Card.Root key={account.id} variant="outline">
+                                <Card.Root key={account.id} variant="outline" opacity={isEnabled ? 1 : 0.7}>
                                     {/* Account Header - Clickable */}
                                     <Card.Body p={0}>
                                         <Box
@@ -248,6 +276,22 @@ const AccountsManagement: React.FC = () => {
                                                     </Box>
                                                 </HStack>
                                                 <HStack gap={2} onClick={(e) => e.stopPropagation()}>
+                                                    {/* Enabled Toggle */}
+                                                    <HStack gap={1} title={account.enabled !== false ? 'Click to disable syncing' : 'Click to enable syncing'}>
+                                                        <Text fontSize="xs" color={account.enabled !== false ? 'green.600' : 'gray.400'}>
+                                                            {account.enabled !== false ? 'Sync On' : 'Sync Off'}
+                                                        </Text>
+                                                        <Switch.Root
+                                                            size="sm"
+                                                            checked={account.enabled !== false}
+                                                            onCheckedChange={() => toggleAccountEnabled(account.id, account.enabled !== false)}
+                                                        >
+                                                            <Switch.HiddenInput />
+                                                            <Switch.Control>
+                                                                <Switch.Thumb />
+                                                            </Switch.Control>
+                                                        </Switch.Root>
+                                                    </HStack>
                                                     {account.tags?.slice(0, 2).map((tag, idx) => (
                                                         <Badge key={idx} size="sm" variant="subtle">
                                                             {tag}

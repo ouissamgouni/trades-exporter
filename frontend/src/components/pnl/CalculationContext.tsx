@@ -9,7 +9,7 @@
  * - "new": Configure and calculate a new P&L
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     Badge,
     Box,
@@ -21,9 +21,12 @@ import {
     Spinner,
     Text,
 } from '@chakra-ui/react';
-import { FiPlay, FiSave, FiRefreshCw, FiClock, FiTrash2, FiDownload, FiPlus, FiFolder } from 'react-icons/fi';
+import { FiActivity, FiPlay, FiSave, FiRefreshCw, FiClock, FiTrash2, FiDownload, FiPlus, FiFolder } from 'react-icons/fi';
 import { CalculationConfig, CalculationStatus, VersionListItem } from './types';
-import { Account, CostMethod, LotMode } from '../../types';
+import { Account, Asset, API_URL, CostMethod, LotMode, ValidationSummary } from '../../types';
+import { formatDateTimeLocale } from '../../utils/dateUtils';
+import { DataHealthCheckDrawer } from '../DataHealthCheckDrawer';
+import { Tooltip } from '../ui/tooltip';
 
 export type CalculationMode = 'load' | 'new';
 
@@ -73,8 +76,74 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
     error,
 }) => {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
+    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
+    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [healthCheckAccounts, setHealthCheckAccounts] = useState<Account[]>([]);
 
     const selectedVersion = availableVersions.find(v => v.version_id === selectedVersionId);
+
+    // Fetch assets for health check drawer
+    const fetchAssets = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
+            if (response.ok) {
+                const data = await response.json();
+                setAssets(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch assets:', err);
+        }
+    }, []);
+
+    // Fetch accounts for health check drawer
+    const fetchHealthCheckAccounts = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/accounts/`);
+            if (response.ok) {
+                const data = await response.json();
+                setHealthCheckAccounts(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch accounts:', err);
+        }
+    }, []);
+
+    // Fetch assets and accounts when health check opens
+    useEffect(() => {
+        if (isHealthCheckOpen) {
+            fetchAssets();
+            fetchHealthCheckAccounts();
+        }
+    }, [isHealthCheckOpen, fetchAssets, fetchHealthCheckAccounts]);
+
+    // Fetch validation summary on mount and when account filter changes
+    const fetchValidationSummary = useCallback(async () => {
+        try {
+            const params = new URLSearchParams();
+            if (config.account_ids && config.account_ids.length > 0) {
+                params.set('account_ids', config.account_ids.join(','));
+            }
+            const url = `${API_URL}/transactions/data-health-check${params.toString() ? `?${params}` : ''}`;
+            const response = await fetch(url);
+            if (response.ok) {
+                const data: ValidationSummary = await response.json();
+                setValidationSummary(data);
+            } else {
+                // On error, show healthy state
+                setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
+            }
+        } catch (err) {
+            console.error('Failed to fetch validation summary:', err);
+            // On error, show healthy state
+            setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
+        }
+    }, [config.account_ids]);
+
+    useEffect(() => {
+        fetchValidationSummary();
+    }, [fetchValidationSummary]);
 
     const getStatusBadge = () => {
         switch (status) {
@@ -156,7 +225,7 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                     <option value="">Select a saved version...</option>
                                     {availableVersions.map((v) => (
                                         <option key={v.version_id} value={v.version_id}>
-                                            v{v.version_id} - {new Date(v.created_at ?? '').toLocaleString()} - {v.lot_method} ({v.status})
+                                            v{v.version_id} - {formatDateTimeLocale(v.created_at)} - {v.lot_method} ({v.status})
                                         </option>
                                     ))}
                                 </NativeSelect.Field>
@@ -190,7 +259,7 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                         {selectedVersion && (
                             <Text fontSize="xs" color="gray.500" mt={2}>
                                 <FiClock style={{ display: 'inline', marginRight: 4 }} />
-                                Calculated: {selectedVersion.created_at ? new Date(selectedVersion.created_at).toLocaleString() : 'Unknown'}
+                                Calculated: {formatDateTimeLocale(selectedVersion.created_at)}
                             </Text>
                         )}
                     </Box>
@@ -256,8 +325,8 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                             )}
                         </Box>
 
-                        {/* Other Configuration Parameters */}
-                        <Flex gap={4} wrap="wrap" align="flex-end" mb={4}>
+                        {/* Main Configuration Parameters */}
+                        <Flex gap={4} wrap="wrap" align="flex-start" mb={4}>
                             <Box>
                                 <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
                                     Cost Method
@@ -298,42 +367,124 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                 </Badge>
                             </Box>
 
-                            <Box>
-                                <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
-                                    Residual Tolerance %
+                            {/* Advanced Settings - Inline */}
+                            <Box p={2} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
+                                <Text fontSize="xs" fontWeight="semibold" color="gray.700" mb={2}>
+                                    Advanced Settings
                                 </Text>
-                                <input
-                                    type="number"
-                                    value={config.residual_tolerance_pct}
-                                    onChange={(e) => onConfigChange({ residual_tolerance_pct: parseFloat(e.target.value) || 0 })}
-                                    step={0.01}
-                                    min={0}
-                                    max={100}
-                                    style={{
-                                        width: '80px',
-                                        padding: '6px 8px',
-                                        borderRadius: '6px',
-                                        border: '1px solid #e2e8f0',
-                                        fontSize: '14px',
-                                    }}
-                                />
-                            </Box>
+                                <Flex gap={3} wrap="wrap" align="center">
+                                    <Flex align="center" gap={1}>
+                                        <Text fontSize="xs" color="gray.600">Residual %</Text>
+                                        <input
+                                            type="number"
+                                            value={config.residual_tolerance_pct}
+                                            onChange={(e) => onConfigChange({ residual_tolerance_pct: parseFloat(e.target.value) || 0 })}
+                                            step={0.01}
+                                            min={0}
+                                            max={100}
+                                            style={{
+                                                width: '60px',
+                                                padding: '4px 6px',
+                                                borderRadius: '4px',
+                                                border: '1px solid #e2e8f0',
+                                                fontSize: '12px',
+                                            }}
+                                        />
+                                    </Flex>
 
-                            <Box>
-                                <Text fontSize="xs" mb={1} fontWeight="medium" color="gray.600">
-                                    Allow Negative Balances
-                                </Text>
-                                <input
-                                    type="checkbox"
-                                    checked={config.allow_negative_balances}
-                                    onChange={(e) => onConfigChange({ allow_negative_balances: e.target.checked })}
-                                    style={{ width: '20px', height: '20px' }}
-                                />
+                                    <Flex align="center" gap={1}>
+                                        <input
+                                            type="checkbox"
+                                            id="allow_negative_balances"
+                                            checked={config.allow_negative_balances}
+                                            onChange={(e) => onConfigChange({ allow_negative_balances: e.target.checked })}
+                                            style={{ width: '14px', height: '14px' }}
+                                        />
+                                        <label htmlFor="allow_negative_balances" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
+                                            Negative Bal.
+                                        </label>
+                                    </Flex>
+
+                                    <Flex align="center" gap={1}>
+                                        <input
+                                            type="checkbox"
+                                            id="compute_residuals"
+                                            checked={config.compute_residuals}
+                                            onChange={(e) => onConfigChange({ compute_residuals: e.target.checked })}
+                                            style={{ width: '14px', height: '14px' }}
+                                        />
+                                        <label htmlFor="compute_residuals" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
+                                            Residuals
+                                        </label>
+                                    </Flex>
+
+                                    <Flex align="center" gap={1}>
+                                        <input
+                                            type="checkbox"
+                                            id="crypto_swap_taxable"
+                                            checked={config.crypto_swap_taxable_by_default}
+                                            onChange={(e) => onConfigChange({ crypto_swap_taxable_by_default: e.target.checked })}
+                                            style={{ width: '14px', height: '14px' }}
+                                        />
+                                        <label htmlFor="crypto_swap_taxable" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
+                                            Swaps Tax
+                                        </label>
+                                    </Flex>
+
+                                    <Flex align="center" gap={1}>
+                                        <input
+                                            type="checkbox"
+                                            id="fee_taxable"
+                                            checked={config.fee_taxable_by_default}
+                                            onChange={(e) => onConfigChange({ fee_taxable_by_default: e.target.checked })}
+                                            style={{ width: '14px', height: '14px' }}
+                                        />
+                                        <label htmlFor="fee_taxable" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
+                                            Fees Tax
+                                        </label>
+                                    </Flex>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" pl={3} ml={1}>
+                                        <Flex align="center" gap={1}>
+                                            <input
+                                                type="checkbox"
+                                                id="use_price_fallback"
+                                                checked={config.use_price_fallback}
+                                                onChange={(e) => onConfigChange({ use_price_fallback: e.target.checked })}
+                                                style={{ width: '14px', height: '14px' }}
+                                            />
+                                            <label htmlFor="use_price_fallback" style={{ fontSize: '0.75rem', color: '#718096', cursor: 'pointer' }}>
+                                                Price Fallback
+                                            </label>
+                                        </Flex>
+                                    </Box>
+
+                                    {config.use_price_fallback && (
+                                        <Flex align="center" gap={1}>
+                                            <Text fontSize="xs" color="gray.600">Stale after</Text>
+                                            <input
+                                                type="number"
+                                                value={config.price_staleness_window_days}
+                                                onChange={(e) => onConfigChange({ price_staleness_window_days: parseInt(e.target.value) || 7 })}
+                                                min={1}
+                                                max={365}
+                                                style={{
+                                                    width: '50px',
+                                                    padding: '4px 6px',
+                                                    borderRadius: '4px',
+                                                    border: '1px solid #e2e8f0',
+                                                    fontSize: '12px',
+                                                }}
+                                            />
+                                            <Text fontSize="xs" color="gray.600">days</Text>
+                                        </Flex>
+                                    )}
+                                </Flex>
                             </Box>
                         </Flex>
 
-                        {/* Calculate Button */}
-                        <Flex gap={2}>
+                        {/* Calculate Button + Data Health Check */}
+                        <Flex gap={2} align="center">
                             <Button
                                 size="sm"
                                 colorPalette="blue"
@@ -363,7 +514,44 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                     )}
                                 </Button>
                             )}
+
+                            {/* Data Health Check Indicator */}
+                            {validationSummary && (
+                                <Tooltip content={
+                                    validationSummary.has_issues 
+                                        ? `${validationSummary.total_issues} data issue(s) may affect P&L accuracy. Click to review.`
+                                        : 'All transaction data is complete and ready for P&L calculation.'
+                                }>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        colorPalette={validationSummary.has_issues ? 'orange' : 'green'}
+                                        onClick={() => setIsHealthCheckOpen(true)}
+                                    >
+                                        <FiActivity />
+                                        {validationSummary.has_issues ? (
+                                            <Badge colorPalette="orange" size="sm" ml={1}>
+                                                {validationSummary.total_issues}
+                                            </Badge>
+                                        ) : (
+                                            <Text ml={1} fontSize="xs">✓ Ready</Text>
+                                        )}
+                                    </Button>
+                                </Tooltip>
+                            )}
                         </Flex>
+
+                        {/* Data Health Check Drawer */}
+                        <DataHealthCheckDrawer
+                            isOpen={isHealthCheckOpen}
+                            onClose={() => setIsHealthCheckOpen(false)}
+                            accountIds={config.account_ids}
+                            refreshTrigger={healthCheckRefreshTrigger}
+                            assets={assets}
+                            accounts={healthCheckAccounts}
+                            onAssetsUpdated={fetchAssets}
+                            onAccountsUpdated={fetchHealthCheckAccounts}
+                        />
                     </>
                 )}
 

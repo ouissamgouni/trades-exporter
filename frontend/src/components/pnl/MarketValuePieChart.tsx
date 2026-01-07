@@ -1,12 +1,12 @@
 /**
- * Market Value Pie Chart
+ * Market Value Pie Chart (Nivo)
  * 
  * Displays market value distribution by category within a selected dimension.
  * Features:
  * - Dimension selector dropdown
  * - Interactive pie chart with click-to-filter
+ * - Built-in arc link labels with connector lines
  * - Tooltip showing category details
- * - Legend with color-coded categories
  * - "Uncategorized" slice for assets without category in selected dimension
  */
 
@@ -18,7 +18,7 @@ import {
     NativeSelect,
     Text,
 } from '@chakra-ui/react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { ResponsivePie } from '@nivo/pie';
 import { DimensionWithCategories, Category } from '../../types';
 import { AssetPnLRow, PieChartDataPoint, aggregateMarketValueByCategory } from './types';
 
@@ -41,119 +41,24 @@ export interface MarketValuePieChartProps {
 const formatCurrency = (value: number, currency: string): string => {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: currency === 'USD' ? 'USD' : 'USD',  // Default to USD formatting
+        currency: 'USD',
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
     }).format(value).replace('$', `${currency} `);
 };
 
 /**
- * Custom tooltip for the pie chart
+ * Nivo pie data format
  */
-interface CustomTooltipProps {
-    active?: boolean;
-    payload?: Array<{
-        payload: PieChartDataPoint;
-    }>;
-    baseCurrency: string;
+interface NivoPieData {
+    id: string;
+    label: string;
+    value: number;
+    color: string;
+    categoryId: number | null;
+    percentage: number;
+    assetCount: number;
 }
-
-const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, baseCurrency }) => {
-    if (!active || !payload || payload.length === 0) return null;
-
-    const data = payload[0].payload;
-
-    return (
-        <Box
-            bg="white"
-            p={3}
-            borderRadius="md"
-            boxShadow="lg"
-            border="1px solid"
-            borderColor="gray.200"
-        >
-            <Flex align="center" gap={2} mb={1}>
-                <Box
-                    w={3}
-                    h={3}
-                    borderRadius="sm"
-                    bg={data.color}
-                />
-                <Text fontWeight="semibold">{data.label}</Text>
-            </Flex>
-            <Text fontSize="sm" color="gray.600">
-                Value: {formatCurrency(data.value, baseCurrency)}
-            </Text>
-            <Text fontSize="sm" color="gray.600">
-                Percentage: {data.percentage.toFixed(1)}%
-            </Text>
-            <Text fontSize="sm" color="gray.500">
-                {data.assetCount} asset{data.assetCount !== 1 ? 's' : ''}
-            </Text>
-        </Box>
-    );
-};
-
-/**
- * Custom legend that shows category names with values
- */
-interface CustomLegendProps {
-    payload?: Array<{
-        value: string;
-        color: string;
-        payload: PieChartDataPoint;
-    }>;
-    baseCurrency: string;
-    selectedCategoryIds: number[];
-    onCategoryClick: (categoryId: number | null) => void;
-}
-
-const CustomLegend: React.FC<CustomLegendProps> = ({
-    payload,
-    baseCurrency,
-    selectedCategoryIds,
-    onCategoryClick
-}) => {
-    if (!payload) return null;
-
-    return (
-        <Box maxH="200px" overflowY="auto" pr={2}>
-            {payload.map((entry, index) => {
-                const data = entry.payload;
-                const isSelected = data.categoryId !== null && selectedCategoryIds.includes(data.categoryId);
-
-                return (
-                    <Flex
-                        key={index}
-                        align="center"
-                        gap={2}
-                        py={1}
-                        px={2}
-                        borderRadius="md"
-                        cursor="pointer"
-                        bg={isSelected ? 'blue.50' : 'transparent'}
-                        _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
-                        onClick={() => onCategoryClick(data.categoryId)}
-                    >
-                        <Box
-                            w={3}
-                            h={3}
-                            borderRadius="sm"
-                            bg={entry.color}
-                            flexShrink={0}
-                        />
-                        <Text fontSize="sm" flex={1} truncate>
-                            {entry.value}
-                        </Text>
-                        <Text fontSize="xs" color="gray.500">
-                            {data.percentage.toFixed(1)}%
-                        </Text>
-                    </Flex>
-                );
-            })}
-        </Box>
-    );
-};
 
 export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     assets,
@@ -163,9 +68,14 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     onCategoryClick,
 }) => {
     // Default to first dimension
-    const [selectedDimensionId, setSelectedDimensionId] = useState<number | null>(
-        dimensions.length > 0 ? dimensions[0].id : null
-    );
+    const [selectedDimensionId, setSelectedDimensionId] = useState<number | null>(null);
+
+    // Set initial dimension when dimensions load
+    React.useEffect(() => {
+        if (dimensions.length > 0 && selectedDimensionId === null) {
+            setSelectedDimensionId(dimensions[0].id);
+        }
+    }, [dimensions, selectedDimensionId]);
 
     // Flatten all categories from all dimensions for the aggregation function
     const allCategories = useMemo(() => {
@@ -176,12 +86,21 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
         return cats;
     }, [dimensions]);
 
-    // Compute pie chart data
-    const pieData = useMemo(() => {
+    // Compute pie chart data and convert to Nivo format
+    const pieData = useMemo((): NivoPieData[] => {
         if (selectedDimensionId === null || assets.length === 0) {
             return [];
         }
-        return aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
+        const rawData = aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
+        return rawData.map((d: PieChartDataPoint) => ({
+            id: d.label,
+            label: d.label,
+            value: d.value,
+            color: d.color,
+            categoryId: d.categoryId,
+            percentage: d.percentage,
+            assetCount: d.assetCount,
+        }));
     }, [assets, selectedDimensionId, allCategories]);
 
     // Total market value for display
@@ -190,7 +109,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     }, [assets]);
 
     // Handle pie slice click
-    const handlePieClick = useCallback((data: PieChartDataPoint) => {
+    const handlePieClick = useCallback((data: NivoPieData) => {
         onCategoryClick(data.categoryId);
     }, [onCategoryClick]);
 
@@ -259,63 +178,82 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
                     No categories assigned in this dimension.
                 </Text>
             ) : (
-                <Flex direction={{ base: 'column', md: 'row' }} gap={4}>
-                    {/* Pie Chart */}
-                    <Box flex={1} minH="250px">
-                        <ResponsiveContainer width="100%" height={250}>
-                            <PieChart>
-                                <Pie
-                                    data={pieData as any[]}
-                                    dataKey="value"
-                                    nameKey="label"
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={50}
-                                    outerRadius={90}
-                                    paddingAngle={2}
-                                    onClick={(_, index) => handlePieClick(pieData[index])}
-                                    style={{ cursor: 'pointer' }}
-                                >
-                                    {pieData.map((entry, index) => {
-                                        const isSelected = entry.categoryId !== null &&
-                                            selectedCategoryIds.includes(entry.categoryId);
-                                        return (
-                                            <Cell
-                                                key={`cell-${index}`}
-                                                fill={entry.color}
-                                                stroke={isSelected ? '#2563eb' : '#fff'}
-                                                strokeWidth={isSelected ? 3 : 1}
-                                                opacity={
-                                                    selectedCategoryIds.length === 0
-                                                        ? 1
-                                                        : isSelected ? 1 : 0.5
-                                                }
-                                            />
-                                        );
-                                    })}
-                                </Pie>
-                                <Tooltip content={<CustomTooltip baseCurrency={baseCurrency} />} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </Box>
-
-                    {/* Legend */}
-                    <Box minW="200px" maxW="280px">
-                        <Text fontSize="xs" fontWeight="medium" color="gray.500" mb={2}>
-                            Click to filter
-                        </Text>
-                        <CustomLegend
-                            payload={pieData.map(d => ({
-                                value: d.label,
-                                color: d.color,
-                                payload: d,
-                            }))}
-                            baseCurrency={baseCurrency}
-                            selectedCategoryIds={selectedCategoryIds}
-                            onCategoryClick={onCategoryClick}
-                        />
-                    </Box>
-                </Flex>
+                <Box h="320px">
+                    <ResponsivePie
+                        data={pieData}
+                        margin={{ top: 40, right: 100, bottom: 40, left: 100 }}
+                        innerRadius={0.5}
+                        padAngle={1}
+                        cornerRadius={3}
+                        activeOuterRadiusOffset={8}
+                        colors={{ datum: 'data.color' }}
+                        borderWidth={1}
+                        borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
+                        // Arc link labels (connector lines)
+                        arcLinkLabelsSkipAngle={10}
+                        arcLinkLabelsTextColor="#374151"
+                        arcLinkLabelsThickness={1}
+                        arcLinkLabelsColor={{ from: 'color' }}
+                        arcLinkLabelsDiagonalLength={16}
+                        arcLinkLabelsStraightLength={12}
+                        arcLinkLabelsTextOffset={4}
+                        arcLinkLabel={d => `${d.label} (${d.data.percentage.toFixed(1)}%)`}
+                        // Arc labels (inside slices) - disabled for cleaner look
+                        enableArcLabels={false}
+                        // Tooltip
+                        tooltip={({ datum }) => (
+                            <Box
+                                bg="white"
+                                p={3}
+                                borderRadius="md"
+                                boxShadow="lg"
+                                border="1px solid"
+                                borderColor="gray.200"
+                            >
+                                <Flex align="center" gap={2} mb={1}>
+                                    <Box
+                                        w={3}
+                                        h={3}
+                                        borderRadius="sm"
+                                        bg={datum.color}
+                                    />
+                                    <Text fontWeight="semibold">{datum.label}</Text>
+                                </Flex>
+                                <Text fontSize="sm" color="gray.600">
+                                    Value: {formatCurrency(datum.value, baseCurrency)}
+                                </Text>
+                                <Text fontSize="sm" color="gray.600">
+                                    Percentage: {datum.data.percentage.toFixed(1)}%
+                                </Text>
+                                <Text fontSize="sm" color="gray.500">
+                                    {datum.data.assetCount} asset{datum.data.assetCount !== 1 ? 's' : ''}
+                                </Text>
+                            </Box>
+                        )}
+                        // Interactivity
+                        onClick={(data) => handlePieClick(data.data as NivoPieData)}
+                        // Selection highlighting via activeId
+                        activeId={
+                            selectedCategoryIds.length > 0
+                                ? pieData.find(d => d.categoryId !== null && selectedCategoryIds.includes(d.categoryId))?.id
+                                : undefined
+                        }
+                        // Theme
+                        theme={{
+                            labels: {
+                                text: {
+                                    fontSize: 10,
+                                    fontFamily: 'inherit',
+                                }
+                            },
+                            tooltip: {
+                                container: {
+                                    fontFamily: 'inherit',
+                                }
+                            }
+                        }}
+                    />
+                </Box>
             )}
         </Box>
     );

@@ -5,7 +5,7 @@ Maps source-specific asset symbols to normalized assets.
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from sqlalchemy import update
 
@@ -35,6 +35,114 @@ class RawAssetResponse(BaseModel):
     symbol: str
     source: str
     asset_id: Optional[int] = None
+
+
+class BulkMapAssetItem(BaseModel):
+    """Single item for bulk asset mapping."""
+    symbol: str = Field(..., description="Raw asset symbol")
+    source: str = Field(..., description="Source platform/exchange")
+    asset_id: int = Field(..., description="Target asset_id to map to")
+
+
+class BulkMapAssetRequest(BaseModel):
+    """Request model for bulk asset mapping."""
+    mappings: List[BulkMapAssetItem] = Field(..., description="List of mappings to apply")
+
+
+class BulkMapResponse(BaseModel):
+    """Response model for bulk mapping operations."""
+    success_count: int = Field(..., description="Number of successful mappings")
+    failed_count: int = Field(..., description="Number of failed mappings")
+    errors: List[str] = Field(default_factory=list, description="Error messages for failed mappings")
+
+
+@router.post("/bulk-map", response_model=BulkMapResponse)
+def bulk_map_assets(
+    request: BulkMapAssetRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Bulk map multiple raw assets to normalized assets.
+    
+    Each mapping updates the raw_asset record and propagates to all linked transactions.
+    Used by "Apply All Suggestions" feature in Data Health Check.
+    """
+    success_count = 0
+    failed_count = 0
+    errors = []
+    
+    try:
+        for item in request.mappings:
+            try:
+                # Find the raw asset
+                statement = select(RawAsset).where(
+                    RawAsset.symbol == item.symbol,
+                    RawAsset.source == item.source,
+                )
+                raw_asset = session.exec(statement).first()
+                
+                if not raw_asset:
+                    # Create if doesn't exist
+                    raw_asset = RawAsset(
+                        symbol=item.symbol,
+                        source=item.source,
+                        asset_id=item.asset_id,
+                    )
+                    session.add(raw_asset)
+                else:
+                    raw_asset.asset_id = item.asset_id
+                
+                # Propagate to transactions
+                # Update asset_id for transactions matching source_asset_symbol
+                stmt_asset = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == item.source,
+                        NormalizedTransaction.source_asset_symbol == item.symbol,
+                    )
+                    .values(asset_id=item.asset_id)
+                )
+                session.exec(stmt_asset)
+                
+                # Update price_quote_asset_id for transactions matching source_price_quote_asset_symbol
+                stmt_price = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == item.source,
+                        NormalizedTransaction.source_price_quote_asset_symbol == item.symbol,
+                    )
+                    .values(price_quote_asset_id=item.asset_id)
+                )
+                session.exec(stmt_price)
+                
+                # Update fee_quote_asset_id for transactions matching source_fee_quote_asset_symbol
+                stmt_fee = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == item.source,
+                        NormalizedTransaction.source_fee_quote_asset_symbol == item.symbol,
+                    )
+                    .values(fee_quote_asset_id=item.asset_id)
+                )
+                session.exec(stmt_fee)
+                
+                success_count += 1
+                
+            except Exception as e:
+                failed_count += 1
+                errors.append(f"{item.symbol}@{item.source}: {str(e)}")
+        
+        session.commit()
+        
+        return BulkMapResponse(
+            success_count=success_count,
+            failed_count=failed_count,
+            errors=errors
+        )
+        
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=f"Bulk mapping failed: {str(e)}")
 
 
 @router.get("", response_model=List[RawAssetResponse])

@@ -24,6 +24,7 @@ import {
 import { FiExternalLink, FiInfo, FiArrowRight } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { PnLImpactEvent, ConsumedLotDetail, EventTransaction } from './types';
+import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
 
 interface PnLImpactPanelProps {
     event: PnLImpactEvent;
@@ -46,13 +47,7 @@ const formatQty = (value: number): string => {
     return value.toFixed(8).replace(/\.?0+$/, '');
 };
 
-const formatDate = (dateStr: string): string => {
-    return new Date(dateStr).toLocaleDateString();
-};
-
-const formatDateTime = (dateStr: string): string => {
-    return new Date(dateStr).toLocaleString();
-};
+// Using formatDateLocale and formatDateTimeLocale from utils/dateUtils
 
 export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
     event,
@@ -91,7 +86,7 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                 )}
                             </Flex>
                             <Text fontSize="sm" color="gray.600">
-                                {formatDateTime(event.event_date)}
+                                {formatDateTimeLocale(event.event_date)}
                             </Text>
                         </Box>
                         <Box textAlign="right">
@@ -187,7 +182,7 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                     <Table.Row key={idx}>
                                         <Table.Cell>
                                             <Flex direction="column">
-                                                <Text fontSize="sm">{formatDate(lot.acquired_at)}</Text>
+                                                <Text fontSize="sm">{formatDateLocale(lot.acquired_at)}</Text>
                                                 {lot.origin_transaction_id && onTransactionClick && (
                                                     <Button
                                                         size="xs"
@@ -249,7 +244,7 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                 {event.transactions.map((tx) => (
                                     <Table.Row key={tx.transaction_id}>
                                         <Table.Cell>
-                                            <Text fontSize="sm">{formatDateTime(tx.date_time)}</Text>
+                                            <Text fontSize="sm">{formatDateTimeLocale(tx.date_time)}</Text>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Badge size="sm" variant="subtle">{tx.source}</Badge>

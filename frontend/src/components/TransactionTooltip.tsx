@@ -10,6 +10,7 @@ import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { FiLoader } from 'react-icons/fi';
 import { Tooltip } from './ui/tooltip';
 import { API_URL } from '../types';
+import { formatDateTimeLocale } from '../utils/dateUtils';
 
 // ============================================================================
 // Types
@@ -142,7 +143,7 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
                 <Box fontSize="xs">
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Date</Text>
-                        <Text color="white">{txData.date_time ? new Date(txData.date_time).toLocaleString() : '-'}</Text>
+                        <Text color="white">{formatDateTimeLocale(txData.date_time)}</Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Account</Text>
@@ -192,6 +193,29 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
                                 : (txData.to_account_name || txData.source_to_account || '-')}
                         </Text>
                     </Flex>
+                    {/* View full details link */}
+                    {onTransactionClick && (
+                        <Box
+                            mt={2}
+                            pt={2}
+                            borderTop="1px solid"
+                            borderColor="gray.600"
+                            textAlign="center"
+                        >
+                            <Text
+                                fontSize="xs"
+                                color="blue.300"
+                                cursor="pointer"
+                                _hover={{ color: 'blue.200', textDecoration: 'underline' }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTransactionClick(txId);
+                                }}
+                            >
+                                View full details →
+                            </Text>
+                        </Box>
+                    )}
                 </Box>
             ) : (
                 <Text fontSize="xs" color="gray.400">Hover to load details</Text>

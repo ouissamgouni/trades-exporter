@@ -5,17 +5,23 @@
  * - Compact inline display with truncation (max 5 transactions)
  * - "Show all X" expansion for more transactions
  * - Direction indicators (↓ inflow, ↑ outflow)
+ * - Enhanced info: id, account, price, total
  */
 
 import React, { useState } from 'react';
 import { Box, Flex, Text, Table, Button, Badge } from '@chakra-ui/react';
+import { FiInfo } from 'react-icons/fi';
 import { TransactionSummary } from '../types';
 import { Direction } from '../enums';
+import { TransactionTooltip } from './TransactionTooltip';
+import { AssetBadge } from './AssetBadge';
+import { formatDateShort, formatTimeShort } from '../utils/dateUtils';
 
 interface BundleTransactionListProps {
     transactions: TransactionSummary[];
     maxVisible?: number;
     colorScheme?: 'teal' | 'purple' | 'blue' | 'gray';
+    onTransactionClick?: (txId: number) => void;
 }
 
 const directionIcon = (direction: string): string => {
@@ -44,10 +50,19 @@ const formatQuantity = (qty: number): string => {
     return qty.toLocaleString(undefined, { maximumFractionDigits: 2 });
 };
 
+const formatCurrency = (value: number | undefined | null): string => {
+    if (value == null) return '-';
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(value);
+};
+
 export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
     transactions,
     maxVisible = 5,
     colorScheme = 'gray',
+    onTransactionClick,
 }) => {
     const [expanded, setExpanded] = useState(false);
 
@@ -59,56 +74,92 @@ export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
         );
     }
 
-    const visibleTransactions = expanded 
-        ? transactions 
+    const visibleTransactions = expanded
+        ? transactions
         : transactions.slice(0, maxVisible);
-    
+
     const hasMore = transactions.length > maxVisible;
     const hiddenCount = transactions.length - maxVisible;
 
     return (
-        <Box>
-            <Table.Root size="sm">
+        <Box overflow="hidden">
+            <Table.Root size="sm" width="100%">
                 <Table.Body>
                     {visibleTransactions.map((tx) => (
-                        <Table.Row key={tx.id} css={{ fontSize: '10px' }}>
-                            <Table.Cell px={1} py={0.5} width="70px">
-                                <Text fontSize="9px" color="gray.500">
-                                    {tx.date_time ? tx.date_time.slice(0, 16) : '-'}
+                        <Table.Row
+                            key={tx.id}
+                            css={{ fontSize: '9px' }}
+                            _hover={{ bg: 'gray.50' }}
+                            cursor={onTransactionClick ? 'pointer' : 'default'}
+                            onClick={() => onTransactionClick?.(tx.id)}
+                        >
+                            {/* Date/Time */}
+                            <Table.Cell px={0.5} py={0.5} width="60px">
+                                <Text fontSize="8px" color="gray.600" whiteSpace="nowrap">
+                                    {formatDateShort(tx.date_time)}
+                                </Text>
+                                <Text fontSize="7px" color="gray.400" whiteSpace="nowrap">
+                                    {formatTimeShort(tx.date_time)}
                                 </Text>
                             </Table.Cell>
-                            <Table.Cell px={1} py={0.5} width="24px" textAlign="center">
-                                <Text 
-                                    fontSize="sm" 
-                                    fontWeight="bold" 
+                            {/* Direction */}
+                            <Table.Cell px={0.5} py={0.5} width="20px">
+                                <Text
+                                    fontSize="xs"
+                                    fontWeight="bold"
                                     color={directionColor(tx.direction)}
                                     title={tx.direction}
                                 >
                                     {directionIcon(tx.direction)}
                                 </Text>
                             </Table.Cell>
-                            <Table.Cell px={1} py={0.5}>
-                                <Flex align="center" gap={1}>
-                                    <Text 
-                                        fontSize="10px" 
-                                        fontWeight="medium" 
+                            {/* Account */}
+                            <Table.Cell px={0.5} py={0.5} width="45px">
+                                <Text fontSize="8px" color="purple.600" truncate title={tx.account_name} maxW="40px">
+                                    {tx.account_name || '-'}
+                                </Text>
+                            </Table.Cell>
+                            {/* Quantity + Asset */}
+                            <Table.Cell px={0.5} py={0.5}>
+                                <Flex align="center" gap={0.5} flexWrap="nowrap">
+                                    <Text
+                                        fontSize="9px"
+                                        fontWeight="medium"
                                         fontFamily="mono"
+                                        whiteSpace="nowrap"
                                     >
                                         {formatQuantity(tx.quantity)}
                                     </Text>
-                                    <Badge 
-                                        size="xs" 
+                                    <AssetBadge
+                                        asset={tx.linked_asset}
+                                        sourceSymbol={tx.symbol || tx.asset_symbol || tx.source_asset_symbol}
+                                        size="xs"
                                         colorPalette={colorScheme}
-                                        variant="subtle"
-                                    >
-                                        {tx.symbol || tx.asset_symbol || '?'}
-                                    </Badge>
+                                        maxLength={15}
+                                    />
                                 </Flex>
                             </Table.Cell>
-                            <Table.Cell px={1} py={0.5} width="60px">
-                                <Text fontSize="9px" color="gray.500" truncate>
-                                    {tx.source || '-'}
+                            {/* Total */}
+                            <Table.Cell px={0.5} py={0.5} width="45px" textAlign="right">
+                                <Text fontSize="8px" color="gray.600" fontFamily="mono" whiteSpace="nowrap">
+                                    {tx.total != null ? formatCurrency(tx.total) : '-'}
                                 </Text>
+                            </Table.Cell>
+                            {/* Info icon with TransactionTooltip */}
+                            <Table.Cell px={0.5} py={0.5} width="18px">
+                                <TransactionTooltip
+                                    txId={tx.id}
+                                    onTransactionClick={onTransactionClick}
+                                >
+                                    <Box
+                                        as="span"
+                                        color="gray.400"
+                                        _hover={{ color: 'blue.500' }}
+                                        cursor="pointer"
+                                    >
+                                        <FiInfo size={10} />
+                                    </Box>
+                                </TransactionTooltip>
                             </Table.Cell>
                         </Table.Row>
                     ))}
@@ -120,13 +171,13 @@ export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
                     size="xs"
                     variant="ghost"
                     colorPalette={colorScheme}
-                    onClick={() => setExpanded(!expanded)}
+                    onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
                     mt={1}
                     width="100%"
                     fontSize="10px"
                 >
-                    {expanded 
-                        ? '▲ Show less' 
+                    {expanded
+                        ? '▲ Show less'
                         : `▼ Show ${hiddenCount} more transaction${hiddenCount > 1 ? 's' : ''}`
                     }
                 </Button>

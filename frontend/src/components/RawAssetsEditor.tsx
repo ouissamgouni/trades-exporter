@@ -190,7 +190,7 @@ export const RawAssetsEditor: React.FC = () => {
                 const key = getEditKey(rawAsset);
                 const suggestions = suggestionsMap.get(key) || [];
                 // Only auto-map if confidence >= 0.9 (very likely match)
-                if (suggestions.length > 0 && suggestions[0].confidence >= 0.9) {
+                if (suggestions.length > 0 && suggestions[0].confidence >= 0.9 && suggestions[0].asset.asset_id !== undefined) {
                     toMap.push({ rawAsset, assetId: suggestions[0].asset.asset_id });
                 }
             });
@@ -424,7 +424,7 @@ export const RawAssetsEditor: React.FC = () => {
                                                                 size="xs"
                                                                 variant={s.confidence >= 0.9 ? "solid" : "outline"}
                                                                 colorPalette={s.confidence >= 0.9 ? "green" : s.confidence >= 0.7 ? "blue" : "gray"}
-                                                                onClick={() => acceptSuggestion(rawAsset, s.asset.asset_id)}
+                                                                onClick={() => acceptSuggestion(rawAsset, s.asset.asset_id!)}
                                                             >
                                                                 {s.asset.symbol}
                                                                 {s.confidence >= 0.9 && " ✓"}

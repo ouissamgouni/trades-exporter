@@ -14,9 +14,10 @@ import {
     Flex,
     Text,
 } from '@chakra-ui/react';
-import { FiExternalLink, FiAlertTriangle, FiAlertCircle, FiInfo } from 'react-icons/fi';
+import { FiExternalLink, FiAlertTriangle, FiAlertCircle, FiInfo, FiPlus } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { PnLWarningItem, WarningLevel } from './types';
+import { AddManualPriceDialog } from './AddManualPriceDialog';
 
 interface WarningsPanelProps {
     warnings: PnLWarningItem[];
@@ -24,6 +25,11 @@ interface WarningsPanelProps {
     onTransactionClick?: (txId: number) => void;
     onUnitClick?: (unitId: number) => void;
     onAssetClick?: (assetId: number) => void;
+    // Manual price entry support
+    quoteAssetId?: number;  // Base currency asset ID
+    baseCurrency?: string;  // Base currency symbol (e.g., "EUR")
+    onPriceAdded?: (assetId: number, warningId: string) => void;  // Callback after manual price is saved
+    assets?: Array<{ id: number; name: string }>;  // Asset lookup for name display
 }
 
 const getWarningIcon = (level: WarningLevel) => {
@@ -56,8 +62,49 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
     onTransactionClick,
     onUnitClick,
     onAssetClick,
+    quoteAssetId,
+    baseCurrency,
+    onPriceAdded,
+    assets,
 }) => {
     const [levelFilter, setLevelFilter] = useState<WarningLevel | 'all'>('all');
+
+    // State for manual price dialog
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const [selectedWarning, setSelectedWarning] = useState<PnLWarningItem | null>(null);
+
+    // Check if warning is a price-related warning that can have manual price added
+    const isPriceWarning = (warning: PnLWarningItem) =>
+        (warning.warning_type === 'missing_price' || warning.warning_type === 'stale_price') &&
+        warning.asset_id != null;
+
+    // Get asset name from assets list or fallback to ID
+    const getAssetName = (assetId: number) => {
+        const asset = assets?.find(a => a.id === assetId);
+        return asset?.name || `Asset #${assetId}`;
+    };
+
+    // Get default date for price from warning details
+    const getDefaultDateFromWarning = (warning: PnLWarningItem): string => {
+        const transactionDate = warning.details?.transaction_date as string | undefined;
+        if (transactionDate) {
+            return transactionDate;
+        }
+        return new Date().toISOString();
+    };
+
+    const handleAddPriceClick = (warning: PnLWarningItem) => {
+        setSelectedWarning(warning);
+        setDialogOpen(true);
+    };
+
+    const handlePriceSaved = () => {
+        if (selectedWarning && selectedWarning.asset_id && onPriceAdded) {
+            onPriceAdded(selectedWarning.asset_id, selectedWarning.id);
+        }
+        setDialogOpen(false);
+        setSelectedWarning(null);
+    };
 
     const errorCount = warnings.filter(w => w.level === 'error').length;
     const warningCount = warnings.filter(w => w.level === 'warning').length;
@@ -200,6 +247,17 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                                                             {warning.action_label}
                                                         </Button>
                                                     )}
+                                                    {/* Add Price button for price-related warnings */}
+                                                    {isPriceWarning(warning) && quoteAssetId && baseCurrency && (
+                                                        <Button
+                                                            size="xs"
+                                                            colorPalette="green"
+                                                            onClick={() => handleAddPriceClick(warning)}
+                                                        >
+                                                            <FiPlus size={12} />
+                                                            <Text ml={1}>Add Price</Text>
+                                                        </Button>
+                                                    )}
                                                 </Flex>
                                             </Box>
                                         </Flex>
@@ -209,6 +267,23 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                         </Card.Body>
                     </Card.Root>
                 ))
+            )}
+
+            {/* Manual Price Dialog */}
+            {selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
+                <AddManualPriceDialog
+                    isOpen={dialogOpen}
+                    onClose={() => {
+                        setDialogOpen(false);
+                        setSelectedWarning(null);
+                    }}
+                    onSave={handlePriceSaved}
+                    assetId={selectedWarning.asset_id}
+                    assetName={getAssetName(selectedWarning.asset_id)}
+                    defaultDate={getDefaultDateFromWarning(selectedWarning)}
+                    quoteAssetId={quoteAssetId}
+                    quoteAssetName={baseCurrency}
+                />
             )}
         </SlidePanel>
     );

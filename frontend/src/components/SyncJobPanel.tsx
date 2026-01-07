@@ -1,11 +1,11 @@
 import {
     Badge, Box,
     Button, Card, Flex,
-    Heading, Progress, Spinner, Text
+    Heading, Progress, Spinner, Text, Grid, GridItem
 } from '@chakra-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { API_URL, ConnectorsInfo, SyncJobProgress, SyncJobStartResponse } from '../types';
+import { API_URL, ConnectorProgress, ConnectorsInfo, ConnectorSyncStatus, SyncJobProgress, SyncJobStartResponse } from '../types';
 import { toaster } from './ui/toaster';
 
 export const SyncJobPanel: React.FC = () => {
@@ -55,7 +55,7 @@ export const SyncJobPanel: React.FC = () => {
     // Poll for status updates when job is running
     useEffect(() => {
         if (jobStatus?.status === 'running') {
-            const interval = setInterval(fetchJobStatus, 1000);
+            const interval = setInterval(fetchJobStatus, 500);
             return () => clearInterval(interval);
         }
     }, [jobStatus?.status, fetchJobStatus]);
@@ -135,6 +135,45 @@ export const SyncJobPanel: React.FC = () => {
     const getProgressPercent = (): number => {
         if (!jobStatus || jobStatus.total_connectors === 0) return 0;
         return Math.round((jobStatus.connectors_completed.length / jobStatus.total_connectors) * 100);
+    };
+
+    // Get status icon and color for connector status
+    const getConnectorStatusIcon = (status: ConnectorSyncStatus): string => {
+        switch (status) {
+            case 'pending': return '⏳';
+            case 'running': return '🔄';
+            case 'completed': return '✅';
+            case 'failed': return '❌';
+            case 'skipped': return '⏭️';
+            default: return '•';
+        }
+    };
+
+    const getConnectorStatusColor = (status: ConnectorSyncStatus): string => {
+        switch (status) {
+            case 'pending': return 'gray';
+            case 'running': return 'blue';
+            case 'completed': return 'green';
+            case 'failed': return 'red';
+            case 'skipped': return 'orange';
+            default: return 'gray';
+        }
+    };
+
+    // Get sorted connector statuses
+    const getSortedConnectorStatuses = (): ConnectorProgress[] => {
+        if (!jobStatus?.connector_statuses) return [];
+        return Object.values(jobStatus.connector_statuses).sort((a, b) => {
+            // Sort by status priority: running first, then pending, then completed, then failed, then skipped
+            const statusOrder: Record<ConnectorSyncStatus, number> = {
+                'running': 0,
+                'pending': 1,
+                'completed': 2,
+                'failed': 3,
+                'skipped': 4
+            };
+            return statusOrder[a.status] - statusOrder[b.status];
+        });
     };
 
     const isRunning = jobStatus?.status === 'running';
@@ -271,8 +310,60 @@ export const SyncJobPanel: React.FC = () => {
                             </Box>
                         </Flex>
 
-                        {/* Completed Connectors */}
-                        {jobStatus.connectors_completed.length > 0 && (
+                        {/* Per-Connector Status */}
+                        {jobStatus.connector_statuses && Object.keys(jobStatus.connector_statuses).length > 0 && (
+                            <Box mb={4}>
+                                <Text fontSize="sm" color="gray.500" mb={2}>Connector Progress</Text>
+                                <Grid templateColumns="repeat(auto-fill, minmax(280px, 1fr))" gap={3}>
+                                    {getSortedConnectorStatuses().map((cp: ConnectorProgress) => (
+                                        <GridItem key={cp.connector_id}>
+                                            <Box
+                                                p={3}
+                                                borderRadius="md"
+                                                borderWidth="1px"
+                                                borderColor={cp.status === 'running' ? 'blue.300' : cp.status === 'failed' ? 'red.200' : 'gray.200'}
+                                                bg={cp.status === 'running' ? 'blue.50' : cp.test_mode ? 'orange.50' : 'white'}
+                                            >
+                                                <Flex justify="space-between" align="center" mb={2}>
+                                                    <Flex align="center" gap={2}>
+                                                        <Text fontWeight="medium" fontSize="sm">
+                                                            {getConnectorStatusIcon(cp.status)} {cp.connector_name}
+                                                        </Text>
+                                                        {cp.test_mode && (
+                                                            <Badge colorPalette="orange" size="sm">🧪 Test</Badge>
+                                                        )}
+                                                    </Flex>
+                                                    <Badge colorPalette={getConnectorStatusColor(cp.status)} size="sm">
+                                                        {cp.status}
+                                                    </Badge>
+                                                </Flex>
+                                                <Text fontSize="xs" color="gray.500" mb={2}>
+                                                    {cp.account_name}
+                                                </Text>
+                                                {(cp.status === 'completed' || cp.status === 'running') && (
+                                                    <Flex gap={3} fontSize="xs" wrap="wrap">
+                                                        <Text color="green.600">+{cp.new_entries} new</Text>
+                                                        <Text color="blue.600">{cp.updated} updated</Text>
+                                                        <Text color="gray.500">{cp.duplicates} dups</Text>
+                                                        {cp.errors > 0 && (
+                                                            <Text color="red.600">{cp.errors} errors</Text>
+                                                        )}
+                                                    </Flex>
+                                                )}
+                                                {cp.status === 'failed' && cp.error_message && (
+                                                    <Text fontSize="xs" color="red.600" mt={1} lineClamp={2}>
+                                                        {cp.error_message}
+                                                    </Text>
+                                                )}
+                                            </Box>
+                                        </GridItem>
+                                    ))}
+                                </Grid>
+                            </Box>
+                        )}
+
+                        {/* Legacy: Completed Connectors (fallback for backward compatibility) */}
+                        {!jobStatus.connector_statuses && jobStatus.connectors_completed.length > 0 && (
                             <Box mb={4}>
                                 <Text fontSize="sm" color="gray.500" mb={1}>Completed Connectors</Text>
                                 <Flex gap={2} wrap="wrap">

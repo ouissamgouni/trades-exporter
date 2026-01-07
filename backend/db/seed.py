@@ -17,6 +17,7 @@ Examples:
 """
 
 import argparse
+import os
 import yaml
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -33,7 +34,7 @@ from backend.db.models import (
     UserCalculationBundle,
 )
 from backend.db.database import get_session
-from backend.config.loader import configure_logging
+from backend.config.loader import configure_logging, is_test_mode
 
 log = configure_logging("db_seed")
 
@@ -423,7 +424,11 @@ class DatabaseSeeder:
         self, transactions_config: List[Dict[str, Any]]
     ) -> int:
         """
-        Seed transactions from configuration (idempotent upsert by source + source_transaction_id).
+        Seed transactions from configuration (idempotent upsert).
+
+        Idempotency is ensured by:
+        1. Explicit 'id' field (preferred) - matches by primary key
+        2. Fallback to 'source' + 'source_transaction_id' combination
 
         Args:
             transactions_config: List of transaction configurations
@@ -433,10 +438,14 @@ class DatabaseSeeder:
         """
         processed = 0
         for tx_data in transactions_config:
+            # Get identifiers for idempotency
+            explicit_id = tx_data.get("id")
             source = tx_data.get("source", "")
             source_tx_id = tx_data.get("source_transaction_id")
-            if not source_tx_id:
-                log.warning("⚠️ Transaction missing source_transaction_id, skipping")
+
+            # Require either explicit id or source_transaction_id
+            if explicit_id is None and not source_tx_id:
+                log.warning("⚠️ Transaction missing both 'id' and 'source_transaction_id', skipping")
                 continue
 
             # Resolve foreign keys
@@ -474,13 +483,21 @@ class DatabaseSeeder:
             if tx_data.get("total") is not None:
                 total = Decimal(str(tx_data["total"]))
 
-            # Check for existing transaction
-            existing = self.session.exec(
-                select(NormalizedTransaction).where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_transaction_id == source_tx_id,
-                )
-            ).first()
+            # Check for existing transaction - first by explicit id, then by source + source_tx_id
+            existing = None
+            if explicit_id is not None:
+                existing = self.session.exec(
+                    select(NormalizedTransaction).where(
+                        NormalizedTransaction.id == explicit_id
+                    )
+                ).first()
+            if existing is None and source_tx_id:
+                existing = self.session.exec(
+                    select(NormalizedTransaction).where(
+                        NormalizedTransaction.source == source,
+                        NormalizedTransaction.source_transaction_id == source_tx_id,
+                    )
+                ).first()
 
             if existing:
                 # Update existing transaction
@@ -490,6 +507,9 @@ class DatabaseSeeder:
                 existing.direction = tx_data.get("direction", existing.direction)
                 existing.transaction_type = tx_data.get(
                     "transaction_type", existing.transaction_type
+                )
+                existing.source_transaction_type = tx_data.get(
+                    "source_transaction_type", existing.source_transaction_type
                 )
                 existing.date_time = date_time or existing.date_time
                 existing.price = price if price is not None else existing.price
@@ -531,12 +551,15 @@ class DatabaseSeeder:
                 )
                 existing.updated_at = datetime.now(timezone.utc)
                 self.session.add(existing)
-                log.debug(f"📝 Updated transaction: {source}/{source_tx_id}")
+                tx_identifier = f"id={existing.id}" if explicit_id else f"{source}/{source_tx_id}"
+                log.debug(f"📝 Updated transaction: {tx_identifier}")
             else:
-                # Create new transaction
+                # Create new transaction with explicit id if provided
                 tx = NormalizedTransaction(
+                    id=explicit_id,  # Use explicit id for idempotency
                     source=source,
                     source_transaction_id=source_tx_id,
+                    source_transaction_type=tx_data.get("source_transaction_type", ""),
                     source_asset_symbol=tx_data.get("asset_symbol", ""),
                     account_id=account_id,
                     asset_id=asset_id,
@@ -566,7 +589,8 @@ class DatabaseSeeder:
                     # raw_transaction_id is intentionally left null for seeded data
                 )
                 self.session.add(tx)
-                log.debug(f"➕ Created transaction: {source}/{source_tx_id}")
+                tx_identifier = f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
+                log.debug(f"➕ Created transaction: {tx_identifier}")
             processed += 1
 
         self.session.commit()
@@ -811,6 +835,7 @@ class DatabaseSeeder:
         transactions_data = []
         for tx in transactions:
             data: Dict[str, Any] = {
+                "id": tx.id,  # Include id for idempotent re-seeding
                 "source": tx.source,
                 "source_transaction_id": tx.source_transaction_id,
             }
@@ -927,6 +952,10 @@ def seed_database(
         from backend.db.seed import seed_database
         seed_database()
     """
+    if not is_test_mode():
+        log.warning("⚠️ Seeding skipped: Test mode must be enabled (TEST_MODE=1)")
+        return {}
+
     log.info("🌱 Starting database seeding...")
 
     # Convert string path to Path object
@@ -936,14 +965,15 @@ def seed_database(
     with get_session() as session:
         seeder = DatabaseSeeder(session)
 
-        if include_defaults:
-            seeder.seed_default_assets()
-
-        results = seeder.seed_from_yaml(config_path)
+        # Use seed_all to seed everything: assets, accounts, bundles, and transactions
+        results = seeder.seed_all(config_path)
 
         log.info(
-            f"🎉 Seeding complete: {results.get('accounts', 0)} accounts, "
-            f"{results.get('connectors', 0)} connectors"
+            f"🎉 Seeding complete: {results.get('assets', 0)} assets, "
+            f"{results.get('accounts', 0)} accounts, "
+            f"{results.get('connectors', 0)} connectors, "
+            f"{results.get('bundles', 0)} bundles, "
+            f"{results.get('transactions', 0)} transactions"
         )
 
         return results
@@ -1066,6 +1096,9 @@ if __name__ == "__main__":
             print(f"  📝 Transactions: {len(transactions)}")
 
         print("\n✅ Dry run complete. No changes were made.")
+
+    elif not is_test_mode():
+        print("\n⚠️ Seeding skipped: Test mode must be enabled (TEST_MODE=1) or run with --test")
 
     elif args.all:
         # Seed everything
