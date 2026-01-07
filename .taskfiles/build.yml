@@ -1,0 +1,64 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Build Docker images from develop branch (tagged :develop)
+    cmds:
+      - git checkout develop
+      - git pull origin develop
+      - |
+        echo "Building images from develop..."
+        docker build -t trades-exporter-backend:develop ./backend
+        docker build -t trades-exporter-frontend:develop \
+          --build-arg VITE_API_URL=http://localhost:{{.TEST_BACKEND_PORT}} \
+          ./frontend
+        echo ""
+        echo "✅ Images built: :develop"
+
+  prod:
+    desc: Build Docker images from main branch (e.g., task build:prod v1.2.0)
+    cmds:
+      - |
+        VERSION={{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          echo "❌ Usage: task build:prod v1.2.0"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        echo "Building images from main as $VERSION..."
+        docker build -t trades-exporter-backend:$VERSION ./backend
+        docker build -t trades-exporter-frontend:$VERSION \
+          --build-arg VITE_API_URL=http://localhost:{{.PROD_BACKEND_PORT}} \
+          ./frontend
+        docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
+        docker tag trades-exporter-frontend:$VERSION trades-exporter-frontend:latest
+        echo ""
+        echo "✅ Images built: :$VERSION and :latest"
+
+  list:
+    desc: List all trades-exporter Docker images
+    cmds:
+      - docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+
+  clean:
+    desc: Remove old/dangling Docker images
+    cmds:
+      - |
+        echo "Current images:"
+        docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+        echo ""
+        echo "Removing dangling images..."
+        docker image prune -f
+        echo ""
+        echo "✅ Cleanup complete"
+        echo ""
+        echo "Remaining images:"
+        docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+
+  clean:all:
+    desc: "⚠️ Remove ALL trades-exporter Docker images"
+    prompt: This will remove ALL trades-exporter images. Continue?
+    cmds:
+      - docker rmi $(docker images trades-exporter-* -q) --force 2>/dev/null || true
+      - echo "✅ All trades-exporter images removed"

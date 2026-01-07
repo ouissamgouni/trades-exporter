@@ -1,0 +1,20 @@
+version: "3"
+
+tasks:
+  dev:
+    desc: Stop dev services
+    cmds:
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter stop
+      - echo "✅ Dev services stopped"
+
+  test:
+    desc: Stop test stack
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter stop
+      - echo "✅ Test stack stopped"
+
+  prod:
+    desc: Stop prod stack
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter stop
+      - echo "✅ Prod stack stopped"

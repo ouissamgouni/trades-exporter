@@ -1,0 +1,62 @@
+version: "3"
+
+tasks:
+  migrate:dev:
+    desc: Run database migrations on dev
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/alembic upgrade head
+      - echo "✅ Dev database migrated"
+
+  migrate:test:
+    desc: Run database migrations on test
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test python -m alembic upgrade head
+      - echo "✅ Test database migrated"
+
+  migrate:prod:
+    desc: Run database migrations on prod
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter exec backend_prod python -m alembic upgrade head
+      - echo "✅ Prod database migrated"
+
+  seed:dev:
+    desc: Seed dev database
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python scripts/reset_and_seed.py --seed-only
+      - echo "✅ Dev database seeded"
+
+  seed:test:
+    desc: Seed test database
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test python scripts/reset_and_seed.py --seed-only
+      - echo "✅ Test database seeded"
+
+  reset:dev:
+    desc: "⚠️ Reset dev database (drops all tables)"
+    prompt: This will DELETE all data in dev database. Continue?
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - echo "y" | .venv/bin/python scripts/reset_and_seed.py
+      - echo "✅ Dev database reset and seeded"
+
+  reset:test:
+    desc: "⚠️ Reset test database (drops all tables)"
+    prompt: This will DELETE all data in test database. Continue?
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test sh -c 'echo "y" | python scripts/reset_and_seed.py'
+      - echo "✅ Test database reset and seeded"
+
+  reset:prod:
+    desc: "🚨 Reset prod database (DANGEROUS!)"
+    prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter exec backend_prod sh -c 'echo "y" | python scripts/reset_and_seed.py'
+      - echo "⚠️ Prod database reset"

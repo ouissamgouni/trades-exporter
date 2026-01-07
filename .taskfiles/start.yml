@@ -1,0 +1,100 @@
+version: "3"
+
+tasks:
+  dev:
+    desc: Start dev environment (database)
+    cmds:
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter up -d postgres_dev
+      - sleep 2
+      - |
+        echo ""
+        echo "✅ Dev database running on localhost:{{.DEV_DB_PORT}}"
+        echo ""
+        echo "Next steps:"
+        echo "  task start:dev:backend        → Start backend"
+        echo "  task start:dev:backend:debug  → Start backend with debugger"
+        echo "  task start:dev:frontend       → Start frontend"
+        echo "  task start:dev:debug          → Start all with debugging"
+
+  dev:debug:
+    desc: Start full dev environment with debugging (DB + backend + frontend)
+    deps: [dev]
+    cmds:
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Starting all services with live logs"
+        echo ""
+        echo "Services:"
+        echo "   [DB]  Database on localhost:{{.DEV_DB_PORT}}"
+        echo "   [API] Backend on localhost:{{.DEV_BACKEND_PORT}} (debugger: {{.DEV_DEBUGPY_PORT}})"
+        echo "   [WEB] Frontend on localhost:{{.DEV_FRONTEND_PORT}}"
+        echo ""
+        echo "To attach debugger: VSCode → F5 → 'Backend: Attach'"
+        echo "Press Ctrl+C to stop all services"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+      - |
+        npx concurrently \
+          --names "DB,API,WEB" \
+          --prefix-colors "blue.bold,yellow.bold,green.bold" \
+          --prefix "[{name}] " \
+          --kill-others-on-fail \
+          "docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter logs -f postgres_dev" \
+          "cd {{.ROOT_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL=postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev {{.BACKEND_DIR}}/.venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:{{.DEV_BACKEND_PORT}} npm run dev -- --port {{.DEV_FRONTEND_PORT}}"
+
+  dev:backend:
+    desc: Start backend locally (no debugger)
+    dir: "{{.ROOT_DIR}}"
+    env:
+      PYTHONPATH: "{{.ROOT_DIR}}"
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - |
+        {{.BACKEND_DIR}}/.venv/bin/uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}
+
+  dev:backend:debug:
+    desc: Start backend with debugger
+    dir: "{{.ROOT_DIR}}"
+    env:
+      PYTHONPATH: "{{.ROOT_DIR}}"
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - |
+        echo "Starting backend with debugger on port {{.DEV_DEBUGPY_PORT}}..."
+        echo "→ In VSCode: F5 → 'Backend: Attach'"
+      - |
+        {{.BACKEND_DIR}}/.venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}
+
+  dev:frontend:
+    desc: Start frontend locally (Vite)
+    dir: "{{.FRONTEND_DIR}}"
+    env:
+      VITE_API_URL: http://localhost:{{.DEV_BACKEND_PORT}}
+    cmds:
+      - npm run dev -- --port {{.DEV_FRONTEND_PORT}}
+
+  test:
+    desc: Start test stack (existing images)
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - sleep 3
+      - |
+        echo ""
+        echo "✅ Test stack running"
+        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+
+  prod:
+    desc: Start prod stack (existing images)
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+      - sleep 3
+      - |
+        echo ""
+        echo "✅ Prod stack running"
+        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.PROD_DB_PORT}}"
