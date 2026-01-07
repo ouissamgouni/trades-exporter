@@ -1,0 +1,69 @@
+version: "3"
+
+tasks:
+  test:local:
+    desc: Build from develop and deploy to test environment
+    cmds:
+      - task: build:test
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - sleep 5
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to TEST (from develop branch)"
+        echo ""
+        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+        echo ""
+        echo "Next steps:"
+        echo "   task test:int:test    → Run integration tests"
+        echo "   task logs:test        → View logs"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  prod:local:
+    desc: Deploy tagged version to local prod (e.g., task deploy:prod:local v1.2.0)
+    cmds:
+      - |
+        VERSION={{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          VERSION="latest"
+        fi
+
+        # Check if image exists
+        if ! docker image inspect trades-exporter-backend:$VERSION > /dev/null 2>&1; then
+          echo "❌ Image trades-exporter-backend:$VERSION not found"
+          echo ""
+          echo "Available images:"
+          docker images trades-exporter-backend --format "   {{.Tag}}"
+          echo ""
+          echo "Build first with: task build:prod $VERSION"
+          exit 1
+        fi
+
+        echo "Deploying version: $VERSION"
+        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter down
+        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+        sleep 5
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to PROD: $VERSION"
+        echo ""
+        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
+        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
+        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  prod:cloud:
+    desc: Deploy to Render (future)
+    cmds:
+      - |
+        echo "🚧 Cloud deployment not yet configured"
+        echo ""
+        echo "To set up Render deployment:"
+        echo "  1. Create account at render.com"
+        echo "  2. Connect your GitHub repository"
+        echo "  3. Render will auto-detect render.yaml"
+        echo ""
+        echo "See docs/DEVELOPMENT_WORKFLOW.md for details"

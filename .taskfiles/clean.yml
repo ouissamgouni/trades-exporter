@@ -1,0 +1,41 @@
+version: "3"
+
+tasks:
+  dev:
+    desc: Stop and remove dev containers
+    cmds:
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter down
+      - echo "✅ Dev containers removed"
+
+  test:
+    desc: Stop and remove test containers
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down
+      - echo "✅ Test containers removed"
+
+  prod:
+    desc: Stop and remove prod containers
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter down
+      - echo "✅ Prod containers removed"
+
+  dev:volumes:
+    desc: "⚠️ Remove dev containers and volumes (data lost)"
+    prompt: This will DELETE dev database data. Continue?
+    cmds:
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter down -v
+      - echo "✅ Dev containers and volumes removed"
+
+  test:volumes:
+    desc: "⚠️ Remove test containers and volumes (data lost)"
+    prompt: This will DELETE test database data. Continue?
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down -v
+      - echo "✅ Test containers and volumes removed"
+
+  prod:volumes:
+    desc: "🚨 Remove prod containers and volumes (DANGEROUS!)"
+    prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
+    cmds:
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter down -v
+      - echo "⚠️ Prod containers and volumes removed"

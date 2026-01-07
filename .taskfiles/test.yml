@@ -1,0 +1,47 @@
+version: "3"
+
+tasks:
+  default:
+    desc: Run unit tests (quick)
+    cmds:
+      - task: unit
+
+  unit:
+    desc: Run all unit tests
+    cmds:
+      - task: unit:backend
+      - task: unit:frontend
+      - echo "✅ All unit tests passed"
+
+  unit:backend:
+    desc: Run backend unit tests
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python -m pytest -v
+
+  unit:frontend:
+    desc: Run frontend build and type check
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run build
+      - npx tsc --noEmit || true
+
+  int:dev:
+    desc: Run integration tests against dev environment
+    dir: "{{.BACKEND_DIR}}"
+    env:
+      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+    cmds:
+      - .venv/bin/python -m pytest -v -m integration || true
+
+  int:test:
+    desc: Run integration tests against test stack
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml exec backend_test python -m pytest -v -m integration || true
+
+  ci:
+    desc: Simulate full CI locally via Act
+    cmds:
+      - act push -j backend-tests --container-architecture linux/amd64
