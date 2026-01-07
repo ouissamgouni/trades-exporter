@@ -34,7 +34,7 @@ from backend.db.models import (
     UserCalculationBundle,
 )
 from backend.db.database import get_session
-from backend.config.loader import configure_logging, is_test_mode
+from backend.config.loader import configure_logging
 
 log = configure_logging("db_seed")
 
@@ -952,10 +952,6 @@ def seed_database(
         from backend.db.seed import seed_database
         seed_database()
     """
-    if not is_test_mode():
-        log.warning("⚠️ Seeding skipped: Test mode must be enabled (TEST_MODE=1)")
-        return {}
-
     log.info("🌱 Starting database seeding...")
 
     # Convert string path to Path object
@@ -1024,15 +1020,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Set test mode if requested
-    if args.test:
-        from backend.config.loader import set_test_mode
-
-        set_test_mode(True)
-        print("🧪 Using TEST database")
-    else:
-        print("🔐 Using PRODUCTION database")
-
     # Handle export mode
     if args.export:
         output_dir = Path(args.output_dir) if args.output_dir else None
@@ -1096,9 +1083,6 @@ if __name__ == "__main__":
             print(f"  📝 Transactions: {len(transactions)}")
 
         print("\n✅ Dry run complete. No changes were made.")
-
-    elif not is_test_mode():
-        print("\n⚠️ Seeding skipped: Test mode must be enabled (TEST_MODE=1) or run with --test")
 
     elif args.all:
         # Seed everything

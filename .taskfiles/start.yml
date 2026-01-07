@@ -41,7 +41,7 @@ tasks:
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter logs -f postgres_dev" \
-          "cd {{.ROOT_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL=postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev {{.BACKEND_DIR}}/.venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}" \
+          "cd {{.ROOT_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL=postgresql://{{.DEV_DB_USER}}:{{.DEV_DB_PASSWORD}}@{{.DEV_DB_HOST}}:{{.DEV_DB_PORT}}/{{.DEV_DB_NAME}} {{.BACKEND_DIR}}/.venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}" \
           "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:{{.DEV_BACKEND_PORT}} npm run dev -- --port {{.DEV_FRONTEND_PORT}}"
 
   dev:backend:
@@ -49,7 +49,7 @@ tasks:
     dir: "{{.ROOT_DIR}}"
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
-      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+      DATABASE_URL: postgresql://{{.DEV_DB_USER}}:{{.DEV_DB_PASSWORD}}@{{.DEV_DB_HOST}}:{{.DEV_DB_PORT}}/{{.DEV_DB_NAME}}
     cmds:
       - |
         {{.BACKEND_DIR}}/.venv/bin/uvicorn backend.api.main:app --reload --port {{.DEV_BACKEND_PORT}}
@@ -59,7 +59,7 @@ tasks:
     dir: "{{.ROOT_DIR}}"
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
-      DATABASE_URL: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
+      DATABASE_URL: postgresql://{{.DEV_DB_USER}}:{{.DEV_DB_PASSWORD}}@{{.DEV_DB_HOST}}:{{.DEV_DB_PORT}}/{{.DEV_DB_NAME}}
     cmds:
       - |
         echo "Starting backend with debugger on port {{.DEV_DEBUGPY_PORT}}..."
