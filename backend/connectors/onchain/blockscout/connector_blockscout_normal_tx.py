@@ -28,6 +28,7 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
         chain_name: str = "base",
         account_id: int = None,
         connector_id: int = None,
+        config: Dict[str, Any] = None,
         **kwargs,
     ):
         """
@@ -38,6 +39,7 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             chain_name: Chain identifier (e.g., "base", "ethereum", "arbitrum")
             account_id: Optional account ID for database linking
             connector_id: Optional connector ID for database linking
+            config: Optional connector configuration dict
             **kwargs: Additional configuration parameters
         """
         super().__init__(
@@ -45,6 +47,7 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             chain_name=chain_name,
             account_id=account_id,
             connector_id=connector_id,
+            config=config,
         )
 
     def get_raws(self) -> List[Dict[str, Any]]:
@@ -122,6 +125,7 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             return NormalizedTransaction(
                 source=f"blockscout_{self.chain_name.lower()}_normal_tx",
                 account_id=self.account_id,
+                source_account=self.wallet_address,  # Raw account identifier for mapping
                 source_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,

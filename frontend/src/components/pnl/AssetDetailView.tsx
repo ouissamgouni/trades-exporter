@@ -173,8 +173,8 @@ function AssetDetailView({
             // Build cost lots array from units' nested data (no separate API call needed)
             const allLots: CostLot[] = [];
             for (const unit of mappedUnits) {
-                if (unit.cost_basis?.lots) {
-                    for (const lot of unit.cost_basis.lots) {
+                if ((unit as any).cost_basis?.lots) {
+                    for (const lot of (unit as any).cost_basis.lots) {
                         allLots.push({
                             cost_lot_id: lot.cost_lot_id,
                             asset: lot.asset,

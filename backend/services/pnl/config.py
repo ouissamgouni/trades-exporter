@@ -28,6 +28,7 @@ class WarningType(str, Enum):
     INSUFFICIENT_LOTS = "insufficient_lots"
     NEGATIVE_BALANCE = "negative_balance"
     MISSING_PRICE = "missing_price"
+    STALE_PRICE = "stale_price"  # Price used is outside staleness window (fallback)
     RESIDUAL_MISMATCH = "residual_mismatch"
     ZERO_COST_LOT = "zero_cost_lot"
     FEE_CONSUMPTION_FAILED = "fee_consumption_failed"
@@ -51,10 +52,7 @@ class PnLConfig:
     allow_negative_balances: bool = False
 
     # Taxability settings
-    crypto_swap_taxable: bool = False  # Whether crypto-to-crypto swaps are taxable (False in most EU jurisdictions)
-    stock_swap_taxable: bool = True  # Whether stock-to-stock swaps are taxable
-    transfer_taxable: bool = False  # Internal transfers are never taxable
-    split_taxable: bool = False  # Stock splits are never taxable
+    crypto_swap_taxable_by_default: bool = False  # Whether crypto-to-crypto swaps are taxable (False in most EU jurisdictions)
     fee_taxable_by_default: bool = (
         False  # Fees reduce proceeds/cost, not taxable by default
     )
@@ -62,7 +60,19 @@ class PnLConfig:
     # FMV/Residual settings
     compute_residuals: bool = True  # Whether to compute residual warnings
     fmv_timeout_seconds: float = 5.0  # Timeout for FMV fetches
-    skip_fmv_on_error: bool = True  # Skip FMV computation if price fetch fails
+    skip_fmv_on_error: bool = False  # Skip FMV computation if price fetch fails
+
+    # Price fallback settings
+    use_price_fallback: bool = True  # Whether to fallback to latest known price when fetch fails
+    price_staleness_window_days: int = 7  # Default staleness window in days
+    # Per-asset-type staleness windows (days). If not specified, uses price_staleness_window_days
+    price_staleness_by_type: dict = None  # e.g., {"crypto": 1, "stock": 7, "fiat": 30}
+
+    def get_staleness_window_days(self, price_type: str) -> int:
+        """Get staleness window for a specific asset/price type."""
+        if self.price_staleness_by_type and price_type in self.price_staleness_by_type:
+            return self.price_staleness_by_type[price_type]
+        return self.price_staleness_window_days
 
     def __post_init__(self):
         if isinstance(self.lot_method, str):

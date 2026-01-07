@@ -42,6 +42,10 @@ class AccountConnectorRepository:
     def get_enabled(self) -> List[Tuple[AccountConnector, Account]]:
         """
         Get all enabled connectors with their accounts.
+        
+        Only returns connectors where:
+        - AccountConnector.enabled = True
+        - Account.enabled = True (account-level enable flag)
 
         Returns:
             List of (AccountConnector, Account) tuples ordered by sync_priority
@@ -50,6 +54,7 @@ class AccountConnectorRepository:
             select(AccountConnector, Account)
             .join(Account)
             .where(AccountConnector.enabled)
+            .where(Account.enabled)
             .order_by(AccountConnector.sync_priority)
         )
         return list(self.session.exec(statement).all())

@@ -75,14 +75,27 @@ class PriceSnapshotResponse(BaseModel):
     created_at: Optional[str] = None
     # Joined fields
     asset_symbol: Optional[str] = None
+    asset_label: Optional[str] = None
     quote_asset_symbol: Optional[str] = None
+    quote_asset_label: Optional[str] = None
 
 
-@router.get("", response_model=List[PriceSnapshotResponse])
+class PaginatedPriceSnapshotsResponse(BaseModel):
+    """Paginated response for price snapshots."""
+
+    items: List[PriceSnapshotResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+@router.get("", response_model=PaginatedPriceSnapshotsResponse)
 def list_price_snapshots(
     asset_id: Optional[int] = Query(None, description="Filter by asset ID"),
     quote_asset_id: Optional[int] = Query(None, description="Filter by quote asset ID"),
     source: Optional[str] = Query(None, description="Filter by source"),
+    snapshot_time_from: Optional[str] = Query(None, description="Filter by minimum snapshot time (ISO format)"),
+    snapshot_time_to: Optional[str] = Query(None, description="Filter by maximum snapshot time (ISO format)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     session: Session = Depends(get_db),
@@ -93,6 +106,8 @@ def list_price_snapshots(
     - **asset_id**: Filter by asset ID
     - **quote_asset_id**: Filter by quote asset ID
     - **source**: Filter by price source
+    - **snapshot_time_from**: Filter by minimum snapshot time (ISO format)
+    - **snapshot_time_to**: Filter by maximum snapshot time (ISO format)
     - **limit**: Maximum number of results to return
     - **offset**: Number of results to skip for pagination
     """
@@ -108,6 +123,19 @@ def list_price_snapshots(
         if source:
             statement = statement.where(PriceSnapshot.source == source)
 
+        if snapshot_time_from:
+            dt_from = parse_datetime(snapshot_time_from)
+            statement = statement.where(PriceSnapshot.snapshot_time >= dt_from)
+
+        if snapshot_time_to:
+            dt_to = parse_datetime(snapshot_time_to)
+            statement = statement.where(PriceSnapshot.snapshot_time <= dt_to)
+
+        # Get total count before pagination
+        from sqlmodel import func
+        count_statement = select(func.count()).select_from(statement.subquery())
+        total = session.exec(count_statement).one()
+
         statement = (
             statement.order_by(PriceSnapshot.snapshot_time.desc())
             .offset(offset)
@@ -118,18 +146,22 @@ def list_price_snapshots(
 
         results = []
         for s in snapshots:
-            # Get asset symbols
+            # Get asset symbols and labels
             asset_symbol = None
+            asset_label = None
             quote_symbol = None
+            quote_label = None
 
             asset = session.get(Asset, s.asset_id)
             if asset:
                 asset_symbol = asset.symbol
+                asset_label = asset.label
 
             if s.quote_asset_id:
                 quote_asset = session.get(Asset, s.quote_asset_id)
                 if quote_asset:
                     quote_symbol = quote_asset.symbol
+                    quote_label = quote_asset.label
 
             results.append(
                 PriceSnapshotResponse(
@@ -143,11 +175,18 @@ def list_price_snapshots(
                     source=s.source,
                     created_at=s.created_at.isoformat() if s.created_at else None,
                     asset_symbol=asset_symbol,
+                    asset_label=asset_label,
                     quote_asset_symbol=quote_symbol,
+                    quote_asset_label=quote_label,
                 )
             )
 
-        return results
+        return PaginatedPriceSnapshotsResponse(
+            items=results,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

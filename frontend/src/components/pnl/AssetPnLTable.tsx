@@ -14,12 +14,14 @@ import {
     Card,
     Flex,
     Input,
+    Spinner,
     Table,
     Text,
 } from '@chakra-ui/react';
 import { FiChevronRight, FiSearch, FiAlertCircle } from 'react-icons/fi';
 import { AssetPnLRow } from './types';
 import { Tooltip } from '../ui/tooltip';
+import { formatDateTimeLocale } from '../../utils/dateUtils';
 
 interface AssetPnLTableProps {
     assets: AssetPnLRow[];
@@ -59,13 +61,7 @@ const isPriceStale = (fetchedAt?: string): boolean => {
     return fetchedTime < oneHourAgo;
 };
 
-/** Format datetime for display */
-const formatDateTime = (isoString?: string): string => {
-    if (!isoString) return 'N/A';
-    // Backend returns naive UTC datetime - append 'Z' if missing to ensure UTC parsing
-    const normalized = isoString.endsWith('Z') ? isoString : isoString + 'Z';
-    return new Date(normalized).toLocaleString();
-};
+// Using formatDateTimeLocale from utils/dateUtils for datetime formatting
 
 type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl';
 type SortDirection = 'asc' | 'desc';
@@ -218,6 +214,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     const stale = isPriceStale(asset.price_fetched_at);
                                     const hasPrice = asset.unit_value != null;
                                     const hasError = !!asset.price_error;
+                                    const isLoadingPrice = !!asset.price_loading;
 
                                     return (
                                         <Table.Row
@@ -249,60 +246,64 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                             </Table.Cell>
                                             {/* Unit Value (current market price) with tooltip */}
                                             <Table.Cell>
-                                                <Tooltip
-                                                    content={
-                                                        <Box p={2} fontSize="xs">
-                                                            <Flex justify="space-between" gap={4} mb={1}>
-                                                                <Text color="gray.400">Source</Text>
-                                                                <Text fontWeight="medium">
-                                                                    {asset.price_source || 'N/A'}
-                                                                </Text>
-                                                            </Flex>
-                                                            <Flex justify="space-between" gap={4} mb={1}>
-                                                                <Text color="gray.400">Updated</Text>
-                                                                <Text fontWeight="medium">
-                                                                    {formatDateTime(asset.price_fetched_at)}
-                                                                </Text>
-                                                            </Flex>
-                                                            {hasError && (
-                                                                <Flex justify="space-between" gap={4}>
-                                                                    <Text color="red.400">Error</Text>
-                                                                    <Text color="red.300" maxW="200px" wordBreak="break-word">
-                                                                        {asset.price_error}
+                                                {isLoadingPrice ? (
+                                                    <Spinner size="xs" color="gray.400" />
+                                                ) : (
+                                                    <Tooltip
+                                                        content={
+                                                            <Box p={2} fontSize="xs">
+                                                                <Flex justify="space-between" gap={4} mb={1}>
+                                                                    <Text color="gray.400">Source</Text>
+                                                                    <Text fontWeight="medium">
+                                                                        {asset.price_source || 'N/A'}
                                                                     </Text>
                                                                 </Flex>
-                                                            )}
-                                                            {stale && (
-                                                                <Text color="orange.400" mt={1}>
-                                                                    ⚠ Price is stale (over 1 hour old)
+                                                                <Flex justify="space-between" gap={4} mb={1}>
+                                                                    <Text color="gray.400">Updated</Text>
+                                                                    <Text fontWeight="medium">
+                                                                        {formatDateTimeLocale(asset.price_fetched_at)}
+                                                                    </Text>
+                                                                </Flex>
+                                                                {hasError && (
+                                                                    <Flex justify="space-between" gap={4}>
+                                                                        <Text color="red.400">Error</Text>
+                                                                        <Text color="red.300" maxW="200px" wordBreak="break-word">
+                                                                            {asset.price_error}
+                                                                        </Text>
+                                                                    </Flex>
+                                                                )}
+                                                                {stale && (
+                                                                    <Text color="orange.400" mt={1}>
+                                                                        ⚠ Price is stale (over 1 hour old)
+                                                                    </Text>
+                                                                )}
+                                                            </Box>
+                                                        }
+                                                        openDelay={200}
+                                                        closeDelay={100}
+                                                    >
+                                                        <Flex align="center" gap={1} cursor="help">
+                                                            {hasPrice ? (
+                                                                <Text
+                                                                    textDecoration="underline dotted"
+                                                                    color={stale ? 'orange.500' : undefined}
+                                                                >
+                                                                    {formatCurrency(asset.unit_value!, baseCurrency)}
+                                                                </Text>
+                                                            ) : (
+                                                                <Text color="gray.400">
+                                                                    —
                                                                 </Text>
                                                             )}
-                                                        </Box>
-                                                    }
-                                                    openDelay={200}
-                                                    closeDelay={100}
-                                                >
-                                                    <Flex align="center" gap={1} cursor="help">
-                                                        {hasPrice ? (
-                                                            <Text
-                                                                textDecoration="underline dotted"
-                                                                color={stale ? 'orange.500' : undefined}
-                                                            >
-                                                                {formatCurrency(asset.unit_value!, baseCurrency)}
-                                                            </Text>
-                                                        ) : (
-                                                            <Text color="gray.400">
-                                                                —
-                                                            </Text>
-                                                        )}
-                                                        {(stale || hasError) && (
-                                                            <FiAlertCircle
-                                                                size={12}
-                                                                color={hasError ? '#E53E3E' : '#DD6B20'}
-                                                            />
-                                                        )}
-                                                    </Flex>
-                                                </Tooltip>
+                                                            {(stale || hasError) && (
+                                                                <FiAlertCircle
+                                                                    size={12}
+                                                                    color={hasError ? '#E53E3E' : '#DD6B20'}
+                                                                />
+                                                            )}
+                                                        </Flex>
+                                                    </Tooltip>
+                                                )}
                                             </Table.Cell>
                                             <Table.Cell>
                                                 {formatCurrency(asset.market_value, baseCurrency)}

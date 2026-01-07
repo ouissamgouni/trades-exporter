@@ -145,16 +145,28 @@ const UnifiedSetupView: React.FC = () => {
 
   const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || BaseCurrencySelector;
 
+  // Calculate completion percentage based on actual setup status
+  // Items that contribute to completeness:
+  // 1. Base currency set (25%)
+  // 2. At least one account configured (25%)
+  // 3. No unmapped raw accounts (25%)
+  // 4. No unmapped raw assets (25%)
   const completionPercentage = setupStatus
     ? Math.round(
-      ((setupStatus.accounts_configured ? 1 : 0) +
-        (setupStatus.connectors_configured ? 1 : 0) +
-        (setupStatus.assets_configured ? 1 : 0) +
-        (setupStatus.base_currency_set ? 1 : 0)) /
-      4 *
-      100
-    )
+        ((setupStatus.base_currency_set ? 25 : 0) +
+          (setupStatus.accounts_count > 0 ? 25 : 0) +
+          (!setupStatus.unmapped_raw_accounts_count ? 25 : 0) +
+          (!setupStatus.unmapped_raw_assets_count ? 25 : 0))
+      )
     : 0;
+
+  // Check if there are setup issues (for tab badge in App.tsx via callback)
+  const hasSetupIssues = setupStatus && (
+    !setupStatus.base_currency_set ||
+    setupStatus.accounts_count === 0 ||
+    (setupStatus.unmapped_raw_accounts_count ?? 0) > 0 ||
+    (setupStatus.unmapped_raw_assets_count ?? 0) > 0
+  );
 
   // Render a single nav item
   const renderNavItem = (item: NavItem, indent: boolean = false) => {

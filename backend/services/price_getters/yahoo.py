@@ -106,8 +106,8 @@ class YahooPriceGetter(BasePriceGetter):
             native_quote_currency is what the ticker actually returns prices in
         """
         # 1. If explicit ticker in config, use it
-        if config and config.asset_id:
-            ticker = config.asset_id
+        if config and config.external_id:
+            ticker = config.external_id
             # Get native quote from config, or parse from ticker, or use default
             native_quote = config.extra.get("native_quote_currency")
             if not native_quote:

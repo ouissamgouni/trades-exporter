@@ -30,6 +30,51 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class ConnectorSyncStatus(str, Enum):
+    """Possible states for individual connector sync."""
+    
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass
+class ConnectorProgress:
+    """Tracks progress for a single connector."""
+    
+    connector_id: int
+    connector_type: str
+    account_name: str
+    status: ConnectorSyncStatus = ConnectorSyncStatus.QUEUED
+    test_mode: bool = False
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    processed: int = 0
+    new_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    error: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API response."""
+        return {
+            "connector_id": self.connector_id,
+            "connector_type": self.connector_type,
+            "account_name": self.account_name,
+            "status": self.status.value,
+            "test_mode": self.test_mode,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "processed": self.processed,
+            "new_count": self.new_count,
+            "updated_count": self.updated_count,
+            "skipped_count": self.skipped_count,
+            "error": self.error,
+        }
+
+
 @dataclass
 class JobProgress:
     """Tracks the progress of a sync job."""
@@ -47,6 +92,8 @@ class JobProgress:
     total_connectors: int = 0
     abort_requested: bool = False
     error_message: Optional[str] = None
+    # Per-connector status tracking
+    connector_statuses: Dict[int, ConnectorProgress] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -65,6 +112,9 @@ class JobProgress:
             "total_connectors": self.total_connectors,
             "abort_requested": self.abort_requested,
             "error_message": self.error_message,
+            "connector_statuses": {
+                k: v.to_dict() for k, v in self.connector_statuses.items()
+            },
         }
 
     def reset(self):
@@ -82,6 +132,7 @@ class JobProgress:
         self.total_connectors = 0
         self.abort_requested = False
         self.error_message = None
+        self.connector_statuses = {}
 
 
 class SyncJobService:
@@ -125,6 +176,11 @@ class SyncJobService:
     def get_status(self) -> Dict[str, Any]:
         """Get the current job status and progress."""
         status = self.progress.to_dict()
+        # Handle case where singleton was created before this attribute was added
+        if not hasattr(self, '_use_database_connectors'):
+            self._use_database_connectors = self._settings.get(
+                "use_database_connectors", False
+            ) if hasattr(self, '_settings') else False
         status["use_database_connectors"] = self._use_database_connectors
         status["test_mode"] = is_test_mode()
         return status
@@ -238,6 +294,19 @@ class SyncJobService:
                 )
 
                 connector_hub = DatabaseConnectorHub(session)
+                
+                # Initialize per-connector statuses for database connectors
+                from backend.db.repositories import AccountConnectorRepository
+                repo = AccountConnectorRepository(session)
+                for account_connector, account in repo.get_enabled():
+                    config = account_connector.config or {}
+                    self.progress.connector_statuses[account_connector.id] = ConnectorProgress(
+                        connector_id=account_connector.id,
+                        connector_type=account_connector.connector_type,
+                        account_name=account.name,
+                        status=ConnectorSyncStatus.QUEUED,
+                        test_mode=config.get("test_mode", False),
+                    )
             else:
                 self.logger.info("📁 Using file-configured connectors")
                 connector_hub = ConnectorHub()
@@ -251,6 +320,9 @@ class SyncJobService:
             self.logger.info(
                 f"📋 Processing {self.progress.total_connectors} connectors"
             )
+            
+            # Track current connector_id for status updates
+            current_connector_id: Optional[int] = None
 
             # Process each item from the connector hub
             for raw_item, normalized_item, error in connector_hub.yield_normalized():
@@ -258,28 +330,57 @@ class SyncJobService:
                 if self._abort_event.is_set():
                     self.logger.info("⚠️ Abort requested, stopping job...")
                     self.progress.status = JobStatus.ABORTED
+                    # Mark remaining connectors as skipped
+                    for cid, cstatus in self.progress.connector_statuses.items():
+                        if cstatus.status == ConnectorSyncStatus.QUEUED:
+                            cstatus.status = ConnectorSyncStatus.SKIPPED
+                        elif cstatus.status == ConnectorSyncStatus.RUNNING:
+                            cstatus.status = ConnectorSyncStatus.SKIPPED
+                            cstatus.finished_at = datetime.now()
                     break
 
                 # Track current connector from raw_item metadata
                 if raw_item and "_master_source" in raw_item:
                     current = raw_item["_master_source"]
                     if current != self.progress.current_connector:
-                        if self.progress.current_connector:
+                        # Mark previous connector as completed
+                        if self.progress.current_connector and current_connector_id:
                             self.progress.connectors_completed.append(
                                 self.progress.current_connector
                             )
+                            if current_connector_id in self.progress.connector_statuses:
+                                cstatus = self.progress.connector_statuses[current_connector_id]
+                                if cstatus.status == ConnectorSyncStatus.RUNNING:
+                                    cstatus.status = ConnectorSyncStatus.COMPLETED
+                                    cstatus.finished_at = datetime.now()
+                        
                         self.progress.current_connector = current
+                        
+                        # Try to extract connector_id from raw_item or master_source
+                        new_connector_id = raw_item.get("_connector_id")
+                        if new_connector_id and new_connector_id in self.progress.connector_statuses:
+                            current_connector_id = new_connector_id
+                            cstatus = self.progress.connector_statuses[current_connector_id]
+                            cstatus.status = ConnectorSyncStatus.RUNNING
+                            cstatus.started_at = datetime.now()
 
                 # Handle errors from connector
                 if error:
                     error_msg = f"[{self.progress.current_connector}] {error}"
                     self.progress.errors.append(error_msg)
                     self.logger.warning(f"⚠️ {error_msg}")
+                    # Track error in connector status
+                    if current_connector_id and current_connector_id in self.progress.connector_statuses:
+                        self.progress.connector_statuses[current_connector_id].error = error
                     continue
 
                 # Process normalized item through pipeline
                 if normalized_item:
                     self.progress.total_processed += 1
+                    
+                    # Update per-connector processed count
+                    if current_connector_id and current_connector_id in self.progress.connector_statuses:
+                        self.progress.connector_statuses[current_connector_id].processed += 1
 
                     try:
                         # Create pipeline context with raw item
@@ -298,6 +399,13 @@ class SyncJobService:
                             self.progress.new_entries_added += result.new_count
                             self.progress.entries_updated += result.updated_count
                             self.progress.duplicates_skipped += result.skipped_count
+                            
+                            # Update per-connector counts
+                            if current_connector_id and current_connector_id in self.progress.connector_statuses:
+                                cstatus = self.progress.connector_statuses[current_connector_id]
+                                cstatus.new_count += result.new_count
+                                cstatus.updated_count += result.updated_count
+                                cstatus.skipped_count += result.skipped_count
 
                             # Log splits
                             if result.split_count > 0:
@@ -332,6 +440,18 @@ class SyncJobService:
                     self.progress.connectors_completed.append(
                         self.progress.current_connector
                     )
+                # Mark last connector as completed
+                if current_connector_id and current_connector_id in self.progress.connector_statuses:
+                    cstatus = self.progress.connector_statuses[current_connector_id]
+                    if cstatus.status == ConnectorSyncStatus.RUNNING:
+                        cstatus.status = ConnectorSyncStatus.COMPLETED
+                        cstatus.finished_at = datetime.now()
+                # Mark any remaining queued connectors as completed (no data)
+                for cid, cstatus in self.progress.connector_statuses.items():
+                    if cstatus.status == ConnectorSyncStatus.QUEUED:
+                        cstatus.status = ConnectorSyncStatus.COMPLETED
+                        cstatus.finished_at = datetime.now()
+                        
                 self.logger.info(
                     f"✅ Sync job completed. Added {self.progress.new_entries_added} new, "
                     f"updated {self.progress.entries_updated}, "

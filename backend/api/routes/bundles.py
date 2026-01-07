@@ -16,6 +16,7 @@ from backend.db.models import (
     NormalizedTransaction,
     UserCalculationBundle,
     Asset,
+    Account,
     UnitPattern,
     TaxabilityStatus,
     Direction,
@@ -70,6 +71,21 @@ class TransactionSummary(BaseModel):
     source: Optional[str] = None
     source_transaction_id: Optional[str] = None
     network: Optional[str] = None
+    # Extended fields for enhanced display
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    price: Optional[float] = None
+    price_quote_asset_symbol: Optional[str] = None
+    total: Optional[float] = None
+    fee: Optional[float] = None
+    fee_quote_asset_symbol: Optional[str] = None
+    from_account_name: Optional[str] = None
+    to_account_name: Optional[str] = None
+    source_from_account: Optional[str] = None
+    source_to_account: Optional[str] = None
+    source_transaction_type: Optional[str] = None
+    source_asset_symbol: Optional[str] = None
+    network_transaction_id: Optional[str] = None
 
 
 class UnitResponse(BaseModel):
@@ -116,6 +132,9 @@ class AcceptSuggestionRequest(BaseModel):
     transaction_ids: List[int]
     label: Optional[str] = None
     notes: Optional[str] = None
+    taxability_override: Optional[TaxabilityStatus] = Field(
+        None, description="Override taxability for the bundle"
+    )
 
 
 # ============================================================================
@@ -177,8 +196,55 @@ def get_suggestions(
         # Use shared taxability logic from P&L module
         taxability_hint = suggest_bundle_taxability(
             pattern=s.pattern,
-            crypto_swap_taxable=config.crypto_swap_taxable,
+            crypto_swap_taxable=config.crypto_swap_taxable_by_default,
         )
+        
+        # Build enriched transaction summaries with account names
+        tx_summaries = []
+        for t in (s.transactions or []):
+            account_name = None
+            if t.get("account_id"):
+                account = session.get(Account, t.get("account_id"))
+                account_name = account.name if account else None
+            
+            from_account_name = None
+            if t.get("from_account_id"):
+                from_account = session.get(Account, t.get("from_account_id"))
+                from_account_name = from_account.name if from_account else None
+            
+            to_account_name = None
+            if t.get("to_account_id"):
+                to_account = session.get(Account, t.get("to_account_id"))
+                to_account_name = to_account.name if to_account else None
+            
+            tx_summaries.append(
+                TransactionSummary(
+                    id=t.get("id", 0),
+                    date_time=t.get("date_time", ""),
+                    source=t.get("source", ""),
+                    source_transaction_id=t.get("source_transaction_id", ""),
+                    direction=t.get("direction", ""),
+                    quantity=t.get("quantity", 0),
+                    symbol=t.get("symbol", ""),
+                    asset_symbol=t.get("asset_symbol") or t.get("symbol", ""),
+                    # Extended fields
+                    account_id=t.get("account_id"),
+                    account_name=account_name,
+                    price=t.get("price"),
+                    price_quote_asset_symbol=t.get("price_quote_asset_symbol"),
+                    total=t.get("total"),
+                    fee=t.get("fee"),
+                    fee_quote_asset_symbol=t.get("fee_quote_asset_symbol"),
+                    from_account_name=from_account_name,
+                    to_account_name=to_account_name,
+                    source_from_account=t.get("source_from_account"),
+                    source_to_account=t.get("source_to_account"),
+                    source_transaction_type=t.get("source_transaction_type"),
+                    source_asset_symbol=t.get("source_asset_symbol"),
+                    network=t.get("network"),
+                    network_transaction_id=t.get("network_transaction_id"),
+                )
+            )
         
         responses.append(
             SuggestionResponse(
@@ -189,18 +255,7 @@ def get_suggestions(
                 reason=s.reason,
                 taxability_suggestion=taxability_hint.taxability,
                 taxability_suggestion_reason=taxability_hint.reason,
-                transactions=[
-                    TransactionSummary(
-                        id=t.get("id", 0),
-                        date_time=t.get("date_time", ""),
-                        source=t.get("source", ""),
-                        source_transaction_id=t.get("source_transaction_id", ""),
-                        direction=t.get("direction", ""),
-                        quantity=t.get("quantity", 0),
-                        symbol=t.get("symbol", ""),
-                    )
-                    for t in (s.transactions or [])
-                ],
+                transactions=tx_summaries,
             )
         )
     
@@ -223,7 +278,7 @@ def accept_suggestion(
         label=request.label or f"{request.pattern.title()} Unit",
         reason="User accepted suggestion",
         confidence=1.0,
-        transaction_ids=request.transaction_ids,
+        transactions=[{"id": tx_id} for tx_id in request.transaction_ids],
     )
 
     service = SuggestionService(session)
@@ -231,6 +286,7 @@ def accept_suggestion(
         suggestion,
         label=request.label,
         notes=request.notes,
+        taxability_override=request.taxability_override,
     )
 
     return _build_unit_response(unit, session)
@@ -435,12 +491,40 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
     inflows: dict = {}
     outflows: dict = {}
 
+    # Cache for account and asset lookups
+    account_cache: dict = {}
+    asset_cache: dict = {}
+
+    def get_account_name(account_id: Optional[int]) -> Optional[str]:
+        if not account_id:
+            return None
+        if account_id not in account_cache:
+            account = session.get(Account, account_id)
+            account_cache[account_id] = account.name if account else None
+        return account_cache[account_id]
+
+    def get_asset_symbol(asset_id: Optional[int]) -> Optional[str]:
+        if not asset_id:
+            return None
+        if asset_id not in asset_cache:
+            asset = session.get(Asset, asset_id)
+            asset_cache[asset_id] = asset.symbol if asset else None
+        return asset_cache[asset_id]
+
     for tx in transactions:
         # Get asset symbol
         asset_symbol = tx.source_asset_symbol
         if not asset_symbol and tx.asset_id:
-            asset = session.get(Asset, tx.asset_id)
-            asset_symbol = asset.symbol if asset else None
+            asset_symbol = get_asset_symbol(tx.asset_id)
+
+        # Get price and fee quote asset symbols
+        price_quote_asset_symbol = get_asset_symbol(tx.price_quote_asset_id)
+        fee_quote_asset_symbol = get_asset_symbol(tx.fee_quote_asset_id)
+
+        # Get account names
+        account_name = get_account_name(tx.account_id)
+        from_account_name = get_account_name(tx.from_account_id)
+        to_account_name = get_account_name(tx.to_account_id)
 
         tx_summaries.append(
             TransactionSummary(
@@ -454,6 +538,21 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
                 source=tx.source,
                 source_transaction_id=tx.source_transaction_id,
                 network=tx.network,
+                # Extended fields
+                account_id=tx.account_id,
+                account_name=account_name,
+                price=float(tx.price) if tx.price else None,
+                price_quote_asset_symbol=price_quote_asset_symbol,
+                total=float(tx.total) if tx.total else None,
+                fee=float(tx.fee) if tx.fee else None,
+                fee_quote_asset_symbol=fee_quote_asset_symbol,
+                from_account_name=from_account_name,
+                to_account_name=to_account_name,
+                source_from_account=tx.source_from_account,
+                source_to_account=tx.source_to_account,
+                source_transaction_type=tx.source_transaction_type,
+                source_asset_symbol=tx.source_asset_symbol,
+                network_transaction_id=tx.network_transaction_id,
             )
         )
 

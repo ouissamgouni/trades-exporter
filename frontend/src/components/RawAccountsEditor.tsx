@@ -6,9 +6,11 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Account, RawAccount } from '../types';
+import { AccountSelector } from './AccountSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
+import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 
 // Fuzzy matching utility for smart suggestions
 const calculateSimilarity = (str1: string, str2: string): number => {
@@ -80,6 +82,11 @@ export const RawAccountsEditor: React.FC = () => {
     const [newRawAccount, setNewRawAccount] = useState<Partial<RawAccount>>({});
     const [sourceFilter, setSourceFilter] = useState('');
     const [linkedFilter, setLinkedFilter] = useState<string>('');
+
+    // State for creating new account from raw account
+    const [showAccountDialog, setShowAccountDialog] = useState(false);
+    const [accountPrefill, setAccountPrefill] = useState<AccountPrefill | undefined>(undefined);
+    const [pendingRawAccount, setPendingRawAccount] = useState<RawAccount | null>(null);
 
     // Confirmation dialogs
     const deleteConfirm = useConfirmDialog<RawAccount>();
@@ -280,6 +287,42 @@ export const RawAccountsEditor: React.FC = () => {
         }
     };
 
+    // Create new account from raw account
+    const createAccountFromRaw = (rawAccount: RawAccount) => {
+        // Infer account type: wallet for 0x addresses or onchain sources, otherwise cex
+        const isWalletAddress = rawAccount.label.startsWith('0x') ||
+            rawAccount.source.toLowerCase().includes('chain') ||
+            rawAccount.source.toLowerCase().includes('scan') ||
+            rawAccount.source.toLowerCase().includes('wallet');
+
+        const accountType: 'cex' | 'broker' | 'wallet' = isWalletAddress ? 'wallet' : 'cex';
+
+        setAccountPrefill({
+            name: rawAccount.label,
+            address_or_identifier: rawAccount.label,
+            account_type: accountType,
+        });
+        setPendingRawAccount(rawAccount);
+        setShowAccountDialog(true);
+    };
+
+    const handleAccountDialogClose = async (createdAccountId?: number) => {
+        setShowAccountDialog(false);
+
+        // If account was created and we have a pending raw account, auto-link them
+        if (createdAccountId && pendingRawAccount) {
+            await acceptSuggestion(pendingRawAccount, createdAccountId);
+            toaster.success({
+                title: 'Account created & linked',
+                description: `Created account and linked to "${pendingRawAccount.label}"`
+            });
+        }
+
+        setAccountPrefill(undefined);
+        setPendingRawAccount(null);
+        await fetchAccounts();
+    };
+
     // Truncate long labels (like blockchain addresses)
     const truncateLabel = (label: string, maxLength: number = 20) => {
         if (label.length <= maxLength) return label;
@@ -424,19 +467,18 @@ export const RawAccountsEditor: React.FC = () => {
                                         </Table.Cell>
                                         <Table.Cell>
                                             {isEditing ? (
-                                                <NativeSelect.Root size="sm" width="180px">
-                                                    <NativeSelect.Field
-                                                        value={editAccountId ?? ''}
-                                                        onChange={e => setEditAccountId(e.target.value ? Number(e.target.value) : null)}
-                                                    >
-                                                        <option value="">Select account...</option>
-                                                        {accounts.map(account => (
-                                                            <option key={account.id} value={account.id}>
-                                                                {account.name} ({account.account_type})
-                                                            </option>
-                                                        ))}
-                                                    </NativeSelect.Field>
-                                                </NativeSelect.Root>
+                                                <Box width="200px">
+                                                    <AccountSelector
+                                                        value={editAccountId}
+                                                        onChange={setEditAccountId}
+                                                        accounts={accounts}
+                                                        onAccountCreated={fetchAccounts}
+                                                        defaultName={rawAccount.label}
+                                                        rawAccountSource={rawAccount.source}
+                                                        rawAccountLabel={rawAccount.label}
+                                                        placeholder="Search accounts..."
+                                                    />
+                                                </Box>
                                             ) : (
                                                 rawAccount.account_id ? (
                                                     <Badge colorPalette="green">{getAccountName(rawAccount.account_id)}</Badge>
@@ -482,9 +524,23 @@ export const RawAccountsEditor: React.FC = () => {
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <Button size="xs" variant="outline" onClick={() => startEditing(rawAccount)}>
-                                                            🔗
-                                                        </Button>
+                                                        <Tooltip content="Link to existing account">
+                                                            <Button size="xs" variant="outline" onClick={() => startEditing(rawAccount)}>
+                                                                🔗
+                                                            </Button>
+                                                        </Tooltip>
+                                                        {(rawAccount.account_id === null || rawAccount.account_id === undefined) && (
+                                                            <Tooltip content="Create new account from this">
+                                                                <Button
+                                                                    size="xs"
+                                                                    colorPalette="green"
+                                                                    variant="outline"
+                                                                    onClick={() => createAccountFromRaw(rawAccount)}
+                                                                >
+                                                                    ➕
+                                                                </Button>
+                                                            </Tooltip>
+                                                        )}
                                                         {rawAccount.account_id !== null && rawAccount.account_id !== undefined && (
                                                             <Button size="xs" colorPalette="orange" variant="outline" onClick={() => unlinkRawAccount(rawAccount)}>
                                                                 ⛓️‍💥
@@ -542,19 +598,13 @@ export const RawAccountsEditor: React.FC = () => {
                                     </Box>
                                     <Box>
                                         <Text fontWeight="medium" mb={1}>Link to Account (optional)</Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={newRawAccount.account_id ?? ''}
-                                                onChange={e => setNewRawAccount({ ...newRawAccount, account_id: e.target.value ? Number(e.target.value) : undefined })}
-                                            >
-                                                <option value="">Select account...</option>
-                                                {accounts.map(account => (
-                                                    <option key={account.id} value={account.id}>
-                                                        {account.name} ({account.account_type})
-                                                    </option>
-                                                ))}
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
+                                        <AccountSelector
+                                            value={newRawAccount.account_id ?? null}
+                                            onChange={(id) => setNewRawAccount({ ...newRawAccount, account_id: id ?? undefined })}
+                                            accounts={accounts}
+                                            onAccountCreated={fetchAccounts}
+                                            placeholder="Search or create account..."
+                                        />
                                     </Box>
                                 </Flex>
                             </Dialog.Body>
@@ -592,6 +642,14 @@ export const RawAccountsEditor: React.FC = () => {
                 title="Auto-Map Raw Accounts"
                 message={autoMapConfirm.data ? `Auto-map ${autoMapConfirm.data.count} raw account(s) with high confidence matches?` : ''}
                 confirmLabel="Auto-Map"
+            />
+
+            {/* Create Account from Raw Account Dialog */}
+            <AccountFormDialog
+                isOpen={showAccountDialog}
+                onClose={handleAccountDialogClose}
+                account={null}
+                prefill={accountPrefill}
             />
         </Box>
     );

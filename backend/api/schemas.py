@@ -22,6 +22,21 @@ from backend.db.models import (
 
 
 # =============================================================================
+# Common Reference Types
+# =============================================================================
+
+
+class AssetRef(BaseModel):
+    """
+    Lightweight asset reference for embedding in responses.
+    Contains minimal fields for display without relationships.
+    """
+    asset_id: Optional[int] = None
+    symbol: Optional[str] = None
+    label: Optional[str] = None
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
@@ -50,8 +65,17 @@ class TransactionUpdate(BaseModel):
     fee_quote_asset_id: Optional[int] = None
     account_id: Optional[int] = None
     source: Optional[str] = None
+    source_transaction_id: Optional[str] = Field(
+        None, description="Source transaction ID (external reference)"
+    )
     direction: Optional[str] = Field(None, pattern="^(inflow|outflow|internal)$")
     source_asset_symbol: Optional[str] = None
+    source_price_quote_asset_symbol: Optional[str] = Field(
+        None, description="Source price quote asset symbol"
+    )
+    source_fee_quote_asset_symbol: Optional[str] = Field(
+        None, description="Source fee quote asset symbol"
+    )
     source_transaction_type: Optional[str] = Field(
         None, description="Source transaction type (e.g., airdrop, buy, sell)"
     )
@@ -169,7 +193,12 @@ class TransactionResponse(BaseModel):
     # Metadata
     tags: Optional[Dict[str, Any]] = None
 
-    # Additional fields from JOIN with assets table
+    # Nested asset references (replaces flat linked_*_symbol fields)
+    linked_asset: Optional[AssetRef] = None
+    price_quote_asset: Optional[AssetRef] = None
+    fee_quote_asset: Optional[AssetRef] = None
+
+    # Backward compatibility: flat symbol fields (deprecated, prefer nested objects)
     linked_asset_symbol: Optional[str] = None
     linked_price_quote_asset_symbol: Optional[str] = None
     linked_fee_quote_asset_symbol: Optional[str] = None
@@ -419,6 +448,137 @@ class PnLSummaryResponse(BaseModel):
 
 
 # =============================================================================
+# Data Health Check Models
+# =============================================================================
+
+
+from enum import Enum
+
+
+class IssueType(str, Enum):
+    """Types of data issues in transactions."""
+    ASSET = "asset"
+    ACCOUNT = "account"
+    PRICE_QUOTE = "price_quote"
+    FEE_QUOTE = "fee_quote"
+
+
+class SuggestionInfo(BaseModel):
+    """Fuzzy match suggestion for a raw asset or raw account."""
+    id: int = Field(..., description="Suggested asset_id or account_id")
+    name: str = Field(..., description="Display name (symbol/label)")
+    confidence: float = Field(..., description="Match confidence (0-1)")
+
+
+class RawAssetIssue(BaseModel):
+    """Raw asset that needs mapping."""
+    symbol: str = Field(..., description="Raw symbol from source")
+    source: str = Field(..., description="Source platform/exchange")
+    affected_count: int = Field(..., description="Number of affected transactions")
+    suggestion: Optional[SuggestionInfo] = Field(None, description="Best fuzzy match suggestion")
+
+
+class RawAccountIssue(BaseModel):
+    """Raw account that needs mapping."""
+    id: int = Field(..., description="Raw account ID")
+    label: str = Field(..., description="Raw account label from source")
+    source: str = Field(..., description="Source platform/exchange")
+    affected_count: int = Field(..., description="Number of affected transactions")
+    suggestion: Optional[SuggestionInfo] = Field(None, description="Best fuzzy match suggestion")
+
+
+class DataHealthCheckResponse(BaseModel):
+    """
+    Response model for data health check endpoint.
+    
+    Provides aggregated counts of data completeness issues
+    plus optional detailed raw values for inline fixing.
+    """
+    
+    model_config = ConfigDict(from_attributes=True)
+    
+    # Transaction counts by review status
+    total_count: int = Field(0, description="Total number of transactions")
+    valid_count: int = Field(0, description="Transactions with review_status='valid'")
+    pending_count: int = Field(0, description="Transactions with review_status='pending'")
+    invalid_count: int = Field(0, description="Transactions with review_status='invalid'")
+    
+    # Missing required data counts
+    missing_asset_count: int = Field(0, description="Transactions missing asset_id")
+    missing_account_count: int = Field(0, description="Transactions missing account_id")
+    missing_price_quote_count: int = Field(
+        0, description="Transactions missing price_quote_asset_id"
+    )
+    missing_fee_quote_count: int = Field(
+        0, description="Transactions with fee > 0 but missing fee_quote_asset_id"
+    )
+    
+    # Bundle suggestions
+    bundle_suggestions_count: int = Field(
+        0, description="Number of unhandled bundle suggestions"
+    )
+    
+    # Computed properties
+    has_issues: bool = Field(
+        False, description="True if any validation issues exist"
+    )
+    total_issues: int = Field(
+        0, description="Sum of all issues (missing + pending)"
+    )
+    
+    # Optional detailed issue lists (when include_details=true) - DEPRECATED
+    # Use issues_list instead for transaction-centric view
+    missing_assets_detail: Optional[List[RawAssetIssue]] = Field(
+        None, description="[DEPRECATED] Raw assets needing mapping (asset_id missing)"
+    )
+    missing_accounts_detail: Optional[List[RawAccountIssue]] = Field(
+        None, description="[DEPRECATED] Raw accounts needing mapping (account_id missing)"
+    )
+    missing_price_quotes_detail: Optional[List[RawAssetIssue]] = Field(
+        None, description="[DEPRECATED] Raw assets needing mapping (price_quote_asset_id missing)"
+    )
+    missing_fee_quotes_detail: Optional[List[RawAssetIssue]] = Field(
+        None, description="[DEPRECATED] Raw assets needing mapping (fee_quote_asset_id missing)"
+    )
+    
+    # Transaction-centric issue list (preferred over grouped details)
+    issues_list: Optional[List["TransactionIssue"]] = Field(
+        None, description="Flat list of transaction issues for inline fixing"
+    )
+    issues_total_count: int = Field(
+        0, description="Total number of transaction issues (for pagination)"
+    )
+    issues_page: int = Field(1, description="Current page number")
+    issues_per_page: int = Field(50, description="Items per page")
+
+
+class TransactionIssue(BaseModel):
+    """
+    A single data issue for a specific transaction.
+    
+    Used for transaction-centric display with inline fix actions.
+    """
+    # Transaction info (compact display)
+    transaction_id: int = Field(..., description="Transaction ID")
+    date_time: str = Field(..., description="Transaction datetime (ISO format)")
+    direction: str = Field(..., description="inflow/outflow/internal")
+    quantity: float = Field(..., description="Transaction quantity")
+    source_asset_symbol: str = Field(..., description="Raw asset symbol from source")
+    source: str = Field(..., description="Source platform/exchange")
+    
+    # Issue details
+    issue_type: IssueType = Field(..., description="Type of issue")
+    raw_value: str = Field(..., description="Raw value needing fix (symbol or label)")
+    
+    # Fix suggestion
+    suggestion: Optional[SuggestionInfo] = Field(None, description="Best match suggestion")
+
+
+# Update DataHealthCheckResponse to reference TransactionIssue
+DataHealthCheckResponse.model_rebuild()
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -443,4 +603,11 @@ __all__ = [
     "PnLCalculationRequest",
     "PnLCalculationResponse",
     "PnLSummaryResponse",
+    # Data Health Check models
+    "DataHealthCheckResponse",
+    "SuggestionInfo",
+    "RawAssetIssue",
+    "RawAccountIssue",
+    "TransactionIssue",
+    "IssueType",
 ]

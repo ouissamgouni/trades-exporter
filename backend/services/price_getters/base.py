@@ -271,29 +271,6 @@ class PriceGetterConfig:
             extra=params or {},
         )
 
-    @classmethod
-    def from_dict(cls, params: Optional[Dict[str, Any]]) -> "PriceGetterConfig":
-        """
-        Create PriceGetterConfig from a dictionary.
-        
-        DEPRECATED: Use from_db() with separate external_id and params.
-        Kept for backward compatibility during migration.
-
-        Args:
-            params: Dictionary of parameters. Can be None.
-
-        Returns:
-            PriceGetterConfig instance.
-        """
-        if not params:
-            return cls()
-
-        # Support legacy params.asset_id format during migration
-        return cls(
-            external_id=params.get("asset_id"),
-            extra={k: v for k, v in params.items() if k != "asset_id"},
-        )
-
 
 @dataclass
 class PriceResult:
@@ -304,6 +281,12 @@ class PriceResult:
     source: str = ""
     timestamp: Optional[datetime] = None
     ticker_used: Optional[str] = None
+    # Staleness/fallback fields
+    is_fallback: bool = False  # True if this price came from fallback lookup
+    is_stale: bool = False  # True if fallback price is outside staleness window
+    actual_price_date: Optional[datetime] = None  # The actual date of the price used
+    staleness_days: Optional[int] = None  # Days between requested and actual price date
+    fallback_error: Optional[str] = None  # Original error that triggered fallback
 
 
 class BasePriceGetter(ABC):

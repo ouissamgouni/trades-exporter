@@ -166,15 +166,10 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
     legs = []
     
     quantity = Decimal(str(tx.quantity))
-    price = Decimal(str(tx.price)) if tx.price else None
-    total = Decimal(str(tx.total)) if tx.total else None
-    
-    # Compute total if missing
-    if (not total or total <= 0) and price and quantity:
-        total = price * quantity
+    total = tx.total  # Computed property: price * quantity
     
     direction = (tx.direction or "").lower()
-    base_source_id = tx.source_transaction_id or str(tx.id)
+
     
     # Use relationships if available, otherwise create from IDs/symbols
     base_rel = tx.asset

@@ -41,6 +41,7 @@ export interface Account {
     address_or_identifier?: string;
     tags: string[];
     owned: boolean;
+    enabled: boolean;
     created_at: string;
 }
 
@@ -73,6 +74,17 @@ export interface ConnectorTypeInfo {
     optional_config: string[];
 }
 
+/**
+ * Lightweight asset reference for embedding in transaction responses.
+ * Contains minimal fields for display without relationships.
+ * Different from P&L's AssetRef which uses (id, name) fields.
+ */
+export interface TransactionAssetRef {
+    asset_id?: number | null;
+    symbol?: string | null;
+    label?: string | null;
+}
+
 export interface Transaction {
     id: number;
     raw_transaction_id?: number;
@@ -93,6 +105,11 @@ export interface Transaction {
     source_asset_symbol?: string;
     source_price_quote_asset_symbol?: string;
     source_fee_quote_asset_symbol?: string;
+    // Nested asset references (preferred for display)
+    linked_asset?: TransactionAssetRef | null;
+    price_quote_asset?: TransactionAssetRef | null;
+    fee_quote_asset?: TransactionAssetRef | null;
+    // Backward-compatible flat symbol fields (deprecated, prefer nested objects)
     linked_asset_symbol?: string; // From assets table via asset_id FK
     linked_price_quote_asset_symbol?: string; // From assets table via price_quote_asset_id FK
     linked_fee_quote_asset_symbol?: string; // From assets table via fee_quote_asset_id FK
@@ -106,6 +123,7 @@ export interface Transaction {
     fee?: number;
     include_fee?: boolean;
     disposal_taxable?: boolean;  // Whether disposing this asset is a taxable event
+    source_account?: string;  // Raw account identifier before mapping
     source_from_account?: string;
     source_to_account?: string;
     from_account_id?: number | null;
@@ -146,7 +164,6 @@ export type Bundle = CalculationUnit;
 // Grouping suggestion from the suggestion service
 export interface GroupingSuggestion {
     pattern: UnitPattern;
-    transaction_ids: number[];
     confidence: number;
     label: string;
     reason: string;
@@ -154,7 +171,7 @@ export interface GroupingSuggestion {
     total_quantity?: number;
     asset_symbol?: string;
     date_range?: string;
-    transactions?: TransactionSummary[];
+    transactions: TransactionSummary[];
 }
 
 // Backward compatibility alias
@@ -190,14 +207,33 @@ export interface TransactionSummary {
     transaction_type?: string;
     symbol?: string;
     asset_symbol?: string;
+    network?: string;
+    // Nested asset references (preferred for display)
+    linked_asset?: TransactionAssetRef | null;
+    price_quote_asset?: TransactionAssetRef | null;
+    fee_quote_asset?: TransactionAssetRef | null;
+    // Extended fields for enhanced display
+    account_id?: number;
+    account_name?: string;
+    price?: number;
+    price_quote_asset_symbol?: string;
+    total?: number;
+    fee?: number;
+    fee_quote_asset_symbol?: string;
+    from_account_name?: string;
+    to_account_name?: string;
+    source_from_account?: string;
+    source_to_account?: string;
+    source_transaction_type?: string;
+    source_asset_symbol?: string;
+    network_transaction_id?: string;
 }
 
 export interface SuggestedGroup {
     reason: string;
     confidence: number;
-    transaction_ids: number[];
     suggested_label: string;
-    transactions?: TransactionSummary[];
+    transactions: TransactionSummary[];
 }
 
 export interface AssetPriceGetter {
@@ -294,7 +330,16 @@ export interface PriceSnapshot {
     source?: string;
     created_at?: string;
     asset_symbol?: string;
+    asset_label?: string;
     quote_asset_symbol?: string;
+    quote_asset_label?: string;
+}
+
+export interface PaginatedPriceSnapshotsResponse {
+    items: PriceSnapshot[];
+    total: number;
+    limit: number;
+    offset: number;
 }
 
 export interface RawAsset {
@@ -313,6 +358,24 @@ export interface RawAccount {
 // Sync Job Types
 export type SyncJobStatus = 'idle' | 'running' | 'completed' | 'aborted' | 'failed';
 
+export type ConnectorSyncStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface ConnectorProgress {
+    connector_id: number;
+    connector_name: string;
+    account_name: string;
+    status: ConnectorSyncStatus;
+    test_mode: boolean;
+    processed: number;
+    new_entries: number;
+    updated: number;
+    duplicates: number;
+    errors: number;
+    error_message?: string;
+    started_at?: string;
+    finished_at?: string;
+}
+
 export interface SyncJobProgress {
     status: SyncJobStatus;
     started_at?: string;
@@ -328,6 +391,7 @@ export interface SyncJobProgress {
     total_connectors: number;
     abort_requested: boolean;
     error_message?: string;
+    connector_statuses?: Record<string, ConnectorProgress>;
 }
 
 export interface SyncJobStartResponse {
@@ -407,6 +471,12 @@ export interface PriceResponse {
     fetched_at?: string;
     source?: string;
     error?: string;  // Error message if price fetch failed
+    // Staleness/fallback fields
+    is_fallback?: boolean;  // True if fallback price was used
+    is_stale?: boolean;  // True if price is outside staleness window
+    actual_price_date?: string;  // The actual date of the price used
+    staleness_days?: number;  // Days between requested and actual price date
+    warning?: string;  // Warning message for stale prices
 }
 
 export interface PricesResponse {
@@ -628,6 +698,128 @@ export interface PaginatedResponse<T> {
     page: number;
     page_size: number;
     items: T[];
+}
+
+// =============================================================================
+// Validation Summary (Data Health Check)
+// =============================================================================
+
+/**
+ * Fuzzy match suggestion for inline fixes in Data Health Check
+ */
+export interface SuggestionInfo {
+    id: number;
+    name: string;
+    confidence: number;
+}
+
+/**
+ * Raw asset that needs mapping (for inline fixing)
+ */
+export interface RawAssetIssue {
+    symbol: string;
+    source: string;
+    affected_count: number;
+    suggestion?: SuggestionInfo | null;
+}
+
+/**
+ * Raw account that needs mapping (for inline fixing)
+ */
+export interface RawAccountIssue {
+    id: number;
+    label: string;
+    source: string;
+    affected_count: number;
+    suggestion?: SuggestionInfo | null;
+}
+
+/**
+ * Issue type enum for transaction-centric issues
+ */
+export type IssueType = 'asset' | 'account' | 'price_quote' | 'fee_quote';
+
+/**
+ * A single data issue for a specific transaction.
+ * Used for transaction-centric display with inline fix actions.
+ */
+export interface TransactionIssue {
+    // Transaction info (compact display)
+    transaction_id: number;
+    date_time: string;
+    direction: string;
+    quantity: number;
+    source_asset_symbol: string;
+    source: string;
+    
+    // Issue details
+    issue_type: IssueType;
+    raw_value: string;
+    
+    // Fix suggestion
+    suggestion?: SuggestionInfo | null;
+}
+
+/**
+ * Response from /transactions/data-health-check endpoint.
+ * Powers "Data Health Check" badges and drawer UI with inline fixing.
+ */
+export interface DataHealthCheckResponse {
+    // Transaction counts by review status
+    total_count: number;
+    valid_count: number;
+    pending_count: number;
+    invalid_count: number;
+    
+    // Missing required data counts
+    missing_asset_count: number;
+    missing_account_count: number;
+    missing_price_quote_count: number;
+    missing_fee_quote_count: number;
+    
+    // Bundle suggestions
+    bundle_suggestions_count: number;
+    
+    // Computed flags
+    has_issues: boolean;
+    total_issues: number;
+    
+    // [DEPRECATED] Grouped detail lists - use issues_list instead
+    missing_assets_detail?: RawAssetIssue[] | null;
+    missing_accounts_detail?: RawAccountIssue[] | null;
+    missing_price_quotes_detail?: RawAssetIssue[] | null;
+    missing_fee_quotes_detail?: RawAssetIssue[] | null;
+    
+    // Transaction-centric issue list (preferred)
+    issues_list?: TransactionIssue[] | null;
+    issues_total_count: number;
+    issues_page: number;
+    issues_per_page: number;
+}
+
+/**
+ * @deprecated Use DataHealthCheckResponse instead
+ * Kept for backward compatibility during migration
+ */
+export interface ValidationSummary {
+    // Transaction counts by review status
+    total_count: number;
+    valid_count: number;
+    pending_count: number;
+    invalid_count: number;
+    
+    // Missing required data counts
+    missing_asset_count: number;
+    missing_account_count: number;
+    missing_price_quote_count: number;
+    missing_fee_quote_count: number;
+    
+    // Bundle suggestions
+    bundle_suggestions_count: number;
+    
+    // Computed flags
+    has_issues: boolean;
+    total_issues: number;
 }
 
 export const API_URL = 'http://localhost:8000';

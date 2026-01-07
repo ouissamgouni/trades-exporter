@@ -9,7 +9,9 @@ This document outlines strategies for setting up test/production environments an
 ## 1. Local Test/Prod Environment Setup
 
 ### Current Setup
+
 You already have a good foundation with Docker Compose:
+
 - **Test DB**: `trades_db_test` on port 5433
 - **Prod DB**: `trades_db` on port 5432
 
@@ -282,6 +284,7 @@ jobs:
 **Free Tier**: $5 credit/month (enough for small apps)
 
 **Pros**:
+
 - Easy PostgreSQL provisioning
 - Auto-deploy from GitHub
 - Good DX with railway CLI
@@ -289,6 +292,7 @@ jobs:
 - Supports Docker
 
 **Setup**:
+
 ```bash
 # Install Railway CLI
 brew install railway
@@ -302,6 +306,7 @@ railway up
 ```
 
 **railway.toml**:
+
 ```toml
 [build]
 builder = "dockerfile"
@@ -324,17 +329,20 @@ port = 3000
 
 ### 🥈 Render.com
 
-**Free Tier**: 
+**Free Tier**:
+
 - Web services: 750 hours/month
 - PostgreSQL: Free tier available
 
 **Pros**:
+
 - Native PostgreSQL support
 - Auto-deploy from GitHub
 - Free SSL
 - Good documentation
 
 **render.yaml** (Infrastructure as Code):
+
 ```yaml
 services:
   # Backend API
@@ -383,18 +391,21 @@ databases:
 
 ### 🥉 Fly.io
 
-**Free Tier**: 
+**Free Tier**:
+
 - 3 shared-cpu VMs
 - 3GB persistent storage
 - 160GB outbound bandwidth
 
 **Pros**:
+
 - Global deployment (edge locations)
 - Good for low-latency apps
 - PostgreSQL support
 - Great CLI
 
 **fly.toml** (Backend):
+
 ```toml
 app = "trades-exporter-api"
 primary_region = "cdg"  # Paris
@@ -444,6 +455,7 @@ primary_region = "cdg"  # Paris
 ## 4. Recommended Architecture
 
 ### Local Development
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    LOCAL MACHINE                         │
@@ -471,6 +483,7 @@ primary_region = "cdg"  # Paris
 ```
 
 ### Production (Cloud)
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    GITHUB                                │
@@ -514,12 +527,14 @@ primary_region = "cdg"  # Paris
 ## 5. Quick Start Guide
 
 ### Step 1: Set up GitHub Actions
+
 ```bash
 mkdir -p .github/workflows
 # Copy the ci.yml content above
 ```
 
 ### Step 2: Choose a hosting platform
+
 I recommend **Railway** for the easiest setup:
 
 ```bash
@@ -549,6 +564,7 @@ railway up
 ```
 
 ### Step 3: Connect GitHub for auto-deploy
+
 1. Go to Railway dashboard
 2. Connect your GitHub repo
 3. Enable automatic deployments on push to `main`
@@ -558,17 +574,22 @@ railway up
 ## 6. Environment Variables Management
 
 ### For Local Development
+
 Use `.env` file (already in place)
 
 ### For GitHub Actions
+
 Add secrets in GitHub repo settings:
+
 - `RENDER_API_KEY`
 - `RAILWAY_TOKEN`
 - `FLY_API_TOKEN`
 - Any API keys needed for tests
 
 ### For Production Hosting
+
 Each platform has its own way:
+
 - **Railway**: `railway variables set KEY=value`
 - **Render**: Dashboard → Environment Variables
 - **Fly.io**: `fly secrets set KEY=value`
@@ -578,13 +599,14 @@ Each platform has its own way:
 ## Summary
 
 | Component | Local | CI | Production |
-|-----------|-------|----|-----------| 
+|-----------|-------|----|-----------|
 | Database | Docker Compose | GitHub Actions Service | Railway/Render PostgreSQL |
 | Backend | uvicorn (local) | pytest in CI | Deployed container |
 | Frontend | Vite dev server | npm build in CI | Static hosting |
 | Secrets | .env file | GitHub Secrets | Platform secrets |
 
 The recommended stack for your use case:
+
 1. **CI/CD**: GitHub Actions (free 2000 min/month)
 2. **Hosting**: Railway ($5 free credit) or Render (free tier)
 3. **Database**: Managed PostgreSQL from same provider

@@ -7,7 +7,7 @@
  * - Principle 3: Everything must be traceable
  */
 
-import { CostMethod, LotMode } from '../../types';
+import { CostMethod, LotMode, TransactionAssetRef } from '../../types';
 
 // ============================================================================
 // Core Reference Types
@@ -16,6 +16,7 @@ import { CostMethod, LotMode } from '../../types';
 /**
  * Asset reference containing both ID and display name.
  * Used throughout P&L responses for asset identification.
+ * Note: Different from TransactionAssetRef which uses (asset_id, symbol, label)
  */
 export interface AssetRef {
     id: number;
@@ -37,6 +38,13 @@ export interface CalculationConfig {
     residual_tolerance_pct: number;
     allow_negative_balances: boolean;
     account_ids?: number[];  // Filter by account IDs. Empty = all accounts
+    // Advanced settings
+    compute_residuals: boolean;
+    crypto_swap_taxable_by_default: boolean;
+    fee_taxable_by_default: boolean;
+    // Price fallback settings
+    use_price_fallback: boolean;  // Fall back to latest known price when fetch fails
+    price_staleness_window_days: number;  // Max days to consider price fresh
 }
 
 export interface CalculationVersion {
@@ -209,6 +217,7 @@ export interface AssetPnLRow {
     price_source?: string;           // e.g., "coingecko", "price_service"
     price_fetched_at?: string;       // ISO datetime when price was fetched
     price_error?: string;            // Error message if price fetch failed
+    price_loading?: boolean;         // True if price is currently being fetched
 }
 
 // ============================================================================
@@ -439,6 +448,8 @@ export interface PnLWarningItem {
     transaction_id?: number;
     unit_id?: number;  // CalculationUnit where warning occurred
     unit_label?: string;
+    asset_id?: number;  // Asset involved in the warning (for price errors)
+    details?: Record<string, unknown>;  // Additional context (transaction_date, error, etc.)
 
     // Action
     action_label?: string;
@@ -576,21 +587,27 @@ export interface OriginTransactionDetail {
     source_from_account?: string;
     source_to_account?: string;
 
-    // Base asset
+    // Base asset - nested ref (preferred) + legacy flat fields
+    linked_asset?: TransactionAssetRef | null;
     asset_id?: number;
     asset_symbol?: string;
+    source_asset_symbol?: string;
     quantity?: number;
 
-    // Pricing
+    // Pricing - nested ref (preferred) + legacy flat fields
+    price_quote_asset?: TransactionAssetRef | null;
     price?: number;
     price_quote_asset_id?: number;
     price_quote_asset_symbol?: string;
+    source_price_quote_asset_symbol?: string;
     total?: number;
 
-    // Fee
+    // Fee - nested ref (preferred) + legacy flat fields
+    fee_quote_asset?: TransactionAssetRef | null;
     fee?: number;
     fee_quote_asset_id?: number;
     fee_quote_asset_symbol?: string;
+    source_fee_quote_asset_symbol?: string;
 }
 
 export interface CalculationUnit {

@@ -1,26 +1,77 @@
 import {
     Badge, Box,
     Button, Card, Checkbox, Collapsible, Dialog, Flex,
-    Heading, Input, NativeSelect, Portal, Spinner,
-    Switch, Table, Tabs, Text
+    Heading, HStack, Input, NativeSelect, Portal, Spinner,
+    Switch, Table, Tabs, Text, Progress
 } from '@chakra-ui/react';
 import { BiTransfer } from 'react-icons/bi';
 import { RiExchangeFundsLine } from 'react-icons/ri';
 import { FaQuestion } from 'react-icons/fa';
-import { LuPencil } from 'react-icons/lu';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { LuPencil, LuUpload } from 'react-icons/lu';
+import { FiActivity, FiFileText } from 'react-icons/fi';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { API_URL, Account, Asset, Bundle, BundleSuggestion, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus } from '../types';
+import { API_URL, Account, Asset, Bundle, BundleSuggestion, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus, ValidationSummary } from '../types';
 import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
 import { AssetSelector } from './AssetSelector';
+import { AccountSelector } from './AccountSelector';
 import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
 import { TransactionEditorDialog } from './TransactionEditorDialog';
 import { BundleTransactionList } from './BundleTransactionList';
 import { BundleTable } from './BundleTable';
-import { TransactionDetailPanel } from './TransactionDetailPanel';
+import { TransactionDetailDrawer } from './TransactionDetailDrawer';
+import { TransactionFilters, TransactionFilterState, defaultFilterState } from './TransactionFilters';
+import { DataHealthCheckDrawer } from './DataHealthCheckDrawer';
 import { toaster } from './ui/toaster';
+import { Tooltip } from './ui/tooltip';
+import { AssetBadge } from './AssetBadge';
+import { AccountBadge } from './AccountBadge';
+import { getAccountSuggestions, getAssetSuggestions, getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import {
+    formatDateTimeCompact,
+    toDateTimeLocalString,
+    dateTimeLocalToISO,
+} from '../utils/dateUtils';
 
-const ITEMS_PER_PAGE = 25;
+// Types for CSV import
+interface TradesImportPreviewTransaction {
+    date_time: string | null;
+    transaction_type: string;
+    asset_ticker: string;
+    asset_label: string;
+    quantity: number | null;
+    price: number | null;
+    fee: number | null;
+    account_code: string;
+    is_fee_transaction: boolean;
+}
+
+interface TradesImportPreview {
+    filename: string;
+    transactions_count: number;
+    accounts_count: number;
+    assets_count: number;
+    fee_transactions_count: number;
+    errors: { row: number; error: string }[];
+    warnings: string[];
+    transactions: TradesImportPreviewTransaction[];
+    accounts: string[];
+    assets: string[];
+}
+
+interface TradesImportResult {
+    transactions: { created: number; skipped: number; errors: any[] };
+    raw_accounts: { created: number; skipped: number; errors: any[] };
+    raw_assets: { created: number; skipped: number; errors: any[] };
+    pending_review_count: number;
+    parse_errors: any[];
+    warnings: string[];
+    dry_run: boolean;
+    summary: { total_transactions: number; total_raw_accounts: number; total_raw_assets: number; total_errors: number };
+}
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 25;
 
 // Direction color mapping for row backgrounds
 const directionRowColors: Record<string, string> = {
@@ -57,15 +108,123 @@ const patternColors: Record<string, string> = {
     [UnitPattern.SWAP]: 'orange',
 };
 
-// Helper to format date as local datetime-local input value (avoids UTC timezone shift)
-const toLocalDateTimeString = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+// SourceInfoCell - Merged cell displaying Source Account + Source + Source Type + Source Symbol
+interface SourceInfoCellProps {
+    sourceAccount?: string;      // Raw source_account field
+    accountId?: number | null;   // Resolved account_id (to show warning if missing)
+    resolvedAccount?: Account;   // Full resolved account object
+    resolvedAccountName?: string; // Resolved account name for display
+    source: string;
+    sourceType?: string;
+    sourceSymbol?: string;
+    onClick?: () => void;
+    /** Account suggestions for quick linking */
+    accountSuggestions?: SuggestedMatch<Account>[];
+    /** Callback to accept a suggested account */
+    onAcceptSuggestion?: (accountId: number) => void;
+}
+
+const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
+    sourceAccount,
+    accountId,
+    resolvedAccount,
+    resolvedAccountName,
+    source,
+    sourceType,
+    sourceSymbol,
+    onClick,
+    accountSuggestions = [],
+    onAcceptSuggestion,
+}) => {
+    // Build the secondary line: source · type · symbol (only non-empty parts)
+    const parts = [
+        source,
+        sourceType,
+        sourceSymbol
+    ].filter(Boolean);
+    const secondaryText = parts.join(' · ');
+
+    // Determine if account is linked (resolved)
+    const isAccountLinked = accountId != null;
+
+    return (
+        <Flex
+            direction="column"
+            gap={0}
+            minW="100px"
+            maxW="180px"
+        >
+            {/* Primary line: Account - show resolved badge or warning with source */}
+            {isAccountLinked ? (
+                <AccountBadge
+                    account={resolvedAccount}
+                    accountId={accountId}
+                    accountName={resolvedAccountName}
+                    size="sm"
+                    maxLength={18}
+                    onClick={onClick}
+                />
+            ) : (
+                <Flex direction="column" gap={1}>
+                    <Text
+                        fontSize="8px"
+                        color="orange.500"
+                        fontWeight="bold"
+                        overflow="hidden"
+                        textOverflow="ellipsis"
+                        whiteSpace="nowrap"
+                        cursor="pointer"
+                        onClick={onClick}
+                        title={sourceAccount ? `Unlinked: ${sourceAccount}` : 'No account linked'}
+                    >
+                        ⚠ {sourceAccount || 'Link'}
+                    </Text>
+                    {/* Show compact suggestion chips for unlinked accounts */}
+                    {accountSuggestions.length > 0 && (
+                        <HStack gap={1} flexWrap="wrap">
+                            {accountSuggestions.slice(0, 2).map((s, idx) => (
+                                <Tooltip
+                                    key={idx}
+                                    content={`${formatConfidence(s.confidence)} match - Click to link`}
+                                    openDelay={100}
+                                >
+                                    <Badge
+                                        size="xs"
+                                        colorPalette={getConfidenceColor(s.confidence)}
+                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                        cursor="pointer"
+                                        fontSize="7px"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onAcceptSuggestion?.(s.item.id);
+                                        }}
+                                    >
+                                        {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}
+                                        {s.confidence >= 0.9 && ' ✓'}
+                                    </Badge>
+                                </Tooltip>
+                            ))}
+                        </HStack>
+                    )}
+                </Flex>
+            )}
+            {/* Secondary line: source · type · symbol */}
+            <Text
+                fontSize="7px"
+                color="gray.500"
+                overflow="hidden"
+                textOverflow="ellipsis"
+                whiteSpace="nowrap"
+                title={secondaryText}
+                mt="1px"
+            >
+                {secondaryText || '-'}
+            </Text>
+        </Flex>
+    );
 };
+
+// Date formatting utilities imported from utils/dateUtils
 
 // Props interface for configurable behavior
 export interface TransactionsTableProps {
@@ -100,6 +259,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const queryClient = useQueryClient();
     const [bundles, setBundles] = useState<Bundle[]>([]);
     const [suggestions, setSuggestions] = useState<BundleSuggestion[]>([]);
+    const [suggestionTaxabilityOverrides, setSuggestionTaxabilityOverrides] = useState<Record<number, TaxabilityStatus>>({});
     const [assets, setAssets] = useState<Asset[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     // Cell-level editing: "txId:field" format, e.g., "123:account"
@@ -108,16 +268,27 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const editInputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
     const editValuesRef = useRef<Partial<Transaction>>({});
     const escapePressedRef = useRef(false);
-    const [workflowFilter, setWorkflowFilter] = useState<string>(defaultWorkflowFilter);
-    const [sourceFilter, setSourceFilter] = useState<string>('');
-    const [accountFilter, setAccountFilter] = useState<string>('');
+    // New unified filter state
+    const [filters, setFilters] = useState<TransactionFilterState>(() => ({
+        ...defaultFilterState,
+        reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : [],
+    }));
+    // Pagination items per page
+    const [itemsPerPage, setItemsPerPage] = useState<number>(DEFAULT_PAGE_SIZE);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [showBundleDialog, setShowBundleDialog] = useState(false);
     const [bundleLabel, setBundleLabel] = useState('');
-    const [expandedRow, setExpandedRow] = useState<number | null>(null);
+    // Transaction detail drawer state (replaces expandedRow)
+    const [drawerTransactionId, setDrawerTransactionId] = useState<number | null>(null);
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [bundlesExpanded, setBundlesExpanded] = useState(true);
     const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
     const [viewMode, setViewMode] = useState<'transactions' | 'bundles'>('transactions');
+
+    // Data Health Check drawer state
+    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
+    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
 
     // Bulk action states
     const [bulkActionLoading, setBulkActionLoading] = useState(false);
@@ -129,21 +300,85 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
 
+    // Deletion impact check
+    const [deletionImpact, setDeletionImpact] = useState<Record<string, number>>({});
+    const [isImpactLoading, setIsImpactLoading] = useState(false);
+
+    const fetchDeletionImpact = async (ids: number[]) => {
+        setIsImpactLoading(true);
+        setDeletionImpact({});
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/check-linked`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transaction_ids: ids })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setDeletionImpact(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch deletion impact:', err);
+        } finally {
+            setIsImpactLoading(false);
+        }
+    };
+
     // Transaction editor dialog state
     const [showEditorDialog, setShowEditorDialog] = useState(false);
     const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
+
+    // CSV Import state
+    const [showImportDialog, setShowImportDialog] = useState(false);
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [importPreview, setImportPreview] = useState<TradesImportPreview | null>(null);
+    const [importResult, setImportResult] = useState<TradesImportResult | null>(null);
+    const [importLoading, setImportLoading] = useState(false);
+    const [importStep, setImportStep] = useState<'select' | 'preview' | 'result'>('select');
+    const [dryRunMode, setDryRunMode] = useState(true);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
 
     // TanStack Query for transactions - filters are part of the query key
     const { data: transactions = [], isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
-        queryKey: ['transactions', workflowFilter, sourceFilter, accountFilter],
+        queryKey: ['transactions', filters],
         queryFn: async () => {
             const params = new URLSearchParams();
-            if (workflowFilter) params.append('review_status', workflowFilter);
-            if (sourceFilter) params.append('source', sourceFilter);
-            if (accountFilter) params.append('account_id', accountFilter);
+            // Apply review status filter (support multiple via comma-separated)
+            if (filters.reviewStatus.length > 0) {
+                // If only one, use it directly; otherwise API doesn't support multiple review_status currently
+                // So we just take the first one for now (or could send comma-separated if backend supports)
+                params.append('review_status', filters.reviewStatus[0]);
+            }
+            if (filters.taxability.length > 0) {
+                params.append('taxability', filters.taxability.join(','));
+            }
+            if (filters.sources.length > 0) {
+                params.append('source', filters.sources.join(','));
+            }
+            if (filters.accountIds.length > 0) {
+                params.append('account_id', filters.accountIds.join(','));
+            }
+            if (filters.assetIds.length > 0) {
+                params.append('asset_id', filters.assetIds.join(','));
+            }
+            if (filters.categoryIds.length > 0) {
+                params.append('category_id', filters.categoryIds.join(','));
+            }
+            if (filters.transactionTypes.length > 0) {
+                params.append('transaction_type', filters.transactionTypes.join(','));
+            }
+            if (filters.directions.length > 0) {
+                params.append('direction', filters.directions.join(','));
+            }
+            if (filters.dateFrom) {
+                params.append('date_from', filters.dateFrom);
+            }
+            if (filters.dateTo) {
+                params.append('date_to', filters.dateTo);
+            }
             const response = await fetch(`${API_URL}/transactions?${params}`);
             if (!response.ok) throw new Error('Failed to fetch transactions');
             return response.json() as Promise<Transaction[]>;
@@ -164,7 +399,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     }, [showBundles, showSuggestions]);
 
     // Reset to first page when filters change
-    useEffect(() => { setCurrentPage(1); }, [workflowFilter, sourceFilter, accountFilter]);
+    useEffect(() => { setCurrentPage(1); }, [filters]);
 
     // Keep editValuesRef in sync with editValues state
     useEffect(() => { editValuesRef.current = editValues; }, [editValues]);
@@ -217,21 +452,48 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         }
     };
 
-    const acceptSuggestion = async (suggestion: BundleSuggestion) => {
+    // Fetch validation summary for Data Health Check badge
+    const fetchValidationSummary = async () => {
         try {
+            const response = await fetch(`${API_URL}/transactions/data-health-check`);
+            if (response.ok) {
+                const data: ValidationSummary = await response.json();
+                setValidationSummary(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch validation summary:', err);
+        }
+    };
+
+    // Fetch validation summary on mount and when data changes
+    useEffect(() => {
+        fetchValidationSummary();
+    }, []);
+
+    const acceptSuggestion = async (suggestion: BundleSuggestion, idx: number) => {
+        try {
+            // Use override if set, otherwise use the suggestion's taxability
+            const taxabilityOverride = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
             const response = await fetch(`${API_URL}/bundles/accept-suggestion`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     pattern: suggestion.pattern,
-                    transaction_ids: suggestion.transaction_ids,
+                    transaction_ids: suggestion.transactions.map(t => t.id),
                     label: suggestion.label,
+                    taxability_override: taxabilityOverride,
                 }),
             });
             if (response.ok) {
                 queryClient.invalidateQueries({ queryKey: ['transactions'] });
                 await fetchBundles();
                 await fetchSuggestions();
+                // Clear override for this suggestion
+                setSuggestionTaxabilityOverrides(prev => {
+                    const newOverrides = { ...prev };
+                    delete newOverrides[idx];
+                    return newOverrides;
+                });
                 onDataChange?.();
             }
         } catch (err) {
@@ -318,15 +580,17 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     };
 
     // Pagination calculations
-    const totalPages = Math.ceil(transactions.length / ITEMS_PER_PAGE);
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const totalPages = Math.ceil(transactions.length / itemsPerPage);
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
     const paginatedTransactions = transactions.slice(startIndex, endIndex);
 
     const goToPage = (page: number) => {
         if (page >= 1 && page <= totalPages) {
             setCurrentPage(page);
-            setExpandedRow(null); // Close any expanded row when changing pages
+            // Close drawer when changing pages
+            setIsDrawerOpen(false);
+            setDrawerTransactionId(null);
         }
     };
 
@@ -421,10 +685,16 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         }
 
         try {
+            // Convert date_time to ISO format if it's a local datetime string
+            const payload = { ...values };
+            if (typeof payload.date_time === 'string' && payload.date_time && !payload.date_time.includes('Z')) {
+                payload.date_time = dateTimeLocalToISO(payload.date_time);
+            }
+
             const response = await fetch(`${API_URL}/transactions/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(values)
+                body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error('Failed to update transaction');
             queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -604,14 +874,109 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         }
     };
 
-    const formatDateTime = (dt: string | number) => {
-        const date = typeof dt === 'number' ? new Date(dt * 1000) : new Date(dt);
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const mins = String(date.getMinutes()).padStart(2, '0');
-        return `${month}/${day} ${hours}:${mins}`;
+    // CSV Import handlers
+    const openImportDialog = () => {
+        setShowImportDialog(true);
+        setImportStep('select');
+        setImportFile(null);
+        setImportPreview(null);
+        setImportResult(null);
+        setDryRunMode(true);
     };
+
+    const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setImportFile(file);
+        }
+    };
+
+    const handleFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files?.[0];
+        if (file && file.name.endsWith('.csv')) {
+            setImportFile(file);
+        } else {
+            toaster.error({ title: 'Invalid file', description: 'Please drop a CSV file' });
+        }
+    };
+
+    const previewImport = async () => {
+        if (!importFile) return;
+        setImportLoading(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', importFile);
+
+            const response = await fetch(`${API_URL}/transactions/import-csv/preview`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Preview failed');
+            }
+
+            const data: TradesImportPreview = await response.json();
+            setImportPreview(data);
+            setImportStep('preview');
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to preview CSV' });
+        } finally {
+            setImportLoading(false);
+        }
+    };
+
+    const executeImport = async () => {
+        if (!importFile) return;
+        setImportLoading(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', importFile);
+
+            const params = new URLSearchParams();
+            params.append('dry_run', String(dryRunMode));
+
+            const response = await fetch(`${API_URL}/transactions/import-csv?${params}`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Import failed');
+            }
+
+            const data: TradesImportResult = await response.json();
+            setImportResult(data);
+            setImportStep('result');
+
+            // Refresh transactions list if not a dry run
+            if (!dryRunMode) {
+                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                fetchValidationSummary();
+                setHealthCheckRefreshTrigger(prev => prev + 1);
+                onDataChange?.();
+            }
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to import CSV' });
+        } finally {
+            setImportLoading(false);
+        }
+    };
+
+    const resetImportDialog = () => {
+        setImportStep('select');
+        setImportFile(null);
+        setImportPreview(null);
+        setImportResult(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
+    // Using formatDateTimeCompact from dateUtils for consistent date formatting
 
     const getRowBgColor = (tx: Transaction) => {
         if (selectedIds.has(tx.id)) return 'blue.100';
@@ -647,9 +1012,17 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const allCurrentPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
 
     const handleRefresh = () => {
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-        if (showBundles) fetchBundles();
+        // Force refetch the transactions query directly
+        refetchTransactions();
+        // Always refresh bundles in "All" tab (showBundles=true means we're in All tab)
+        if (showBundles) {
+            fetchBundles();
+            fetchSuggestions();
+        }
         if (showSuggestions) fetchSuggestions();
+        // Refresh validation summary for Data Health Check
+        fetchValidationSummary();
+        setHealthCheckRefreshTrigger(prev => prev + 1);
     };
 
     return (
@@ -665,11 +1038,47 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             📦 Create Bundle ({selectedIds.size})
                         </Button>
                     )}
+                    {/* Data Health Check Button */}
+                    <Tooltip content="Check data completeness for P&L calculations">
+                        <Button
+                            onClick={() => setIsHealthCheckOpen(true)}
+                            variant="outline"
+                            colorPalette={validationSummary?.has_issues ? 'orange' : 'green'}
+                        >
+                            <FiActivity />
+                            {validationSummary?.has_issues ? (
+                                <Badge colorPalette="orange" size="sm" ml={1}>
+                                    {validationSummary.total_issues}
+                                </Badge>
+                            ) : (
+                                <Text ml={1} fontSize="sm">✓</Text>
+                            )}
+                        </Button>
+                    </Tooltip>
                     <Button onClick={handleRefresh} variant="outline">
                         🔄 Refresh
                     </Button>
                 </Flex>
             </Flex>
+
+            {/* Data Health Check Drawer */}
+            <DataHealthCheckDrawer
+                isOpen={isHealthCheckOpen}
+                onClose={() => setIsHealthCheckOpen(false)}
+                refreshTrigger={healthCheckRefreshTrigger}
+                assets={assets}
+                accounts={accounts}
+                onAssetsUpdated={fetchAssets}
+                onAccountsUpdated={fetchAccounts}
+                onNavigateToPendingTransactions={() => {
+                    setFilters(prev => ({ ...prev, reviewStatus: ['pending'] }));
+                    setIsHealthCheckOpen(false);
+                }}
+                onNavigateToBundleSuggestions={() => {
+                    setViewMode('bundles');
+                    setIsHealthCheckOpen(false);
+                }}
+            />
 
             {/* Standalone Suggestions Section - only when showSuggestions but not showBundles */}
             {showSuggestions && !showBundles && (
@@ -694,48 +1103,84 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                 <Text color="teal.600" fontSize="sm">No bundle suggestions available. Add more transactions to get pattern-based suggestions.</Text>
                             ) : (
                                 <Flex gap={3} flexWrap="wrap">
-                                    {suggestions.map((suggestion, idx) => (
-                                        <Card.Root key={idx} size="sm" width="320px" bg="white">
-                                            <Card.Body p={3}>
-                                                <Flex justify="space-between" align="center" mb={2}>
-                                                    <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
-                                                        {suggestion.pattern}
-                                                    </Badge>
-                                                    <Text fontSize="xs" color="gray.500">
-                                                        {Math.round(suggestion.confidence * 100)}% confidence
-                                                    </Text>
-                                                </Flex>
-                                                <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
-                                                <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
-                                                {suggestion.total_quantity && (
-                                                    <Text fontSize="xs" mt={1}>
-                                                        {suggestion.total_quantity} {suggestion.asset_symbol}
-                                                    </Text>
-                                                )}
-                                                {/* Expandable Transaction List */}
-                                                <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                    <Text fontSize="xs" color="gray.500" mb={1}>
-                                                        {suggestion.transaction_ids.length} transaction{suggestion.transaction_ids.length !== 1 ? 's' : ''}:
-                                                    </Text>
-                                                    <BundleTransactionList
-                                                        transactions={suggestion.transactions || []}
-                                                        maxVisible={3}
-                                                        colorScheme="teal"
-                                                    />
-                                                </Box>
-                                                <Flex mt={3} gap={2}>
-                                                    <Button
-                                                        size="xs"
-                                                        colorPalette="green"
-                                                        onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion); }}
-                                                    >
-                                                        ✓ Create Bundle
-                                                    </Button>
-                                                    <Button size="xs" variant="ghost">Dismiss</Button>
-                                                </Flex>
-                                            </Card.Body>
-                                        </Card.Root>
-                                    ))}
+                                    {suggestions.map((suggestion, idx) => {
+                                        const currentTaxability = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
+                                        return (
+                                            <Card.Root key={idx} size="sm" width="320px" bg="white">
+                                                <Card.Body p={3}>
+                                                    <Flex justify="space-between" align="center" mb={2}>
+                                                        <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
+                                                            {suggestion.pattern}
+                                                        </Badge>
+                                                        <Text fontSize="xs" color="gray.500">
+                                                            {Math.round(suggestion.confidence * 100)}% confidence
+                                                        </Text>
+                                                    </Flex>
+                                                    <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
+                                                    <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
+                                                    {suggestion.total_quantity && (
+                                                        <Text fontSize="xs" mt={1}>
+                                                            {suggestion.total_quantity} {suggestion.asset_symbol}
+                                                        </Text>
+                                                    )}
+                                                    {/* Taxability Selector */}
+                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                        <Flex align="center" gap={2}>
+                                                            <Text fontSize="xs" color="gray.500">Taxability:</Text>
+                                                            <NativeSelect.Root size="sm" width="100px">
+                                                                <NativeSelect.Field
+                                                                    value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
+                                                                    onChange={e => {
+                                                                        setSuggestionTaxabilityOverrides(prev => ({
+                                                                            ...prev,
+                                                                            [idx]: e.target.value as TaxabilityStatus,
+                                                                        }));
+                                                                    }}
+                                                                    onClick={e => e.stopPropagation()}
+                                                                    style={{
+                                                                        fontSize: '10px',
+                                                                        padding: '2px 4px',
+                                                                        backgroundColor: currentTaxability === TaxabilityStatusEnum.TAXABLE ? '#FED7AA' :
+                                                                            currentTaxability === TaxabilityStatusEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
+                                                                        borderRadius: '4px',
+                                                                    }}
+                                                                >
+                                                                    <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
+                                                                    <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
+                                                                    <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
+                                                                </NativeSelect.Field>
+                                                            </NativeSelect.Root>
+                                                        </Flex>
+                                                    </Box>
+                                                    {/* Expandable Transaction List */}
+                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                        <Text fontSize="xs" color="gray.500" mb={1}>
+                                                            {suggestion.transactions.length} transaction{suggestion.transactions.length !== 1 ? 's' : ''}:
+                                                        </Text>
+                                                        <BundleTransactionList
+                                                            transactions={suggestion.transactions}
+                                                            maxVisible={3}
+                                                            colorScheme="teal"
+                                                            onTransactionClick={(txId) => {
+                                                                setDrawerTransactionId(txId);
+                                                                setIsDrawerOpen(true);
+                                                            }}
+                                                        />
+                                                    </Box>
+                                                    <Flex mt={3} gap={2}>
+                                                        <Button
+                                                            size="xs"
+                                                            colorPalette="green"
+                                                            onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion, idx); }}
+                                                        >
+                                                            ✓ Create Bundle
+                                                        </Button>
+                                                        <Button size="xs" variant="ghost">Dismiss</Button>
+                                                    </Flex>
+                                                </Card.Body>
+                                            </Card.Root>
+                                        );
+                                    })}
                                 </Flex>
                             )}
                         </Box>
@@ -779,7 +1224,10 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                 size="sm"
                                 colorPalette="red"
                                 variant="outline"
-                                onClick={() => setShowBulkDeleteDialog(true)}
+                                onClick={() => {
+                                    fetchDeletionImpact(Array.from(selectedIds));
+                                    setShowBulkDeleteDialog(true);
+                                }}
                             >
                                 🗑️ Delete
                             </Button>
@@ -826,48 +1274,84 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                         <Text color="teal.600" fontSize="sm">No bundle suggestions available. Add more transactions to get pattern-based suggestions.</Text>
                                     ) : (
                                         <Flex gap={3} flexWrap="wrap">
-                                            {suggestions.map((suggestion, idx) => (
-                                                <Card.Root key={idx} size="sm" width="320px" bg="white">
-                                                    <Card.Body p={3}>
-                                                        <Flex justify="space-between" align="center" mb={2}>
-                                                            <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
-                                                                {suggestion.pattern}
-                                                            </Badge>
-                                                            <Text fontSize="xs" color="gray.500">
-                                                                {Math.round(suggestion.confidence * 100)}% confidence
-                                                            </Text>
-                                                        </Flex>
-                                                        <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
-                                                        <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
-                                                        {suggestion.total_quantity && (
-                                                            <Text fontSize="xs" mt={1}>
-                                                                {suggestion.total_quantity} {suggestion.asset_symbol}
-                                                            </Text>
-                                                        )}
-                                                        {/* Expandable Transaction List */}
-                                                        <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                            <Text fontSize="xs" color="gray.500" mb={1}>
-                                                                {suggestion.transaction_ids.length} transaction{suggestion.transaction_ids.length !== 1 ? 's' : ''}:
-                                                            </Text>
-                                                            <BundleTransactionList
-                                                                transactions={suggestion.transactions || []}
-                                                                maxVisible={3}
-                                                                colorScheme="teal"
-                                                            />
-                                                        </Box>
-                                                        <Flex mt={3} gap={2}>
-                                                            <Button
-                                                                size="xs"
-                                                                colorPalette="green"
-                                                                onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion); }}
-                                                            >
-                                                                ✓ Create Bundle
-                                                            </Button>
-                                                            <Button size="xs" variant="ghost">Dismiss</Button>
-                                                        </Flex>
-                                                    </Card.Body>
-                                                </Card.Root>
-                                            ))}
+                                            {suggestions.map((suggestion, idx) => {
+                                                const currentTaxability = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
+                                                return (
+                                                    <Card.Root key={idx} size="sm" width="320px" bg="white">
+                                                        <Card.Body p={3}>
+                                                            <Flex justify="space-between" align="center" mb={2}>
+                                                                <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
+                                                                    {suggestion.pattern}
+                                                                </Badge>
+                                                                <Text fontSize="xs" color="gray.500">
+                                                                    {Math.round(suggestion.confidence * 100)}% confidence
+                                                                </Text>
+                                                            </Flex>
+                                                            <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
+                                                            <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
+                                                            {suggestion.total_quantity && (
+                                                                <Text fontSize="xs" mt={1}>
+                                                                    {suggestion.total_quantity} {suggestion.asset_symbol}
+                                                                </Text>
+                                                            )}
+                                                            {/* Taxability Selector */}
+                                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                                <Flex align="center" gap={2}>
+                                                                    <Text fontSize="xs" color="gray.500">Taxability:</Text>
+                                                                    <NativeSelect.Root size="sm" width="100px">
+                                                                        <NativeSelect.Field
+                                                                            value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
+                                                                            onChange={e => {
+                                                                                setSuggestionTaxabilityOverrides(prev => ({
+                                                                                    ...prev,
+                                                                                    [idx]: e.target.value as TaxabilityStatus,
+                                                                                }));
+                                                                            }}
+                                                                            onClick={e => e.stopPropagation()}
+                                                                            style={{
+                                                                                fontSize: '10px',
+                                                                                padding: '2px 4px',
+                                                                                backgroundColor: currentTaxability === TaxabilityStatusEnum.TAXABLE ? '#FED7AA' :
+                                                                                    currentTaxability === TaxabilityStatusEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
+                                                                                borderRadius: '4px',
+                                                                            }}
+                                                                        >
+                                                                            <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
+                                                                            <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
+                                                                            <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
+                                                                        </NativeSelect.Field>
+                                                                    </NativeSelect.Root>
+                                                                </Flex>
+                                                            </Box>
+                                                            {/* Expandable Transaction List */}
+                                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                                <Text fontSize="xs" color="gray.500" mb={1}>
+                                                                    {suggestion.transactions.length} transaction{suggestion.transactions.length !== 1 ? 's' : ''}:
+                                                                </Text>
+                                                                <BundleTransactionList
+                                                                    transactions={suggestion.transactions}
+                                                                    maxVisible={3}
+                                                                    colorScheme="teal"
+                                                                    onTransactionClick={(txId) => {
+                                                                        setDrawerTransactionId(txId);
+                                                                        setIsDrawerOpen(true);
+                                                                    }}
+                                                                />
+                                                            </Box>
+                                                            <Flex mt={3} gap={2}>
+                                                                <Button
+                                                                    size="xs"
+                                                                    colorPalette="green"
+                                                                    onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion, idx); }}
+                                                                >
+                                                                    ✓ Create Bundle
+                                                                </Button>
+                                                                <Button size="xs" variant="ghost">Dismiss</Button>
+                                                            </Flex>
+                                                        </Card.Body>
+                                                    </Card.Root>
+                                                );
+                                            })}
                                         </Flex>
                                     )}
                                 </Box>
@@ -881,6 +1365,10 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             onBundleDelete={handleBundleDelete}
                             onRemoveTransaction={handleRemoveTransactionFromBundle}
                             onRefresh={fetchBundles}
+                            onTransactionClick={(txId) => {
+                                setDrawerTransactionId(txId);
+                                setIsDrawerOpen(true);
+                            }}
                         />
                     </Tabs.Content>
                 </Tabs.Root>
@@ -890,98 +1378,52 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             {(!showBundles || viewMode === 'transactions') && (
                 <>
                     {showFilters && (
-                        <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                            <Flex align="center" gap={2}>
-                                <Text fontWeight="medium" fontSize="sm">Status:</Text>
-                                <NativeSelect.Root size="sm" width="auto">
-                                    <NativeSelect.Field
-                                        value={workflowFilter}
-                                        onChange={e => setWorkflowFilter(e.target.value)}
-                                    >
-                                        <option value="">All</option>
-                                        <option value="pending">📥 Pending</option>
-                                        <option value="valid">✅ Valid</option>
-                                        <option value="invalid">🚫 Invalid</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Flex>
-                            <Flex align="center" gap={2}>
-                                <Text fontWeight="medium" fontSize="sm">Source:</Text>
-                                <NativeSelect.Root size="sm" width="auto">
-                                    <NativeSelect.Field
-                                        value={sourceFilter}
-                                        onChange={e => setSourceFilter(e.target.value)}
-                                    >
-                                        <option value="">All Sources</option>
-                                        <option value="binance">Binance</option>
-                                        <option value="mexc">MEXC</option>
-                                        <option value="coinbase">Coinbase</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Flex>
-                            <Flex align="center" gap={2}>
-                                <Text fontWeight="medium" fontSize="sm">Account:</Text>
-                                <NativeSelect.Root size="sm" width="auto">
-                                    <NativeSelect.Field
-                                        value={accountFilter}
-                                        onChange={e => setAccountFilter(e.target.value)}
-                                    >
-                                        <option value="">All Accounts</option>
-                                        <option value="binance">Binance</option>
-                                        <option value="mexc">MEXC</option>
-                                        <option value="okx">OKX</option>
-                                        <option value="coinbase">Coinbase</option>
-                                        <option value="onchain">Onchain</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Flex>
-                            {(workflowFilter || sourceFilter || accountFilter) && (
-                                <Button size="sm" variant="outline" onClick={() => { setWorkflowFilter(''); setSourceFilter(''); setAccountFilter(''); }}>
-                                    Clear Filters
-                                </Button>
-                            )}
-
-                            {/* Legend */}
-                            <Flex ml="auto" gap={3} align="center">
-                                <Text fontSize="xs" color="gray.500">Dir:</Text>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="green.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↓In</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="red.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↑Out</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
-                                    <Text fontSize="xs">↔Int</Text>
-                                </Flex>
-                                <Text fontSize="xs" color="gray.500" ml={2}>Workflow:</Text>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
-                                    <Text fontSize="xs">Pending</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="green.500" borderRadius="sm" />
-                                    <Text fontSize="xs">Reviewed</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={1} h={3} bg="gray.400" borderRadius="sm" />
-                                    <Text fontSize="xs">Excluded</Text>
-                                </Flex>
-                                <Flex align="center" gap={1}>
-                                    <Box w={3} h={3} bg="orange.100" borderRadius="sm" />
-                                    <Text fontSize="xs">No Asset</Text>
-                                </Flex>
-                            </Flex>
-                        </Flex>
+                        <TransactionFilters
+                            filters={filters}
+                            onChange={setFilters}
+                            onClear={() => setFilters({ ...defaultFilterState, reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : [] })}
+                        />
                     )}
+
+                    {/* Legend */}
+                    <Flex mb={4} gap={3} align="center" flexWrap="wrap">
+                        <Text fontSize="xs" color="gray.500">Dir:</Text>
+                        <Flex align="center" gap={1}>
+                            <Box w={3} h={3} bg="green.100" borderRadius="sm" />
+                            <Text fontSize="xs">↓In</Text>
+                        </Flex>
+                        <Flex align="center" gap={1}>
+                            <Box w={3} h={3} bg="red.100" borderRadius="sm" />
+                            <Text fontSize="xs">↑Out</Text>
+                        </Flex>
+                        <Flex align="center" gap={1}>
+                            <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
+                            <Text fontSize="xs">↔Int</Text>
+                        </Flex>
+                        <Text fontSize="xs" color="gray.500" ml={2}>Workflow:</Text>
+                        <Flex align="center" gap={1}>
+                            <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
+                            <Text fontSize="xs">Pending</Text>
+                        </Flex>
+                        <Flex align="center" gap={1}>
+                            <Box w={1} h={3} bg="green.500" borderRadius="sm" />
+                            <Text fontSize="xs">Reviewed</Text>
+                        </Flex>
+                        <Flex align="center" gap={1}>
+                            <Box w={1} h={3} bg="gray.400" borderRadius="sm" />
+                            <Text fontSize="xs">Excluded</Text>
+                        </Flex>
+                        <Flex align="center" gap={1}>
+                            <Box w={3} h={3} bg="orange.100" borderRadius="sm" />
+                            <Text fontSize="xs">No Asset</Text>
+                        </Flex>
+                    </Flex>
 
                     <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" css={{ fontSize: '8px' }} position="relative">
                         <Table.Root size="sm" variant="line">
                             <Table.Header css={{ fontSize: '9px' }}>
                                 <Table.Row>
-                                    <Table.ColumnHeader position="sticky" left={0} bg="gray.100" zIndex={10} minW="30px" borderRight="2px solid" borderColor="gray.300">
+                                    <Table.ColumnHeader position="sticky" left={0} bg="gray.100" zIndex={10} minW="50px" borderRight="2px solid" borderColor="gray.300">
                                         <Checkbox.Root
                                             checked={allCurrentPageSelected}
                                             onCheckedChange={toggleSelectAll}
@@ -990,15 +1432,11 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                             <Checkbox.Control />
                                         </Checkbox.Root>
                                     </Table.ColumnHeader>
-                                    <Table.ColumnHeader minW="20px"></Table.ColumnHeader>
                                     <Table.ColumnHeader>ID</Table.ColumnHeader>
                                     <Table.ColumnHeader>Date/Time</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Account</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Src Type</Table.ColumnHeader>
+                                    <Table.ColumnHeader minW="100px">Source Info</Table.ColumnHeader>
                                     <Table.ColumnHeader>Dir</Table.ColumnHeader>
                                     <Table.ColumnHeader>Type</Table.ColumnHeader>
-                                    <Table.ColumnHeader maxW="60px">Src Sym</Table.ColumnHeader>
                                     <Table.ColumnHeader>Asset</Table.ColumnHeader>
                                     <Table.ColumnHeader>Qty</Table.ColumnHeader>
                                     <Table.ColumnHeader>Price</Table.ColumnHeader>
@@ -1014,7 +1452,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             <Table.Body>
                                 {paginatedTransactions.length === 0 ? (
                                     <Table.Row>
-                                        <Table.Cell colSpan={20}>
+                                        <Table.Cell colSpan={17}>
                                             <Text textAlign="center" py={8} color="gray.500">
                                                 No transactions found
                                             </Text>
@@ -1025,19 +1463,32 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                         <React.Fragment key={tx.id}>
                                             <Table.Row bg={getRowBgColor(tx)} _hover={{ bg: 'gray.50' }} borderLeft="4px solid" borderLeftColor={getRowBorderColor(tx)}>
                                                 <Table.Cell position="sticky" left={0} bg={getRowBgColor(tx)} zIndex={5} borderRight="2px solid" borderColor="gray.300">
-                                                    <Checkbox.Root
-                                                        checked={selectedIds.has(tx.id)}
-                                                        onCheckedChange={() => toggleSelection(tx.id)}
-                                                    >
-                                                        <Checkbox.HiddenInput />
-                                                        <Checkbox.Control />
-                                                    </Checkbox.Root>
-                                                </Table.Cell>
-                                                {/* Arrow for details */}
-                                                <Table.Cell py={1}>
-                                                    <Button size="xs" variant="ghost" onClick={() => setExpandedRow(expandedRow === tx.id ? null : tx.id)} p={0} minW="16px" h="16px">
-                                                        {expandedRow === tx.id ? '▲' : '▼'}
-                                                    </Button>
+                                                    <Flex gap={1} align="center">
+                                                        <Checkbox.Root
+                                                            checked={selectedIds.has(tx.id)}
+                                                            onCheckedChange={() => toggleSelection(tx.id)}
+                                                        >
+                                                            <Checkbox.HiddenInput />
+                                                            <Checkbox.Control />
+                                                        </Checkbox.Root>
+                                                        {/* Details button - opens drawer */}
+                                                        <Button
+                                                            size="xs"
+                                                            variant="ghost"
+                                                            onClick={() => {
+                                                                setDrawerTransactionId(tx.id);
+                                                                setIsDrawerOpen(true);
+                                                            }}
+                                                            p={0}
+                                                            minW="16px"
+                                                            h="16px"
+                                                            color="gray.400"
+                                                            _hover={{ color: 'blue.500' }}
+                                                            title="View transaction details"
+                                                        >
+                                                            <FiFileText size={12} />
+                                                        </Button>
+                                                    </Flex>
                                                 </Table.Cell>
                                                 <Table.Cell py={1}>
                                                     <Text fontSize="8px" fontFamily="mono" color="gray.500">{tx.id}</Text>
@@ -1049,9 +1500,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             ref={editInputRef as React.RefObject<HTMLInputElement>}
                                                             size="xs"
                                                             type="datetime-local"
-                                                            value={typeof editValues.date_time === 'number'
-                                                                ? toLocalDateTimeString(new Date(editValues.date_time * 1000))
-                                                                : editValues.date_time ? toLocalDateTimeString(new Date(editValues.date_time)) : ''}
+                                                            value={toDateTimeLocalString(editValues.date_time)}
                                                             onChange={e => updateEditValues({ date_time: e.target.value })}
                                                             onKeyDown={handleEditKeyDown}
                                                             onBlur={saveAndClose}
@@ -1060,94 +1509,106 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             px={1}
                                                         />
                                                     ) : (
-                                                        <Text fontSize="8px">{formatDateTime(tx.date_time)}</Text>
+                                                        <Text fontSize="8px">{formatDateTimeCompact(tx.date_time)}</Text>
                                                     )}
                                                 </Table.Cell>
-                                                {/* Account column - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'account_id') && startCellEdit(tx, 'account_id')} cursor="pointer">
+                                                {/* Source Info - merged column with Source Account, Source, Source Type, Source Symbol */}
+                                                <Table.Cell py={1} cursor="pointer">
                                                     {isEditingCell(tx.id, 'account_id') ? (
-                                                        <NativeSelect.Root size="sm" width="80px">
-                                                            <NativeSelect.Field
-                                                                value={editValues.account_id ?? tx.account_id ?? ''}
-                                                                onChange={async e => {
-                                                                    const newAccountId = e.target.value ? parseInt(e.target.value) : null;
-                                                                    try {
-                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                            method: 'PATCH',
-                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                            body: JSON.stringify({
-                                                                                account_id: newAccountId
-                                                                            })
-                                                                        });
-                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
-                                                                    } catch (err) {
-                                                                        toaster.error({ title: 'Error', description: 'Failed to save account' });
-                                                                    }
-                                                                }}
-                                                                onBlur={() => {
+                                                        <Flex direction="column" gap={1} minW="120px">
+                                                            <AccountSelector
+                                                                value={editValues.account_id ?? null}
+                                                                onChange={(accountId) => {
                                                                     if (!escapePressedRef.current) {
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
+                                                                        updateEditValues({ account_id: accountId ?? undefined });
+                                                                        saveAndClose();
                                                                     }
                                                                 }}
-                                                                style={{ fontSize: '8px', padding: '2px' }}
-                                                                autoFocus
-                                                            >
-                                                                <option value="">None</option>
-                                                                {accounts.map(acc => (
-                                                                    <option key={acc.id} value={acc.id}>{acc.name}</option>
-                                                                ))}
-                                                            </NativeSelect.Field>
-                                                        </NativeSelect.Root>
+                                                                accounts={accounts}
+                                                                onAccountCreated={fetchAccounts}
+                                                                defaultName={tx.source_account || ''}
+                                                                placeholder="Link account..."
+                                                                rawAccountSource={tx.source}
+                                                                rawAccountLabel={tx.source_account}
+                                                            />
+                                                            {/* Show asset suggestions below the selector when editing */}
+                                                            {tx.source_account && !tx.account_id && (() => {
+                                                                const suggestions = getAccountSuggestions(tx.source_account, accounts);
+                                                                return suggestions.length > 0 ? (
+                                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                                        <Text fontSize="7px" color="gray.500">Suggestions:</Text>
+                                                                        {suggestions.map((s, idx) => (
+                                                                            <Tooltip
+                                                                                key={idx}
+                                                                                content={`${formatConfidence(s.confidence)} match`}
+                                                                                openDelay={100}
+                                                                            >
+                                                                                <Badge
+                                                                                    size="xs"
+                                                                                    colorPalette={getConfidenceColor(s.confidence)}
+                                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                                    cursor="pointer"
+                                                                                    fontSize="7px"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        updateEditValues({ account_id: s.item.id });
+                                                                                        saveAndClose();
+                                                                                    }}
+                                                                                >
+                                                                                    {s.item.name.slice(0, 12)}{s.item.name.length > 12 ? '…' : ''}
+                                                                                    {s.confidence >= 0.9 && ' ✓'}
+                                                                                </Badge>
+                                                                            </Tooltip>
+                                                                        ))}
+                                                                    </HStack>
+                                                                ) : null;
+                                                            })()}
+                                                            {/* Secondary info shown when editing */}
+                                                            <Text fontSize="7px" color="gray.400">
+                                                                {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
+                                                            </Text>
+                                                        </Flex>
                                                     ) : (
-                                                        <Badge size="sm" colorPalette="purple">
-                                                            {accounts.find(a => a.id === tx.account_id)?.name || '-'}
-                                                        </Badge>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Source - click to edit */}
-                                                <Table.Cell py={1} maxW="80px" onClick={() => !isEditingCell(tx.id, 'source') && startCellEdit(tx, 'source')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'source') ? (
-                                                        <Input
-                                                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                            size="xs"
-                                                            value={editValues.source ?? tx.source}
-                                                            onChange={e => updateEditValues({ source: e.target.value })}
-                                                            onKeyDown={e => {
-                                                                if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'source', editValuesRef.current.source); }
+                                                        <SourceInfoCell
+                                                            sourceAccount={tx.source_account}
+                                                            accountId={tx.account_id}
+                                                            resolvedAccount={accounts.find(a => a.id === tx.account_id)}
+                                                            resolvedAccountName={accounts.find(a => a.id === tx.account_id)?.name}
+                                                            source={tx.source}
+                                                            sourceType={tx.source_transaction_type}
+                                                            sourceSymbol={tx.source_asset_symbol}
+                                                            onClick={() => startCellEdit(tx, 'account_id')}
+                                                            accountSuggestions={
+                                                                !tx.account_id && tx.source_account
+                                                                    ? getAccountSuggestions(tx.source_account, accounts, 0.5, 2)
+                                                                    : []
+                                                            }
+                                                            onAcceptSuggestion={async (accountId) => {
+                                                                try {
+                                                                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                        method: 'PATCH',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ account_id: accountId })
+                                                                    });
+                                                                    if (!response.ok) throw new Error('Failed to update');
+                                                                    // Also link the raw_account if it exists
+                                                                    if (tx.source_account) {
+                                                                        try {
+                                                                            await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_account)}`, {
+                                                                                method: 'PATCH',
+                                                                                headers: { 'Content-Type': 'application/json' },
+                                                                                body: JSON.stringify({ account_id: accountId })
+                                                                            });
+                                                                        } catch (linkErr) {
+                                                                            console.warn('Failed to link raw account:', linkErr);
+                                                                        }
+                                                                    }
+                                                                    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                } catch (err) {
+                                                                    toaster.error({ title: 'Error', description: 'Failed to link account' });
+                                                                }
                                                             }}
-                                                            onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'source', editValuesRef.current.source)}
-                                                            width="70px"
-                                                            fontSize="8px"
-                                                            px={1}
                                                         />
-                                                    ) : (
-                                                        <Text fontSize="8px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={tx.source}>
-                                                            {tx.source}
-                                                        </Text>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Source Type column - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'source_transaction_type') && startCellEdit(tx, 'source_transaction_type')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'source_transaction_type') ? (
-                                                        <Input
-                                                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                            size="xs"
-                                                            value={editValues.source_transaction_type ?? tx.source_transaction_type ?? ''}
-                                                            onChange={e => updateEditValues({ source_transaction_type: e.target.value })}
-                                                            onKeyDown={handleEditKeyDown}
-                                                            onBlur={saveAndClose}
-                                                            placeholder="type"
-                                                            width="60px"
-                                                            fontSize="8px"
-                                                            px={1}
-                                                        />
-                                                    ) : (
-                                                        <Text fontSize="8px" color="gray.600">{tx.source_transaction_type || '-'}</Text>
                                                     )}
                                                 </Table.Cell>
                                                 {/* Direction - click to edit */}
@@ -1244,33 +1705,10 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                         </Flex>
                                                     )}
                                                 </Table.Cell>
-                                                {/* Source Asset Symbol - click to edit */}
-                                                <Table.Cell py={1} maxW="60px" onClick={() => !isEditingCell(tx.id, 'source_asset_symbol') && startCellEdit(tx, 'source_asset_symbol')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'source_asset_symbol') ? (
-                                                        <Input
-                                                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                            size="xs"
-                                                            value={editValues.source_asset_symbol ?? tx.source_asset_symbol ?? ''}
-                                                            onChange={e => updateEditValues({ source_asset_symbol: e.target.value })}
-                                                            onKeyDown={e => {
-                                                                if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'source_asset_symbol', editValuesRef.current.source_asset_symbol); }
-                                                            }}
-                                                            onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'source_asset_symbol', editValuesRef.current.source_asset_symbol)}
-                                                            width="50px"
-                                                            fontSize="8px"
-                                                            px={1}
-                                                        />
-                                                    ) : (
-                                                        <Text fontSize="8px" fontFamily="mono" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={tx.source_asset_symbol || ''}>
-                                                            {tx.source_asset_symbol || '-'}
-                                                        </Text>
-                                                    )}
-                                                </Table.Cell>
                                                 {/* Linked Asset - click to edit */}
                                                 <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
                                                     {isEditingCell(tx.id, 'asset_id') ? (
-                                                        <Box minW="90px">
+                                                        <Flex direction="column" gap={1} minW="90px">
                                                             <AssetSelector
                                                                 value={editValues.asset_id ?? null}
                                                                 onChange={(assetId) => {
@@ -1286,10 +1724,48 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                 rawAssetSource={tx.source}
                                                                 rawAssetSymbol={tx.source_asset_symbol}
                                                             />
-                                                        </Box>
+                                                            {/* Show asset suggestions when editing unlinked asset */}
+                                                            {tx.source_asset_symbol && !tx.asset_id && (() => {
+                                                                const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
+                                                                return suggestions.length > 0 ? (
+                                                                    <HStack gap={1} flexWrap="wrap">
+                                                                        <Text fontSize="7px" color="gray.500">Suggestions:</Text>
+                                                                        {suggestions.map((s, idx) => (
+                                                                            <Tooltip
+                                                                                key={idx}
+                                                                                content={`${formatConfidence(s.confidence)} match`}
+                                                                                openDelay={100}
+                                                                            >
+                                                                                <Badge
+                                                                                    size="xs"
+                                                                                    colorPalette={getConfidenceColor(s.confidence)}
+                                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                                    cursor="pointer"
+                                                                                    fontSize="7px"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        updateEditValues({ asset_id: s.item.asset_id });
+                                                                                        saveAndClose();
+                                                                                    }}
+                                                                                >
+                                                                                    {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
+                                                                                    {s.confidence >= 0.9 && ' ✓'}
+                                                                                </Badge>
+                                                                            </Tooltip>
+                                                                        ))}
+                                                                    </HStack>
+                                                                ) : null;
+                                                            })()}
+                                                        </Flex>
                                                     ) : (
                                                         tx.linked_asset_symbol ? (
-                                                            <Badge size="sm" colorPalette="purple">{tx.linked_asset_symbol}</Badge>
+                                                            <AssetBadge
+                                                                asset={tx.linked_asset}
+                                                                size="sm"
+                                                                colorPalette="purple"
+                                                                maxLength={15}
+                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
+                                                            />
                                                         ) : (
                                                             <Text color="orange.500" fontWeight="bold" fontSize="8px">⚠ Link</Text>
                                                         )
@@ -1342,7 +1818,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             <Text fontSize="8px">{tx.price ? tx.price.toFixed(2) : '-'}</Text>
                                                         )}
                                                         {isEditingCell(tx.id, 'price_quote_asset_id') ? (
-                                                            <Box minW="70px">
+                                                            <Flex direction="column" gap={1} minW="70px">
                                                                 <AssetSelector
                                                                     value={editValues.price_quote_asset_id ?? null}
                                                                     onChange={(assetId) => {
@@ -1358,9 +1834,45 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                     rawAssetSource={tx.source}
                                                                     rawAssetSymbol={tx.source_price_quote_asset_symbol}
                                                                 />
-                                                            </Box>
+                                                                {/* Show asset suggestions when editing unlinked price quote asset */}
+                                                                {tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id && (() => {
+                                                                    const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 3);
+                                                                    return suggestions.length > 0 ? (
+                                                                        <HStack gap={1} flexWrap="wrap">
+                                                                            {suggestions.map((s, idx) => (
+                                                                                <Tooltip
+                                                                                    key={idx}
+                                                                                    content={`${formatConfidence(s.confidence)} match`}
+                                                                                    openDelay={100}
+                                                                                >
+                                                                                    <Badge
+                                                                                        size="xs"
+                                                                                        colorPalette={getConfidenceColor(s.confidence)}
+                                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                                        cursor="pointer"
+                                                                                        fontSize="6px"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            updateEditValues({ price_quote_asset_id: s.item.asset_id });
+                                                                                            saveAndClose();
+                                                                                        }}
+                                                                                    >
+                                                                                        {s.item.symbol.slice(0, 6)}{s.confidence >= 0.9 && '✓'}
+                                                                                    </Badge>
+                                                                                </Tooltip>
+                                                                            ))}
+                                                                        </HStack>
+                                                                    ) : null;
+                                                                })()}
+                                                            </Flex>
                                                         ) : tx.linked_price_quote_asset_symbol ? (
-                                                            <Badge size="xs" colorPalette="cyan" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>{tx.linked_price_quote_asset_symbol}</Badge>
+                                                            <AssetBadge
+                                                                asset={tx.price_quote_asset}
+                                                                size="xs"
+                                                                colorPalette="cyan"
+                                                                maxLength={12}
+                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}
+                                                            />
                                                         ) : tx.source_price_quote_asset_symbol ? (
                                                             <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
                                                         ) : null}
@@ -1391,7 +1903,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                             <Text fontSize="8px">{tx.fee ? tx.fee.toFixed(4) : '-'}</Text>
                                                         )}
                                                         {isEditingCell(tx.id, 'fee_quote_asset_id') ? (
-                                                            <Box minW="70px">
+                                                            <Flex direction="column" gap={1} minW="70px">
                                                                 <AssetSelector
                                                                     value={editValues.fee_quote_asset_id ?? null}
                                                                     onChange={(assetId) => {
@@ -1407,9 +1919,45 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                     rawAssetSource={tx.source}
                                                                     rawAssetSymbol={tx.source_fee_quote_asset_symbol}
                                                                 />
-                                                            </Box>
+                                                                {/* Show asset suggestions when editing unlinked fee quote asset */}
+                                                                {tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id && (() => {
+                                                                    const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 3);
+                                                                    return suggestions.length > 0 ? (
+                                                                        <HStack gap={1} flexWrap="wrap">
+                                                                            {suggestions.map((s, idx) => (
+                                                                                <Tooltip
+                                                                                    key={idx}
+                                                                                    content={`${formatConfidence(s.confidence)} match`}
+                                                                                    openDelay={100}
+                                                                                >
+                                                                                    <Badge
+                                                                                        size="xs"
+                                                                                        colorPalette={getConfidenceColor(s.confidence)}
+                                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                                        cursor="pointer"
+                                                                                        fontSize="6px"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            updateEditValues({ fee_quote_asset_id: s.item.asset_id });
+                                                                                            saveAndClose();
+                                                                                        }}
+                                                                                    >
+                                                                                        {s.item.symbol.slice(0, 6)}{s.confidence >= 0.9 && '✓'}
+                                                                                    </Badge>
+                                                                                </Tooltip>
+                                                                            ))}
+                                                                        </HStack>
+                                                                    ) : null;
+                                                                })()}
+                                                            </Flex>
                                                         ) : tx.linked_fee_quote_asset_symbol ? (
-                                                            <Badge size="xs" colorPalette="cyan" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>{tx.linked_fee_quote_asset_symbol}</Badge>
+                                                            <AssetBadge
+                                                                asset={tx.fee_quote_asset}
+                                                                size="xs"
+                                                                colorPalette="cyan"
+                                                                maxLength={12}
+                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}
+                                                            />
                                                         ) : tx.source_fee_quote_asset_symbol ? (
                                                             <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
                                                         ) : null}
@@ -1490,6 +2038,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                                     colorPalette="red"
                                                                     onClick={() => {
                                                                         setTransactionToDelete(tx);
+                                                                        fetchDeletionImpact([tx.id]);
                                                                         setShowDeleteDialog(true);
                                                                     }}
                                                                     title="Delete transaction"
@@ -1501,46 +2050,6 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                     </Flex>
                                                 </Table.Cell>
                                             </Table.Row>
-                                            {expandedRow === tx.id && (
-                                                <Table.Row>
-                                                    <Table.Cell colSpan={20} p={0}>
-                                                        <TransactionDetailPanel
-                                                            transaction={tx}
-                                                            accounts={accounts}
-                                                            onNotesChange={async (txId, notes) => {
-                                                                try {
-                                                                    const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                                                                        method: 'PUT',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ review_notes: notes }),
-                                                                    });
-                                                                    if (response.ok) {
-                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                                                                        onDataChange?.();
-                                                                    }
-                                                                } catch (err) {
-                                                                    console.error('Failed to update notes:', err);
-                                                                }
-                                                            }}
-                                                            onTagsChange={async (txId, tags) => {
-                                                                try {
-                                                                    const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                                                                        method: 'PUT',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ tags }),
-                                                                    });
-                                                                    if (response.ok) {
-                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                                                                        onDataChange?.();
-                                                                    }
-                                                                } catch (err) {
-                                                                    console.error('Failed to update tags:', err);
-                                                                }
-                                                            }}
-                                                        />
-                                                    </Table.Cell>
-                                                </Table.Row>
-                                            )}
                                         </React.Fragment>
                                     ))
                                 )}
@@ -1610,20 +2119,38 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                 >
                                     ⟫
                                 </Button>
+
+                                {/* Items per page selector */}
+                                <Flex align="center" gap={2} ml={4}>
+                                    <Text fontSize="sm" color="gray.600">Show:</Text>
+                                    <NativeSelect.Root size="sm" width="80px">
+                                        <NativeSelect.Field
+                                            value={itemsPerPage}
+                                            onChange={e => {
+                                                setItemsPerPage(Number(e.target.value));
+                                                setCurrentPage(1);
+                                            }}
+                                        >
+                                            {PAGE_SIZE_OPTIONS.map(size => (
+                                                <option key={size} value={size}>{size}</option>
+                                            ))}
+                                        </NativeSelect.Field>
+                                    </NativeSelect.Root>
+                                </Flex>
                             </Flex>
                         )
                     }
 
                     <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                        <Text fontSize="sm" color="gray.600">
-                            <strong>Total:</strong> {transactions.length} transactions
-                            {totalPages > 1 && (
-                                <Text as="span"> • Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (showing {startIndex + 1}-{Math.min(endIndex, transactions.length)})</Text>
-                            )}
-                            {selectedIds.size > 0 && <Text as="span"> • <strong>{selectedIds.size}</strong> selected</Text>}
-                            {workflowFilter && <Text as="span"> • Filtered by workflow: <strong>{workflowFilter}</strong></Text>}
-                            {sourceFilter && <Text as="span"> • Filtered by source: <strong>{sourceFilter}</strong></Text>}
-                        </Text>
+                        <Flex justify="space-between" align="center">
+                            <Text fontSize="sm" color="gray.600">
+                                <strong>Total:</strong> {transactions.length} transactions
+                                {totalPages > 1 && (
+                                    <Text as="span"> • Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (showing {startIndex + 1}-{Math.min(endIndex, transactions.length)})</Text>
+                                )}
+                                {selectedIds.size > 0 && <Text as="span"> • <strong>{selectedIds.size}</strong> selected</Text>}
+                            </Text>
+                        </Flex>
                     </Box>
                 </>
             )}
@@ -1742,7 +2269,15 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             </Dialog.Root>
 
             {/* Bulk Delete Dialog */}
-            <Dialog.Root open={showBulkDeleteDialog} onOpenChange={(e) => setShowBulkDeleteDialog(e.open)}>
+            <Dialog.Root
+                open={showBulkDeleteDialog}
+                onOpenChange={(e) => {
+                    setShowBulkDeleteDialog(e.open);
+                    if (!e.open) {
+                        setDeletionImpact({});
+                    }
+                }}
+            >
                 <Portal>
                     <Dialog.Backdrop />
                     <Dialog.Positioner>
@@ -1761,6 +2296,29 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                     IDs: {Array.from(selectedIds).slice(0, 10).join(', ')}
                                     {selectedIds.size > 10 && ` ... and ${selectedIds.size - 10} more`}
                                 </Text>
+
+                                {isImpactLoading ? (
+                                    <Flex align="center" gap={2} mt={4}>
+                                        <Spinner size="xs" />
+                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
+                                    </Flex>
+                                ) : Object.keys(deletionImpact).length > 0 && (
+                                    <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
+                                        <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
+                                            ⚠️ Linked objects that will also be deleted:
+                                        </Text>
+                                        <Flex direction="column" gap={0.5}>
+                                            {Object.entries(deletionImpact).map(([key, count]) => (
+                                                <Text key={key} fontSize="10px" color="orange.700">
+                                                    • {count} {key.replace(/_/g, ' ')}
+                                                </Text>
+                                            ))}
+                                        </Flex>
+                                        <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
+                                            This data is linked to these transaction(s) and will be removed due to cascade deletion.
+                                        </Text>
+                                    </Box>
+                                )}
                             </Dialog.Body>
                             <Dialog.Footer>
                                 <Flex gap={2}>
@@ -1778,7 +2336,16 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             </Dialog.Root>
 
             {/* Delete Single Transaction Dialog */}
-            <Dialog.Root open={showDeleteDialog} onOpenChange={(e) => setShowDeleteDialog(e.open)}>
+            <Dialog.Root
+                open={showDeleteDialog}
+                onOpenChange={(e) => {
+                    setShowDeleteDialog(e.open);
+                    if (!e.open) {
+                        setTransactionToDelete(null);
+                        setDeletionImpact({});
+                    }
+                }}
+            >
                 <Portal>
                     <Dialog.Backdrop />
                     <Dialog.Positioner>
@@ -1796,9 +2363,32 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                 {transactionToDelete && (
                                     <Box p={3} bg="gray.50" borderRadius="md">
                                         <Text fontSize="sm"><strong>ID:</strong> {transactionToDelete.id}</Text>
-                                        <Text fontSize="sm"><strong>Date:</strong> {formatDateTime(transactionToDelete.date_time)}</Text>
+                                        <Text fontSize="sm"><strong>Date:</strong> {formatDateTimeCompact(transactionToDelete.date_time)}</Text>
                                         <Text fontSize="sm"><strong>Type:</strong> {transactionToDelete.transaction_type}</Text>
                                         <Text fontSize="sm"><strong>Quantity:</strong> {transactionToDelete.quantity} {transactionToDelete.source_asset_symbol}</Text>
+                                    </Box>
+                                )}
+
+                                {isImpactLoading ? (
+                                    <Flex align="center" gap={2} mt={4}>
+                                        <Spinner size="xs" />
+                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
+                                    </Flex>
+                                ) : Object.keys(deletionImpact).length > 0 && (
+                                    <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
+                                        <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
+                                            ⚠️ Linked objects that will also be deleted:
+                                        </Text>
+                                        <Flex direction="column" gap={0.5}>
+                                            {Object.entries(deletionImpact).map(([key, count]) => (
+                                                <Text key={key} fontSize="10px" color="orange.700">
+                                                    • {count} {key.replace(/_/g, ' ')}
+                                                </Text>
+                                            ))}
+                                        </Flex>
+                                        <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
+                                            This data is linked to this transaction and will be removed due to cascade deletion.
+                                        </Text>
                                     </Box>
                                 )}
                             </Dialog.Body>
@@ -1824,6 +2414,389 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 onClose={() => {
                     setShowEditorDialog(false);
                     setTransactionToEdit(null);
+                }}
+            />
+
+            {/* CSV Import Dialog */}
+            <Dialog.Root open={showImportDialog} onOpenChange={(e) => setShowImportDialog(e.open)} size="xl">
+                <Portal>
+                    <Dialog.Backdrop />
+                    <Dialog.Positioner>
+                        <Dialog.Content maxW="900px">
+                            <Dialog.Header>
+                                <Dialog.Title>Import Trades from CSV</Dialog.Title>
+                            </Dialog.Header>
+                            <Dialog.Body>
+                                {importStep === 'select' && (
+                                    <Box>
+                                        <Text mb={4}>
+                                            Upload a CSV file with trades to import. The file should have columns for:
+                                            Date, Transaction Type, Asset, Quantity, Unit Price, Trading Fees, Investment Account.
+                                        </Text>
+                                        <Box
+                                            border="2px dashed"
+                                            borderColor="gray.300"
+                                            borderRadius="md"
+                                            p={8}
+                                            textAlign="center"
+                                            onDrop={handleFileDrop}
+                                            onDragOver={(e) => e.preventDefault()}
+                                            bg={importFile ? 'green.50' : 'gray.50'}
+                                            cursor="pointer"
+                                            onClick={() => fileInputRef.current?.click()}
+                                            _hover={{ borderColor: 'teal.400', bg: 'teal.50' }}
+                                        >
+                                            <input
+                                                type="file"
+                                                accept=".csv"
+                                                onChange={handleFileSelect}
+                                                ref={fileInputRef}
+                                                style={{ display: 'none' }}
+                                            />
+                                            {importFile ? (
+                                                <Box>
+                                                    <Text color="green.600" fontWeight="bold">✓ {importFile.name}</Text>
+                                                    <Text fontSize="sm" color="gray.500">{(importFile.size / 1024).toFixed(1)} KB</Text>
+                                                </Box>
+                                            ) : (
+                                                <Box>
+                                                    <Text fontSize="lg" mb={2}>📁 Drop CSV file here or click to browse</Text>
+                                                    <Text fontSize="sm" color="gray.500">Supports .csv files</Text>
+                                                </Box>
+                                            )}
+                                        </Box>
+                                    </Box>
+                                )}
+
+                                {importStep === 'preview' && importPreview && (
+                                    <Box>
+                                        <Flex gap={4} mb={4} flexWrap="wrap">
+                                            <Badge colorPalette="blue" fontSize="sm" p={2}>
+                                                📊 {importPreview.transactions_count} Transactions
+                                            </Badge>
+                                            <Badge colorPalette="purple" fontSize="sm" p={2}>
+                                                👤 {importPreview.accounts_count} Accounts
+                                            </Badge>
+                                            <Badge colorPalette="teal" fontSize="sm" p={2}>
+                                                💎 {importPreview.assets_count} Assets
+                                            </Badge>
+                                            {importPreview.fee_transactions_count > 0 && (
+                                                <Badge colorPalette="orange" fontSize="sm" p={2}>
+                                                    💰 {importPreview.fee_transactions_count} Fee Transactions
+                                                </Badge>
+                                            )}
+                                        </Flex>
+
+                                        {importPreview.errors.length > 0 && (
+                                            <Box mb={4} p={3} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
+                                                <Text color="red.600" fontWeight="bold" mb={2}>⚠️ Parse Errors ({importPreview.errors.length})</Text>
+                                                {importPreview.errors.slice(0, 5).map((err, i) => (
+                                                    <Text key={i} fontSize="sm" color="red.600">Row {err.row}: {err.error}</Text>
+                                                ))}
+                                                {importPreview.errors.length > 5 && (
+                                                    <Text fontSize="sm" color="red.500">...and {importPreview.errors.length - 5} more errors</Text>
+                                                )}
+                                            </Box>
+                                        )}
+
+                                        {importPreview.warnings.length > 0 && (
+                                            <Box mb={4} p={3} bg="yellow.50" borderRadius="md" borderWidth={1} borderColor="yellow.200">
+                                                <Text color="yellow.700" fontWeight="bold" mb={2}>⚠️ Warnings ({importPreview.warnings.length})</Text>
+                                                {importPreview.warnings.slice(0, 5).map((warn, i) => (
+                                                    <Text key={i} fontSize="sm" color="yellow.700">{warn}</Text>
+                                                ))}
+                                            </Box>
+                                        )}
+
+                                        <Box mb={4}>
+                                            <Text fontWeight="bold" mb={2}>Accounts to create as RawAccount:</Text>
+                                            <Flex gap={1} flexWrap="wrap">
+                                                {importPreview.accounts.map((acc, i) => (
+                                                    <Badge key={i} colorPalette="purple" fontSize="xs">{acc}</Badge>
+                                                ))}
+                                            </Flex>
+                                        </Box>
+
+                                        <Box mb={4}>
+                                            <Text fontWeight="bold" mb={2}>Assets to create as RawAsset:</Text>
+                                            <Flex gap={1} flexWrap="wrap" maxH="100px" overflow="auto">
+                                                {importPreview.assets.slice(0, 30).map((asset, i) => (
+                                                    <Badge key={i} colorPalette="teal" fontSize="xs">{asset}</Badge>
+                                                ))}
+                                                {importPreview.assets.length > 30 && (
+                                                    <Badge colorPalette="gray" fontSize="xs">+{importPreview.assets.length - 30} more</Badge>
+                                                )}
+                                            </Flex>
+                                        </Box>
+
+                                        <Box>
+                                            <Text fontWeight="bold" mb={2}>Transaction Preview (first 20) - Source → Transformed:</Text>
+                                            <Box maxH="350px" overflow="auto" borderWidth={1} borderRadius="md">
+                                                <Table.Root size="sm">
+                                                    <Table.Header>
+                                                        <Table.Row>
+                                                            <Table.ColumnHeader>Date</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="gray.100">CSV Type</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="blue.50">→ DB Type</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="blue.50">→ Direction</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="gray.100">CSV Asset</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="blue.50">→ DB Asset</Table.ColumnHeader>
+                                                            <Table.ColumnHeader>Qty</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="blue.50">→ Fee</Table.ColumnHeader>
+                                                            <Table.ColumnHeader bg="gray.100">CSV Account</Table.ColumnHeader>
+                                                        </Table.Row>
+                                                    </Table.Header>
+                                                    <Table.Body>
+                                                        {importPreview.transactions.slice(0, 20).map((tx, i) => {
+                                                            // Compute transformed values (what will actually be stored in DB)
+                                                            const dbType = tx.is_fee_transaction ? 'technical' : 'trade';
+                                                            const direction = tx.is_fee_transaction
+                                                                ? 'neutral'
+                                                                : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');
+                                                            const dbQty = tx.is_fee_transaction ? 0 : tx.quantity;
+                                                            const dbFee = tx.is_fee_transaction ? tx.quantity : tx.fee;
+                                                            // DB asset: None for FEES, pending RawAsset mapping for trades
+                                                            const dbAsset = tx.is_fee_transaction ? null : tx.asset_ticker;
+
+                                                            return (
+                                                                <Table.Row key={i} bg={tx.is_fee_transaction ? 'orange.50' : undefined}>
+                                                                    <Table.Cell fontSize="xs">{formatDateTimeCompact(tx.date_time)}</Table.Cell>
+                                                                    {/* CSV Source Type */}
+                                                                    <Table.Cell fontSize="xs" bg="gray.50">
+                                                                        <Badge colorPalette="gray" size="sm" variant="outline">
+                                                                            {tx.transaction_type}
+                                                                        </Badge>
+                                                                    </Table.Cell>
+                                                                    {/* → DB transaction_type */}
+                                                                    <Table.Cell fontSize="xs" bg="blue.50">
+                                                                        <Badge colorPalette={tx.is_fee_transaction ? 'orange' : 'blue'} size="sm">
+                                                                            {dbType}
+                                                                        </Badge>
+                                                                    </Table.Cell>
+                                                                    {/* → DB direction */}
+                                                                    <Table.Cell fontSize="xs" bg="blue.50">
+                                                                        <Badge
+                                                                            colorPalette={direction === 'inflow' ? 'green' : direction === 'outflow' ? 'red' : 'gray'}
+                                                                            size="sm"
+                                                                        >
+                                                                            {direction}
+                                                                        </Badge>
+                                                                    </Table.Cell>
+                                                                    {/* CSV Source Asset */}
+                                                                    <Table.Cell fontSize="xs" bg="gray.50" maxW="100px" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={tx.asset_label}>
+                                                                        {tx.asset_ticker}
+                                                                    </Table.Cell>
+                                                                    {/* → DB Asset (asset_id mapping) */}
+                                                                    <Table.Cell fontSize="xs" bg="blue.50">
+                                                                        {dbAsset ? (
+                                                                            <Badge colorPalette="teal" size="sm" title="Will create RawAsset for mapping">
+                                                                                {dbAsset}
+                                                                            </Badge>
+                                                                        ) : (
+                                                                            <Text color="gray.400" fontSize="xs">None</Text>
+                                                                        )}
+                                                                    </Table.Cell>
+                                                                    {/* Quantity */}
+                                                                    <Table.Cell fontSize="xs">
+                                                                        {tx.is_fee_transaction ? (
+                                                                            <Text as="span" textDecoration="line-through" color="gray.400">{tx.quantity?.toFixed(2)}</Text>
+                                                                        ) : (
+                                                                            tx.quantity?.toFixed(4) || '-'
+                                                                        )}
+                                                                    </Table.Cell>
+                                                                    {/* → DB Fee */}
+                                                                    <Table.Cell fontSize="xs" bg="blue.50">
+                                                                        {dbFee ? `€${dbFee.toFixed(2)}` : '-'}
+                                                                    </Table.Cell>
+                                                                    {/* CSV Account */}
+                                                                    <Table.Cell fontSize="xs" bg="gray.50">{tx.account_code}</Table.Cell>
+                                                                </Table.Row>
+                                                            );
+                                                        })}
+                                                    </Table.Body>
+                                                </Table.Root>
+                                            </Box>
+                                            <Flex mt={2} gap={4} fontSize="xs" color="gray.600">
+                                                <Text><Box as="span" bg="gray.100" px={1} borderRadius="sm">Gray</Box> = CSV source values</Text>
+                                                <Text><Box as="span" bg="blue.50" px={1} borderRadius="sm">Blue</Box> = Transformed DB values</Text>
+                                            </Flex>
+                                        </Box>
+
+                                        <Box mt={4} p={3} bg="blue.50" borderRadius="md">
+                                            <Flex align="center" gap={2}>
+                                                <Switch.Root
+                                                    checked={dryRunMode}
+                                                    onCheckedChange={(e: { checked: boolean }) => setDryRunMode(e.checked)}
+                                                >
+                                                    <Switch.HiddenInput />
+                                                    <Switch.Control />
+                                                </Switch.Root>
+                                                <Text fontWeight="bold">Dry Run Mode</Text>
+                                            </Flex>
+                                            <Text fontSize="sm" color="gray.600" mt={1}>
+                                                {dryRunMode
+                                                    ? 'Preview only - no changes will be saved to the database'
+                                                    : '⚠️ Changes will be committed to the database'}
+                                            </Text>
+                                        </Box>
+                                    </Box>
+                                )}
+
+                                {importStep === 'result' && importResult && (
+                                    <Box>
+                                        <Box mb={4} p={4} bg={importResult.dry_run ? 'blue.50' : 'green.50'} borderRadius="md">
+                                            <Text fontSize="lg" fontWeight="bold" mb={2}>
+                                                {importResult.dry_run ? '🔍 Dry Run Complete' : '✅ Import Complete'}
+                                            </Text>
+                                            {importResult.dry_run && (
+                                                <Text fontSize="sm" color="blue.600">
+                                                    No changes were saved. Run again with Dry Run disabled to commit.
+                                                </Text>
+                                            )}
+                                        </Box>
+
+                                        <Flex gap={4} mb={4} flexWrap="wrap">
+                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
+                                                <Text fontSize="sm" color="gray.500">Transactions</Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="green.600">
+                                                    {importResult.transactions.created} created
+                                                </Text>
+                                                <Text fontSize="sm" color="gray.500">
+                                                    {importResult.transactions.skipped} skipped
+                                                </Text>
+                                            </Box>
+                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
+                                                <Text fontSize="sm" color="gray.500">Raw Accounts</Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="purple.600">
+                                                    {importResult.raw_accounts.created} created
+                                                </Text>
+                                                <Text fontSize="sm" color="gray.500">
+                                                    {importResult.raw_accounts.skipped} skipped
+                                                </Text>
+                                            </Box>
+                                            <Box p={3} bg="gray.50" borderRadius="md" flex="1" minW="150px">
+                                                <Text fontSize="sm" color="gray.500">Raw Assets</Text>
+                                                <Text fontSize="xl" fontWeight="bold" color="teal.600">
+                                                    {importResult.raw_assets.created} created
+                                                </Text>
+                                                <Text fontSize="sm" color="gray.500">
+                                                    {importResult.raw_assets.skipped} skipped
+                                                </Text>
+                                            </Box>
+                                        </Flex>
+
+                                        {importResult.pending_review_count > 0 && (
+                                            <Box p={3} bg="yellow.50" borderRadius="md" mb={4}>
+                                                <Text color="yellow.700">
+                                                    ⚠️ <strong>{importResult.pending_review_count}</strong> transactions need review
+                                                    (unmapped accounts or assets). Use the Raw Accounts and Raw Assets editors to map them.
+                                                </Text>
+                                            </Box>
+                                        )}
+
+                                        {importResult.summary.total_errors > 0 && (
+                                            <Box p={3} bg="red.50" borderRadius="md">
+                                                <Text color="red.600" fontWeight="bold">
+                                                    ❌ {importResult.summary.total_errors} errors occurred
+                                                </Text>
+                                            </Box>
+                                        )}
+                                    </Box>
+                                )}
+                            </Dialog.Body>
+                            <Dialog.Footer>
+                                <Flex gap={2} justify="space-between" width="100%">
+                                    <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                                        Close
+                                    </Button>
+                                    <Flex gap={2}>
+                                        {importStep === 'select' && (
+                                            <Button
+                                                colorPalette="teal"
+                                                onClick={previewImport}
+                                                disabled={!importFile || importLoading}
+                                            >
+                                                {importLoading ? <Spinner size="sm" /> : 'Preview'}
+                                            </Button>
+                                        )}
+                                        {importStep === 'preview' && (
+                                            <>
+                                                <Button variant="outline" onClick={resetImportDialog}>
+                                                    ← Back
+                                                </Button>
+                                                <Button
+                                                    colorPalette={dryRunMode ? 'blue' : 'green'}
+                                                    onClick={executeImport}
+                                                    disabled={importLoading}
+                                                >
+                                                    {importLoading ? <Spinner size="sm" /> : (dryRunMode ? 'Run Dry Import' : 'Import Now')}
+                                                </Button>
+                                            </>
+                                        )}
+                                        {importStep === 'result' && (
+                                            <>
+                                                <Button variant="outline" onClick={resetImportDialog}>
+                                                    Import Another
+                                                </Button>
+                                                {importResult?.dry_run && (
+                                                    <Button
+                                                        colorPalette="green"
+                                                        onClick={() => {
+                                                            setDryRunMode(false);
+                                                            setImportStep('preview');
+                                                        }}
+                                                    >
+                                                        Commit Import
+                                                    </Button>
+                                                )}
+                                            </>
+                                        )}
+                                    </Flex>
+                                </Flex>
+                            </Dialog.Footer>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
+
+            {/* Transaction Detail Drawer - Always rendered, available from any tab */}
+            <TransactionDetailDrawer
+                transactionId={drawerTransactionId}
+                isOpen={isDrawerOpen}
+                onClose={() => {
+                    setIsDrawerOpen(false);
+                    setDrawerTransactionId(null);
+                }}
+                accounts={accounts}
+                onNotesChange={async (txId, notes) => {
+                    try {
+                        const response = await fetch(`${API_URL}/transactions/${txId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ review_notes: notes }),
+                        });
+                        if (response.ok) {
+                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            onDataChange?.();
+                        }
+                    } catch (err) {
+                        console.error('Failed to update notes:', err);
+                    }
+                }}
+                onTagsChange={async (txId, tags) => {
+                    try {
+                        const response = await fetch(`${API_URL}/transactions/${txId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tags }),
+                        });
+                        if (response.ok) {
+                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            onDataChange?.();
+                        }
+                    } catch (err) {
+                        console.error('Failed to update tags:', err);
+                    }
                 }}
             />
         </Box >

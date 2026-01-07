@@ -27,6 +27,7 @@ class AccountCreate(BaseModel):
     address_or_identifier: Optional[str] = None
     tags: Optional[List[str]] = None
     owned: bool = True
+    enabled: bool = True
 
 
 class AccountUpdate(BaseModel):
@@ -37,6 +38,7 @@ class AccountUpdate(BaseModel):
     address_or_identifier: Optional[str] = None
     tags: Optional[List[str]] = None
     owned: Optional[bool] = None
+    enabled: Optional[bool] = None
 
 
 class AccountResponse(BaseModel):
@@ -48,6 +50,7 @@ class AccountResponse(BaseModel):
     address_or_identifier: Optional[str]
     tags: Optional[List[str]]
     owned: bool
+    enabled: bool
     created_at: str
 
     class Config:
@@ -99,6 +102,7 @@ def list_accounts(
             address_or_identifier=acc.address_or_identifier,
             tags=acc.tags or [],
             owned=acc.owned,
+            enabled=acc.enabled,
             created_at=acc.created_at.isoformat(),
         )
         for acc in accounts
@@ -128,6 +132,7 @@ def get_account(account_id: int, session: Session = Depends(get_session_dependen
         address_or_identifier=account.address_or_identifier,
         tags=account.tags or [],
         owned=account.owned,
+        enabled=account.enabled,
         created_at=account.created_at.isoformat(),
     )
 
@@ -171,6 +176,7 @@ def create_account(
         address_or_identifier=account_data.address_or_identifier,
         tags=account_data.tags or [],
         owned=account_data.owned,
+        enabled=account_data.enabled,
     )
 
     session.add(account)
@@ -184,6 +190,7 @@ def create_account(
         address_or_identifier=account.address_or_identifier,
         tags=account.tags or [],
         owned=account.owned,
+        enabled=account.enabled,
         created_at=account.created_at.isoformat(),
     )
 
@@ -240,6 +247,8 @@ def update_account(
         account.tags = account_data.tags
     if account_data.owned is not None:
         account.owned = account_data.owned
+    if account_data.enabled is not None:
+        account.enabled = account_data.enabled
 
     session.add(account)
     session.commit()
@@ -252,6 +261,7 @@ def update_account(
         address_or_identifier=account.address_or_identifier,
         tags=account.tags or [],
         owned=account.owned,
+        enabled=account.enabled,
         created_at=account.created_at.isoformat(),
     )
 

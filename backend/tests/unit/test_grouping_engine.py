@@ -467,6 +467,236 @@ class TestRule4SwapDetection:
 
 
 # =============================================================================
+# Rule 4b: Split Detection Tests
+# =============================================================================
+
+
+class TestRule4bSplitDetection:
+    """Tests for Rule 4b: Split detection (same asset, different qty, same value)."""
+
+    def test_basic_split_detection(self, engine):
+        """Should detect a 2-for-1 split: same asset, different qty, same total value."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),
+            total_in_base=Decimal("10000"),  # $100 per share
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("200"),  # 2x quantity
+            total_in_base=Decimal("10000"),  # Same total value
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        assert len(suggestions) == 1
+        assert suggestions[0].pattern == PATTERN_SWAP
+        assert "Split" in suggestions[0].label
+        assert "2:1" in suggestions[0].label
+        assert suggestions[0].confidence >= 0.85
+        assert set(suggestions[0].transaction_ids) == {1, 2}
+
+    def test_reverse_split_detection(self, engine):
+        """Should detect a reverse split: more shares out, fewer in."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("200"),
+            total_in_base=Decimal("10000"),
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),  # Half quantity
+            total_in_base=Decimal("10000"),  # Same total value
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        assert len(suggestions) == 1
+        assert suggestions[0].pattern == PATTERN_SWAP
+        assert "Reverse Split" in suggestions[0].label
+        assert set(suggestions[0].transaction_ids) == {1, 2}
+
+    def test_no_split_when_same_quantity(self, engine):
+        """Should NOT detect split when quantities are equal (that's a transfer)."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),
+            total_in_base=Decimal("10000"),
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),  # Same quantity
+            total_in_base=Decimal("10000"),
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should not be detected as split
+        split_suggestions = [s for s in suggestions if "Split" in s.label]
+        assert len(split_suggestions) == 0
+
+    def test_no_split_when_different_assets(self, engine):
+        """Should NOT detect split when assets differ (that's a swap)."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),
+            total_in_base=Decimal("10000"),
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="GOOG",  # Different asset
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=200,
+            quantity=Decimal("50"),
+            total_in_base=Decimal("10000"),
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should be detected as swap, not split
+        split_suggestions = [s for s in suggestions if "Split" in s.label]
+        assert len(split_suggestions) == 0
+
+    def test_no_split_when_different_accounts(self, engine):
+        """Should NOT detect split when accounts differ (that's a transfer/bridge)."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,  # Different account
+            asset_id=100,
+            quantity=Decimal("100"),
+            total_in_base=Decimal("10000"),
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=2,  # Different account
+            asset_id=100,
+            quantity=Decimal("200"),
+            total_in_base=Decimal("10000"),
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should not be detected as split
+        split_suggestions = [s for s in suggestions if "Split" in s.label]
+        assert len(split_suggestions) == 0
+
+    def test_no_split_when_values_differ(self, engine):
+        """Should NOT detect split when total values differ significantly."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),
+            total_in_base=Decimal("10000"),
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("200"),
+            total_in_base=Decimal("15000"),  # 50% different value
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should not be detected as split (value diff > 10% tolerance)
+        split_suggestions = [s for s in suggestions if "Split" in s.label]
+        assert len(split_suggestions) == 0
+
+    def test_no_split_when_no_value_data(self, engine):
+        """Should NOT detect split when total_in_base is missing."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="AAPL",
+            dt=now,
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("100"),
+            # No total_in_base
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AAPL",
+            dt=now + timedelta(seconds=30),
+            account_id=1,
+            asset_id=100,
+            quantity=Decimal("200"),
+            # No total_in_base
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should not be detected as split without value data
+        split_suggestions = [s for s in suggestions if "Split" in s.label]
+        assert len(split_suggestions) == 0
+
+
+# =============================================================================
 # Rule 5: Bridge Detection Tests
 # =============================================================================
 

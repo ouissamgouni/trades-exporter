@@ -188,7 +188,7 @@ class TaxabilityCalculator:
             return True
         
         # 9. Default: crypto-to-crypto swap taxability
-        return self.config.crypto_swap_taxable
+        return self.config.crypto_swap_taxable_by_default
     
     def apply_to_legs(self, legs: list) -> None:
         """

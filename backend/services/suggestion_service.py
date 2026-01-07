@@ -24,7 +24,6 @@ from backend.db.models import NormalizedTransaction, UserCalculationBundle, Unit
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
-    TransactionData,
     GroupingSuggestion,
     PATTERN_UNKNOWN,
 )
@@ -71,16 +70,13 @@ class SuggestionService:
             List of GroupingSuggestion objects (can be converted to CalculationUnit).
         """
         if transactions is None:
-            transactions = self._get_pending_transactions()
+            transactions = self._get_standalone_transactions()
 
         if not transactions:
             return []
 
-        # Convert to TransactionData for GroupingEngine
-        tx_data = [self._to_transaction_data(tx) for tx in transactions]
-
-        # Get suggestions from GroupingEngine
-        suggestions = self.engine.suggest_groups(tx_data)
+        # Get suggestions from GroupingEngine (works directly with NormalizedTransaction)
+        suggestions = self.engine.suggest_groups(transactions)
 
         # Filter suggestions
         filtered = [
@@ -98,6 +94,7 @@ class SuggestionService:
         suggestion: GroupingSuggestion,
         label: Optional[str] = None,
         notes: Optional[str] = None,
+        taxability_override: Optional[str] = None,
     ) -> UserCalculationBundle:
         """
         Accept a suggestion and create a UserCalculationBundle.
@@ -106,6 +103,7 @@ class SuggestionService:
             suggestion: The suggestion to accept
             label: Override label (uses suggestion.label if None)
             notes: Optional notes
+            taxability_override: Override taxability status
 
         Returns:
             Created UserCalculationBundle (persisted)
@@ -115,7 +113,7 @@ class SuggestionService:
             label=label or suggestion.label,
             pattern=suggestion.pattern,
             notes=notes or suggestion.reason,
-            # Don't set taxability_override - let P&L compute it
+            taxability_override=taxability_override,  # Apply user's taxability choice
             confidence=None,  # Clear confidence - this is now confirmed
             reason=suggestion.reason,  # Keep reason for history
         )
@@ -145,25 +143,12 @@ class SuggestionService:
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())
-
-    def _to_transaction_data(self, tx: NormalizedTransaction) -> TransactionData:
-        """Convert NormalizedTransaction to TransactionData for GroupingEngine."""
-        return TransactionData(
-            id=tx.id,
-            source=tx.source or "",
-            source_transaction_id=tx.source_transaction_id,
-            network_transaction_id=tx.network_transaction_id,
-            date_time=tx.date_time,
-            direction=tx.direction or "neutral",
-            transaction_type=tx.transaction_type or "",
-            asset_id=tx.asset_id,
-            source_asset_symbol=tx.source_asset_symbol or "",
-            quantity=tx.quantity or Decimal(0),
-            total_in_base=tx.total,
-            account_id=tx.account_id,
-            to_account_id=tx.to_account_id,
-            from_account_id=tx.from_account_id,
-            source_to_account=tx.source_to_account,
-            source_from_account=tx.source_from_account,
-            network=tx.network,
+    
+    def _get_standalone_transactions(self) -> List[NormalizedTransaction]:
+        """Get all standalone transactions (not yet grouped)."""
+        statement = (
+            select(NormalizedTransaction)
+            .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .order_by(NormalizedTransaction.date_time)
         )
+        return list(self.session.exec(statement).all())

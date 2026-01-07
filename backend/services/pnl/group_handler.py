@@ -429,7 +429,34 @@ def _proceeds_and_pnl_entry(
                 transaction_id=origin_tx_id,
                 asset_id=asset_id,
                 unit=unit,
-                details={"error": price_error, "proceeds_used": float(proceeds)},
+                details={
+                    "error": price_error,
+                    "proceeds_used": float(proceeds),
+                    "transaction_date": disposal_dt.isoformat() if disposal_dt else None,
+                },
+            )
+        )
+    
+    # Track stale price warnings (fallback used and outside staleness window)
+    if proceeds_metadata.get("is_stale"):
+        if unit.warnings is None:
+            unit.warnings = []
+        staleness_days = proceeds_metadata.get("staleness_days", 0)
+        actual_price_date = proceeds_metadata.get("actual_price_date")
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.STALE_PRICE.value,
+                message=f"Using stale price for {asset_symbol}: price from {actual_price_date.strftime('%Y-%m-%d') if actual_price_date else 'unknown'} ({staleness_days} days old)",
+                transaction_id=origin_tx_id,
+                asset_id=asset_id,
+                unit=unit,
+                details={
+                    "staleness_days": staleness_days,
+                    "actual_price_date": actual_price_date.isoformat() if actual_price_date else None,
+                    "price_used": float(proceeds_metadata.get("price", 0)) if proceeds_metadata.get("price") else None,
+                    "price_source": proceeds_metadata.get("price_source"),
+                    "transaction_date": disposal_dt.isoformat() if disposal_dt else None,
+                },
             )
         )
 
@@ -622,7 +649,7 @@ def _create_fee_entry(
     
     # Use relationship objects instead of IDs - SQLAlchemy will resolve IDs on flush
     # This handles the case where entities haven't been persisted yet
-    # Setting unit=unit auto-populates unit.fee_entries via back_populates
+    # Setting fee_leg=disposal auto-populates disposal.fee_entries via back_populates
     fee_entry = FeeEntry(
         fee_leg=disposal,
         realized_pnl=realized_pnl,
@@ -654,7 +681,7 @@ def _determine_related_asset_for_fee(
     - Exclude base currency and the fee asset itself
     - For crypto-to-crypto: prefer outflow (the asset being sold)
     - For simple trades: use the non-base-currency asset
-    - For multiple candidates: use the one with largest absolute value
+    - For multiple candidates: use the one with largest quantity
     
     Returns:
         Asset ID of the related asset, or None if no suitable asset found
@@ -677,14 +704,16 @@ def _determine_related_asset_for_fee(
     if len(candidates) == 1:
         return candidates[0].asset_id
     
-    # Multiple candidates - prefer outflows (negative quantity = disposal)
-    outflows = [c for c in candidates if c.quantity < 0]
+    # Multiple candidates - prefer outflows
+    # Note: quantities are positive, use leg_type to identify outflows
+    outflows = [c for c in candidates if c.leg_type == "outflow"]
     if len(outflows) == 1:
         return outflows[0].asset_id
     
-    # Multiple outflows or no outflows - pick largest absolute value
+    # Multiple outflows or no outflows - pick largest quantity
+    # Fallback since value_in_base is not available at this stage
     target = outflows if outflows else candidates
-    largest = max(target, key=lambda c: abs(c.value_in_base or 0))
+    largest = max(target, key=lambda c: c.quantity)
     return largest.asset_id
 
 
@@ -733,6 +762,10 @@ def _compute_proceeds(
             "price": fmv_result.price,
             "price_source": fmv_result.source,
             "timestamp": fmv_result.timestamp,
+            "is_stale": fmv_result.is_stale,
+            "is_fallback": fmv_result.is_fallback,
+            "staleness_days": fmv_result.staleness_days,
+            "actual_price_date": fmv_result.actual_price_date,
         }
         return fmv_result.value, error, metadata
 
@@ -776,6 +809,10 @@ def _compute_proceeds(
         "price": fmv_result.price,
         "price_source": fmv_result.source,  # coingecko, fallback, etc.
         "timestamp": fmv_result.timestamp,
+        "is_stale": fmv_result.is_stale,
+        "is_fallback": fmv_result.is_fallback,
+        "staleness_days": fmv_result.staleness_days,
+        "actual_price_date": fmv_result.actual_price_date,
     }
     
     return fmv_result.value, error, metadata

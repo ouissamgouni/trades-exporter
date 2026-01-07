@@ -9,9 +9,11 @@ import {
     Portal,
     Text,
     Textarea,
+    Switch,
 } from '@chakra-ui/react';
 
 import { AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
+import FileDropzone from './FileDropzone';
 
 interface ConnectorFormDialogProps {
     isOpen: boolean;
@@ -39,6 +41,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [testMode, setTestMode] = useState(false);
+    const [fixtureFile, setFixtureFile] = useState<File | null>(null);
+    const [uploadingFixture, setUploadingFixture] = useState(false);
+    const [currentFixtureName, setCurrentFixtureName] = useState<string | null>(null);
 
     // Get available types for new connectors (not already configured)
     const availableTypes = connector
@@ -56,6 +62,21 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 credentials_ref: connector.credentials_ref || '',
                 sync_priority: connector.sync_priority,
             });
+            // Load test mode state from config
+            setTestMode(connector.config?.test_mode || false);
+            // Fetch fixture status if editing
+            if (connector.id) {
+                fetch(`${API_URL}/fixtures/connectors/${connector.id}/test-fixture`)
+                    .then(res => res.ok ? res.json() : null)
+                    .then(data => {
+                        if (data?.has_fixture) {
+                            setCurrentFixtureName(`${connector.id}.json (${data.item_count} items)`);
+                        } else {
+                            setCurrentFixtureName(null);
+                        }
+                    })
+                    .catch(() => setCurrentFixtureName(null));
+            }
         } else {
             // Only reset form when dialog opens, not on every availableTypes change
             const firstAvailable = connectorTypes.find(t => !existingConnectorTypes.includes(t.type));
@@ -66,6 +87,9 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 credentials_ref: '',
                 sync_priority: 100,
             });
+            setTestMode(false);
+            setCurrentFixtureName(null);
+            setFixtureFile(null);
         }
         setError('');
     }, [connector, isOpen, connectorTypes, existingConnectorTypes]);
@@ -76,10 +100,19 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         setError('');
 
         try {
+            // Build config with test_mode if enabled
+            const configToSave = { ...formData.config };
+            if (testMode) {
+                configToSave.test_mode = true;
+            } else {
+                delete configToSave.test_mode;
+                delete configToSave.test_file_path;
+            }
+
             const payload = {
                 connector_type: formData.connector_type,
                 enabled: formData.enabled,
-                config: formData.config,
+                config: configToSave,
                 credentials_ref: formData.credentials_ref || null,
                 sync_priority: formData.sync_priority,
             };
@@ -101,11 +134,51 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 throw new Error(errorData.detail || 'Failed to save connector');
             }
 
+            const savedConnector = await response.json();
+
+            // Upload fixture file if test mode is enabled and we have a file
+            if (testMode && fixtureFile && savedConnector.id) {
+                setUploadingFixture(true);
+                const fixtureFormData = new FormData();
+                fixtureFormData.append('file', fixtureFile);
+
+                const fixtureResponse = await fetch(
+                    `${API_URL}/fixtures/connectors/${savedConnector.id}/test-fixture`,
+                    {
+                        method: 'POST',
+                        body: fixtureFormData,
+                    }
+                );
+
+                if (!fixtureResponse.ok) {
+                    const errorData = await fixtureResponse.json();
+                    throw new Error(errorData.detail || 'Failed to upload fixture');
+                }
+            }
+
             onClose();
         } catch (err: any) {
             setError(err.message || 'An error occurred');
         } finally {
             setLoading(false);
+            setUploadingFixture(false);
+        }
+    };
+
+    const handleRemoveFixture = async () => {
+        if (!connector?.id) return;
+
+        try {
+            const response = await fetch(
+                `${API_URL}/fixtures/connectors/${connector.id}/test-fixture`,
+                { method: 'DELETE' }
+            );
+            if (response.ok) {
+                setCurrentFixtureName(null);
+                setTestMode(false);
+            }
+        } catch (err) {
+            console.error('Failed to remove fixture:', err);
         }
     };
 
@@ -307,6 +380,55 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                                         <Text fontSize="sm" color="gray.500" mt={1}>
                                             Lower number = higher priority (synced first)
                                         </Text>
+                                    </Box>
+
+                                    {/* Test Mode Section */}
+                                    <Box
+                                        p={4}
+                                        borderWidth="1px"
+                                        borderRadius="md"
+                                        borderColor={testMode ? 'orange.300' : 'gray.200'}
+                                        bg={testMode ? 'orange.50' : 'transparent'}
+                                    >
+                                        <Flex align="center" justify="space-between" mb={testMode ? 3 : 0}>
+                                            <Box>
+                                                <Text fontWeight="medium">🧪 Test Mode</Text>
+                                                <Text fontSize="sm" color="gray.500">
+                                                    Use fixture data instead of live API
+                                                </Text>
+                                            </Box>
+                                            <Switch.Root
+                                                checked={testMode}
+                                                onCheckedChange={(e) => setTestMode(e.checked)}
+                                            >
+                                                <Switch.HiddenInput />
+                                                <Switch.Control>
+                                                    <Switch.Thumb />
+                                                </Switch.Control>
+                                            </Switch.Root>
+                                        </Flex>
+
+                                        {testMode && (
+                                            <Box mt={3}>
+                                                <Text fontSize="sm" fontWeight="medium" mb={2}>
+                                                    Test Fixture File
+                                                </Text>
+                                                <FileDropzone
+                                                    onFileSelect={(file) => setFixtureFile(file)}
+                                                    currentFileName={fixtureFile?.name || currentFixtureName}
+                                                    onRemove={connector?.id ? handleRemoveFixture : () => setFixtureFile(null)}
+                                                    accept=".json"
+                                                    maxSize={1024 * 1024}
+                                                    disabled={uploadingFixture}
+                                                />
+                                                {!connector && !fixtureFile && (
+                                                    <Text fontSize="xs" color="gray.500" mt={2}>
+                                                        Upload a JSON array of transactions to use for testing.
+                                                        You can also upload after creating the connector.
+                                                    </Text>
+                                                )}
+                                            </Box>
+                                        )}
                                     </Box>
                                 </Flex>
                             </Dialog.Body>

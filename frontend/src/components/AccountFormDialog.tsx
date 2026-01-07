@@ -12,16 +12,24 @@ import {
 import React, { useEffect, useState } from 'react';
 import { Account, API_URL } from '../types';
 
+export interface AccountPrefill {
+    name?: string;
+    account_type?: 'cex' | 'broker' | 'wallet';
+    address_or_identifier?: string;
+}
+
 interface AccountFormDialogProps {
     isOpen: boolean;
-    onClose: () => void;
+    onClose: (createdAccountId?: number) => void;
     account?: Account | null;
+    prefill?: AccountPrefill;
 }
 
 const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     isOpen,
     onClose,
     account,
+    prefill,
 }) => {
     const [formData, setFormData] = useState({
         name: '',
@@ -32,6 +40,26 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     const [tagsInput, setTagsInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+    const [existingAccounts, setExistingAccounts] = useState<Account[]>([]);
+
+    // Fetch existing accounts for duplicate detection
+    useEffect(() => {
+        const fetchAccounts = async () => {
+            try {
+                const response = await fetch(`${API_URL}/accounts`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setExistingAccounts(data);
+                }
+            } catch (err) {
+                console.error('Failed to fetch accounts for duplicate check:', err);
+            }
+        };
+        if (isOpen) {
+            fetchAccounts();
+        }
+    }, [isOpen]);
 
     useEffect(() => {
         if (account) {
@@ -42,6 +70,15 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 tags: account.tags || [],
             });
             setTagsInput((account.tags || []).join(', '));
+        } else if (prefill) {
+            // Use prefill data when creating from raw account
+            setFormData({
+                name: prefill.name || '',
+                account_type: prefill.account_type || 'cex',
+                address_or_identifier: prefill.address_or_identifier || '',
+                tags: [],
+            });
+            setTagsInput('');
         } else {
             setFormData({
                 name: '',
@@ -52,7 +89,24 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
             setTagsInput('');
         }
         setError('');
-    }, [account, isOpen]);
+        setDuplicateWarning(null);
+    }, [account, prefill, isOpen]);
+
+    // Check for duplicate address_or_identifier
+    useEffect(() => {
+        if (!formData.address_or_identifier || account) {
+            setDuplicateWarning(null);
+            return;
+        }
+        const duplicate = existingAccounts.find(
+            acc => acc.address_or_identifier?.toLowerCase() === formData.address_or_identifier.toLowerCase()
+        );
+        if (duplicate) {
+            setDuplicateWarning(`An account with this address/identifier already exists: "${duplicate.name}"`);
+        } else {
+            setDuplicateWarning(null);
+        }
+    }, [formData.address_or_identifier, existingAccounts, account]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -91,7 +145,10 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 throw new Error(errorData.detail || 'Failed to save account');
             }
 
-            onClose();
+            // Get the created/updated account ID from response
+            const responseData = await response.json();
+            const createdId = responseData?.id;
+            onClose(createdId);
         } catch (err: any) {
             setError(err.message || 'An error occurred');
         } finally {
@@ -100,7 +157,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     };
 
     return (
-        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(); }}>
+        <Dialog.Root open={isOpen} onOpenChange={(e) => { if (!e.open) onClose(undefined); }}>
             <Portal>
                 <Dialog.Backdrop />
                 <Dialog.Positioner>
@@ -118,6 +175,14 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                         <Text color="red.500" fontSize="sm">
                                             {error}
                                         </Text>
+                                    )}
+
+                                    {duplicateWarning && (
+                                        <Box bg="orange.50" p={3} borderRadius="md" borderWidth={1} borderColor="orange.200">
+                                            <Text color="orange.700" fontSize="sm">
+                                                ⚠️ {duplicateWarning}
+                                            </Text>
+                                        </Box>
                                     )}
 
                                     <Box>
@@ -182,7 +247,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                 <Flex gap={3}>
                                     <Button
                                         variant="outline"
-                                        onClick={onClose}
+                                        onClick={() => onClose(undefined)}
                                         disabled={loading}
                                     >
                                         Cancel

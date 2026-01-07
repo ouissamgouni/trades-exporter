@@ -24,6 +24,7 @@ from backend.api.routes import (
     account_connectors,
     connectors,
     categories,
+    fixtures,
 )
 from backend.config.loader import set_test_mode, is_test_mode
 from backend.db import init_db
@@ -56,7 +57,7 @@ app = FastAPI(
     description="API for managing and reviewing cryptocurrency transactions",
     version="1.0.0",
     lifespan=lifespan,
-    redirect_slashes=False,  # Don't redirect /path/ to /path (avoid 307)
+    redirect_slashes=True,  # Redirect /path to /path/ (consistent trailing slashes)
 )
 
 # Configure CORS
@@ -83,6 +84,7 @@ app.include_router(accounts.router)
 app.include_router(account_connectors.router)
 app.include_router(connectors.router)
 app.include_router(categories.router)
+app.include_router(fixtures.router)
 
 
 @app.get("/")

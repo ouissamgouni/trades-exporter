@@ -201,6 +201,7 @@ class ConnectorLoaderService:
             kwargs = {
                 "account_id": account_id,
                 "connector_id": connector_id,
+                "config": config,  # Pass full config for test_mode, test_file_path, etc.
             }
 
             # Add connector-specific config based on type

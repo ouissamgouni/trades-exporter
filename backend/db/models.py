@@ -232,6 +232,7 @@ class Account(SQLModel, table=True):
     address_or_identifier: Optional[str] = Field(default=None, index=True)
     tags: Optional[List[str]] = Field(default=None, sa_column=Column(ARRAY(Text)))
     owned: bool = Field(default=True)  # Whether this account is owned by the user
+    enabled: bool = Field(default=True, index=True)  # Whether this account is enabled for sync
     created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships
@@ -314,6 +315,7 @@ class AssetPriceGetter(SQLModel, table=True):
     - external_id: The identifier used by the external API (e.g., "BTC-USD" for Yahoo,
       "bitcoin" for CoinGecko). This is the primary override for ticker resolution.
     - params: Additional getter-specific parameters (e.g., native_quote_currency, source).
+    - staleness_window_days: Per-asset override for price staleness window (optional).
 
     Example configurations:
     - asset_id=1, price_getter="yahoo", external_id="BTC-USD", params={}
@@ -336,6 +338,7 @@ class AssetPriceGetter(SQLModel, table=True):
     # - native_quote_currency: Currency the ticker returns (e.g., "USD", "EUR")
     # - source: DataReader source (e.g., "stooq", "fred")
     # - to_currency: Forex target currency
+    staleness_window_days: Optional[int] = Field(default=None)  # Per-asset staleness override (days)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -490,7 +493,8 @@ class RawTransaction(SQLModel, table=True):
 
     # Relationships
     normalized_transactions: List["NormalizedTransaction"] = Relationship(
-        back_populates="raw_transaction"
+        back_populates="raw_transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
 
@@ -521,6 +525,7 @@ class NormalizedTransaction(SQLModel, table=True):
     account_id: Optional[int] = Field(
         default=None, foreign_key="accounts.id", index=True
     )
+    source_account: Optional[str] = Field(default=None)  # Raw account identifier before mapping
 
     # Core transaction fields
     date_time: Optional[datetime] = Field(default=None, index=True)
@@ -587,9 +592,6 @@ class NormalizedTransaction(SQLModel, table=True):
         default=None, foreign_key="bundles.id", index=True
     )
 
-    # Totals (in quote asset)
-    total: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))
-
     # Review notes
     review_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
 
@@ -638,6 +640,58 @@ class NormalizedTransaction(SQLModel, table=True):
         },
     )
 
+    # Cascade relationships for cleanup upon deletion
+    cost_lots: List["CostLot"] = Relationship(
+        back_populates="origin_transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    pnl_warnings: List["PnlWarning"] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    calculation_legs: List["CalculationUnitLeg"] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    realized_pnl: List["RealizedPnl"] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    lot_settlements: List["LotSettlement"] = Relationship(
+        back_populates="settling_transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    cost_lot_events: List["CostLotEvent"] = Relationship(
+        back_populates="triggered_by_transaction",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+
+    # Computed total property (price * quantity)
+    @property
+    def total(self) -> Optional[Decimal]:
+        """Compute total from price * quantity.
+        
+        Returns None if price is not set.
+        """
+        if self.price is not None and self.quantity is not None:
+            return self.price * self.quantity
+        return None
+    
+    @total.setter
+    def total(self, value: Optional[Decimal]) -> None:
+        """Set total by computing price = total / quantity.
+        
+        If quantity is zero or None, price is set to None.
+        If value is None, price is left unchanged.
+        """
+        if value is None:
+            return
+        if self.quantity and self.quantity != Decimal("0"):
+            self.price = Decimal(str(value)) / Decimal(str(self.quantity))
+        else:
+            # Cannot derive price without quantity
+            self.price = None
+
 
 # ============================================================================
 # Unknown Addresses (for review)
@@ -649,7 +703,7 @@ class RawAccount(SQLModel, table=True):
     Raw account mapping table.
     Maps (source, label) pairs to account_id in the accounts table.
     Similar to raw_assets but for accounts/addresses.
-    Used to map source_from_account and source_to_account to resolved accounts.
+    Used to map source_account, source_from_account and source_to_account to resolved accounts.
     """
 
     __tablename__ = "raw_accounts"
@@ -830,6 +884,10 @@ class CostLot(SQLModel, table=True):
     # Relationships
     asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLot.asset_id]"},
+    )
+    origin_transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="cost_lots",
+        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_transaction_id]"}
     )
     # consumed_slices owned by this lot with cascade
     consumed_slices: List["ConsumedLotSlice"] = Relationship(
@@ -1065,6 +1123,7 @@ class RealizedPnl(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.origin_unit_id]"},
     )
     transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="realized_pnl",
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.transaction_id]"},
     ) 
 
@@ -1078,16 +1137,18 @@ class FeeEntry(SQLModel, table=True):
     - All fee data (FMV, cost basis, quantity) lives in RealizedPnl
     - All fees create RealizedPnl entries (disposal_taxable flag determines tax treatment)
     
-    Ownership: Owned by CalculationUnit via unit_id (cascade delete).
+    Ownership: Owned by CalculationUnitLeg via fee_leg_id (cascade delete).
+    Hierarchy: CalculationUnit → CalculationUnitLeg → FeeEntry
     """
 
     __tablename__ = "fee_entries"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     
-    # Core FKs - minimal index
+    # Core FKs - fee_leg_id is the owner relationship
     fee_leg_id: int = Field(foreign_key="calculation_unit_legs.id", nullable=False, index=True)
     realized_pnl_id: Optional[int] = Field(default=None, foreign_key="realized_pnl.pnl_id", nullable=True, index=True)
+    # unit_id kept for query convenience but derived from fee_leg.unit_id
     unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
     version_id: int = Field(foreign_key="calculation_versions.version_id", nullable=False, index=True)
     
@@ -1101,15 +1162,15 @@ class FeeEntry(SQLModel, table=True):
     # Timestamps
     created_at: datetime = Field(default_factory=utc_now)
     
-    # Relationships
+    # Relationships - fee_leg is the owner
     fee_leg: Optional["CalculationUnitLeg"] = Relationship(
+        back_populates="fee_entries",
         sa_relationship_kwargs={"foreign_keys": "[FeeEntry.fee_leg_id]"},
     )
     realized_pnl: Optional["RealizedPnl"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[FeeEntry.realized_pnl_id]"},
     )
     unit: Optional["CalculationUnit"] = Relationship(
-        back_populates="fee_entries",
         sa_relationship_kwargs={"foreign_keys": "[FeeEntry.unit_id]"},
     )
     version: Optional["CalculationVersion"] = Relationship(
@@ -1158,10 +1219,19 @@ class CalculationUnitLeg(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.unit_id]"}
     )
     transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="calculation_legs",
         sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.transaction_id]"}
     )
     asset: Optional["Asset"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CalculationUnitLeg.asset_id]"}
+    )
+    # FeeEntry owned by this leg - cascade enables automatic deletion
+    fee_entries: List["FeeEntry"] = Relationship(
+        back_populates="fee_leg",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[FeeEntry.fee_leg_id]"
+        }
     )
     
     # Computed properties for ExpandedLeg compatibility
@@ -1246,6 +1316,7 @@ class CalculationUnit(SQLModel, table=True):
     unit_label: Optional[str] = Field(default=None)  # Human-readable label
     pattern: Optional[str] = Field(default=None)  # User-confirmed pattern: transfer, swap, split, unknown
     timestamp: datetime = Field(default_factory=utc_now, index=True)
+    created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships - all children use cascade for automatic persistence
     version: Optional["CalculationVersion"] = Relationship(back_populates="calculation_units")
@@ -1265,11 +1336,12 @@ class CalculationUnit(SQLModel, table=True):
             "foreign_keys": "[RealizedPnl.origin_unit_id]"
         }
     )
+    # fee_entries now owned by CalculationUnitLeg, not CalculationUnit
+    # Kept as viewonly for query convenience (cascades via legs → fee_entries)
     fee_entries: List["FeeEntry"] = Relationship(
-        back_populates="unit",
         sa_relationship_kwargs={
-            "cascade": "all, delete-orphan",
-            "foreign_keys": "[FeeEntry.unit_id]"
+            "foreign_keys": "[FeeEntry.unit_id]",
+            "viewonly": True
         }
     )
     warnings: List["PnlWarning"] = Relationship(
@@ -1605,6 +1677,7 @@ class LotSettlement(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[LotSettlement.negative_lot_id]"},
     )
     settling_transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="lot_settlements",
         sa_relationship_kwargs={"foreign_keys": "[LotSettlement.settling_transaction_id]"},
     )
     
@@ -1646,6 +1719,10 @@ class PnlWarning(SQLModel, table=True):
     unit: Optional["CalculationUnit"] = Relationship(
         back_populates="warnings",
         sa_relationship_kwargs={"foreign_keys": "[PnlWarning.unit_id]"}
+    )
+    transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="pnl_warnings",
+        sa_relationship_kwargs={"foreign_keys": "[PnlWarning.transaction_id]"}
     )
     
     # Convenience property to access version via unit
@@ -1733,6 +1810,7 @@ class CostLotEvent(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.related_lot_id]"}
     )
     triggered_by_transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="cost_lot_events",
         sa_relationship_kwargs={"foreign_keys": "[CostLotEvent.triggered_by_transaction_id]"}
     )
     triggered_by_unit: Optional["CalculationUnit"] = Relationship(

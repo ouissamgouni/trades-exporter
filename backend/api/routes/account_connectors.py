@@ -375,6 +375,7 @@ def delete_account_connector(
 ):
     """
     Delete a connector from an account.
+    Also deletes any associated test fixture file.
     """
     get_account_or_404(session, account_id)
     repo = get_repo(session)
@@ -386,6 +387,10 @@ def delete_account_connector(
             status_code=404,
             detail=f"Connector '{connector_type}' not found for account {account_id}",
         )
+
+    # Delete associated test fixture file if it exists
+    from backend.api.routes.fixtures import delete_fixture_file
+    delete_fixture_file(connector.id)
 
     repo.delete(connector.id)
     session.commit()

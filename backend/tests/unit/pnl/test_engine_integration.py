@@ -302,7 +302,7 @@ class TestPnLEngineIntegration:
             lot_method=CostMethod.FIFO,
             base_currency_id=1,
             base_currency_symbol="EUR",
-            crypto_swap_taxable=True,
+            crypto_swap_taxable_by_default=True,
         )
         engine = PnLEngine(mock_session, mock_price_service, config)
 
