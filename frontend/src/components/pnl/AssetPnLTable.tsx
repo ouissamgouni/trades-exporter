@@ -26,7 +26,7 @@ import { formatDateTimeLocale } from '../../utils/dateUtils';
 interface AssetPnLTableProps {
     assets: AssetPnLRow[];
     baseCurrency: string;
-    onAssetClick: (assetId: number) => void;
+    onAssetClick: (assetId: number | undefined | null) => void;
     loading?: boolean;
 }
 
@@ -80,7 +80,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     // Filter and sort
     const filtered = assets
         .filter((a) => {
-            if (search && !a.asset_symbol.toLowerCase().includes(search.toLowerCase())) {
+            if (search && (!a.asset.symbol || !a.asset.symbol.toLowerCase().includes(search.toLowerCase()))) {
                 return false;
             }
             if (filter === 'with-position' && a.quantity === 0) return false;
@@ -88,8 +88,15 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             return true;
         })
         .sort((a, b) => {
-            const aVal = a[sortField];
-            const bVal = b[sortField];
+            let aVal: string | number;
+            let bVal: string | number;
+            if (sortField === 'asset_symbol') {
+                aVal = a.asset.symbol ?? '';
+                bVal = b.asset.symbol ?? '';
+            } else {
+                aVal = a[sortField];
+                bVal = b[sortField];
+            }
             if (typeof aVal === 'string') {
                 return sortDir === 'asc'
                     ? aVal.localeCompare(bVal as string)
@@ -210,38 +217,33 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     </Table.Cell>
                                 </Table.Row>
                             ) : (
-                                filtered.map((asset) => {
-                                    const stale = isPriceStale(asset.price_fetched_at);
-                                    const hasPrice = asset.unit_value != null;
-                                    const hasError = !!asset.price_error;
-                                    const isLoadingPrice = !!asset.price_loading;
+                                filtered.map((assetpnlrow) => {
+                                    const stale = isPriceStale(assetpnlrow.price_fetched_at);
+                                    const hasPrice = assetpnlrow.unit_value != null;
+                                    const hasError = !!assetpnlrow.price_error;
+                                    const isLoadingPrice = !!assetpnlrow.price_loading;
 
                                     return (
                                         <Table.Row
-                                            key={asset.asset_id}
+                                            key={assetpnlrow.asset.id}
                                             cursor="pointer"
                                             _hover={{ bg: 'blue.50' }}
-                                            onClick={() => onAssetClick(asset.asset_id)}
+                                            onClick={() => onAssetClick(assetpnlrow.asset.id)}
                                         >
                                             <Table.Cell>
                                                 <Flex align="center" gap={2}>
                                                     <Badge colorPalette="blue" fontWeight="bold">
-                                                        {asset.asset_symbol}
+                                                        {assetpnlrow.asset.symbol}
                                                     </Badge>
-                                                    {asset.asset_label && (
-                                                        <Text fontSize="xs" color="gray.500">
-                                                            {asset.asset_label}
-                                                        </Text>
-                                                    )}
                                                 </Flex>
                                             </Table.Cell>
                                             <Table.Cell>
-                                                {formatQty(asset.quantity)}
+                                                {formatQty(assetpnlrow.quantity)}
                                             </Table.Cell>
                                             {/* Unit Cost (average cost basis per unit) */}
                                             <Table.Cell>
-                                                {asset.unit_cost != null
-                                                    ? formatCurrency(asset.unit_cost, baseCurrency)
+                                                {assetpnlrow.unit_cost != null
+                                                    ? formatCurrency(assetpnlrow.unit_cost, baseCurrency)
                                                     : '—'}
                                             </Table.Cell>
                                             {/* Unit Value (current market price) with tooltip */}
@@ -255,20 +257,20 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                 <Flex justify="space-between" gap={4} mb={1}>
                                                                     <Text color="gray.400">Source</Text>
                                                                     <Text fontWeight="medium">
-                                                                        {asset.price_source || 'N/A'}
+                                                                        {assetpnlrow.price_source || 'N/A'}
                                                                     </Text>
                                                                 </Flex>
                                                                 <Flex justify="space-between" gap={4} mb={1}>
                                                                     <Text color="gray.400">Updated</Text>
                                                                     <Text fontWeight="medium">
-                                                                        {formatDateTimeLocale(asset.price_fetched_at)}
+                                                                        {formatDateTimeLocale(assetpnlrow.price_fetched_at)}
                                                                     </Text>
                                                                 </Flex>
                                                                 {hasError && (
                                                                     <Flex justify="space-between" gap={4}>
                                                                         <Text color="red.400">Error</Text>
                                                                         <Text color="red.300" maxW="200px" wordBreak="break-word">
-                                                                            {asset.price_error}
+                                                                            {assetpnlrow.price_error}
                                                                         </Text>
                                                                     </Flex>
                                                                 )}
@@ -288,7 +290,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                     textDecoration="underline dotted"
                                                                     color={stale ? 'orange.500' : undefined}
                                                                 >
-                                                                    {formatCurrency(asset.unit_value!, baseCurrency)}
+                                                                    {formatCurrency(assetpnlrow.unit_value!, baseCurrency)}
                                                                 </Text>
                                                             ) : (
                                                                 <Text color="gray.400">
@@ -306,45 +308,45 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                 )}
                                             </Table.Cell>
                                             <Table.Cell>
-                                                {formatCurrency(asset.market_value, baseCurrency)}
+                                                {formatCurrency(assetpnlrow.market_value, baseCurrency)}
                                             </Table.Cell>
                                             <Table.Cell>
-                                                {formatCurrency(asset.cost_basis, baseCurrency)}
+                                                {formatCurrency(assetpnlrow.cost_basis, baseCurrency)}
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <Flex direction="column">
                                                     <Text
                                                         fontWeight="medium"
-                                                        color={asset.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}
+                                                        color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}
                                                     >
-                                                        {formatCurrency(asset.unrealized_pnl, baseCurrency)}
+                                                        {formatCurrency(assetpnlrow.unrealized_pnl, baseCurrency)}
                                                     </Text>
                                                     <Text fontSize="xs" color="gray.500">
-                                                        {formatPct(asset.unrealized_pnl_pct)}
+                                                        {formatPct(assetpnlrow.unrealized_pnl_pct)}
                                                     </Text>
                                                 </Flex>
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <Text
                                                     fontWeight="medium"
-                                                    color={asset.realized_pnl >= 0 ? 'green.600' : 'red.600'}
+                                                    color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}
                                                 >
-                                                    {formatCurrency(asset.realized_pnl, baseCurrency)}
+                                                    {formatCurrency(assetpnlrow.realized_pnl, baseCurrency)}
                                                 </Text>
                                             </Table.Cell>
                                             <Table.Cell>
                                                 <Text fontSize="sm" color="gray.600">
-                                                    {formatCurrency(asset.total_fees, baseCurrency)}
+                                                    {formatCurrency(assetpnlrow.total_fees, baseCurrency)}
                                                 </Text>
                                             </Table.Cell>
                                             <Table.Cell textAlign="center">
                                                 <Flex gap={1} justify="center">
                                                     <Badge size="sm" variant="subtle">
-                                                        {asset.lot_count} lots
+                                                        {assetpnlrow.lot_count} lots
                                                     </Badge>
-                                                    {asset.warning_count > 0 && (
+                                                    {assetpnlrow.warning_count > 0 && (
                                                         <Badge size="sm" colorPalette="orange">
-                                                            {asset.warning_count} ⚠
+                                                            {assetpnlrow.warning_count} ⚠
                                                         </Badge>
                                                     )}
                                                 </Flex>

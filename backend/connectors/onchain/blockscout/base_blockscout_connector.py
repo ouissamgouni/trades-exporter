@@ -33,6 +33,7 @@ class BlockscoutConnectorBase(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """
@@ -44,6 +45,7 @@ class BlockscoutConnectorBase(BaseConnector):
             account_id: Optional account ID for database linking
             connector_id: Optional connector ID for database linking
             config: Optional connector configuration dict
+            progress_callback: Optional callback for reporting progress
             **kwargs: Additional configuration parameters
         """
         # Set variables needed for connector_name BEFORE super().__init__()
@@ -55,7 +57,12 @@ class BlockscoutConnectorBase(BaseConnector):
         self.native_token_decimals = get_native_token_decimals(self.chain_name)
 
         # Initialize base (sets self.test_mode and logs)
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(
+            account_id=account_id,
+            connector_id=connector_id,
+            config=config,
+            progress_callback=progress_callback,
+        )
 
         # Validate wallet configuration (required in both test and live mode)
         if not self.wallet_address:

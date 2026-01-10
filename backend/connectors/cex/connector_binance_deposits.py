@@ -5,7 +5,7 @@ Object-oriented design implementing BaseConnector interface.
 """
 
 import ccxt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 
 from backend.connectors.base.base_connector import BaseConnector
@@ -32,10 +32,11 @@ class ConnectorBinanceDeposits(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize Binance deposits connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
         # In test mode, skip all API configuration
         if self.test_mode:
@@ -82,7 +83,13 @@ class ConnectorBinanceDeposits(BaseConnector):
         Returns:
             list: List of deposit objects from CCXT or empty list on error
         """
+        if since is None:
+            now = datetime.now(timezone.utc)
+            six_months_ago = now - timedelta(days=180)
+            since = int(six_months_ago.timestamp() * 1000)
+        
         try:
+            
             deposits = self.exchange.fetch_deposits(code=None, since=since, limit=limit)
             log.info(f"✅ Fetched {len(deposits)} deposits from Binance")
             return deposits
@@ -167,10 +174,32 @@ class ConnectorBinanceDeposits(BaseConnector):
             list: List of deposit objects
         """
         log.info("🔄 Fetching deposits from Binance API using CCXT...")
+        
+        self.update_progress(
+            operation="Fetching deposits",
+            current=0,
+            total=1,
+            log_message="Fetching deposits from Binance API..."
+        )
+        
         all_deposits = self.get_deposits()
         if not all_deposits:
             log.warning("⚠️ No deposits fetched from Binance")
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message="ℹ️ No deposits found on Binance"
+            )
             return []
+        
+        self.update_progress(
+            operation="Completed",
+            current=1,
+            total=1,
+            log_message=f"✅ Fetched {len(all_deposits)} deposits from Binance"
+        )
+        
         return all_deposits
 
     # Inherits yield_normalized from BaseConnector

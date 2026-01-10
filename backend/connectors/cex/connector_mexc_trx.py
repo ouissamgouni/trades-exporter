@@ -33,10 +33,11 @@ class MEXCConnectorTrx(BaseConnector):
         connector_id: int = None,
         symbols: List[str] = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize MEXC connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
         # Store symbols filter (if provided, only fetch trades for these symbols)
         self._symbols_filter = symbols
@@ -199,12 +200,34 @@ class MEXCConnectorTrx(BaseConnector):
             log.warning("⚠️ No symbols fetched from MEXC")
             return []
 
+        self.update_progress(
+            operation="Fetching symbols",
+            current=0,
+            total=len(symbols),
+            log_message=f"Starting to fetch trades for {len(symbols)} symbols"
+        )
+
+        import threading
+        completed_count = 0
+        completed_lock = threading.Lock()
+
         def fetch_symbol_trades(indexed_symbol):
             """Helper function to fetch trades for a single symbol."""
+            nonlocal completed_count
             idx, symbol = indexed_symbol
             prefix = f"[{idx + 1}/{len(symbols)}]"
             try:
                 trades = self.get_trades(symbol)
+                
+                with completed_lock:
+                    completed_count += 1
+                    self.update_progress(
+                        operation=f"Fetching {symbol}",
+                        current=completed_count,
+                        total=len(symbols),
+                        log_message=f"{prefix} Fetched {len(trades)} trades for {symbol}" if trades else None
+                    )
+                
                 if trades:
                     log.info(f"{prefix} ✅ Found {len(trades)} trades for {symbol}")
                     return trades
@@ -230,6 +253,13 @@ class MEXCConnectorTrx(BaseConnector):
                     all_trades.extend(trades)
                 except Exception as e:
                     log.debug(f"Error processing future result: {e}")
+
+        self.update_progress(
+            operation="Completed",
+            current=len(symbols),
+            total=len(symbols),
+            log_message=f"✅ Total trades fetched: {len(all_trades)}"
+        )
 
         return all_trades
 

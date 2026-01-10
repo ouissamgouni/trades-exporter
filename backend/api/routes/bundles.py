@@ -22,6 +22,7 @@ from backend.db.models import (
     Direction,
     ReviewStatus,
 )
+from backend.api.routes.pnl import TransactionSummary  # Import shared model
 from backend.services.suggestion_service import SuggestionService, GroupingSuggestion
 from backend.services.pnl.taxability import suggest_bundle_taxability
 from backend.services.pnl.config import PnLConfig
@@ -58,34 +59,7 @@ class UnitUpdate(BaseModel):
     )
 
 
-class TransactionSummary(BaseModel):
-    """Summary of a transaction in a unit."""
-
-    id: int
-    date_time: Optional[str] = None
-    direction: Optional[Direction] = None
-    transaction_type: Optional[str] = None
-    asset_symbol: Optional[str] = None
-    symbol: Optional[str] = None  # Alias for frontend compatibility
-    quantity: Optional[float] = None
-    source: Optional[str] = None
-    source_transaction_id: Optional[str] = None
-    network: Optional[str] = None
-    # Extended fields for enhanced display
-    account_id: Optional[int] = None
-    account_name: Optional[str] = None
-    price: Optional[float] = None
-    price_quote_asset_symbol: Optional[str] = None
-    total: Optional[float] = None
-    fee: Optional[float] = None
-    fee_quote_asset_symbol: Optional[str] = None
-    from_account_name: Optional[str] = None
-    to_account_name: Optional[str] = None
-    source_from_account: Optional[str] = None
-    source_to_account: Optional[str] = None
-    source_transaction_type: Optional[str] = None
-    source_asset_symbol: Optional[str] = None
-    network_transaction_id: Optional[str] = None
+# TransactionSummary imported from backend.api.routes.pnl to avoid duplication
 
 
 class UnitResponse(BaseModel):

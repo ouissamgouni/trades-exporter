@@ -84,15 +84,16 @@ const InfoRow: React.FC<InfoRowProps> = ({ label, value, muted, alert }) => (
         <Text fontSize="10px" color="gray.500" flexShrink={0}>{label}</Text>
         <Flex align="center" gap={1}>
             {alert && <FiAlertTriangle size={10} color="orange" />}
-            <Text
+            <Box
+                as="span"
                 fontSize="10px"
                 color={alert ? 'orange.500' : muted ? 'gray.400' : 'gray.700'}
                 fontFamily="mono"
                 textAlign="right"
-                wordBreak="break-all"
+                css={{ wordBreak: 'break-all' }}
             >
                 {value}
-            </Text>
+            </Box>
         </Flex>
     </Flex>
 );

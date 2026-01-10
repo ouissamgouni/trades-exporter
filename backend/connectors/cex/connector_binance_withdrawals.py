@@ -33,10 +33,11 @@ class BinanceWithdrawalsConnector(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize Binance withdrawals connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
         # In test mode, skip all API configuration
         if self.test_mode:
@@ -183,10 +184,31 @@ class BinanceWithdrawalsConnector(BaseConnector):
             list: List of withdrawal objects
         """
         log.info("🔄 Fetching withdrawals from Binance API using CCXT...")
+        
+        self.update_progress(
+            operation="Fetching withdrawals",
+            current=0,
+            total=1,
+            log_message="Fetching withdrawals from Binance API..."
+        )
+        
         all_withdrawals = self.get_withdrawals()
         if not all_withdrawals:
             log.warning("⚠️ No withdrawals fetched from Binance")
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message="ℹ️ No withdrawals found on Binance"
+            )
             return []
+
+        self.update_progress(
+            operation="Completed",
+            current=1,
+            total=1,
+            log_message=f"✅ Fetched {len(all_withdrawals)} withdrawals from Binance"
+        )
 
         return all_withdrawals
 

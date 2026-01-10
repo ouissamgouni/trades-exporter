@@ -12,6 +12,7 @@ from sqlmodel import SQLModel, Field, Relationship, Column, JSON
 from sqlalchemy import UniqueConstraint, Text, ARRAY, Numeric, case, Integer
 from enum import Enum
 from sqlalchemy.ext.hybrid import hybrid_property
+from pydantic import field_validator
 
 
 def utc_now() -> datetime:
@@ -48,6 +49,26 @@ class SyncStatus(str, Enum):
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+
+
+class SyncJobStatus(str, Enum):
+    """Status enum for sync jobs."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ABORTED = "aborted"
+    FAILED = "failed"
+
+
+class SyncJobConnectorStatus(str, Enum):
+    """Status enum for individual connector runs within a sync job."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class PriceType(str, Enum):
@@ -145,6 +166,20 @@ class Direction(str, Enum):
     INFLOW = "inflow"
     OUTFLOW = "outflow"
     NEUTRAL = "neutral"
+
+
+class LegType(str, Enum):
+    """Leg type for calculation unit legs.
+    
+    Values:
+    - INFLOW: Assets entering the unit
+    - OUTFLOW: Assets leaving the unit
+    - FEE: Fee payments
+    """
+    
+    INFLOW = "inflow"
+    OUTFLOW = "outflow"
+    FEE = "fee"
 
 
 class ReviewStatus(str, Enum):
@@ -268,6 +303,105 @@ class AccountConnector(SQLModel, table=True):
 
     # Relationships
     account: Optional[Account] = Relationship(back_populates="connectors")
+    connector_runs: List["SyncJobConnectorRun"] = Relationship(back_populates="connector")
+
+
+# ============================================================================
+# Sync Job Models (Job History Tracking)
+# ============================================================================
+
+
+class SyncJob(SQLModel, table=True):
+    """
+    Sync job record for tracking job history.
+    
+    Each sync job execution creates a record with:
+    - Overall job status and timing
+    - Aggregated stats (computed from connector runs)
+    - Configuration snapshot (overrides used)
+    """
+
+    __tablename__ = "sync_jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: str = Field(default="running", index=True)  # SyncJobStatus enum values
+    started_at: datetime = Field(default_factory=utc_now, index=True)
+    finished_at: Optional[datetime] = Field(default=None)
+    last_heartbeat: Optional[datetime] = Field(default=None)  # For detecting stale/crashed jobs
+    
+    # Aggregated stats (updated on completion)
+    total_connectors: int = Field(default=0)
+    total_processed: int = Field(default=0)
+    total_new: int = Field(default=0)
+    total_updated: int = Field(default=0)
+    total_skipped: int = Field(default=0)
+    total_errors: int = Field(default=0)
+    
+    # Configuration snapshot (overrides, settings)
+    config_snapshot: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    
+    # Error info
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    connector_runs: List["SyncJobConnectorRun"] = Relationship(back_populates="job")
+
+
+class SyncJobConnectorRun(SQLModel, table=True):
+    """
+    Per-connector run within a sync job.
+    
+    Tracks detailed metrics, outcomes, and logs for each connector execution.
+    Supports viewing transactions synced by this run and rerun capability.
+    """
+
+    __tablename__ = "sync_job_connector_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: int = Field(foreign_key="sync_jobs.id", nullable=False, index=True)
+    connector_id: int = Field(foreign_key="account_connectors.id", nullable=False, index=True)
+    
+    # Connector info snapshot (for display even if connector deleted)
+    connector_type: str = Field(default="")
+    account_name: str = Field(default="")
+    
+    # Status and timing
+    status: str = Field(default="queued", index=True)  # SyncJobConnectorStatus enum values
+    test_mode: bool = Field(default=False)
+    started_at: Optional[datetime] = Field(default=None)
+    finished_at: Optional[datetime] = Field(default=None)
+    
+    # Metrics
+    processed: int = Field(default=0)  # Total items processed from connector
+    synced_count: int = Field(default=0)  # New transactions created
+    updated_count: int = Field(default=0)  # Existing transactions updated
+    skipped_count: int = Field(default=0)  # Duplicates skipped (no changes)
+    error_count: int = Field(default=0)  # Items that failed
+    
+    # Outcome tracking (JSON arrays)
+    # synced_ids: external IDs of new transactions
+    # updated_ids: external IDs of updated transactions
+    # skipped_ids: external IDs of skipped (no change) items - limited to sample
+    # error_details: [{external_id, stage, error}]
+    synced_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    updated_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    skipped_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))  # Sample only
+    error_details: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
+    
+    # Logs (JSON array of {timestamp, level, message})
+    logs: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
+    
+    # Error summary
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    job: Optional[SyncJob] = Relationship(back_populates="connector_runs")
+    connector: Optional[AccountConnector] = Relationship(back_populates="connector_runs")
+    transactions: List["NormalizedTransaction"] = Relationship(back_populates="sync_connector_run")
 
 
 # ============================================================================
@@ -578,8 +712,22 @@ class NormalizedTransaction(SQLModel, table=True):
     token_contract_address: Optional[str] = Field(default=None)
 
     # Metadata
+    # Note: Empty dict {} in DB will be coerced to None to avoid Pydantic serialization warnings
     tags: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
     synced_at: Optional[datetime] = Field(default=None)
+    
+    # Sync job tracking - links to the connector run that last synced this transaction
+    sync_connector_run_id: Optional[int] = Field(
+        default=None, foreign_key="sync_job_connector_runs.id", index=True
+    )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def coerce_empty_dict_to_none(cls, v):
+        """Coerce empty dict to None (DB may have {} instead of [] or null)."""
+        if v == {} or v == []:
+            return None
+        return v
 
     # Review status and taxability
     review_status: str = Field(default="pending", index=True)  # valid, pending, invalid
@@ -637,6 +785,14 @@ class NormalizedTransaction(SQLModel, table=True):
     to_account: Optional[Account] = Relationship(
         sa_relationship_kwargs={
             "foreign_keys": "[NormalizedTransaction.to_account_id]"
+        },
+    )
+    
+    # Sync job tracking relationship
+    sync_connector_run: Optional["SyncJobConnectorRun"] = Relationship(
+        back_populates="transactions",
+        sa_relationship_kwargs={
+            "foreign_keys": "[NormalizedTransaction.sync_connector_run_id]"
         },
     )
 
@@ -936,8 +1092,6 @@ class CostLot(SQLModel, table=True):
         # If total_cost was provided, compute it
         if self.total_cost_in_base is None :
             self.total_cost_in_base = total_cost
-
-
     
     @property
     def total_cost_in_base(self) -> Decimal:
@@ -992,6 +1146,7 @@ class CostLot(SQLModel, table=True):
             unit_cost_in_base=self.unit_cost_in_base,
             total_cost_in_base=qty * self.unit_cost_in_base,
             cost_lot=self,  # Set cost_lot relationship - cascade handles persistence
+            unit_id=self.unit_id,  # Set unit_id for direct link to calculation unit
         )
         return slice_record
 
@@ -1018,6 +1173,9 @@ class ConsumedLotSlice(SQLModel, table=True):
     consumed_by_leg_id: Optional[int] = Field(
         default=None, foreign_key="calculation_unit_legs.id", index=True
     )
+    unit_id: Optional[int] = Field(
+        default=None, foreign_key="calculation_units.id", index=True
+    )
     quantity: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     unit_cost_in_base: Decimal = Field(
         sa_column=Column(Numeric(36, 18), nullable=False)
@@ -1038,6 +1196,9 @@ class ConsumedLotSlice(SQLModel, table=True):
     cost_lot: Optional[CostLot] = Relationship(back_populates="consumed_slices")
     consumed_by_leg: Optional["CalculationUnitLeg"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.consumed_by_leg_id]"}
+    )
+    unit: Optional["CalculationUnit"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[ConsumedLotSlice.unit_id]"}
     )
     
     # Convenience property to access version via cost_lot
@@ -1209,7 +1370,7 @@ class CalculationUnitLeg(SQLModel, table=True):
     unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
     transaction_id: int = Field(foreign_key="normalized_transactions.id", nullable=False, index=True)
     asset_id: int = Field(foreign_key="assets.asset_id", nullable=False, index=True)
-    leg_type: str = Field(nullable=False, index=True)  # "inflow", "outflow", "fee"
+    leg_type: LegType = Field(nullable=False, index=True)
     quantity: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -1268,12 +1429,12 @@ class CalculationUnitLeg(SQLModel, table=True):
     @property
     def direction(self) -> str:
         """Map leg_type to direction for ExpandedLeg compatibility."""
-        return self.leg_type if self.leg_type in ("inflow", "outflow") else "outflow"
+        return self.leg_type.value if self.leg_type in (LegType.INFLOW, LegType.OUTFLOW) else "outflow"
     
     @property
     def is_fee(self) -> bool:
         """Check if this is a fee leg."""
-        return self.leg_type == "fee"
+        return self.leg_type == LegType.FEE
     
     @property
     def tx_disposal_taxable(self) -> bool:
@@ -1358,6 +1519,12 @@ class CalculationUnit(SQLModel, table=True):
             "foreign_keys": "[CalculationUnitLeg.unit_id]"
         }
     )
+    consumed_slices: List["ConsumedLotSlice"] = Relationship(
+        back_populates="unit",
+        sa_relationship_kwargs={
+            "foreign_keys": "[ConsumedLotSlice.unit_id]"
+        }
+    )
     
     # Model configuration to allow extra attributes for runtime data
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
@@ -1396,14 +1563,6 @@ class CalculationUnit(SQLModel, table=True):
     
     # Computed properties from persisted relationships
     @property
-    def lots_created_count(self) -> int:
-        return len(self.cost_lots) if self.cost_lots else 0
-    
-    @property
-    def realized_entry_count(self) -> int:
-        return len(self.realized_pnl_records) if self.realized_pnl_records else 0
-    
-    @property
     def total_realized_pnl_in_base(self) -> Decimal:
         if not self.realized_pnl_records:
             return Decimal("0")
@@ -1412,20 +1571,17 @@ class CalculationUnit(SQLModel, table=True):
     # Persisted leg accessors (for API/queries)
     @property
     def outflow_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "outflow"]
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.OUTFLOW]
     
     @property
     def inflow_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "inflow"]
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.INFLOW]
     
     @property
     def fee_legs(self) -> List["CalculationUnitLeg"]:
-        return [leg for leg in (self.legs or []) if leg.leg_type == "fee"]
+        return [leg for leg in (self.legs or []) if leg.leg_type == LegType.FEE]
     
-    @property
-    def transaction_ids(self) -> List[int]:
-        return list({leg.transaction_id for leg in (self.legs or [])})
-    
+
     # Computed properties from legs
     @property
     def _outflow_asset_ids(self) -> set:
@@ -1448,9 +1604,13 @@ class CalculationUnit(SQLModel, table=True):
     def _generate_label(self) -> str:
         """Generate a human-readable label from legs with quantities.
         
-        Returns:
-            Label like '0.5 BTC → 10 ETH' for swaps, '1.5 BTC out' for spends,
-            '1 BTC: Binance → Ledger' for transfers, etc.
+        Format: ↓{inflow} | ↑{outflow} | 💸{fee}
+        Examples:
+            - "↓0.5 BTC | ↑10 ETH" for swap
+            - "↓1 BTC" for deposit/income
+            - "↑1.5 BTC" for withdrawal/spend
+            - "↓0.5 BTC | 💸0.001 BTC" for deposit with fee
+            - "↓0.5 BTC | ↑10 ETH | 💸0.01 BNB" for swap with fee
         """
         if not self.legs:
             return ""
@@ -1463,61 +1623,37 @@ class CalculationUnit(SQLModel, table=True):
             formatted = f"{float(qty):g}"
             return formatted
         
-        def get_account_name(leg) -> str:
-            """Get account name from leg if available."""
-            if leg.account:
-                return leg.account.name
-            return ""
-        
-        # For transfers: show "{qty} {asset}: {from_account} → {to_account}"
-        if self.pattern == UnitPattern.TRANSFER.value:
-            outflow_legs = self.outflow_legs
-            inflow_legs = self.inflow_legs
-            
-            if outflow_legs and inflow_legs:
-                # Get the asset (same for both sides in transfer)
-                asset_symbol = outflow_legs[0].asset_symbol if outflow_legs else "?"
-                qty = sum(leg.quantity or Decimal(0) for leg in outflow_legs)
-                
-                # Get account names
-                from_accounts = list({get_account_name(leg) for leg in outflow_legs if get_account_name(leg)})
-                to_accounts = list({get_account_name(leg) for leg in inflow_legs if get_account_name(leg)})
-                
-                from_str = ", ".join(from_accounts[:2]) if from_accounts else "?"
-                to_str = ", ".join(to_accounts[:2]) if to_accounts else "?"
-                
-                if from_accounts and to_accounts:
-                    return f"{format_qty(qty)} {asset_symbol}: {from_str} → {to_str}"
-        
-        # Aggregate quantities by symbol for outflows
-        outflow_by_symbol: dict[str, Decimal] = {}
-        for leg in self.outflow_legs:
-            if leg.asset_symbol:
-                outflow_by_symbol[leg.asset_symbol] = outflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + (leg.quantity or Decimal(0))
-        
-        # Aggregate quantities by symbol for inflows
+        # Aggregate quantities by symbol for each direction
         inflow_by_symbol: dict[str, Decimal] = {}
-        for leg in self.inflow_legs:
-            if leg.asset_symbol:
-                inflow_by_symbol[leg.asset_symbol] = inflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + (leg.quantity or Decimal(0))
+        outflow_by_symbol: dict[str, Decimal] = {}
+        fee_by_symbol: dict[str, Decimal] = {}
         
-        # Format as "qty SYMBOL" pairs
-        outflow_parts = [f"{format_qty(qty)} {sym}" for sym, qty in sorted(outflow_by_symbol.items())[:2]]
-        inflow_parts = [f"{format_qty(qty)} {sym}" for sym, qty in sorted(inflow_by_symbol.items())[:2]]
+        for leg in self.legs:
+            if not leg.asset_symbol:
+                continue
+            qty = leg.quantity or Decimal(0)
+            if leg.leg_type == LegType.INFLOW:
+                inflow_by_symbol[leg.asset_symbol] = inflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
+            elif leg.leg_type == LegType.OUTFLOW:
+                outflow_by_symbol[leg.asset_symbol] = outflow_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
+            elif leg.leg_type == LegType.FEE:
+                fee_by_symbol[leg.asset_symbol] = fee_by_symbol.get(leg.asset_symbol, Decimal(0)) + qty
         
-        # For swaps: OUT → IN
-        if outflow_parts and inflow_parts:
-            return f"{', '.join(outflow_parts)} → {', '.join(inflow_parts)}"
+        # Format as "↓qty SYM" for inflows, "↑qty SYM" for outflows, "💸qty SYM" for fees
+        inflow_parts = [f"↓{format_qty(qty)} {sym}" for sym, qty in sorted(inflow_by_symbol.items())[:3]]
+        outflow_parts = [f"↑{format_qty(qty)} {sym}" for sym, qty in sorted(outflow_by_symbol.items())[:3]]
+        fee_parts = [f"💸{format_qty(qty)} {sym}" for sym, qty in sorted(fee_by_symbol.items())[:2]]
         
-        # For outflow only (e.g., spend)
-        if outflow_parts:
-            return f"{', '.join(outflow_parts)} out"
-        
-        # For inflow only (e.g., income)
+        # Build label: inflows | outflows | fees
+        sections = []
         if inflow_parts:
-            return f"{', '.join(inflow_parts)} in"
+            sections.append(", ".join(inflow_parts))
+        if outflow_parts:
+            sections.append(", ".join(outflow_parts))
+        if fee_parts:
+            sections.append(", ".join(fee_parts))
         
-        return ""
+        return " | ".join(sections)
     
     def _compute_pattern_from_legs(self) -> tuple[str, str]:
         """Compute pattern from legs analysis.
@@ -1781,6 +1917,15 @@ class CostLotEvent(SQLModel, table=True):
         sa_column=Column(Numeric(36, 18), nullable=False)
     )
     cost_basis_remaining_after: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )
+    
+    # Asset-level balance (across all accounts/lots for this asset)
+    balance_after: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )
+    # Account-level balance (for this specific account+asset combination)
+    account_balance_after: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
     

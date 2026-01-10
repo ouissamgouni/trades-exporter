@@ -40,6 +40,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """
@@ -52,6 +53,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
             account_id: Optional account ID for database linking
             connector_id: Optional connector ID for database linking
             config: Optional connector configuration dict
+            progress_callback: Optional callback for reporting progress
             **kwargs: Additional configuration parameters
         """
         # Set variables needed for connector_name BEFORE super().__init__()
@@ -64,7 +66,12 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         self.chain_id = get_chain_id(self.chain_name)
 
         # Initialize base (sets self.test_mode and logs)
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(
+            account_id=account_id,
+            connector_id=connector_id,
+            config=config,
+            progress_callback=progress_callback,
+        )
 
         # Validate wallet configuration (required in both test and live mode)
         if not self.wallet_address:
@@ -148,6 +155,13 @@ class ConnectorEtherscanNormalTx(BaseConnector):
     def get_raws(self) -> List[Dict[str, Any]]:
         """Get raw normal transactions without mapping (for JSON logging)."""
         try:
+            self.update_progress(
+                operation="Fetching normal transactions",
+                current=0,
+                total=1,
+                log_message=f"Fetching normal transactions for {self.wallet_address[:10]}..."
+            )
+            
             result = self.safe_request(
                 {
                     "module": "account",
@@ -158,9 +172,24 @@ class ConnectorEtherscanNormalTx(BaseConnector):
                 }
             )
 
-            return result if isinstance(result, list) else []
+            transactions = result if isinstance(result, list) else []
+            
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message=f"✅ Found {len(transactions)} normal transactions on {self.chain_name}"
+            )
+            
+            return transactions
         except Exception as e:
             log.error(f"   ⚠️ Error fetching raw normal transactions: {e}")
+            self.update_progress(
+                operation="Failed",
+                current=1,
+                total=1,
+                log_message=f"❌ Error: {str(e)[:100]}"
+            )
             return []
 
     def raw_to_normalized(self, tx: Dict) -> NormalizedTransaction:

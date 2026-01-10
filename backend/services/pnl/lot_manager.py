@@ -97,6 +97,15 @@ class LotManager:
                 "All lot events must be associated with a calculation unit."
             )
         
+        # Compute balances after this event
+        # Asset-level balance (across all accounts)
+        balance_after = self.get_asset_balance(asset_id=lot.asset_id)
+        # Account-level balance (for this specific account)
+        account_balance_after = self.get_balance(account_id=lot.account_id, asset_id=lot.asset_id)
+        
+        # Use transaction datetime for event timestamp (economic time, not system time)
+        event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow()
+        
         event = CostLotEvent(
             event_type=event_type.value,
             lot=lot,
@@ -105,12 +114,14 @@ class LotManager:
             cost_basis_delta=cost_basis_delta,
             qty_remaining_after=lot.qty_remaining,
             cost_basis_remaining_after=lot.remaining_cost_in_base,
+            balance_after=balance_after,
+            account_balance_after=account_balance_after,
             triggered_by_transaction=triggered_by_transaction,
             triggered_by_transaction_id=triggered_by_transaction.id if triggered_by_transaction else None,
             triggered_by_unit=triggered_by_unit,
             triggered_by_unit_id=triggered_by_unit.id if triggered_by_unit else None,
             event_metadata=metadata,
-            timestamp=datetime.utcnow(),
+            timestamp=event_timestamp,
         )
         
         # Note: Setting lot=lot in constructor auto-populates lot.events via SQLAlchemy back_populates
@@ -370,7 +381,7 @@ class LotManager:
                     qty=-remaining_qty,  # Negative qty indicates debt
                     qty_remaining=-remaining_qty,  # Negative - amount of debt outstanding
                     unit_cost=unit_cost,
-                    acquired_at=datetime.utcnow(),
+                    acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow(),
                     is_zero_cost=not is_base_currency,
                     is_negative=True,
                     is_settled=False,  # Will be settled by later acquisition
@@ -444,6 +455,32 @@ class LotManager:
         )
         
         return positive_balance - negative_balance
+    
+    def get_asset_balance(self, asset_id: int) -> Decimal:
+        """
+        Get total balance for an asset across all accounts.
+        In MEGA_WALLET mode, this is the same as get_balance(None, asset_id).
+        In LOT_TRAVEL mode, this sums balances across all accounts.
+        """
+        if self.config.lot_mode == LotMode.MEGA_WALLET:
+            return self.get_balance(None, asset_id)
+        
+        # LOT_TRAVEL mode: sum across all accounts for this asset
+        total_balance = Decimal("0")
+        
+        # Sum positive lots across all accounts
+        for key, lots in self.lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance += sum(lot.qty_remaining for lot in lots if not lot.is_negative)
+        
+        # Subtract unsettled negative lots across all accounts
+        for key, neg_lots in self.negative_lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance -= sum(abs(lot.qty) for lot in neg_lots if not lot.is_settled)
+        
+        return total_balance
 
     def get_cost_basis(self, account_id: Optional[int], asset_id: int) -> Decimal:
         """Get total remaining cost basis for account/asset."""

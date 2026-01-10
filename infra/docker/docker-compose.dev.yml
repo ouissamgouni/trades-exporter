@@ -10,16 +10,12 @@ services:
     container_name: trades_db_dev
     env_file:
       - ../../.env.dev
-    environment:
-      POSTGRES_USER: ${DEV_DB_USER}
-      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD}
-      POSTGRES_DB: ${DEV_DB_NAME}
     ports:
       - "5432:5432"
     volumes:
       - trades_dev_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DEV_DB_USER} -d ${DEV_DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 5

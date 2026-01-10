@@ -1,31 +1,31 @@
 import { Box, Flex, Text } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
-import { API_URL, ConfigStatus } from '../types';
+import { API_URL, AppInfo } from '../types';
 
 export const TestModeBanner: React.FC = () => {
-    const [config, setConfig] = useState<ConfigStatus | null>(null);
+    const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const fetchConfig = async () => {
+        const fetchAppInfo = async () => {
             try {
-                const response = await fetch(`${API_URL}/config/status`);
+                const response = await fetch(`${API_URL}/config/info`);
                 if (response.ok) {
-                    const data: ConfigStatus = await response.json();
-                    setConfig(data);
+                    const data: AppInfo = await response.json();
+                    setAppInfo(data);
                 }
             } catch (err) {
-                console.error('Failed to fetch config status:', err);
+                console.error('Failed to fetch app info:', err);
             } finally {
                 setLoading(false);
             }
         };
 
-        fetchConfig();
+        fetchAppInfo();
     }, []);
 
-    // Don't render anything if not in test mode or still loading
-    if (loading || !config?.test_mode) {
+    // Don't render anything if production or still loading
+    if (loading || appInfo?.environment === 'prod') {
         return null;
     }
 
@@ -44,7 +44,7 @@ export const TestModeBanner: React.FC = () => {
             <Flex justify="center" align="center" gap={2}>
                 <Text fontSize="lg">⚠️</Text>
                 <Text>
-                    TEST MODE - You are using a test version of the backend. Data is stored in a separate test database.
+                    {appInfo?.environment.toUpperCase()} ENVIRONMENT - You are using a {appInfo?.environment} version of the backend.
                 </Text>
                 <Text fontSize="lg">⚠️</Text>
             </Flex>

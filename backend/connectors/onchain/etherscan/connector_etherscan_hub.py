@@ -6,7 +6,7 @@ Object-oriented design implementing BaseConnector interface.
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.onchain.chain_config import get_chain_config, CHAIN_CONFIG
-from backend.config.loader import configure_logging, load_settings, is_test_mode
+from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging(__name__)
 
@@ -31,7 +31,6 @@ class ConnectorEtherscanHub(BaseHubConnector):
     ):
         """
         Initialize Etherscan Hub connector that aggregates both transaction types.
-        In test mode, creates child connectors so they return test data.
 
         Args:
             wallet_address: The wallet address to scan
@@ -40,25 +39,27 @@ class ConnectorEtherscanHub(BaseHubConnector):
         # Set variables needed for connector_name BEFORE super().__init__()
         self.chain_name = chain_name
         self.wallet_address = wallet_address
-        test_mode = is_test_mode()
 
-        # Import specialized connectors (needed for both test and live mode)
+        # Import specialized connectors
         from .connector_etherscan_normal_tx import ConnectorEtherscanNormalTx
         from .connector_etherscan_token_transfers import (
             ConnectorEtherscanTokenTransfers,
         )
 
-        # Validate wallet address (required in both test and live mode)
+        # Validate wallet address
         if not self.wallet_address:
             raise ValueError("Missing wallet address")
 
-        # Validate chain is supported (required in both test and live mode)
+        # Validate chain is supported
         chain_config = get_chain_config(self.chain_name)
         if not chain_config:
             raise ValueError(
                 f"Unsupported chain: {self.chain_name}. Available: {list(CHAIN_CONFIG.keys())}"
             )
 
+        # Get test mode from config
+        test_mode = kwargs.get("config", {}).get("test_mode", False)
+        
         if not test_mode:
             # Live mode: validate API key
             web3_config = load_settings().get("web3_wallets", {})

@@ -24,7 +24,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Badge, Box, Button, Flex, Heading, Switch, Tabs, Text } from '@chakra-ui/react';
 import { FiLayers, FiSave, FiRefreshCw, FiEyeOff, FiEye } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
-import { Account, API_URL, PnLPreviewResponse, PricesResponse, PriceResponse, DimensionWithCategories } from '../../types';
+import { Account, API_URL, PriceResponse, DimensionWithCategories } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
@@ -41,6 +41,8 @@ import { MarketValuePieChart } from './MarketValuePieChart';
 import { PerformanceBarChart } from './PerformanceBarChart';
 import { PriceStatusList } from './PriceStatusList';
 import { SlidePanel } from './SlidePanel';
+import { TransactionDetailDrawer } from '../TransactionDetailDrawer';
+import { getPersistedPageSize } from '../../hooks/usePagination';
 
 // Types
 import {
@@ -61,6 +63,7 @@ import {
     Settlement,
     ConsumedSliceDetail,
     CostLotEventEntry,
+    mapProcessedUnitToCalculationUnit,
 } from './types';
 
 export const PnLPanel: React.FC = () => {
@@ -284,6 +287,10 @@ export const PnLPanel: React.FC = () => {
     const [showImpactPanel, setShowImpactPanel] = useState(false);
     const [impactEvent, setImpactEvent] = useState<PnLImpactEvent | null>(null);
 
+    // Transaction detail drawer state
+    const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
+    const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
+
     // Main view tab state: 'assets' or 'audit'
     const [mainTab, setMainTab] = useState<'assets' | 'audit'>('assets');
 
@@ -315,6 +322,23 @@ export const PnLPanel: React.FC = () => {
     const [isLoadingWarnings, setIsLoadingWarnings] = useState(false);
     const [isLoadingEvents, setIsLoadingEvents] = useState(false);
     const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
+
+    // Track previous audit state to detect actual tab changes vs callback recreations
+    const prevAuditStateRef = React.useRef<{ mainTab: string; auditSubTab: string; versionId: number | null }>({
+        mainTab: 'assets',
+        auditSubTab: 'units',
+        versionId: null,
+    });
+
+    // Per-tab pagination state for P&L Audit view
+    // Each tab maintains its own page/pageSize/totalCount
+    // Initialize pageSize from localStorage for persistence
+    const [unitsPagination, setUnitsPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('units'), total: 0 }));
+    const [lotsPagination, setLotsPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('lots'), total: 0 }));
+    const [realizedPagination, setRealizedPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('realized'), total: 0 }));
+    const [feesPagination, setFeesPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('fees'), total: 0 }));
+    const [warningsPagination, setWarningsPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('warnings'), total: 0 }));
+    const [eventsPagination, setEventsPagination] = useState(() => ({ page: 1, pageSize: getPersistedPageSize('events'), total: 0 }));
 
     // ID arrays for tab title counts (from calculation result, before data loads)
     const [idCounts, setIdCounts] = useState<{
@@ -392,8 +416,7 @@ export const PnLPanel: React.FC = () => {
     // Transform aggregated balances to AssetPnLRow array
     const transformBalances = useCallback((balances: AggregatedBalanceItem[]): AssetPnLRow[] => {
         return balances.map((balance) => ({
-            asset_id: balance.asset.id,
-            asset_symbol: balance.asset.name,
+            asset: balance.asset,
             account_ids: balance.account_ids || [],  // All accounts holding this asset
             category_ids: balance.category_ids || [],  // All categories assigned to this asset
             quantity: balance.qty,
@@ -421,19 +444,19 @@ export const PnLPanel: React.FC = () => {
                 // Build full price map with metadata
                 const fullPriceMap = new Map<number, PriceResponse>();
                 for (const p of prices) {
-                    if (p.asset.id !== undefined) {
-                        fullPriceMap.set(p.asset.id, p);
-                    }
+                    const assetId = p.asset.id;
+                    if (assetId != null) fullPriceMap.set(assetId, p);
                 }
 
                 // Apply prices to new asset rows
-                const assetsWithPrices = assetRows.map(asset => {
-                    const priceObj = fullPriceMap.get(asset.asset_id);
-                    const isPriceLoading = loadingPriceAssetIds.has(asset.asset_id);
+                const assetsWithPrices = assetRows.map(assetpnlrow => {
+                    const assetId = assetpnlrow.asset.id;
+                    const priceObj = assetId != null ? fullPriceMap.get(assetId) : undefined;
+                    const isPriceLoading = assetId != null && loadingPriceAssetIds.has(assetId);
 
                     if (!priceObj || priceObj.price == null) {
                         return {
-                            ...asset,
+                            ...assetpnlrow,
                             unit_value: null,
                             price_source: priceObj?.source,
                             price_fetched_at: priceObj?.fetched_at,
@@ -441,11 +464,11 @@ export const PnLPanel: React.FC = () => {
                             price_loading: isPriceLoading,
                         };
                     }
-                    const marketValue = asset.quantity * priceObj.price;
-                    const unrealizedPnl = marketValue - asset.cost_basis;
-                    const unrealizedPnlPct = asset.cost_basis > 0 ? unrealizedPnl / asset.cost_basis : 0;
+                    const marketValue = assetpnlrow.quantity * priceObj.price;
+                    const unrealizedPnl = marketValue - assetpnlrow.cost_basis;
+                    const unrealizedPnlPct = assetpnlrow.cost_basis > 0 ? unrealizedPnl / assetpnlrow.cost_basis : 0;
                     return {
-                        ...asset,
+                        ...assetpnlrow,
                         market_value: marketValue,
                         unrealized_pnl: unrealizedPnl,
                         unrealized_pnl_pct: unrealizedPnlPct,
@@ -517,7 +540,7 @@ export const PnLPanel: React.FC = () => {
 
                 // Create error entry
                 const errorItem: PriceResponse = {
-                    asset: { id: assetId, name: 'Unknown' },
+                    asset: { id: assetId, symbol: 'Unknown' },
                     price: null,
                     price_quote: baseCurrency,
                     error: err instanceof Error ? err.message : 'Unknown error',
@@ -527,7 +550,7 @@ export const PnLPanel: React.FC = () => {
                 // Try to find name from balances
                 const balance = balances.find(b => b.asset.id === assetId);
                 if (balance) {
-                    errorItem.asset.name = balance.asset.name;
+                    errorItem.asset.symbol = balance.asset.symbol;
                 }
 
                 setPrices(prev => {
@@ -760,28 +783,36 @@ export const PnLPanel: React.FC = () => {
                 version_id: versionId,
                 status: calcResult.status,
                 total_realized_pnl: calcResult.total_realized_pnl,
-                unit_count: calcResult.unit_ids.length,
-                lot_count: calcResult.cost_lot_ids.length,
             });
 
             // Store version info
             setCurrentVersionId(versionId);
             setCurrentVersionStatus(calcResult.status === 'draft' ? 'draft' : 'committed');
 
-            // Store ID counts for tab titles (derived from ID array lengths)
+            // Initialize ID counts (will be populated from paginated endpoint totals)
             setIdCounts({
-                unitCount: calcResult.unit_ids.length,
-                lotCount: calcResult.cost_lot_ids.length,
-                consumedCount: calcResult.consumed_slice_ids.length,
-                realizedCount: calcResult.realized_pnl_ids.length,
+                unitCount: 0,  // Will be set from units pagination
+                lotCount: 0,  // Will be set from lots pagination
+                consumedCount: 0,  // Will be set from consumed slices pagination
+                realizedCount: 0,  // Will be set from realized pagination
                 feeCount: calcResult.fee_entry_count ?? 0,
-                warningCount: calcResult.warning_ids.length,
-                settlementCount: calcResult.settlement_ids.length,
-                eventCount: calcResult.cost_lot_event_ids?.length ?? 0,
+                warningCount: 0,  // Will be set from warnings pagination
+                settlementCount: 0,  // Will be set from settlements pagination
+                eventCount: 0,  // Will be set from events pagination
             });
 
             // Reset loaded tabs tracker for fresh calculation
             setLoadedTabs(new Set());
+            // Reset audit state ref to force reload on next audit tab view
+            prevAuditStateRef.current = { mainTab: 'assets', auditSubTab: 'units', versionId: null };
+
+            // Reset pagination to page 1 (totals will be set when tabs load)
+            setUnitsPagination(prev => ({ ...prev, page: 1, total: 0 }));
+            setLotsPagination(prev => ({ ...prev, page: 1, total: 0 }));
+            setRealizedPagination(prev => ({ ...prev, page: 1, total: 0 }));
+            setFeesPagination(prev => ({ ...prev, page: 1, total: calcResult.fee_entry_count ?? 0 }));
+            setWarningsPagination(prev => ({ ...prev, page: 1, total: 0 }));
+            setEventsPagination(prev => ({ ...prev, page: 1, total: 0 }));
 
             // Step 2: Load balances from dedicated endpoint (group_by_asset=true)
             const balances = await loadBalances(versionId, showUnsettledNegative);
@@ -793,10 +824,6 @@ export const PnLPanel: React.FC = () => {
                 total_realized_pnl: calcResult.total_realized_pnl,
                 total_fees_in_base: calcResult.total_fees_in_base ?? 0,
                 fee_entry_count: calcResult.fee_entry_count ?? 0,
-                unit_ids: calcResult.unit_ids,
-                cost_lot_ids: calcResult.cost_lot_ids,
-                consumed_slice_ids: calcResult.consumed_slice_ids,
-                warning_ids: calcResult.warning_ids,
             };
 
             // Debug log
@@ -828,87 +855,61 @@ export const PnLPanel: React.FC = () => {
         }
     }, [config, transformResult, loadBalances, transformBalances, fetchPrices]);
 
-    // Independent loader: Load calculation units only
-    const loadUnits = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('units')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load calculation units with pagination
+    const loadUnits = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingUnits(true);
         try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/units`);
-            const units = await response.json();
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
+            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/units?${params}`);
+            const data = await response.json();
+
+            // Check if response is paginated (has items + total) or legacy array
+            const units = Array.isArray(data) ? data : data.items || [];
+            const total = data.total ?? units.length;
 
             // Store calculation units with complete nested data from API
-            const mappedUnits = units.map((u: any, idx: number) => {
-                const primaryAsset = u.outflows?.[0]?.asset || u.inflows?.[0]?.asset || { id: 0, name: '?' };
-                const transactionIds = new Set<number>();
-                [...(u.outflows || []), ...(u.inflows || []), ...(u.fees || [])].forEach(leg => {
-                    transactionIds.add(leg.transaction_id);
-                });
-
-                return {
-                    unit_id: u.unit_id ?? idx,
-                    unit_label: u.unit_label || '',
-                    pattern: u.pattern || 'unknown',
-                    date: u.timestamp,
-                    asset_id: primaryAsset.id,
-                    asset_symbol: primaryAsset.name,
-                    transaction_ids: Array.from(transactionIds),
-                    outflow_asset_ids: u.outflows?.map((leg: any) => leg.asset.id) || [],
-                    inflow_asset_ids: u.inflows?.map((leg: any) => leg.asset.id) || [],
-                    fee_asset_ids: u.fees?.map((leg: any) => leg.asset.id) || [],
-                    outflow_asset_symbols: u.outflows?.map((leg: any) => leg.asset.name) || [],
-                    inflow_asset_symbols: u.inflows?.map((leg: any) => leg.asset.name) || [],
-                    fee_asset_symbols: u.fees?.map((leg: any) => leg.asset.name) || [],
-                    lots_created_uuids: u.cost_basis?.lots?.map((lot: any) => lot.cost_lot_id) || [],
-                    lots_consumed_uuids: u.cost_basis?.consumed?.map((slice: any) => slice.cost_lot_id) || [],
-                    consumed_slices: u.cost_basis?.consumed || [],
-                    settlements: u.cost_basis?.settlements || [],
-                    realized_entries: u.realized_entries || [],
-                    warnings: u.warnings || [],
-                    realized_pnl_in_base: u.realized_pnl_in_base || 0,
-                    is_disposal_taxable: u.is_disposal_taxable || false,
-                    has_fees: u.has_fees || false,
-                    fee_count: u.fee_count || 0,
-                    total_fees_in_base: u.total_fees_in_base || 0,
-                    event_ids: u.event_ids || [],
-                    member_count: (u.outflows?.length || 0) + (u.inflows?.length || 0) + (u.fees?.length || 0),
-                    lots_created_count: u.cost_basis?.lots?.length || 0,
-                    lots_consumed_count: u.cost_basis?.consumed?.length || 0,
-                    realized_entry_count: u.realized_entries?.length || 0,
-                    warning_count: u.warnings?.length || 0,
-                };
-            });
+            const mappedUnits = units.map(mapProcessedUnitToCalculationUnit);
             setCalculationUnits(mappedUnits);
+            setUnitsPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('units'));
-            console.log('Loaded units:', mappedUnits.length);
+            console.log('Loaded units:', mappedUnits.length, 'of', total);
         } catch (err) {
             console.error('Failed to load units:', err);
         } finally {
             setIsLoadingUnits(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Independent loader: Load lots, consumed slices, and settlements (lots tab needs all three)
-    const loadLotsData = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('lots')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load lots with pagination (consumed slices and settlements still loaded fully for cross-referencing)
+    const loadLotsData = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingLots(true);
         try {
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
             const [lotsResponse, consumedResponse, settlementsResponse] = await Promise.all([
-                fetch(`${API_URL}/pnl/versions/${currentVersionId}/lots`),
+                fetch(`${API_URL}/pnl/versions/${currentVersionId}/lots?${params}`),
                 fetch(`${API_URL}/pnl/versions/${currentVersionId}/consumed-slices`),
                 fetch(`${API_URL}/pnl/versions/${currentVersionId}/settlements`),
             ]);
 
-            const [lots, consumedSlices, settlements] = await Promise.all([
+            const [lotsData, consumedSlices, settlements] = await Promise.all([
                 lotsResponse.json(),
                 consumedResponse.json(),
                 settlementsResponse.json(),
             ]);
+
+            // Check if response is paginated (has items + total) or legacy array
+            const lots = Array.isArray(lotsData) ? lotsData : lotsData.items || [];
+            const total = lotsData.total ?? lots.length;
 
             // Store cost lots
             const allLots: CostLot[] = lots.map((lot: any) => ({
@@ -934,7 +935,7 @@ export const PnLPanel: React.FC = () => {
             }));
             setAllCostLots(allLots);
 
-            // Store consumed slices
+            // Store consumed slices (full list for cross-referencing)
             const allConsumed: ConsumedSliceDetail[] = consumedSlices.map((s: any) => ({
                 cost_lot_id: s.cost_lot_id,
                 asset: s.asset,
@@ -949,7 +950,7 @@ export const PnLPanel: React.FC = () => {
             }));
             setAllConsumedSlices(allConsumed);
 
-            // Store settlements
+            // Store settlements (full list for cross-referencing)
             const mappedSettlements: Settlement[] = settlements.map((s: any) => ({
                 settlement_id: s.settlement_id,
                 negative_lot_id: s.negative_lot_id,
@@ -961,25 +962,32 @@ export const PnLPanel: React.FC = () => {
             }));
             setAllSettlements(mappedSettlements);
 
+            setLotsPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('lots'));
-            console.log('Loaded lots data:', { lots: allLots.length, consumed: allConsumed.length, settlements: mappedSettlements.length });
+            console.log('Loaded lots data:', { lots: allLots.length, total, consumed: allConsumed.length, settlements: mappedSettlements.length });
         } catch (err) {
             console.error('Failed to load lots data:', err);
         } finally {
             setIsLoadingLots(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Independent loader: Load realized P&L only
-    const loadRealizedPnL = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('realized')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load realized P&L with pagination
+    const loadRealizedPnL = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingRealized(true);
         try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/realized-pnl`);
-            const realizedPnl = await response.json();
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
+            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/realized-pnl?${params}`);
+            const data = await response.json();
+
+            // Check if response is paginated (has items + total) or legacy array
+            const realizedPnl = Array.isArray(data) ? data : data.items || [];
+            const total = data.total ?? realizedPnl.length;
 
             const allRealized: RealizedPnLRow[] = realizedPnl.map((e: any, idx: number) => ({
                 id: `rpnl-${idx}`,
@@ -1005,48 +1013,63 @@ export const PnLPanel: React.FC = () => {
                 proceeds_price_timestamp: e.proceeds_price_timestamp,
             }));
             setAllRealizedPnL(allRealized);
+            setRealizedPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('realized'));
-            console.log('Loaded realized P&L:', allRealized.length);
+            console.log('Loaded realized P&L:', allRealized.length, 'of', total);
         } catch (err) {
             console.error('Failed to load realized P&L:', err);
         } finally {
             setIsLoadingRealized(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Independent loader: Load warnings only
-    const loadWarnings = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('warnings')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load warnings with pagination
+    const loadWarnings = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingWarnings(true);
         try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/warnings`);
-            const warningsData = await response.json();
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
+            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/warnings?${params}`);
+            const data = await response.json();
+
+            // Check if response is paginated (has items + total) or legacy array
+            const warningsData = Array.isArray(data) ? data : data.items || [];
+            const total = data.total ?? warningsData.length;
+
             setWarnings(warningsData);
+            setWarningsPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('warnings'));
-            console.log('Loaded warnings:', warningsData.length);
+            console.log('Loaded warnings:', warningsData.length, 'of', total);
         } catch (err) {
             console.error('Failed to load warnings:', err);
         } finally {
             setIsLoadingWarnings(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Independent loader: Load fees only
-    const loadFees = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('fees')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load fees with pagination
+    const loadFees = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingFees(true);
         try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/fees`);
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
+            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/fees?${params}`);
             const data = await response.json();
 
-            // Map API response to FeeEntry interface (same as fetchFees)
-            const feeEntries: FeeEntry[] = (data.fees || []).map((f: any) => ({
+            // Check if response is paginated (has fees + total) or legacy structure
+            const feesData = data.fees || [];
+            const total = data.total ?? feesData.length;
+
+            // Map API response to FeeEntry interface
+            const feeEntries: FeeEntry[] = feesData.map((f: any) => ({
                 id: String(f.id),
                 date: f.date,
                 asset_id: f.asset_id,
@@ -1064,60 +1087,49 @@ export const PnLPanel: React.FC = () => {
             }));
 
             setFees(feeEntries);
+            setFeesPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('fees'));
-            console.log('Loaded fees:', feeEntries.length);
+            console.log('Loaded fees:', feeEntries.length, 'of', total);
         } catch (err) {
             console.error('Failed to load fees:', err);
         } finally {
             setIsLoadingFees(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Independent loader: Load lot events only
-    const loadLotEvents = useCallback(async () => {
-        if (!currentVersionId || loadedTabs.has('events')) {
-            return; // Already loaded
-        }
+    // Independent loader: Load lot events with pagination
+    const loadLotEvents = useCallback(async (page: number = 1, limit: number = 50) => {
+        if (!currentVersionId) return;
 
         setIsLoadingEvents(true);
         try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/lot-events`);
-            const eventsData = await response.json();
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: String(limit),
+            });
+            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/lot-events?${params}`);
+            const data = await response.json();
+
+            // Check if response is paginated (has items + total) or legacy array
+            const eventsData = Array.isArray(data) ? data : data.items || [];
+            const total = data.total ?? eventsData.length;
+
             setAllLotEvents(eventsData);
+            setEventsPagination(prev => ({ ...prev, page, pageSize: limit, total }));
             setLoadedTabs(prev => new Set(prev).add('events'));
-            console.log('Loaded lot events:', eventsData.length);
+            console.log('Loaded lot events:', eventsData.length, 'of', total);
         } catch (err) {
             console.error('Failed to load lot events:', err);
         } finally {
             setIsLoadingEvents(false);
         }
-    }, [currentVersionId, loadedTabs]);
+    }, [currentVersionId]);
 
-    // Handle audit tab changes - load data for the selected tab
+    // Handle audit tab changes - just update state, the useEffect will handle loading
     const handleAuditTabChange = useCallback((tab: string) => {
         setAuditSubTab(tab as 'units' | 'lots' | 'realized' | 'fees' | 'warnings' | 'events');
-
-        switch (tab) {
-            case 'units':
-                loadUnits();
-                break;
-            case 'lots':
-                loadLotsData();
-                break;
-            case 'realized':
-                loadRealizedPnL();
-                break;
-            case 'fees':
-                loadFees();
-                break;
-            case 'warnings':
-                loadWarnings();
-                break;
-            case 'events':
-                loadLotEvents();
-                break;
-        }
-    }, [loadUnits, loadLotsData, loadRealizedPnL, loadFees, loadWarnings, loadLotEvents]);
+        // Note: Data loading is handled by the useEffect that watches mainTab/auditSubTab changes
+    }, []);
 
     // Fetch available versions from API
     const fetchAvailableVersions = useCallback(async () => {
@@ -1147,6 +1159,8 @@ export const PnLPanel: React.FC = () => {
         try {
             // Reset all state
             setLoadedTabs(new Set());
+            // Reset audit state ref to force reload on next audit tab view
+            prevAuditStateRef.current = { mainTab: 'assets', auditSubTab: 'units', versionId: null };
             setCalculationUnits([]);
             setAllCostLots([]);
             setAllConsumedSlices([]);
@@ -1175,16 +1189,16 @@ export const PnLPanel: React.FC = () => {
                 base_currency_symbol: versionData.base_currency_symbol ?? prev.base_currency_symbol,
             }));
 
-            // Store ID counts (derive from arrays or use 0 for retrieval endpoints)
+            // Store ID counts (will be populated from paginated endpoint totals when tabs load)
             setIdCounts({
-                unitCount: versionData.unit_ids?.length ?? 0,
-                lotCount: versionData.cost_lot_ids?.length ?? 0,
-                consumedCount: versionData.consumed_slice_ids?.length ?? 0,
-                realizedCount: versionData.realized_pnl_ids?.length ?? 0,
+                unitCount: 0,
+                lotCount: 0,
+                consumedCount: 0,
+                realizedCount: 0,
                 feeCount: versionData.fee_entry_count ?? 0,
-                warningCount: versionData.warning_ids?.length ?? 0,
-                settlementCount: versionData.settlement_ids?.length ?? 0,
-                eventCount: versionData.cost_lot_event_ids?.length ?? 0,
+                warningCount: 0,
+                settlementCount: 0,
+                eventCount: 0,
             });
 
             // Fetch balances from dedicated endpoint (group_by_asset=true)
@@ -1197,10 +1211,6 @@ export const PnLPanel: React.FC = () => {
                 total_realized_pnl: versionData.total_realized_pnl,
                 total_fees_in_base: versionData.total_fees_in_base ?? 0,
                 fee_entry_count: versionData.fee_entry_count ?? 0,
-                unit_ids: versionData.unit_ids ?? [],
-                cost_lot_ids: versionData.cost_lot_ids ?? [],
-                consumed_slice_ids: versionData.consumed_slice_ids ?? [],
-                warning_ids: versionData.warning_ids ?? [],
             };
 
             transformResult(summaryData, assetRows);
@@ -1269,11 +1279,11 @@ export const PnLPanel: React.FC = () => {
     }, [currentVersionId, fetchAvailableVersions]);
 
     // Asset click handler - load lots and realized P&L if not already loaded
-    const handleAssetClick = useCallback(async (assetId: number) => {
-        const asset = assets.find(a => a.asset_id === assetId);
+    const handleAssetClick = useCallback(async (assetId: number | null | undefined) => {
+        const asset = assets.find(apnl => apnl.asset.id === assetId);
         if (!asset) return;
 
-        setSelectedAssetId(assetId);
+        setSelectedAssetId(assetId ?? null);
         setSelectedAsset(asset);
 
         // Ensure lots data is loaded for asset detail view
@@ -1306,12 +1316,12 @@ export const PnLPanel: React.FC = () => {
 
         // Build realized entries from loaded data (uses allRealizedPnL state)
         const realized: RealizedPnLRow[] = allRealizedPnL
-            .filter(e => e.asset_id === assetId)
+            .filter(e => e.asset.id === assetId)
             .map((e, idx) => ({
                 id: `rpnl-${assetId}-${idx}`,
                 asset: e.asset,
-                asset_id: e.asset_id,
-                asset_symbol: e.asset_symbol,
+                asset_id: e.asset.id,
+                asset_symbol: e.asset.symbol,
                 realized_at: e.realized_at,
                 event_type: 'disposal' as const,
                 qty: e.qty,
@@ -1364,10 +1374,15 @@ export const PnLPanel: React.FC = () => {
         setShowImpactPanel(true);
     }, [assetRealizedEntries]);
 
-    // External navigation handlers (would integrate with router)
+    // External navigation handlers
     const handleTransactionClick = useCallback((txId: number) => {
-        console.log('Navigate to transaction:', txId);
-        // In real app: navigate to /inbox?transaction=txId
+        setSelectedTransactionId(txId);
+        setIsTransactionDrawerOpen(true);
+    }, []);
+
+    const handleCloseTransactionDrawer = useCallback(() => {
+        setIsTransactionDrawerOpen(false);
+        setSelectedTransactionId(null);
     }, []);
 
     const handleUnitClick = useCallback((unitId: number) => {
@@ -1409,7 +1424,7 @@ export const PnLPanel: React.FC = () => {
         // Build balance entries from current assets
         if (assets && assets.length > 0) {
             const balanceEntries: BalanceEntry[] = assets.map(a => ({
-                asset: { id: a.asset_id, name: a.asset_symbol },
+                asset: a.asset,
                 qty: a.quantity,
                 cost_basis_in_base: a.cost_basis,
                 avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
@@ -1425,13 +1440,14 @@ export const PnLPanel: React.FC = () => {
         const priceMap = new Map<number, PriceResponse>();
         for (const p of prices) {
             const assetId = p.asset.id;
-            if (assetId !== undefined) priceMap.set(assetId, p);
+            if (assetId != null) priceMap.set(assetId, p);
         }
-        setAssets(prevAssets => prevAssets.map(asset => {
-            const priceObj = priceMap.get(asset.asset_id);
+        setAssets(prevAssets => prevAssets.map(assetpnlrow => {
+            const assetId = assetpnlrow.asset.id;
+            const priceObj = assetId != null ? priceMap.get(assetId) : undefined;
             if (!priceObj || priceObj.price == null) {
                 return {
-                    ...asset,
+                    ...assetpnlrow,
                     market_value: 0,
                     unrealized_pnl: 0,
                     unrealized_pnl_pct: 0,
@@ -1441,11 +1457,11 @@ export const PnLPanel: React.FC = () => {
                     price_error: priceObj?.error,
                 };
             }
-            const marketValue = asset.quantity * priceObj.price;
-            const unrealizedPnl = marketValue - asset.cost_basis;
-            const unrealizedPnlPct = asset.cost_basis > 0 ? unrealizedPnl / asset.cost_basis : 0;
+            const marketValue = assetpnlrow.quantity * priceObj.price;
+            const unrealizedPnl = marketValue - assetpnlrow.cost_basis;
+            const unrealizedPnlPct = assetpnlrow.cost_basis > 0 ? unrealizedPnl / assetpnlrow.cost_basis : 0;
             return {
-                ...asset,
+                ...assetpnlrow,
                 market_value: marketValue,
                 unrealized_pnl: unrealizedPnl,
                 unrealized_pnl_pct: unrealizedPnlPct,
@@ -1458,12 +1474,43 @@ export const PnLPanel: React.FC = () => {
     }, [prices]);
 
     // --- Lazy load audit data when user switches to audit tab ---
+    // Uses ref to track actual state changes vs callback recreations to prevent infinite loops
     useEffect(() => {
-        if (mainTab === 'audit') {
+        const prev = prevAuditStateRef.current;
+        const shouldLoad = mainTab === 'audit' && currentVersionId && (
+            prev.mainTab !== mainTab ||
+            prev.auditSubTab !== auditSubTab ||
+            prev.versionId !== currentVersionId
+        );
+
+        // Update ref with current state
+        prevAuditStateRef.current = { mainTab, auditSubTab, versionId: currentVersionId };
+
+        if (shouldLoad) {
             // Load data for the current audit sub-tab
-            handleAuditTabChange(auditSubTab);
+            const pageSize = getPersistedPageSize(auditSubTab);
+            switch (auditSubTab) {
+                case 'units':
+                    loadUnits(1, pageSize);
+                    break;
+                case 'lots':
+                    loadLotsData(1, pageSize);
+                    break;
+                case 'realized':
+                    loadRealizedPnL(1, pageSize);
+                    break;
+                case 'fees':
+                    loadFees(1, pageSize);
+                    break;
+                case 'warnings':
+                    loadWarnings(1, pageSize);
+                    break;
+                case 'events':
+                    loadLotEvents(1, pageSize);
+                    break;
+            }
         }
-    }, [mainTab, auditSubTab, handleAuditTabChange]);
+    }, [mainTab, auditSubTab, currentVersionId, loadUnits, loadLotsData, loadRealizedPnL, loadFees, loadWarnings, loadLotEvents]);
 
     // --- Recalculate summary unrealized P&L when assets change (from live prices) ---
     useEffect(() => {
@@ -1733,7 +1780,38 @@ export const PnLPanel: React.FC = () => {
                                     idCounts={idCounts}
                                     quoteAssetId={config.base_currency_id ?? undefined}
                                     onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
-                                    assets={assets.map(a => ({ id: a.asset_id, name: a.asset_symbol }))}
+                                    assets={assets.map(a => a.asset)}
+                                    // Pagination props
+                                    unitsPagination={unitsPagination}
+                                    lotsPagination={lotsPagination}
+                                    realizedPagination={realizedPagination}
+                                    feesPagination={feesPagination}
+                                    warningsPagination={warningsPagination}
+                                    eventsPagination={eventsPagination}
+                                    onUnitsPageChange={(page, pageSize) => {
+                                        setUnitsPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadUnits(page, pageSize);
+                                    }}
+                                    onLotsPageChange={(page, pageSize) => {
+                                        setLotsPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadLotsData(page, pageSize);
+                                    }}
+                                    onRealizedPageChange={(page, pageSize) => {
+                                        setRealizedPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadRealizedPnL(page, pageSize);
+                                    }}
+                                    onFeesPageChange={(page, pageSize) => {
+                                        setFeesPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadFees(page, pageSize);
+                                    }}
+                                    onWarningsPageChange={(page, pageSize) => {
+                                        setWarningsPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadWarnings(page, pageSize);
+                                    }}
+                                    onEventsPageChange={(page, pageSize) => {
+                                        setEventsPagination(prev => ({ ...prev, page, pageSize }));
+                                        loadLotEvents(page, pageSize);
+                                    }}
                                 />
                             </Tabs.Content>
                         </Tabs.Root>
@@ -1781,6 +1859,14 @@ export const PnLPanel: React.FC = () => {
                     onPriceAdded={(assetId) => handlePriceAdded(assetId)}
                 />
             </SlidePanel>
+
+            {/* Transaction Detail Drawer - opens when clicking any transaction badge */}
+            <TransactionDetailDrawer
+                transactionId={selectedTransactionId}
+                isOpen={isTransactionDrawerOpen}
+                onClose={handleCloseTransactionDrawer}
+                accounts={accounts}
+            />
         </Box>
     );
 };

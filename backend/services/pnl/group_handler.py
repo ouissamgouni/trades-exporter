@@ -285,7 +285,7 @@ def _create_pending_transfer_warning(
         
         message = (
             f"Transfer inflow missing outflow - {float(total_qty):.6g} {asset_symbol}. "
-            f"No cost lot created. Link matching withdrawal to establish cost basis."
+            f"Provisional lot created with FMV cost basis. Link matching withdrawal to establish actual cost basis."
         )
         details = {
             "transfer_direction": "inflow",
@@ -294,6 +294,8 @@ def _create_pending_transfer_warning(
             "account_id": account_id,
             "total_quantity": float(total_qty),
             "timestamp": timestamp,
+            "provisional_cost_basis": "fmv_at_acquisition",
+            "note": "Provisional lot will be replaced with actual cost basis when transfer is linked and P&L recalculated",
             "inflows": [{
                 "transaction_id": i.origin_transaction_id,
                 "quantity": float(i.quantity) if i.quantity else 0,
@@ -531,8 +533,11 @@ def _process_inflows(
     Handle inflows based on the unit pattern.
     
     For pending transfers (inflow-only with transfer tx_type):
-    - Lot creation is SKIPPED (no cost basis available)
-    - Warning is emitted with inflow details for user visibility
+    - Provisional lot IS created using FMV as temporary cost basis
+    - Warning is emitted with FMV details for user visibility
+    - Provisional lots prevent negative lot errors when assets are later disposed
+    - When transfer is linked and P&L recalculated, provisional lots are replaced
+      with proper lots using inherited cost basis from the matching outflow
     
     Args:
         unit: The calculation unit being processed
@@ -543,15 +548,6 @@ def _process_inflows(
     """
     inflows = unit.inflow_legs
     if not inflows:
-        return
-    
-    # For pending transfers (inflow-only): skip lot creation, emit warning
-    if unit.pattern == UnitPattern.PENDING_TRANSFER.value and unit.is_inflow_only:
-        _create_pending_transfer_warning(
-            unit=unit,
-            direction="inflow",
-            legs=inflows,
-        )
         return
         
     # Use unified is_cost_basis_transfer for non-taxable transfers
@@ -982,6 +978,12 @@ def _handle_acquisition(
 
         # Create the settling lot first (with full qty_remaining)
         # It will be updated after settlement to reflect remaining quantity
+        # For pending transfers, mark as provisional with FMV cost basis
+        is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
+        notes = None
+        if is_pending_transfer and cost_source == "fmv_at_acquisition":
+            notes = "Pending transfer (provisional FMV cost basis)"
+        
         settling_lot = CostLot(
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
             # relationship objects needed for persistence when objects aren't yet persisted)
@@ -996,6 +998,7 @@ def _handle_acquisition(
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
+            notes=notes,
         )
 
         # Check for negative lots to settle (pass the settling_lot for relationship)

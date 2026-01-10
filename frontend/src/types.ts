@@ -8,7 +8,6 @@ import {
     UnitPattern as UnitPatternEnum,
     CostMethod as CostMethodEnum,
     LotMode as LotModeEnum,
-    LegType as LegTypeEnum,
 } from './enums';
 
 // Re-export enums for convenience
@@ -22,7 +21,6 @@ export {
     UnitPatternEnum,
     CostMethodEnum,
     LotModeEnum,
-    LegTypeEnum,
 };
 
 // Type aliases using enum values for backward compatibility
@@ -79,10 +77,11 @@ export interface ConnectorTypeInfo {
  * Contains minimal fields for display without relationships.
  * Different from P&L's AssetRef which uses (id, name) fields.
  */
-export interface TransactionAssetRef {
-    asset_id?: number | null;
+export interface AssetRef {
+    id?: number | null;
     symbol?: string | null;
     label?: string | null;
+    source_symbol?: string | null;
 }
 
 export interface Transaction {
@@ -106,9 +105,9 @@ export interface Transaction {
     source_price_quote_asset_symbol?: string;
     source_fee_quote_asset_symbol?: string;
     // Nested asset references (preferred for display)
-    linked_asset?: TransactionAssetRef | null;
-    price_quote_asset?: TransactionAssetRef | null;
-    fee_quote_asset?: TransactionAssetRef | null;
+    linked_asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
     // Backward-compatible flat symbol fields (deprecated, prefer nested objects)
     linked_asset_symbol?: string; // From assets table via asset_id FK
     linked_price_quote_asset_symbol?: string; // From assets table via price_quote_asset_id FK
@@ -177,13 +176,6 @@ export interface GroupingSuggestion {
 // Backward compatibility alias
 export type BundleSuggestion = GroupingSuggestion;
 
-// Leg types for expanded transactions (deprecated - kept for backward compatibility)
-export type LegType = `${LegTypeEnum}`;
-
-export interface TransactionLeg extends Transaction {
-    leg_type?: LegType;
-}
-
 // Classification suggestion from GroupClassifier
 export type GroupPattern = 'internal_transfer' | 'swap' | 'unknown';
 
@@ -205,27 +197,22 @@ export interface TransactionSummary {
     direction: string;
     quantity: number;
     transaction_type?: string;
-    symbol?: string;
-    asset_symbol?: string;
     network?: string;
     // Nested asset references (preferred for display)
-    linked_asset?: TransactionAssetRef | null;
-    price_quote_asset?: TransactionAssetRef | null;
-    fee_quote_asset?: TransactionAssetRef | null;
+    asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
     // Extended fields for enhanced display
     account_id?: number;
     account_name?: string;
     price?: number;
-    price_quote_asset_symbol?: string;
     total?: number;
     fee?: number;
-    fee_quote_asset_symbol?: string;
     from_account_name?: string;
     to_account_name?: string;
     source_from_account?: string;
     source_to_account?: string;
     source_transaction_type?: string;
-    source_asset_symbol?: string;
     network_transaction_id?: string;
 }
 
@@ -358,22 +345,50 @@ export interface RawAccount {
 // Sync Job Types
 export type SyncJobStatus = 'idle' | 'running' | 'completed' | 'aborted' | 'failed';
 
-export type ConnectorSyncStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type ConnectorSyncStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'queued';
+
+export type PipelineStage = 'fetch' | 'transfer_detection' | 'asset_enrichment' | 'persistence';
+
+export interface LogEntry {
+    timestamp: string;
+    level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+    message: string;
+}
+
+export interface StageStats {
+    processed: number;
+    success: number;
+    failed: number;
+}
 
 export interface ConnectorProgress {
     connector_id: number;
-    connector_name: string;
+    connector_type: string;
     account_name: string;
     status: ConnectorSyncStatus;
     test_mode: boolean;
     processed: number;
-    new_entries: number;
-    updated: number;
-    duplicates: number;
-    errors: number;
-    error_message?: string;
+    new_count: number;
+    updated_count: number;
+    skipped_count: number;
+    error_count: number;  // Track error count for real-time display
+    error?: string;
     started_at?: string;
     finished_at?: string;
+    // New detailed progress fields
+    current_operation?: string;
+    operation_progress: number;
+    operation_total: number;
+    pipeline_stage?: PipelineStage;
+    stage_stats?: Record<PipelineStage, StageStats>;
+    logs?: LogEntry[];
+    // Legacy field names for backward compatibility
+    new_entries?: number;
+    updated?: number;
+    duplicates?: number;
+    errors?: number;
+    error_message?: string;
+    connector_name?: string;
 }
 
 export interface SyncJobProgress {
@@ -392,12 +407,160 @@ export interface SyncJobProgress {
     abort_requested: boolean;
     error_message?: string;
     connector_statuses?: Record<string, ConnectorProgress>;
+    job_id?: number; // Persisted job ID
+}
+
+// ============================================================================
+// Job History Types
+// ============================================================================
+
+export interface SyncJobSummary {
+    id: number;
+    status: SyncJobStatus;
+    started_at?: string;
+    finished_at?: string;
+    total_connectors: number;
+    total_processed: number;
+    total_new: number;
+    total_updated: number;
+    total_skipped: number;
+    total_errors: number;
+    error_message?: string;
+}
+
+export interface ConnectorRunSummary {
+    id: number;
+    connector_id: number;
+    connector_type?: string;
+    account_name?: string;
+    status: ConnectorSyncStatus;
+    test_mode: boolean;
+    started_at?: string;
+    finished_at?: string;
+    processed_count: number;
+    synced_count: number;
+    updated_count: number;
+    skipped_count: number;
+    error_count: number;
+}
+
+export interface SyncJobDetail {
+    id: number;
+    status: SyncJobStatus;
+    started_at?: string;
+    finished_at?: string;
+    total_connectors: number;
+    total_processed: number;
+    total_new: number;
+    total_updated: number;
+    total_skipped: number;
+    total_errors: number;
+    error_message?: string;
+    config_snapshot?: Record<string, any>;
+    connector_runs: ConnectorRunSummary[];
+}
+
+export interface JobHistoryResponse {
+    jobs: SyncJobSummary[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
+export interface ConnectorRunDetail {
+    id: number;
+    job_id: number;
+    connector_id: number;
+    connector_type?: string;
+    account_name?: string;
+    status: ConnectorSyncStatus;
+    test_mode: boolean;
+    started_at?: string;
+    finished_at?: string;
+    processed_count: number;
+    synced_count: number;
+    updated_count: number;
+    skipped_count: number;
+    error_count: number;
+    synced_ids: string[];
+    updated_ids: string[];
+    skipped_ids: string[];
+    error_details: { source_transaction_id: string; error: string }[];
+    logs: { timestamp: string; level: string; message: string }[];
+}
+
+export interface JobTransactionsResponse {
+    transactions: {
+        id: number;
+        source: string;
+        source_transaction_id: string;
+        source_transaction_type?: string;
+        date_time?: string;
+        direction?: string;
+        transaction_type?: string;
+        source_asset_symbol?: string;
+        quantity?: string;
+        price?: string;
+        fee?: string;
+        sync_connector_run_id?: number;
+    }[];
+    total: number;
+    limit: number;
+    offset: number;
+    job_id: number;
 }
 
 export interface SyncJobStartResponse {
     status: string;
     message: string;
     test_mode?: boolean;
+    overrides_count?: number;
+}
+
+// Sync configuration types for per-sync overrides
+export interface ConnectorOverride {
+    connector_id: number;
+    enabled?: boolean;
+    test_mode?: boolean;
+    test_file_path?: string;
+}
+
+export interface SyncJobStartRequest {
+    connector_overrides?: ConnectorOverride[];
+}
+
+export interface EnabledConnector {
+    connector_id: number;
+    connector_type: string;
+    account_id: number;
+    account_name: string;
+    account_type: string;
+    account_enabled?: boolean;
+    enabled: boolean;
+    test_mode: boolean;
+    test_file_path?: string;
+    sync_priority: number;
+    last_sync_at?: string;
+    last_sync_status?: string;
+}
+
+export interface EnabledConnectorsResponse {
+    connectors: EnabledConnector[];
+    count: number;
+}
+
+export interface AccountSummary {
+    id: number;
+    name: string;
+    account_type: string;
+    enabled: boolean;
+}
+
+export interface AllConnectorsResponse {
+    connectors: EnabledConnector[];
+    accounts: AccountSummary[];
+    connector_count: number;
+    account_count: number;
 }
 
 export interface ConnectorsInfo {
@@ -406,47 +569,17 @@ export interface ConnectorsInfo {
 }
 
 // Config Types
-export interface ConfigStatus {
-    test_mode: boolean;
-    mode_label: string;
+export interface AppInfo {
+    environment: string;
+    backend_version: string;
+    frontend_version?: string | null;
+    db_schema_version?: string | null;
 }
 
 // P&L Types
 export type CostMethod = `${CostMethodEnum}`;
 export type LotMode = `${LotModeEnum}`;
 
-/**
- * Asset reference containing both ID and display name.
- * Used throughout P&L responses for asset identification.
- */
-export interface AssetRef {
-    id: number;
-    name: string;  // Asset symbol/name for display
-}
-
-export interface PnLCalculateRequest {
-    lot_method: CostMethod;
-    lot_mode: LotMode;
-    base_currency_symbol: string;
-    residual_tolerance_pct: number;
-    allow_negative_balances: boolean;
-}
-
-export interface RealizedPnLEntry {
-    asset: AssetRef;  // Asset reference with id and name
-    // Deprecated: use asset.id and asset.name instead
-    asset_id?: number;
-    asset_symbol?: string;
-    qty: number;
-    proceeds_in_base: number;
-    cost_basis_in_base: number;
-    pnl_in_base: number;
-    disposal_taxable: boolean;  // Whether this disposal is a taxable event
-    transaction_id?: number;
-    unit_id?: number;  // CalculationUnit that triggered this P&L
-    realized_at: string;
-    holding_period_days?: number;
-}
 
 export interface BalanceEntry {
     account_id?: number;
@@ -479,230 +612,6 @@ export interface PriceResponse {
     warning?: string;  // Warning message for stale prices
 }
 
-export interface PricesResponse {
-    prices: PriceResponse[];
-    base_currency: string;
-    fetched_at: string;
-    successful_count: number;
-    failed_count: number;
-    warning?: string;
-}
-
-// Alias for balances API
-export type BalanceResponse = BalanceEntry[];
-
-export interface PnLWarning {
-    warning_type: string;
-    message: string;
-    timestamp?: string;  // When the warning occurred
-    transaction_id?: number;
-    unit_id?: number;  // CalculationUnit where warning occurred
-    unit_label?: string;  // Human-readable unit description
-    asset_id?: number;
-    asset_symbol?: string;
-}
-
-// Cost lot from API
-export interface CostLotEntry {
-    cost_lot_id: number;
-    asset?: AssetRef;  // Asset reference with id and name (new)
-    asset_id?: number;  // Deprecated: use asset.id
-    asset_symbol?: string;  // Deprecated: use asset.name
-    account_id?: number;
-    account_name?: string;
-    qty_original: number;
-    qty_remaining: number;
-    qty_consumed: number;
-    unit_cost_in_base: number;
-    total_cost_in_base: number;
-    remaining_cost_in_base: number;
-    acquired_at: string;
-    origin_transaction_id?: number;  // Transaction that created this lot
-    origin_unit_id?: number;  // CalculationUnit that created this lot
-    is_zero_cost: boolean;
-    is_negative?: boolean;  // True if this is a negative lot (debt)
-    is_fully_settled?: boolean;  // True if negative lot is fully settled
-    notes?: string;  // Additional info (e.g., settlement details)
-    // Settlement tracking for negative lots
-    total_settled?: number;  // Amount already settled
-    settlement_count?: number;  // Number of settlements
-}
-
-// Settlement record from API (audit trail for negative lot settlements)
-export interface SettlementEntry {
-    settlement_id: number;
-    negative_lot_id: number;  // The debt being settled
-    settling_lot_id: number;  // The lot providing funds
-    settling_transaction_id?: number;  // Which transaction triggered this
-    qty_settled: number;  // How much was settled
-    cost_basis_applied?: number;  // For non-base: cost applied
-    settled_at: string;
-    // Enriched fields for UI
-    negative_lot_origin_tx_id?: number;
-    settling_tx_label?: string;
-}
-
-// Cost lot event types for audit trail
-export type LotEventType = 'created' | 'consumed' | 'settled' | 'transferred' | 'adjusted';
-
-// Cost lot event from API (audit trail for lot lifecycle)
-export interface CostLotEventEntry {
-    event_id: number;
-    event_type: LotEventType;
-
-    lot_id: number;
-    asset?: AssetRef;
-    account_id?: number;
-    account_name?: string;
-
-    quantity_delta: number;
-    cost_basis_delta?: number;
-    qty_remaining_after: number;
-    cost_basis_remaining_after?: number;
-
-    related_lot_id?: number;
-    triggered_by_transaction_id?: number;
-    triggered_by_unit_id?: number;
-    triggered_by_unit_label?: string;
-
-    timestamp: string;
-    event_metadata?: Record<string, any>;
-}
-
-// Consumed slice detail from API
-export interface ConsumedSliceEntry {
-    cost_lot_id: number;
-    quantity: number;
-    unit_cost_in_base: number;
-    total_cost_in_base: number;
-    acquired_at: string;
-    holding_period_days?: number;
-    consumed_by_transaction_id?: number;  // Transaction that consumed this slice
-}
-
-// Realized entry detail from API
-export interface RealizedEntryDetailEntry {
-    asset?: AssetRef;  // New format from backend
-    asset_id?: number;  // Legacy/fallback
-    asset_symbol?: string;  // Legacy/fallback
-    qty: number;
-    proceeds_in_base: number;
-    cost_basis_in_base: number;
-    pnl_in_base: number;
-    disposal_taxable: boolean;
-}
-
-// Unit warning from API
-export interface UnitWarningEntry {
-    warning_type: string;
-    message: string;
-    transaction_id?: number;
-    unit_id?: number;
-    unit_label?: string;
-    asset_id?: number;
-    asset_symbol?: string;
-}
-
-// Transaction leg with origin transaction reference
-export interface TransactionLegDetail {
-    transaction_id: number;
-    asset: { id: number; name: string };
-    qty: number;
-    direction: string; // "outflow", "inflow", "fee"
-}
-
-// Cost basis tracking grouping
-export interface CostBasisTracking {
-    lots: CostLotEntry[];
-    consumed: ConsumedSliceEntry[];
-    settlements: SettlementEntry[];
-}
-
-// Processed calculation unit from API (for audit view)
-export interface ProcessedUnitEntry {
-    unit_id?: number | null;
-    unit_label?: string;
-    pattern?: string | null;  // transfer, swap, split, unknown
-    timestamp: string;
-
-    // Transaction legs (instead of transaction_ids and asset arrays)
-    outflows: TransactionLegDetail[];
-    inflows: TransactionLegDetail[];
-    fees: TransactionLegDetail[];
-
-    // Cost basis tracking (grouped lots, consumed slices, settlements)
-    cost_basis: CostBasisTracking;
-
-    // Realized P&L entries
-    realized_entries: RealizedEntryDetailEntry[];
-
-    // Warnings
-    warnings: UnitWarningEntry[];
-
-    // P&L summary
-    realized_pnl_in_base: number;
-    is_disposal_taxable: boolean;
-}
-
-export interface PnLPreviewResponse {
-    total_realized_pnl: number;
-    lot_method: string;
-    lot_mode: string;
-    base_currency_id: number;
-    base_currency_symbol: string;
-
-    // Fee summary (from calculation preview)
-    total_fees_in_base: number;
-    fee_entry_count: number;
-
-    // ID arrays for tab title counts (before lazy loading full data)
-    unit_ids: number[];           // Length = units count
-    cost_lot_ids: number[];       // Length = lots created count  
-    consumed_slice_ids: number[]; // Length = consumed slices count
-    realized_pnl_ids: number[];   // Length = realized P&L entries count
-    warning_ids: number[];        // Length = warnings count
-    settlement_ids: number[];     // Length = settlements count
-
-    // Full data (populated by lazy loading, empty initially)
-    realized_pnl: RealizedPnLEntry[];
-    cost_lots: CostLotEntry[];
-    consumed_slices: ConsumedSliceEntry[];  // Consumed lot slices
-    warnings: PnLWarning[];
-    balances: BalanceEntry[];  // Kept for backwards compatibility, now always empty
-    settlements: SettlementEntry[];
-    calculation_units: ProcessedUnitEntry[];
-}
-
-// Draft version response for lazy loading
-export interface PnLDraftResponse {
-    version_id: number;
-    status: 'draft' | 'committed';
-    expires_at?: string;
-    // Summary only
-    total_realized_pnl: number;
-    // ID arrays for counts (derive count from length)
-    unit_ids: number[];
-    cost_lot_ids: number[];
-    consumed_slice_ids: number[];
-    warning_ids: number[];
-    // Config used
-    lot_method: string;
-    lot_mode: string;
-    base_currency_id: number;
-    base_currency_symbol: string;
-}
-
-// Paginated response for version queries
-export interface PaginatedResponse<T> {
-    total: number;
-    page: number;
-    page_size: number;
-    items: T[];
-}
-
-// =============================================================================
-// Validation Summary (Data Health Check)
-// =============================================================================
 
 /**
  * Fuzzy match suggestion for inline fixes in Data Health Check
@@ -751,11 +660,11 @@ export interface TransactionIssue {
     quantity: number;
     source_asset_symbol: string;
     source: string;
-    
+
     // Issue details
     issue_type: IssueType;
     raw_value: string;
-    
+
     // Fix suggestion
     suggestion?: SuggestionInfo | null;
 }
@@ -770,26 +679,26 @@ export interface DataHealthCheckResponse {
     valid_count: number;
     pending_count: number;
     invalid_count: number;
-    
+
     // Missing required data counts
     missing_asset_count: number;
     missing_account_count: number;
     missing_price_quote_count: number;
     missing_fee_quote_count: number;
-    
+
     // Bundle suggestions
     bundle_suggestions_count: number;
-    
+
     // Computed flags
     has_issues: boolean;
     total_issues: number;
-    
+
     // [DEPRECATED] Grouped detail lists - use issues_list instead
     missing_assets_detail?: RawAssetIssue[] | null;
     missing_accounts_detail?: RawAccountIssue[] | null;
     missing_price_quotes_detail?: RawAssetIssue[] | null;
     missing_fee_quotes_detail?: RawAssetIssue[] | null;
-    
+
     // Transaction-centric issue list (preferred)
     issues_list?: TransactionIssue[] | null;
     issues_total_count: number;
@@ -807,16 +716,16 @@ export interface ValidationSummary {
     valid_count: number;
     pending_count: number;
     invalid_count: number;
-    
+
     // Missing required data counts
     missing_asset_count: number;
     missing_account_count: number;
     missing_price_quote_count: number;
     missing_fee_quote_count: number;
-    
+
     // Bundle suggestions
     bundle_suggestions_count: number;
-    
+
     // Computed flags
     has_issues: boolean;
     total_issues: number;

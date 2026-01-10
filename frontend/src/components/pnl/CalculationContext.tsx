@@ -518,7 +518,7 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                             {/* Data Health Check Indicator */}
                             {validationSummary && (
                                 <Tooltip content={
-                                    validationSummary.has_issues 
+                                    validationSummary.has_issues
                                         ? `${validationSummary.total_issues} data issue(s) may affect P&L accuracy. Click to review.`
                                         : 'All transaction data is complete and ready for P&L calculation.'
                                 }>
@@ -551,6 +551,7 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                             accounts={healthCheckAccounts}
                             onAssetsUpdated={fetchAssets}
                             onAccountsUpdated={fetchHealthCheckAccounts}
+                            onIssueFixed={fetchValidationSummary}
                         />
                     </>
                 )}

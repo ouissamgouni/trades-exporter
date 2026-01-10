@@ -131,8 +131,8 @@ export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
                                         {formatQuantity(tx.quantity)}
                                     </Text>
                                     <AssetBadge
-                                        asset={tx.linked_asset}
-                                        sourceSymbol={tx.symbol || tx.asset_symbol || tx.source_asset_symbol}
+                                        asset={tx.asset}
+                                        sourceSymbol={tx.asset?.source_symbol}
                                         size="xs"
                                         colorPalette={colorScheme}
                                         maxLength={15}

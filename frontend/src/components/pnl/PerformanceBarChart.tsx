@@ -170,7 +170,7 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
         const categoryMap = new Map<number, number>();
         const dimensionCategories = allCategories.filter(c => c.dimension_id === selectedDimensionId);
         const dimensionCategoryIds = new Set(dimensionCategories.map(c => c.id));
-        
+
         for (const asset of assets) {
             const assetCategories = asset.category_ids.filter(id => dimensionCategoryIds.has(id));
             if (assetCategories.length === 0) continue;
@@ -189,8 +189,8 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
 
         if (viewMode === 'asset') {
             return assets.map(asset => ({
-                id: asset.asset_id,
-                name: asset.asset_symbol,
+                id: asset.asset.id || 0,
+                name: asset.asset.symbol || 'Unknown',
                 value: asset.unrealized_pnl,
                 positiveValue: asset.unrealized_pnl >= 0 ? asset.unrealized_pnl : 0,
                 negativeValue: asset.unrealized_pnl < 0 ? asset.unrealized_pnl : 0,

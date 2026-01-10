@@ -12,11 +12,11 @@
 import React from 'react';
 import { Badge, Box, Flex, Text } from '@chakra-ui/react';
 import { Tooltip } from './ui/tooltip';
-import { TransactionAssetRef } from '../types';
+import { AssetRef } from '../types';
 
 export interface AssetBadgeProps {
     /** Nested asset reference with id, symbol, and label */
-    asset?: TransactionAssetRef | null;
+    asset?: AssetRef | null;
     /** Fallback source symbol when asset is not linked (shows warning state) */
     sourceSymbol?: string | null;
     /** Badge size */
@@ -144,10 +144,10 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
                 <Text color="gray.400">Symbol</Text>
                 <Text color="white" fontFamily="mono">{asset?.symbol || '?'}</Text>
             </Flex>
-            {asset?.asset_id && (
+            {asset?.id && (
                 <Flex justify="space-between" gap={4}>
                     <Text color="gray.400">ID</Text>
-                    <Text color="gray.300">#{asset.asset_id}</Text>
+                    <Text color="gray.300">#{asset.id}</Text>
                 </Flex>
             )}
         </Box>

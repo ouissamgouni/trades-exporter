@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func
+from sqlalchemy import func, not_
 from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_session_dependency
@@ -41,11 +41,26 @@ router = APIRouter(prefix="/pnl", tags=["Profit & Loss"])
 # Request/Response Models
 # =============================================================================
 
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Generic paginated response wrapper."""
+    items: List[T]
+    total: int
+    page: int
+    limit: int
+
 
 class AssetRef(BaseModel):
     """Asset reference with id and name for display."""
     id: int
-    name: str
+    symbol: str
+    label: Optional[str] = None
+    source_symbol: Optional[str] = None  # Optional human-readable label
+
 
 
 class PnLCalculateRequest(BaseModel):
@@ -110,8 +125,7 @@ class FeeEntryResponse(BaseModel):
     
     id: int
     date: datetime
-    asset_id: int
-    asset_symbol: str
+    asset: AssetRef
     fee_amount: float  # quantity
     fee_in_base: float  # proceeds_in_base (FMV)
     
@@ -127,8 +141,7 @@ class FeeEntryResponse(BaseModel):
     
     # Related asset - the primary asset this fee relates to (non-base-currency side of trade)
     # Used for linking fee P&L to asset-level P&L summary
-    related_asset_id: Optional[int] = None
-    related_asset_symbol: Optional[str] = None
+    related_asset: Optional[AssetRef] = None
 
 
 class FeeSummaryResponse(BaseModel):
@@ -216,6 +229,10 @@ class CostLotEventResponse(BaseModel):
     qty_remaining_after: float
     cost_basis_remaining_after: Optional[float] = None
     
+    # Asset and account-level balances after this event
+    balance_after: Optional[float] = None  # Total asset balance across all accounts
+    account_balance_after: Optional[float] = None  # Balance for this specific account
+    
     related_lot_id: Optional[int] = None
     triggered_by_transaction_id: Optional[int] = None
     triggered_by_unit_id: Optional[int] = None
@@ -235,8 +252,8 @@ class ConsumedSliceResponse(BaseModel):
     total_cost_in_base: float
     acquired_at: datetime
     holding_period_days: Optional[int] = None
-    consumed_by_transaction_id: Optional[int] = None  # Transaction that consumed this slice
-    consumed_by_unit_label: Optional[str] = None  # Human-readable label of consuming unit
+    consumed_by_leg_id: Optional[int] = None  # Transaction that consumed this slice
+    consumed_by_unit_id: Optional[int] = None  # Human-readable label of consuming unit
     consumed_at: Optional[datetime] = None  # When the slice was consumed
 
 
@@ -277,13 +294,64 @@ class OriginTransactionDetail(BaseModel):
     fee_quote_asset: Optional[AssetRef] = None
 
 
-class TransactionLegDetail(BaseModel):
-    """Transaction leg with origin transaction reference."""
+class TransactionSummary(BaseModel):
+    """Lightweight transaction reference for leg display.
     
-    transaction_id: int
+    Shared model used by bundles and P&L endpoints.
+    Provides essential transaction context without full object duplication.
+    """
+    
+    id: int
+    date_time: Optional[datetime] = None
+    
+    # Account info
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+    
+    # Source info
+    source: Optional[str] = None
+    transaction_type: Optional[str] = None
+    source_transaction_type: Optional[str] = None
+    source_transaction_id: Optional[str] = None
+    direction: Optional[str] = None
+    
+    # Primary asset
+    asset: Optional[AssetRef] = None
+    quantity: Optional[float] = None
+    
+    # Pricing
+    price: Optional[float] = None
+    price_quote_asset: Optional[AssetRef] = None
+    total: Optional[float] = None
+    
+    # Fee
+    fee: Optional[float] = None
+    fee_quote_asset: Optional[AssetRef] = None
+    
+    # Transfer-specific
+    from_account_name: Optional[str] = None
+    to_account_name: Optional[str] = None
+    source_from_account: Optional[str] = None
+    source_to_account: Optional[str] = None
+    
+    # On-chain
+    network: Optional[str] = None
+    network_transaction_id: Optional[str] = None
+    source_asset_symbol: Optional[str] = None
+
+
+class LegWithTransaction(BaseModel):
+    """Calculation unit leg with transaction reference.
+    
+    Legs are the building blocks of P&L calculation.
+    Transaction details stored once at unit level, legs reference by index.
+    """
+    
     asset: AssetRef
     qty: float
-    direction: str  # "outflow", "inflow", "fee"
+    leg_type: str  # "outflow", "inflow", "fee"
+    direction: Optional[str] = None
+    transaction_id: int  # Transaction ID reference
 
 
 class CostBasisTracking(BaseModel):
@@ -298,20 +366,23 @@ class ProcessedUnitResponse(BaseModel):
     """Complete processed calculation unit with nested data.
     
     Returns full nested data in single request - no need for separate drill-down calls.
+    
+    Structure: Unit → Transactions → Legs
     """
     
     # Identity
     unit_id: Optional[int] = None
     unit_label: str = ""
-    pattern: Optional[str] = None  # transfer, swap, split, unknown
+    pattern: Optional[str] = None  # transfer, swap, split, pending_transfer, unknown
     
     # Timestamp
     timestamp: datetime
     
-    # Transaction legs (instead of transaction_ids and asset arrays)
-    outflows: List[TransactionLegDetail] = []
-    inflows: List[TransactionLegDetail] = []
-    fees: List[TransactionLegDetail] = []
+    # Transactions (now as a list for array access)
+    transactions: List[TransactionSummary] = []  # List of TransactionSummary objects
+    
+    # Legs with transaction references (by index)
+    legs: List[LegWithTransaction] = []
     
     # Cost basis tracking (grouped lots, consumed slices, settlements)
     cost_basis: CostBasisTracking
@@ -380,18 +451,55 @@ class PriceResponse(BaseModel):
 # =============================================================================
 
 
-def build_asset_ref(asset, asset_id: int) -> AssetRef:
-    """Build AssetRef from asset object or ID."""
-    if asset:
-        return AssetRef(id=asset.asset_id, name=asset.symbol)
-    return AssetRef(id=asset_id, name=f"#{asset_id}")
+def build_transaction_summary(tx: NormalizedTransaction) -> TransactionSummary:
+    """Build TransactionSummary from NormalizedTransaction with resolved relationships.
+    
+    Args:
+        tx: NormalizedTransaction with eager-loaded relationships (account_rel, 
+            price_quote_asset, fee_quote_asset)
+    
+    Returns:
+        TransactionSummary with all fields populated
+    """
+    return TransactionSummary(
+        id=tx.id,
+        date_time=tx.date_time,
+        # Account
+        account_id=tx.account_id,
+        account_name=tx.account_rel.name if tx.account_rel else None,
+        # Source
+        source=tx.source,
+        transaction_type=tx.transaction_type,
+        source_transaction_type=tx.source_transaction_type,
+        source_transaction_id=tx.source_transaction_id,
+        direction=tx.direction,
+        # asset
+        asset=AssetRef(id=tx.asset.asset_id, symbol=tx.asset.symbol, source_symbol=tx.source_asset_symbol) if tx.asset_id else None,
+        quantity=float(tx.quantity) if tx.quantity else None,
+        # Pricing
+        price=float(tx.price) if tx.price else None,
+        price_quote_asset=AssetRef(id=tx.price_quote_asset.asset_id, symbol=tx.price_quote_asset.symbol) if tx.price_quote_asset_id else None,
+        total=float(tx.total) if tx.total else None,
+        # Fee
+        fee=float(tx.fee) if tx.fee else None,
+        fee_quote_asset=AssetRef(id=tx.fee_quote_asset.asset_id, symbol=tx.fee_quote_asset.symbol) if tx.fee_quote_asset_id else None,
+        # Transfer-specific
+        from_account_name=tx.from_account.name if tx.from_account else None,
+        to_account_name=tx.to_account.name if tx.to_account else None,
+        source_from_account=tx.source_from_account,
+        source_to_account=tx.source_to_account,
+        # On-chain
+        network=tx.network,
+        network_transaction_id=tx.network_transaction_id,
+        source_asset_symbol=tx.source_asset_symbol,
+    )
 
 
 def build_cost_lot_response(lot: CostLot) -> CostLotResponse:
     """Build CostLotResponse from CostLot model."""
     return CostLotResponse(
         cost_lot_id=lot.cost_lot_id,
-        asset=build_asset_ref(lot.asset, lot.asset_id),
+        asset=AssetRef(id=lot.asset.asset_id, symbol=lot.asset.symbol),
         account_id=lot.account_id,
         account_name=lot.account.name if lot.account else None,
         qty_original=float(lot.qty),
@@ -411,17 +519,14 @@ def build_cost_lot_response(lot: CostLot) -> CostLotResponse:
 
 
 def build_consumed_slice_response(
-    slice: ConsumedLotSlice, 
-    consumed_by_tx_id: Optional[int] = None,
-    consumed_by_unit_label: Optional[str] = None,
-    consumed_at: Optional[datetime] = None
+    slice: ConsumedLotSlice
 ) -> ConsumedSliceResponse:
     """Build ConsumedSliceResponse from ConsumedLotSlice model."""
     asset_ref = None
     if slice.cost_lot and slice.cost_lot.asset:
-        asset_ref = build_asset_ref(slice.cost_lot.asset, slice.cost_lot.asset_id)
+        asset_ref = AssetRef(id=slice.cost_lot.asset.asset_id, symbol=slice.cost_lot.asset.symbol)
     elif slice.cost_lot:
-        asset_ref = AssetRef(id=slice.cost_lot.asset_id, name=f"#{slice.cost_lot.asset_id}")
+        asset_ref = AssetRef(id=slice.cost_lot.asset_id, symbol=f"#{slice.cost_lot.asset_id}")
     
     return ConsumedSliceResponse(
         cost_lot_id=slice.cost_lot.cost_lot_id if slice.cost_lot else 0,
@@ -431,16 +536,16 @@ def build_consumed_slice_response(
         total_cost_in_base=float(slice.total_cost_in_base),
         acquired_at=slice.cost_lot.acquired_at if slice.cost_lot else slice.created_at,
         holding_period_days=slice.holding_period_days,
-        consumed_by_transaction_id=consumed_by_tx_id,
-        consumed_by_unit_label=consumed_by_unit_label,
-        consumed_at=consumed_at,
+        consumed_by_leg_id=slice.consumed_by_leg_id,
+        consumed_by_unit_id=slice.consumed_by_unit_id,
+        consumed_at=slice.consumed_at,
     )
 
 
 def build_realized_entry_response(entry: RealizedPnl, is_fee: bool = False) -> RealizedEntryDetailResponse:
     """Build RealizedEntryDetailResponse from RealizedPnl model."""
     return RealizedEntryDetailResponse(
-        asset=build_asset_ref(entry.asset, entry.asset_id),
+        asset=AssetRef(id=entry.asset.asset_id, symbol=entry.asset.symbol),
         qty=float(entry.qty),
         proceeds_in_base=float(entry.proceeds_in_base),
         cost_basis_in_base=float(entry.cost_basis_in_base),
@@ -514,7 +619,7 @@ def pnl_status():
 
 class BalanceItem(BaseModel):
     """Balance item for initial Asset P&L view."""
-    asset: Dict[str, Any]  # {id, name}
+    asset: AssetRef
     qty: float
     cost_basis_in_base: float
     avg_unit_cost_in_base: float
@@ -559,16 +664,6 @@ class PnLVersionResponse(BaseModel):
     # Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: float = 0.0  # Total fee expense at FMV
     fee_entry_count: int = 0  # Number of fee entries
-    
-    # ID arrays for tab title counts (derive count from len())
-    # Populated for /calculate, empty for version retrieval
-    unit_ids: List[int] = []
-    cost_lot_ids: List[int] = []
-    consumed_slice_ids: List[int] = []
-    realized_pnl_ids: List[int] = []
-    warning_ids: List[int] = []
-    settlement_ids: List[int] = []
-    cost_lot_event_ids: List[int] = []
 
 
 # Backwards compatibility alias
@@ -664,59 +759,12 @@ def compute_total_realized_pnl(session: Session, version_id: int) -> Decimal:
     return Decimal(str(result)) if result else Decimal(0)
 
 
-def build_balances_from_lots(
-    lots: List[CostLot],
-    cost_field: str = "unit_cost_in_base"
-) -> List[BalanceItem]:
-    """
-    Build BalanceItem list from cost lots by aggregating per asset.
-    
-    Args:
-        lots: List of CostLot objects (can be from DB or in-memory PnLResult)
-        cost_field: Field name to use for unit cost:
-            - "unit_cost_in_base" for runtime lots from PnLResult
-            - "unit_cost" for DB CostLot model (uses unit_cost column)
-    """
-    balance_map = defaultdict(lambda: {
-        "qty": Decimal(0),
-        "cost": Decimal(0),
-        "lots": 0,
-        "asset": None,
-    })
-    
-    for lot in lots:
-        unit_cost = getattr(lot, cost_field, lot.unit_cost_in_base)
-        balance_map[lot.asset_id]["qty"] += lot.qty_remaining
-        balance_map[lot.asset_id]["cost"] += lot.qty_remaining * unit_cost
-        balance_map[lot.asset_id]["lots"] += 1
-        if balance_map[lot.asset_id]["asset"] is None:
-            balance_map[lot.asset_id]["asset"] = lot.asset
-    
-    return [
-        BalanceItem(
-            asset={"id": asset_id, "name": data["asset"].symbol if data["asset"] else f"#{asset_id}"},
-            qty=float(data["qty"]),
-            cost_basis_in_base=float(data["cost"]),
-            avg_unit_cost_in_base=float(data["cost"] / data["qty"]) if data["qty"] > 0 else 0.0,
-            lot_count=data["lots"],
-        )
-        for asset_id, data in balance_map.items()
-    ]
-
-
 def build_version_response(
     version: CalculationVersion,
     base_currency_symbol: Optional[str] = None,
     total_realized_pnl: float = 0.0,
     total_fees_in_base: float = 0.0,
     fee_entry_count: int = 0,
-    unit_ids: Optional[List[int]] = None,
-    cost_lot_ids: Optional[List[int]] = None,
-    consumed_slice_ids: Optional[List[int]] = None,
-    realized_pnl_ids: Optional[List[int]] = None,
-    warning_ids: Optional[List[int]] = None,
-    settlement_ids: Optional[List[int]] = None,
-    cost_lot_event_ids: Optional[List[int]] = None,
 ) -> PnLVersionResponse:
     """
     Build PnLVersionResponse from a CalculationVersion with optional enrichment.
@@ -740,13 +788,6 @@ def build_version_response(
         total_realized_pnl=total_realized_pnl,
         total_fees_in_base=total_fees_in_base,
         fee_entry_count=fee_entry_count,
-        unit_ids=unit_ids or [],
-        cost_lot_ids=cost_lot_ids or [],
-        consumed_slice_ids=consumed_slice_ids or [],
-        realized_pnl_ids=realized_pnl_ids or [],
-        warning_ids=warning_ids or [],
-        settlement_ids=settlement_ids or [],
-        cost_lot_event_ids=cost_lot_event_ids or [],
     )
 
 
@@ -832,22 +873,6 @@ def calculate_pnl(
             account_ids=request.account_ids,
         )
 
-        # Build ID arrays for tab title counts
-        unit_ids = [u.id for u in result.calculation_units if u.id]
-        cost_lot_ids = [lot.cost_lot_id for lot in result.created_lots if lot.cost_lot_id]
-        consumed_slice_ids = [s.slice_id for s in result.consumed_slices if s.slice_id]
-        realized_pnl_ids = [r.pnl_id for r in result.realized_pnl_entries if r.pnl_id]
-        warning_ids = [w.id for w in result.warnings if w.id]
-        settlement_ids = [s.settlement_id for s in result.settlement_records if s.settlement_id]
-        
-        # Query cost lot event IDs for the version (events are linked via lot -> unit -> version)
-        cost_lot_event_ids = list(session.exec(
-            select(CostLotEvent.event_id)
-            .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
-            .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
-            .where(CalculationUnit.version_id == version.version_id)
-        ).all())
-
         # Compute fee summary from FeeEntry records (fee_value_in_base is stored directly)
         fee_summary = session.exec(
             select(
@@ -866,13 +891,6 @@ def calculate_pnl(
             total_realized_pnl=float(result.total_realized_pnl),
             total_fees_in_base=total_fees_in_base,
             fee_entry_count=fee_entry_count,
-            unit_ids=unit_ids,
-            cost_lot_ids=cost_lot_ids,
-            consumed_slice_ids=consumed_slice_ids,
-            realized_pnl_ids=realized_pnl_ids,
-            warning_ids=warning_ids,
-            settlement_ids=settlement_ids,
-            cost_lot_event_ids=cost_lot_event_ids,
         )
 
     except HTTPException:
@@ -910,7 +928,7 @@ def get_asset_price(
     asset = session.get(Asset, asset_id)
     if not asset:
         return PriceResponse(
-            asset=AssetRef(id=asset_id, name=f"#{asset_id}"),
+            asset=AssetRef(id=asset_id, symbol=f"#{asset_id}"),
             price=None,
             price_quote=base_currency,
             error=f"Asset {asset_id} not found",
@@ -931,7 +949,7 @@ def get_asset_price(
             warning_msg = f"Using stale price from {result.actual_price_date.strftime('%Y-%m-%d') if result.actual_price_date else 'unknown'} ({result.staleness_days} days old)"
         
         return PriceResponse(
-            asset=AssetRef(id=asset.asset_id, name=asset.symbol or f"#{asset.asset_id}"),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}"),
             price=result.price,
             price_quote=base_currency,
             fetched_at=result.timestamp,
@@ -946,7 +964,7 @@ def get_asset_price(
     except Exception as e:
         log.error(f"Failed to fetch price for asset {asset_id}: {e}")
         return PriceResponse(
-            asset=AssetRef(id=asset.asset_id, name=asset.symbol or f"#{asset.asset_id}"),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}"),
             price=None,
             price_quote=base_currency,
             error=str(e),
@@ -1000,7 +1018,7 @@ def get_current_prices(
         asset = asset_map.get(asset_id)
         if not asset:
             prices.append(PriceResponse(
-                asset=AssetRef(id=asset_id, name=f"#{asset_id}"),
+                asset=AssetRef(id=asset_id, symbol=f"#{asset_id}"),
                 price=None,
                 price_quote=request.base_currency,
                 error=f"Asset {asset_id} not found",
@@ -1023,7 +1041,7 @@ def get_current_prices(
                 stale_count += 1
             
             prices.append(PriceResponse(
-                asset=AssetRef(id=asset_id, name=asset.symbol),
+                asset=AssetRef(id=asset_id, symbol=asset.symbol),
                 price=result.price,
                 price_quote=request.base_currency,
                 fetched_at=result.timestamp or fetched_at,
@@ -1038,7 +1056,7 @@ def get_current_prices(
         except Exception as e:
             log.warning("price_fetch_failed", asset_symbol=asset.symbol, error=str(e))
             prices.append(PriceResponse(
-                asset=AssetRef(id=asset_id, name=asset.symbol),
+                asset=AssetRef(id=asset_id, symbol=asset.symbol),
                 price=None,
                 price_quote=request.base_currency,
                 error=str(e),
@@ -1167,7 +1185,7 @@ def get_version_summary(
     return get_version(version_id, session)
 
 
-@router.get("/versions/{version_id}/lots", response_model=List[CostLotResponse])
+@router.get("/versions/{version_id}/lots")
 def get_version_lots(
     version_id: int,
     include_zero_remaining: bool = True,
@@ -1187,52 +1205,62 @@ def get_version_lots(
     Args:
         include_unsettled_negative: If False, excludes lots where is_negative=True AND is_settled=False.
                                     Default True shows all lots including unsettled negatives.
+                                    
+    Returns:
+        PaginatedResponse with items, total, page, limit
     """
     # Verify version exists
     version = session.get(CalculationVersion, version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
-    # Query with eager loading of asset
-    query = (
+    # Build base query for counting and pagination
+    base_query = (
         select(CostLot)
         .join(CostLot.unit)  # join the related CalculationUnit
-        .options(
+        .where(CalculationUnit.version_id == version_id)
+    )
+    
+    if not include_zero_remaining:
+        base_query = base_query.where(CostLot.qty_remaining > 0)
+    
+    if not include_unsettled_negative:
+        # Exclude lots that are negative AND not yet settled
+        base_query = base_query.where(
+            not_(CostLot.is_negative) | CostLot.is_settled
+        )
+    
+    if asset_id:
+        base_query = base_query.where(CostLot.asset_id == asset_id)
+    
+    if account_id:
+        base_query = base_query.where(CostLot.account_id == account_id)
+    
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+    
+    # Add eager loading and pagination
+    offset = (page - 1) * limit
+    query = (
+        base_query.options(
             selectinload(CostLot.asset), 
             selectinload(CostLot.account),
             selectinload(CostLot.unit),  # Eager load unit for origin_unit_label
         )
-        .where(CalculationUnit.version_id == version_id)
         .order_by(CostLot.acquired_at)
+        .offset(offset)
+        .limit(limit)
     )
-    
-    if not include_zero_remaining:
-        query = query.where(CostLot.qty_remaining > 0)
-    
-    if not include_unsettled_negative:
-        # Exclude lots that are negative AND not yet settled
-        query = query.where(
-            ~((CostLot.is_negative == True) & (CostLot.is_settled == False))
-        )
-    
-    if asset_id:
-        query = query.where(CostLot.asset_id == asset_id)
-    
-    if account_id:
-        query = query.where(CostLot.account_id == account_id)
-    
-    # Apply pagination
-    offset = (page - 1) * limit
-    query = query.offset(offset).limit(limit)
     
     lots = session.exec(query).all()
     
-    return [
+    items = [
         CostLotResponse(
             cost_lot_id=lot.cost_lot_id,
             asset=AssetRef(
                 id=lot.asset.asset_id if lot.asset else lot.asset_id,
-                name=lot.asset.symbol if lot.asset else f"#{lot.asset_id}"
+                symbol=lot.asset.symbol if lot.asset else f"#{lot.asset_id}"
             ),
             account_id=lot.account_id,
             account_name=lot.account.name if lot.account else None,
@@ -1252,6 +1280,8 @@ def get_version_lots(
         )
         for lot in lots
     ]
+    
+    return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 @router.get("/versions/{version_id}/consumed-slices", response_model=List[ConsumedSliceResponse])
@@ -1291,7 +1321,7 @@ def get_version_consumed_slices(
             cost_lot_id=s.cost_lot.cost_lot_id if s.cost_lot else 0,
             asset=AssetRef(
                 id=s.cost_lot.asset.asset_id if s.cost_lot and s.cost_lot.asset else (s.cost_lot.asset_id if s.cost_lot else 0),
-                name=s.cost_lot.asset.symbol if s.cost_lot and s.cost_lot.asset else f"#{s.cost_lot.asset_id if s.cost_lot else 0}"
+                symbol=s.cost_lot.asset.symbol if s.cost_lot and s.cost_lot.asset else f"#{s.cost_lot.asset_id if s.cost_lot else 0}"
             ) if s.cost_lot else None,
             quantity=float(s.quantity),
             unit_cost_in_base=float(s.unit_cost_in_base),
@@ -1306,7 +1336,7 @@ def get_version_consumed_slices(
     ]
 
 
-@router.get("/versions/{version_id}/realized-pnl", response_model=List[RealizedPnLResponse])
+@router.get("/versions/{version_id}/realized-pnl")
 def get_version_realized_pnl(
     version_id: int,
     asset_id: Optional[int] = None,
@@ -1319,35 +1349,45 @@ def get_version_realized_pnl(
     
     Supports pagination and filtering by asset_id.
     Uses eager loading to fetch asset relationships in a single query.
+    
+    Returns:
+        PaginatedResponse with items, total, page, limit
     """
     # Verify version exists
     version = session.get(CalculationVersion, version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
-    # Query with eager loading of asset
-    query = (
+    # Build base query for counting
+    base_query = (
         select(RealizedPnl)
         .join(RealizedPnl.origin_unit)
-        .options(selectinload(RealizedPnl.asset))
         .where(CalculationUnit.version_id == version_id)
-        .order_by(RealizedPnl.realized_at)
     )
     
     if asset_id:
-        query = query.where(RealizedPnl.asset_id == asset_id)
+        base_query = base_query.where(RealizedPnl.asset_id == asset_id)
     
-    # Apply pagination
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+    
+    # Add eager loading and pagination
     offset = (page - 1) * limit
-    query = query.offset(offset).limit(limit)
+    query = (
+        base_query.options(selectinload(RealizedPnl.asset))
+        .order_by(RealizedPnl.realized_at)
+        .offset(offset)
+        .limit(limit)
+    )
     
     entries = session.exec(query).all()
     
-    return [
+    items = [
         RealizedPnLResponse(
             asset=AssetRef(
                 id=e.asset.asset_id if e.asset else e.asset_id,
-                name=e.asset.symbol if e.asset else f"#{e.asset_id}"
+                symbol=e.asset.symbol if e.asset else f"#{e.asset_id}"
             ),
             qty=float(e.qty),
             proceeds_in_base=float(e.proceeds_in_base),
@@ -1366,12 +1406,17 @@ def get_version_realized_pnl(
         )
         for e in entries
     ]
+    
+    return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 class FeesResponse(BaseModel):
-    """Response for fees endpoint with items and summary."""
+    """Response for fees endpoint with items, summary, and pagination."""
     fees: List[FeeEntryResponse]
     summary: FeeSummaryResponse
+    total: int
+    page: int
+    limit: int
 
 
 @router.get("/versions/{version_id}/fees", response_model=FeesResponse)
@@ -1480,8 +1525,7 @@ def get_version_fees(
         fee_responses.append(FeeEntryResponse(
             id=fee_entry.id,
             date=rpnl.realized_at if rpnl else leg.date_time,
-            asset_id=asset.asset_id,
-            asset_symbol=asset.symbol,
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol),
             fee_amount=float(leg.quantity) if leg.quantity else 0.0,
             fee_in_base=float(fee_entry.fee_value_in_base),
             transaction_id=leg.transaction_id,
@@ -1490,8 +1534,7 @@ def get_version_fees(
             transaction_type=tx.transaction_type if tx else None,
             cost_basis_consumed=float(rpnl.cost_basis_in_base) if rpnl else 0.0,
             realized_pnl=float(rpnl.pnl_in_base) if rpnl else 0.0,
-            related_asset_id=related[0] if related else None,
-            related_asset_symbol=related[1] if related else None,
+            related_asset=AssetRef(id=related[0], symbol=related[1]) if related else None,
         ))
     
     return FeesResponse(
@@ -1501,7 +1544,10 @@ def get_version_fees(
             fees_by_asset=fees_by_asset,
             fees_by_source=fees_by_source,
             disposal_taxable_fee_count=disposal_taxable_count,
-        )
+        ),
+        total=len(all_results),
+        page=page,
+        limit=limit,
     )
 
 
@@ -1641,7 +1687,7 @@ def get_version_balances(
             BalanceResponse(
                 asset=AssetRef(
                     id=data["asset"].asset_id if data["asset"] else asset_id,
-                    name=data["asset"].symbol if data["asset"] else f"#{asset_id}"
+                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}"
                 ),
                 account_id=None,  # Aggregated across accounts
                 account_name=None,
@@ -1650,9 +1696,11 @@ def get_version_balances(
                 cost_basis_in_base=float(data["cost"]),
                 avg_unit_cost_in_base=float(data["cost"] / data["qty"]) if data["qty"] > 0 else 0.0,
                 lot_count=data["lots"],
+                # Aggregated P&L data
                 realized_pnl_in_base=realized_map.get(asset_id, {}).get("pnl", 0.0),
                 realized_event_count=realized_map.get(asset_id, {}).get("count", 0),
                 warning_count=warning_map.get(asset_id, 0),
+                # Fee tracking
                 total_fees_in_base=fee_map.get(asset_id, 0.0),
                 unsettled_negative_count=unsettled_negative_by_asset.get(asset_id, 0),
                 category_ids=sorted(category_map.get(asset_id, [])),
@@ -1695,7 +1743,7 @@ def get_version_balances(
             BalanceResponse(
                 asset=AssetRef(
                     id=data["asset"].asset_id if data["asset"] else asset_id,
-                    name=data["asset"].symbol if data["asset"] else f"#{asset_id}"
+                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}"
                 ),
                 account_id=account_id,
                 account_name=data["account"].name if data["account"] else None,
@@ -1709,28 +1757,42 @@ def get_version_balances(
         ]
 
 
-@router.get("/versions/{version_id}/warnings", response_model=List[WarningResponse])
+@router.get("/versions/{version_id}/warnings")
 def get_version_warnings(
     version_id: int,
+    page: int = 1,
+    limit: int = 100,
     session: Session = Depends(get_session_dependency),
 ):
-    """Get warnings for a specific version."""
+    """
+    Get warnings for a specific version.
+    
+    Returns:
+        PaginatedResponse with items, total, page, limit
+    """
     # Verify version exists
     version = session.get(CalculationVersion, version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
-    query = (
+    # Build base query for counting
+    base_query = (
         select(PnlWarning)
         .join(PnlWarning.unit)
         .where(CalculationUnit.version_id == version_id)
-        .order_by(PnlWarning.created_at)
     )
+    
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+    
+    # Add pagination
+    offset = (page - 1) * limit
+    query = base_query.order_by(PnlWarning.created_at).offset(offset).limit(limit)
     
     warnings = session.exec(query).all()
     
-
-    return [
+    items = [
         WarningResponse(
             warning_type=w.warning_type,
             message=w.message,
@@ -1741,6 +1803,8 @@ def get_version_warnings(
         )
         for w in warnings
     ]
+    
+    return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 @router.get("/versions/{version_id}/settlements", response_model=List[SettlementResponse])
@@ -1787,7 +1851,7 @@ def get_version_settlements(
     ]
 
 
-@router.get("/versions/{version_id}/lot-events", response_model=List[CostLotEventResponse])
+@router.get("/versions/{version_id}/lot-events")
 def get_version_lot_events(
     version_id: int,
     lot_id: Optional[int] = None,
@@ -1809,55 +1873,67 @@ def get_version_lot_events(
     - adjusted: Manual cost basis adjustment
     
     Use for tax audit trail and lot history reconstruction.
+    
+    Returns:
+        PaginatedResponse with items, total, page, limit
     """
     # Verify version exists
     version = session.get(CalculationVersion, version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
-    # Build query with eager loading
-    query = (
+    # Build base query for counting
+    base_query = (
         select(CostLotEvent)
         .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
         .where(CalculationUnit.version_id == version_id)
-        .options(
+    )
+    
+    # Apply filters
+    if lot_id:
+        base_query = base_query.where(CostLotEvent.lot_id == lot_id)
+    if event_type:
+        base_query = base_query.where(CostLotEvent.event_type == event_type)
+    if asset_id:
+        base_query = base_query.where(CostLot.asset_id == asset_id)
+    if unit_id:
+        base_query = base_query.where(CostLotEvent.triggered_by_unit_id == unit_id)
+    
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+    
+    # Add eager loading and pagination
+    offset = (page - 1) * limit
+    query = (
+        base_query.options(
             selectinload(CostLotEvent.lot).selectinload(CostLot.asset),
             selectinload(CostLotEvent.lot).selectinload(CostLot.account),
             selectinload(CostLotEvent.related_lot),
             selectinload(CostLotEvent.triggered_by_unit),
         )
         .order_by(CostLotEvent.timestamp, CostLotEvent.sequence_num)
+        .offset(offset)
+        .limit(limit)
     )
-    
-    # Apply filters
-    if lot_id:
-        query = query.where(CostLotEvent.lot_id == lot_id)
-    if event_type:
-        query = query.where(CostLotEvent.event_type == event_type)
-    if asset_id:
-        query = query.where(CostLot.asset_id == asset_id)
-    if unit_id:
-        query = query.where(CostLotEvent.triggered_by_unit_id == unit_id)
-    
-    # Pagination
-    offset = (page - 1) * limit
-    query = query.offset(offset).limit(limit)
     
     events = session.exec(query).all()
     
-    return [
+    items = [
         CostLotEventResponse(
             event_id=e.event_id,
             event_type=e.event_type,
             lot_id=e.lot_id,
-            asset=build_asset_ref(e.lot.asset, e.lot.asset_id) if e.lot else None,
+            asset=AssetRef(id=e.lot.asset.asset_id, symbol=e.lot.asset.symbol) if e.lot and e.lot.asset else None,
             account_id=e.lot.account_id if e.lot else None,
             account_name=e.lot.account.name if e.lot and e.lot.account else None,
             quantity_delta=float(e.quantity_delta),
             cost_basis_delta=float(e.cost_basis_delta) if e.cost_basis_delta else None,
             qty_remaining_after=float(e.qty_remaining_after),
             cost_basis_remaining_after=float(e.cost_basis_remaining_after) if e.cost_basis_remaining_after else None,
+            balance_after=float(e.balance_after) if e.balance_after is not None else None,
+            account_balance_after=float(e.account_balance_after) if e.account_balance_after is not None else None,
             related_lot_id=e.related_lot_id,
             triggered_by_transaction_id=e.triggered_by_transaction_id,
             triggered_by_unit_id=e.triggered_by_unit_id,
@@ -1867,6 +1943,8 @@ def get_version_lot_events(
         )
         for e in events
     ]
+    
+    return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 # =============================================================================
@@ -1952,7 +2030,7 @@ def get_unit_realized_pnl(
     
     return [
         RealizedEntryDetailResponse(
-            asset=AssetRef(id=e.asset_id, name=e.asset.symbol if e.asset else f"#{e.asset_id}"),
+            asset=AssetRef(id=e.asset_id, symbol=e.asset.symbol if e.asset else f"#{e.asset_id}"),
             qty=float(e.qty),
             proceeds_in_base=float(e.proceeds_in_base),
             cost_basis_in_base=float(e.cost_basis_in_base),
@@ -2004,7 +2082,7 @@ def get_unit_warnings(
     ]
 
 
-@router.get("/versions/{version_id}/units", response_model=List[ProcessedUnitResponse])
+@router.get("/versions/{version_id}/units")
 def get_version_units(
     version_id: int,
     asset_id: Optional[int] = None,
@@ -2024,6 +2102,9 @@ def get_version_units(
                   (in outflows, inflows, or fees)
         page: Page number (1-indexed)
         limit: Items per page
+        
+    Returns:
+        PaginatedResponse with items, total, page, limit
     """
     from backend.db.models import CalculationUnitLeg
     
@@ -2032,25 +2113,28 @@ def get_version_units(
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
-    # Build base query
-    offset = (page - 1) * limit
-    query = (
-        select(CalculationUnit)
-        .where(CalculationUnit.version_id == version_id)
-    )
+    # Build base query for counting
+    base_query = select(CalculationUnit).where(CalculationUnit.version_id == version_id)
     
     # Filter by asset_id if provided
-    # Units involve an asset if it appears in any leg (outflow, inflow, or fee)
     if asset_id is not None:
-        query = query.join(CalculationUnit.legs).where(
+        base_query = base_query.join(CalculationUnit.legs).where(
             CalculationUnitLeg.asset_id == asset_id
         ).distinct()
     
-    # Add eager loading and pagination
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+    
+    # Build paginated query with eager loading
+    offset = (page - 1) * limit
     query = (
-        query.options(
-            # Legs with assets
+        base_query.options(
+            # Legs with assets and full transaction details (for compact display)
             selectinload(CalculationUnit.legs).selectinload(CalculationUnitLeg.asset),
+            selectinload(CalculationUnit.legs).selectinload(CalculationUnitLeg.transaction).selectinload(NormalizedTransaction.account_rel),
+            selectinload(CalculationUnit.legs).selectinload(CalculationUnitLeg.transaction).selectinload(NormalizedTransaction.price_quote_asset),
+            selectinload(CalculationUnit.legs).selectinload(CalculationUnitLeg.transaction).selectinload(NormalizedTransaction.fee_quote_asset),
             # Cost lots with assets and accounts
             selectinload(CalculationUnit.cost_lots).selectinload(CostLot.asset),
             selectinload(CalculationUnit.cost_lots).selectinload(CostLot.account),
@@ -2115,35 +2199,25 @@ def get_version_units(
     # Build response
     result = []
     for u in units:
-        # Build transaction legs from unit legs
-        outflows = [
-            TransactionLegDetail(
-                transaction_id=leg.transaction_id,
-                asset=build_asset_ref(leg.asset, leg.asset_id),
-                qty=float(leg.quantity),
-                direction="outflow"
-            )
-            for leg in u.outflow_legs
-        ]
+        # Build deduplicated transactions dictionary (temporary for mapping)
+        transactions_dict: Dict[int, TransactionSummary] = {}
+        for leg in u.legs:
+            if leg.transaction_id not in transactions_dict and leg.transaction:
+                transactions_dict[leg.transaction_id] = build_transaction_summary(leg.transaction)
         
-        inflows = [
-            TransactionLegDetail(
-                transaction_id=leg.transaction_id,
-                asset=build_asset_ref(leg.asset, leg.asset_id),
+        # Convert to list and create ID-to-index mapping
+        transactions_list = list(transactions_dict.values())
+
+        # Build legs with transaction references (now by index)
+        legs = [
+            LegWithTransaction(
+                asset=AssetRef(id=leg.asset.asset_id, symbol=leg.asset.symbol),
                 qty=float(leg.quantity),
-                direction="inflow"
-            )
-            for leg in u.inflow_legs
-        ]
-        
-        fees = [
-            TransactionLegDetail(
+                leg_type=leg.leg_type,
+                direction=leg.direction,
                 transaction_id=leg.transaction_id,
-                asset=build_asset_ref(leg.asset, leg.asset_id),
-                qty=float(leg.quantity),
-                direction="fee"
             )
-            for leg in u.fee_legs
+            for leg in u.legs
         ]
         
         # Build cost lots
@@ -2151,15 +2225,11 @@ def get_version_units(
         
         # Build consumed slices from realized entries (with unit label and consumption timestamp)
         consumed = []
-        for entry in u.realized_pnl_records:
-            if entry.slices:
-                for slice in entry.slices:
-                    consumed.append(build_consumed_slice_response(
-                        slice, 
-                        consumed_by_tx_id=entry.transaction_id,
-                        consumed_by_unit_label=u.unit_label,
-                        consumed_at=entry.realized_at or u.timestamp,
-                    ))
+        for entry in u.consumed_slices:
+            for slice in entry.slices:
+                consumed.append(build_consumed_slice_response(
+                    slice
+                ))
         
         # Build settlements for this unit
         unit_settlements = settlements_by_unit.get(u.id, [])
@@ -2191,9 +2261,9 @@ def get_version_units(
             unit_label=u.unit_label or "",
             pattern=u.pattern,
             timestamp=u.timestamp,
-            outflows=outflows,
-            inflows=inflows,
-            fees=fees,
+            # Deduplicated transactions and legs
+            transactions=transactions_list,  # Now a list instead of dict
+            legs=legs,
             cost_basis=cost_basis,
             realized_entries=realized_entries,
             warnings=warnings,
@@ -2202,12 +2272,12 @@ def get_version_units(
             # Unit is taxable if any leg has disposal_taxable=True
             is_disposal_taxable=any(leg.disposal_taxable for leg in u.legs if leg.leg_type in ("outflow", "fee")),
             # Fee indicators
-            has_fees=len(fees) > 0 or unit_fee_count > 0,
+            has_fees=any(leg.leg_type == "fee" for leg in u.legs),
             fee_count=unit_fee_count,
             total_fees_in_base=unit_total_fees,
         ))
     
-    return result
+    return {"items": result, "total": total, "page": page, "limit": limit}
 
 
 @router.post("/versions/{version_id}/commit")

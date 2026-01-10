@@ -3,6 +3,7 @@ version: "3"
 tasks:
   test:local:
     desc: Build from develop and deploy to test environment
+    dotenv: [.env, .env.test]
     cmds:
       - task: build:test
       - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down
@@ -13,9 +14,9 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Deployed to TEST (from develop branch)"
         echo ""
-        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+        echo "   Frontend: http://localhost:$FRONTEND_PORT"
+        echo "   Backend:  http://localhost:$BACKEND_PORT"
+        echo "   Database: localhost:$POSTGRES_PORT"
         echo ""
         echo "Next steps:"
         echo "   task test:int:test    → Run integration tests"
@@ -24,6 +25,7 @@ tasks:
 
   prod:local:
     desc: Deploy tagged version to local prod (e.g., task deploy:prod:local v1.2.0)
+    dotenv: [.env, .env.prod]
     cmds:
       - |
         VERSION={{.CLI_ARGS}}
@@ -50,9 +52,9 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Deployed to PROD: $VERSION"
         echo ""
-        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+        echo "   Frontend: http://localhost:$FRONTEND_PORT"
+        echo "   Backend:  http://localhost:$BACKEND_PORT"
+        echo "   Database: localhost:$POSTGRES_PORT"
         echo "═══════════════════════════════════════════════════════════════"
 
   prod:cloud:

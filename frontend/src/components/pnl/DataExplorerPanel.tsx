@@ -25,29 +25,18 @@ import {
 import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { CalculationUnit, CostLot, RealizedPnLRow, PnLWarningItem, OriginTransactionDetail, Settlement, ConsumedSliceDetail, CostLotEventEntry, FeeEntry } from './types';
-import { API_URL } from '../../types';
+import { API_URL, AssetRef } from '../../types';
 import { Tooltip } from '../ui/tooltip';
 import { AssetBadge } from '../AssetBadge';
+import { CompactTransactionBadgeRow } from '../CompactTransactionBadgeRow';
+import { TransactionRow } from '../TransactionRow';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
-
-interface DataExplorerPanelProps {
-    isOpen: boolean;
-    onClose: () => void;
-    calculationUnits: CalculationUnit[];
-    costLots: CostLot[];
-    consumedSlices?: ConsumedSliceDetail[];  // Consumed lot slices from /consumed-slices endpoint
-    realizedPnL: RealizedPnLRow[];
-    warnings: PnLWarningItem[];
-    settlements?: Settlement[];  // Audit trail for negative lot settlements
-    baseCurrency: string;
-    onTransactionClick?: (txId: number) => void;
-    onAssetClick?: (assetId: number) => void;
-    // Manual price entry support for warnings
-    quoteAssetId?: number;
-    onPriceAdded?: (assetId: number, warningId: string) => void;
-    assets?: Array<{ id: number; name: string }>;
-}
+import { TablePagination } from '../TablePagination';
+import { usePagination } from '../../hooks/usePagination';
+import { getWarningTypeConfig } from './warningStyles';
+// Re-export for backwards compatibility
+export { getPersistedPageSize } from '../../hooks/usePagination';
 
 const formatCurrency = (value: number, currency: string): string => {
     return new Intl.NumberFormat('en-US', {
@@ -436,13 +425,9 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
     const [loadingEvents, setLoadingEvents] = useState(false);
 
     // Get all transaction IDs for this unit
-    // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
-        if (unit.transaction_ids && unit.transaction_ids.length > 0) {
-            return [...unit.transaction_ids];
-        }
-        return [];
-    }, [unit.transaction_ids]);
+        return unit.transactions.map(tx => tx.id);
+    }, [unit.transactions]);
 
     useEffect(() => {
         const fetchOriginTransactions = async () => {
@@ -525,7 +510,9 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                 const response = await fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?unit_id=${unit.unit_id}`);
                 if (response.ok) {
                     const data = await response.json();
-                    setUnitEvents(data);
+                    // Handle both paginated response (with items array) and legacy array response
+                    const eventsData = Array.isArray(data) ? data : data.items || [];
+                    setUnitEvents(eventsData);
                 }
             } catch (err) {
                 console.error('Failed to fetch unit events:', err);
@@ -654,17 +641,17 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                 <Box>
                                     <Text color="gray.500" fontWeight="bold">Outflows</Text>
                                     <Flex gap={1} wrap="wrap">
-                                        {unit.outflow_asset_symbols?.map((symbol, i) => (
-                                            <Badge key={i} size="xs" colorPalette="red">{symbol}</Badge>
-                                        )) || <Text>-</Text>}
+                                        {unit.legs.filter(leg => leg.leg_type === 'outflow').map((leg, i) => (
+                                            <Badge key={i} size="xs" colorPalette="red">{leg.asset?.symbol}</Badge>
+                                        ))}
                                     </Flex>
                                 </Box>
                                 <Box>
                                     <Text color="gray.500" fontWeight="bold">Inflows</Text>
                                     <Flex gap={1} wrap="wrap">
-                                        {unit.inflow_asset_symbols?.map((symbol, i) => (
-                                            <Badge key={i} size="xs" colorPalette="green">{symbol}</Badge>
-                                        )) || <Text>-</Text>}
+                                        {unit.legs.filter(leg => leg.leg_type === 'inflow').map((leg, i) => (
+                                            <Badge key={i} size="xs" colorPalette="green">{leg.asset?.symbol}</Badge>
+                                        ))}
                                     </Flex>
                                 </Box>
                                 <Box>
@@ -741,7 +728,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                                     </Badge>
                                                                 </Table.Cell>
                                                                 <Table.Cell fontSize="xs">
-                                                                    <Badge size="xs">{event.asset?.name || '-'}</Badge>
+                                                                    <Badge size="xs">{event.asset?.symbol || '-'}</Badge>
                                                                 </Table.Cell>
                                                                 <Table.Cell fontSize="xs" color="gray.600">
                                                                     {event.account_name || '-'}
@@ -779,7 +766,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                     <Card.Root size="sm" variant="outline" flex="1" minW="280px">
                         <Card.Body p={3}>
                             <Text fontSize="xs" fontWeight="bold" color="green.600" mb={2}>
-                                💰 Realized P&L ({unit.realized_entries?.length || unit.realized_entry_count || 0})
+                                💰 Realized P&L ({unit.realized_entries?.length || 0})
                             </Text>
                             {unit.realized_entries && unit.realized_entries.length > 0 ? (
                                 <Table.Root size="sm">
@@ -796,7 +783,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                         {unit.realized_entries.map((entry, i) => (
                                             <Table.Row key={i} bg={entry.is_fee ? 'orange.50' : undefined}>
                                                 <Table.Cell fontSize="xs">
-                                                    <Badge size="xs">{entry.asset.name || `#${entry.asset.id}`}</Badge>
+                                                    <Badge size="xs">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
                                                     {formatCurrency(entry.proceeds_in_base, baseCurrency)}
@@ -870,7 +857,9 @@ export const UnitsTab: React.FC<{
     costLots: CostLot[];
     versionId?: number | null;
     onTransactionClick?: (txId: number) => void;
-}> = ({ units, baseCurrency, costLots, versionId, onTransactionClick }) => {
+    /** Hide internal pagination (when parent provides pagination) */
+    hidePagination?: boolean;
+}> = ({ units, baseCurrency, costLots, versionId, onTransactionClick, hidePagination = false }) => {
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [expandedUnits, setExpandedUnits] = useState<Set<number>>(new Set());
@@ -885,15 +874,18 @@ export const UnitsTab: React.FC<{
             if (typeFilter !== 'all' && (u.pattern || 'unknown') !== typeFilter) return false;
             if (search) {
                 const s = search.toLowerCase();
-                const outSymbols = (u.outflow_asset_symbols || []).join(' ').toLowerCase();
-                const inSymbols = (u.inflow_asset_symbols || []).join(' ').toLowerCase();
+                const symbols = u.legs.map(leg => leg.asset.symbol).join(' ').toLowerCase();
                 const label = (u.unit_label || '').toLowerCase();
-                return outSymbols.includes(s) || inSymbols.includes(s) ||
-                    label.includes(s) || u.unit_id.toString().includes(s);
+                return symbols.includes(s)
+                label.includes(s) || u.unit_id.toString().includes(s);
             }
             return true;
         });
     }, [units, search, typeFilter]);
+
+    // Pagination - only used when not hidden
+    const pagination = usePagination({ storageKey: 'units_tab' });
+    const paginatedUnits = hidePagination ? filtered : pagination.paginate(filtered);
 
     const toggleExpand = (unitId: number) => {
         setExpandedUnits(prev => {
@@ -958,70 +950,128 @@ export const UnitsTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {filtered.slice(0, 200).map((unit) => {
+                        {paginatedUnits.map((unit: CalculationUnit) => {
                             // Generate operation label from unit_label or compose compact preview
                             // For transfers: "Account A → Account B: BTC"
                             // For trades: "−: BTC → +: USD"
                             // Generate operation label based on pattern type
                             // For trades/swaps: "−: BTC → +: USD" 
                             // For transfers: "⇄ BTC" with transfer indicator
-                            const generateOperationDisplay = (): { mainLabel: string; subLabel?: string; icon: string } => {
-                                const outSymbols = unit.outflow_asset_symbols || [];
-                                const inSymbols = unit.inflow_asset_symbols || [];
-                                const feeSymbols = unit.fee_asset_symbols || [];
-                                const isTransfer = unit.pattern === 'transfer';
-                                const isSwap = unit.pattern === 'swap';
+                            // Operation label renderer (frontend version of backend _generate_label)
+                            const renderOperationLabel = () => {
+                                // Use leg arrays from unit
+                                const inflowLegs = unit.legs.filter(leg => leg.leg_type === 'inflow');
+                                const outflowLegs = unit.legs.filter(leg => leg.leg_type === 'outflow');
+                                const feeLegs = unit.legs.filter(leg => leg.leg_type === 'fee');
+                                const hasLegs = inflowLegs.length > 0 || outflowLegs.length > 0 || feeLegs.length > 0;
 
-                                // Format asset symbols for display
-                                const formatAssets = (symbols: string[], max: number = 2): string => {
-                                    if (!symbols.length) return '';
-                                    const display = symbols.slice(0, max).join(', ');
-                                    return symbols.length > max ? `${display}…` : display;
-                                };
-
-                                // If unit has a custom label, use it
-                                if (unit.unit_label) {
-                                    return { mainLabel: unit.unit_label, icon: isTransfer ? '⇄' : isSwap ? '↔' : '•' };
+                                if (hasLegs) {
+                                    const inflow = inflowLegs.map((leg, idx) => (
+                                        <Flex key={`inflow-${idx}`} align="center" gap={1} as="span">
+                                            <Text fontSize="sm" color="green.500" fontWeight="bold">↓</Text>
+                                            <Text fontSize="sm" color="green.600">{formatQty(leg.qty)}</Text>
+                                            {leg.asset?.id ? (
+                                                <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                            ) : (
+                                                <Text fontSize="sm" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                            )}
+                                        </Flex>
+                                    ));
+                                    const outflow = outflowLegs.map((leg, idx) => (
+                                        <Flex key={`outflow-${idx}`} align="center" gap={1} as="span">
+                                            <Text fontSize="sm" color="red.500" fontWeight="bold">↑</Text>
+                                            <Text fontSize="sm" color="red.600">{formatQty(leg.qty)}</Text>
+                                            {leg.asset?.id ? (
+                                                <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                            ) : (
+                                                <Text fontSize="sm" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                            )}
+                                        </Flex>
+                                    ));
+                                    const fee = feeLegs.map((leg, idx) => (
+                                        <Flex key={`fee-${idx}`} align="center" gap={1} as="span">
+                                            <Text fontSize="sm" color="orange.500" fontWeight="bold">💸</Text>
+                                            <Text fontSize="sm" color="orange.600">{formatQty(leg.qty)}</Text>
+                                            {leg.asset?.id ? (
+                                                <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                            ) : (
+                                                <Text fontSize="sm" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                            )}
+                                        </Flex>
+                                    ));
+                                    return (
+                                        <Flex align="center" gap={1} flexWrap="wrap" ml={2}>
+                                            {/* Inflow legs */}
+                                            {inflow.length > 0 && inflow}
+                                            {/* Separator if both inflow and outflow */}
+                                            {inflow.length > 0 && outflow.length > 0 && (
+                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                            )}
+                                            {/* Outflow legs */}
+                                            {outflow.length > 0 && outflow}
+                                            {/* Separator if any fee legs */}
+                                            {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
+                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                            )}
+                                            {/* Fee legs */}
+                                            {fee.length > 0 && fee}
+                                        </Flex>
+                                    );
                                 }
-
-                                if (isTransfer) {
-                                    // Transfer: show moved assets
-                                    const assets = [...new Set([...outSymbols, ...inSymbols])];
-                                    const assetLabel = formatAssets(assets) || 'assets';
-                                    return {
-                                        mainLabel: assetLabel,
-                                        subLabel: 'moved between accounts',
-                                        icon: '⇄'
-                                    };
-                                }
-
-                                if (isSwap) {
-                                    // Swap/Trade: show exchange "BTC → USD"
-                                    const outPart = formatAssets(outSymbols);
-                                    const inPart = formatAssets(inSymbols);
-                                    const feePart = feeSymbols.length > 0 ? ` (fee: ${feeSymbols[0]})` : '';
-
-                                    if (outPart && inPart) {
-                                        return { mainLabel: `${outPart} → ${inPart}${feePart}`, icon: '↔' };
-                                    } else if (outPart) {
-                                        return { mainLabel: `Sell ${outPart}${feePart}`, icon: '↔' };
-                                    } else if (inPart) {
-                                        return { mainLabel: `Buy ${inPart}${feePart}`, icon: '↔' };
-                                    }
-                                }
-
-                                // Default: generic format
-                                const outPart = outSymbols.length ? `−${formatAssets(outSymbols)}` : '';
-                                const inPart = inSymbols.length ? `+${formatAssets(inSymbols)}` : '';
-                                const label = [outPart, inPart].filter(Boolean).join(' → ') || '—';
-                                return { mainLabel: label, icon: '•' };
+                                // Legacy format fallback
+                                const inflow = (inflowLegs || []).map((leg, idx) => (
+                                    <Flex key={`inflow-legacy-${idx}`} align="center" gap={1} as="span">
+                                        <Text fontSize="xs" color="green.500" fontWeight="bold">↓</Text>
+                                        <Text fontSize="xs" color="green.600">{leg.qty.toFixed(8)}</Text>
+                                        {leg.asset?.id ? (
+                                            <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                        ) : (
+                                            <Text fontSize="xs" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                        )}
+                                    </Flex>
+                                ));
+                                const outflow = (outflowLegs || []).map((leg, idx) => (
+                                    <Flex key={`outflow-legacy-${idx}`} align="center" gap={1} as="span">
+                                        <Text fontSize="xs" color="red.500" fontWeight="bold">↑</Text>
+                                        <Text fontSize="xs" color="red.600">{leg.qty.toFixed(8)}</Text>
+                                        {leg.asset?.id ? (
+                                            <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                        ) : (
+                                            <Text fontSize="xs" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                        )}
+                                    </Flex>
+                                ));
+                                const fee = (feeLegs || []).map((leg, idx) => (
+                                    <Flex key={`fee-legacy-${idx}`} align="center" gap={1} as="span">
+                                        <Text fontSize="xs" color="orange.500" fontWeight="bold">💸</Text>
+                                        <Text fontSize="xs" color="orange.600">{leg.qty.toFixed(8)}</Text>
+                                        {leg.asset?.id ? (
+                                            <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
+                                        ) : (
+                                            <Text fontSize="xs" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                        )}
+                                    </Flex>
+                                ));
+                                return (
+                                    <Flex align="center" gap={1} flexWrap="wrap" ml={2}>
+                                        {inflow.length > 0 && inflow}
+                                        {inflow.length > 0 && outflow.length > 0 && (
+                                            <Text fontSize="xs" color="gray.400" px={1}>|</Text>
+                                        )}
+                                        {outflow.length > 0 && outflow}
+                                        {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
+                                            <Text fontSize="xs" color="gray.400" px={1}>|</Text>
+                                        )}
+                                        {fee.length > 0 && fee}
+                                    </Flex>
+                                );
                             };
 
-                            const { mainLabel, subLabel, icon } = generateOperationDisplay();
+
+                            const mainLabel = renderOperationLabel();
                             const warningCount = unit.warnings?.length || 0;
-                            const txCount = unit.transaction_ids?.length || 0;
-                            const isTransfer = unit.pattern === 'transfer';
-                            const isSwap = unit.pattern === 'swap';
+                            const txCount = Object.keys(unit.transactions || {}).length;
+
                             return (
                                 <React.Fragment key={unit.unit_id}>
                                     <Table.Row onClick={() => toggleExpand(unit.unit_id)} style={{ cursor: 'pointer' }} _hover={{ bg: 'gray.50' }}>
@@ -1039,47 +1089,36 @@ export const UnitsTab: React.FC<{
                                         <Table.Cell fontSize="xs">{formatDateLocale(unit.date)}</Table.Cell>
                                         {/* Operation Column: Icon + Label + Sub-label + Transactions */}
                                         <Table.Cell>
-                                            <Flex direction="column" gap={0}>
+                                            <Flex direction="column" gap={1}>
                                                 <Flex align="center" gap={1}>
-                                                    <Text
-                                                        fontSize="sm"
-                                                        color={isTransfer ? 'blue.500' : isSwap ? 'orange.500' : 'gray.500'}
-                                                        fontWeight="bold"
-                                                    >
-                                                        {icon}
-                                                    </Text>
-                                                    <Text fontSize="xs" fontWeight="medium">
+
+                                                    <Text fontSize="sm" fontWeight="medium">
                                                         {mainLabel}
                                                     </Text>
                                                 </Flex>
-                                                {subLabel && (
-                                                    <Text fontSize="2xs" color="gray.500" ml={4}>
-                                                        {subLabel}
-                                                    </Text>
-                                                )}
-                                                {txCount > 0 && (
-                                                    <Flex gap={1} wrap="wrap" mt={1}>
-                                                        {(unit.transaction_ids || []).slice(0, 3).map(txId => (
-                                                            <TransactionTooltip key={txId} txId={txId} baseCurrency={baseCurrency} onTransactionClick={onTransactionClick}>
-                                                                <Badge
-                                                                    size="xs"
-                                                                    colorPalette="gray"
-                                                                    variant="subtle"
-                                                                    cursor="pointer"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        onTransactionClick?.(txId);
-                                                                    }}
-                                                                >
-                                                                    TX#{txId}
-                                                                </Badge>
-                                                            </TransactionTooltip>
-                                                        ))}
-                                                        {txCount > 3 && (
-                                                            <Text fontSize="2xs" color="gray.500">+{txCount - 3} more</Text>
-                                                        )}
-                                                    </Flex>
-                                                )}
+                                                {/* Display transactions with expandable leg details */}
+                                                {(() => {
+
+                                                    // Show transaction IDs as fallback
+                                                    if (unit.transactions.length > 0) {
+                                                        return (
+                                                            <Flex direction="column" gap={0.5} mt={1} bg="gray.100">
+                                                                {unit.transactions.slice(0, 3).map((tx: any) => (
+                                                                    <TransactionRow
+                                                                        key={tx.id}
+                                                                        baseCurrency={baseCurrency}
+                                                                        onTransactionClick={onTransactionClick}
+                                                                        transaction={tx} />
+                                                                ))}
+                                                                {txCount > 3 && (
+                                                                    <Text fontSize="2xs" color="gray.500" pl={1}>+{txCount - 3} more transactions</Text>
+                                                                )}
+                                                            </Flex>
+                                                        );
+                                                    }
+
+                                                    return null;
+                                                })()}
                                             </Flex>
                                         </Table.Cell>
                                         {/* Events count cell - uses event_ids from API (simple total count) */}
@@ -1102,9 +1141,9 @@ export const UnitsTab: React.FC<{
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            {(unit.has_fees || unit.fee_count) ? (
+                                            {unit.has_fees && unit.total_fees_in_base ? (
                                                 <Text fontSize="sm" color="orange.600">
-                                                    {formatCurrency(unit.total_fees_in_base || 0, baseCurrency)}
+                                                    {formatCurrency(unit.total_fees_in_base, baseCurrency)}
                                                 </Text>
                                             ) : (
                                                 <Text fontSize="xs" color="gray.400">-</Text>
@@ -1134,10 +1173,14 @@ export const UnitsTab: React.FC<{
                     </Table.Body>
                 </Table.Root>
             </Box>
-            {filtered.length > 200 && (
-                <Text fontSize="sm" color="gray.500" mt={2} textAlign="center">
-                    Showing first 200 of {filtered.length} units
-                </Text>
+            {!hidePagination && (
+                <TablePagination
+                    page={pagination.page}
+                    pageSize={pagination.pageSize}
+                    total={filtered.length}
+                    onPageChange={pagination.setPage}
+                    onPageSizeChange={pagination.setPageSize}
+                />
             )}
         </Box>
     );
@@ -1170,7 +1213,7 @@ const CostLotsTab: React.FC<{
             // Search filter
             if (search) {
                 const s = search.toLowerCase();
-                const symbol = lot.asset?.name ?? lot.asset_symbol ?? '';
+                const symbol = lot.asset?.symbol ?? lot.asset_symbol ?? '';
                 return symbol.toLowerCase().includes(s) ||
                     String(lot.cost_lot_id).includes(s) ||
                     (lot.account_name || '').toLowerCase().includes(s);
@@ -1276,7 +1319,7 @@ const CostLotsTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {sorted.slice(0, 300).map((lot) => {
+                        {sorted.map((lot) => {
                             const isNegative = lot.unit_cost_in_base < 0 || lot.total_cost_in_base < 0 || lot.qty_remaining < 0;
                             const isExhausted = lot.qty_remaining === 0;
                             const pctRemaining = lot.qty_original > 0 ? (lot.qty_remaining / lot.qty_original) * 100 : 0;
@@ -1300,7 +1343,7 @@ const CostLotsTab: React.FC<{
                                         </Flex>
                                     </Table.Cell>
                                     <Table.Cell>
-                                        <Badge size="xs">{lot.asset?.name ?? lot.asset_symbol ?? `#${lot.asset_id}`}</Badge>
+                                        <Badge size="xs">{lot.asset?.symbol ?? lot.asset_symbol ?? `#${lot.asset_id}`}</Badge>
                                     </Table.Cell>
                                     <Table.Cell fontSize="xs">{formatDateLocale(lot.acquired_at)}</Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
@@ -1366,7 +1409,9 @@ export const CostLotEventsTab: React.FC<{
     events: CostLotEventEntry[];
     baseCurrency: string;
     onTransactionClick?: (txId: number) => void;
-}> = ({ events, baseCurrency, onTransactionClick }) => {
+    /** Hide internal pagination (when parent provides pagination) */
+    hidePagination?: boolean;
+}> = ({ events, baseCurrency, onTransactionClick, hidePagination = false }) => {
     const [search, setSearch] = useState('');
     const [eventTypeFilter, setEventTypeFilter] = useState<'all' | 'created' | 'consumed' | 'adjusted'>('all');
 
@@ -1376,17 +1421,27 @@ export const CostLotEventsTab: React.FC<{
             if (search) {
                 const s = search.toLowerCase();
                 return String(event.lot_id).includes(s) ||
-                    (event.asset?.name || '').toLowerCase().includes(s);
+                    (event.asset?.symbol || '').toLowerCase().includes(s);
             }
             return true;
         });
     }, [events, search, eventTypeFilter]);
 
     const sorted = useMemo(() => {
-        return [...filtered].sort((a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
+        return [...filtered].sort((a, b) => {
+            // Sort by timestamp DESC (newest first), then by sequence_num DESC for same timestamp
+            const timeDiff = new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+            if (timeDiff !== 0) return timeDiff;
+            // For events at the same timestamp, use sequence_num (assuming it exists)
+            const aSeq = (a as any).sequence_num ?? 0;
+            const bSeq = (b as any).sequence_num ?? 0;
+            return bSeq - aSeq;
+        });
     }, [filtered]);
+
+    // Pagination - only used when not hidden
+    const pagination = usePagination({ storageKey: 'events_tab' });
+    const paginatedEvents = hidePagination ? sorted : pagination.paginate(sorted);
 
     const stats = useMemo(() => {
         const createdCount = events.filter(e => e.event_type === 'created').length;
@@ -1498,11 +1553,13 @@ export const CostLotEventsTab: React.FC<{
                             <Table.ColumnHeader>Lot ID</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Qty Delta</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Cost Delta</Table.ColumnHeader>
+                            <Table.ColumnHeader textAlign="right">Account Balance</Table.ColumnHeader>
+                            <Table.ColumnHeader textAlign="right">Asset Balance</Table.ColumnHeader>
                             <Table.ColumnHeader>Triggered By</Table.ColumnHeader>
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {sorted.slice(0, 300).map((event) => (
+                        {paginatedEvents.map((event) => (
                             <Table.Row
                                 key={event.event_id}
                                 bg={
@@ -1525,7 +1582,7 @@ export const CostLotEventsTab: React.FC<{
                                 </Table.Cell>
                                 <Table.Cell fontSize="xs">{formatDateLocale(event.timestamp)}</Table.Cell>
                                 <Table.Cell>
-                                    <Badge size="xs">{event.asset?.name || '?'}</Badge>
+                                    <Badge size="xs">{event.asset?.symbol || '?'}</Badge>
                                 </Table.Cell>
                                 <Table.Cell fontSize="xs" color="gray.600">
                                     {event.account_name || '-'}
@@ -1542,6 +1599,20 @@ export const CostLotEventsTab: React.FC<{
                                     <Text color={(event.cost_basis_delta ?? 0) >= 0 ? 'green.600' : 'red.600'}>
                                         {(event.cost_basis_delta ?? 0) >= 0 ? '+' : ''}{formatCurrency(event.cost_basis_delta ?? 0, baseCurrency)}
                                     </Text>
+                                </Table.Cell>
+                                <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                    <Tooltip content="Balance for this account after event">
+                                        <Text color={event.account_balance_after && event.account_balance_after >= 0 ? 'green.600' : 'red.600'}>
+                                            {event.account_balance_after != null ? formatQty(event.account_balance_after) : '—'}
+                                        </Text>
+                                    </Tooltip>
+                                </Table.Cell>
+                                <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                    <Tooltip content="Total asset balance across all accounts after event">
+                                        <Text color={event.balance_after && event.balance_after >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
+                                            {event.balance_after != null ? formatQty(event.balance_after) : '—'}
+                                        </Text>
+                                    </Tooltip>
                                 </Table.Cell>
                                 <Table.Cell fontSize="xs">
                                     {event.triggered_by_unit_id ? (
@@ -1573,10 +1644,14 @@ export const CostLotEventsTab: React.FC<{
                     </Table.Body>
                 </Table.Root>
             </Box>
-            {sorted.length > 300 && (
-                <Text fontSize="sm" color="gray.500" mt={2} textAlign="center">
-                    Showing first 300 of {sorted.length} events
-                </Text>
+            {!hidePagination && (
+                <TablePagination
+                    page={pagination.page}
+                    pageSize={pagination.pageSize}
+                    total={sorted.length}
+                    onPageChange={pagination.setPage}
+                    onPageSizeChange={pagination.setPageSize}
+                />
             )}
         </Box>
     );
@@ -1600,7 +1675,7 @@ const RealizedPnLTab: React.FC<{
             if (taxableFilter === 'non-taxable' && e.disposal_taxable) return false;
             if (search) {
                 const s = search.toLowerCase();
-                const symbol = e.asset?.name ?? e.asset_symbol ?? '';
+                const symbol = e.asset?.symbol ?? '';
                 return symbol.toLowerCase().includes(s);
             }
             return true;
@@ -1690,7 +1765,7 @@ const RealizedPnLTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {sorted.slice(0, 200).map((entry) => {
+                        {sorted.map((entry) => {
                             // Compute FMV price and source display
                             const fmvPrice = entry.proceeds_price != null
                                 ? entry.proceeds_price
@@ -1721,7 +1796,7 @@ const RealizedPnLTab: React.FC<{
                                 >
                                     <Table.Cell fontSize="sm">{formatDateLocale(entry.realized_at)}</Table.Cell>
                                     <Table.Cell>
-                                        <Badge size="sm">{entry.asset_symbol}</Badge>
+                                        <Badge size="sm">{entry.asset.symbol}</Badge>
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="sm">
                                         {formatQty(entry.qty)}
@@ -1929,7 +2004,7 @@ const FeesTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {filtered.slice(0, 200).map((fee) => (
+                        {filtered.map((fee) => (
                             <Table.Row key={fee.id}>
                                 <Table.Cell>
                                     <Text fontSize="2xs" color="gray.600">
@@ -2024,7 +2099,7 @@ const WarningsTab: React.FC<{
     // Manual price entry support
     quoteAssetId?: number;
     onPriceAdded?: (assetId: number, warningId: string) => void;
-    assets?: Array<{ id: number; name: string }>;
+    assets?: Array<AssetRef>;
 }> = ({ warnings, baseCurrency, onTransactionClick, quoteAssetId, onPriceAdded, assets }) => {
     const [typeFilter, setTypeFilter] = useState<string>('all');
 
@@ -2040,7 +2115,7 @@ const WarningsTab: React.FC<{
     // Get asset name from assets list or fallback
     const getAssetName = (assetId: number) => {
         const asset = assets?.find(a => a.id === assetId);
-        return asset?.name || `Asset #${assetId}`;
+        return asset?.symbol || `#${assetId}`;
     };
 
     // Get default date from warning details
@@ -2136,24 +2211,26 @@ const WarningsTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {filtered.map((warning, i) => (
-                            <Table.Row key={i} bg="orange.50">
-                                <Table.Cell>
-                                    <Text fontSize="2xs" color="gray.600">
-                                        {warning.timestamp
-                                            ? formatDateTimeLocale(warning.timestamp)
-                                            : '-'
-                                        }
-                                    </Text>
-                                </Table.Cell>
-                                <Table.Cell>
-                                    <Badge colorPalette="orange" size="xs">
-                                        {warning.warning_type}
-                                    </Badge>
-                                </Table.Cell>
-                                <Table.Cell>
-                                    <Text fontSize="xs">{warning.message}</Text>
-                                </Table.Cell>
+                        {filtered.map((warning, i) => {
+                            const typeConfig = getWarningTypeConfig(warning.warning_type);
+                            return (
+                                <Table.Row key={i} bg={`${typeConfig.colorPalette}.50`}>
+                                    <Table.Cell>
+                                        <Text fontSize="2xs" color="gray.600">
+                                            {warning.timestamp
+                                                ? formatDateTimeLocale(warning.timestamp)
+                                                : '-'
+                                            }
+                                        </Text>
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                        <Badge colorPalette={typeConfig.colorPalette} size="xs">
+                                            {typeConfig.icon} {warning.warning_type}
+                                        </Badge>
+                                    </Table.Cell>
+                                    <Table.Cell>
+                                        <Text fontSize="xs">{warning.message}</Text>
+                                    </Table.Cell>
                                 <Table.Cell>
                                     {warning.transaction_id ? (
                                         <TransactionCell
@@ -2179,7 +2256,8 @@ const WarningsTab: React.FC<{
                                     </Table.Cell>
                                 )}
                             </Table.Row>
-                        ))}
+                        );
+                        })}
                     </Table.Body>
                 </Table.Root>
             </Box>
@@ -2319,7 +2397,7 @@ const SettlementsTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {sorted.slice(0, 200).map((settlement) => {
+                        {sorted.map((settlement) => {
                             const negativeLot = lotMap.get(settlement.negative_lot_id);
                             const settlingLot = lotMap.get(settlement.settling_lot_id);
                             return (
@@ -2438,173 +2516,6 @@ const SettlementsTab: React.FC<{
 };
 
 // ============================================================================
-// Main Panel
-// ============================================================================
-
-export const DataExplorerPanel: React.FC<DataExplorerPanelProps> = ({
-    isOpen,
-    onClose,
-    calculationUnits,
-    costLots,
-    consumedSlices = [],
-    realizedPnL,
-    warnings,
-    settlements = [],
-    baseCurrency,
-    onTransactionClick,
-    onAssetClick,
-    quoteAssetId,
-    onPriceAdded,
-    assets,
-}) => {
-    return (
-        <SlidePanel
-            isOpen={isOpen}
-            onClose={onClose}
-            title="P&L Audit"
-            titleIcon={<FiLayers size={20} />}
-            width="1000px"
-        >
-            <Tabs.Root defaultValue="units">
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="units">
-                        <FiLayers style={{ marginRight: 4 }} />
-                        Calculation Units ({calculationUnits.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="lots">
-                        <FiDatabase style={{ marginRight: 4 }} />
-                        Cost Lots ({costLots.length}{settlements.length > 0 ? ` + ${settlements.length} settlements` : ''})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="realized">
-                        <FiDollarSign style={{ marginRight: 4 }} />
-                        Realized P&L ({realizedPnL.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="warnings">
-                        <FiAlertTriangle style={{ marginRight: 4 }} />
-                        Warnings ({warnings.length})
-                    </Tabs.Trigger>
-                </Tabs.List>
-
-                <Tabs.Content value="units">
-                    <UnitsTab
-                        units={calculationUnits}
-                        baseCurrency={baseCurrency}
-                        costLots={costLots}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="lots">
-                    <CostLotsTab
-                        lots={costLots}
-                        consumedSlices={consumedSlices}
-                        settlements={settlements}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="realized">
-                    <RealizedPnLTab
-                        entries={realizedPnL}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="warnings">
-                    <WarningsTab
-                        warnings={warnings}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                        quoteAssetId={quoteAssetId}
-                        onPriceAdded={onPriceAdded}
-                        assets={assets}
-                    />
-                </Tabs.Content>
-            </Tabs.Root>
-        </SlidePanel>
-    );
-};
-
-// Embedded version (no slide panel)
-export const DataExplorerContent: React.FC<Omit<DataExplorerPanelProps, 'isOpen' | 'onClose'>> = ({
-    calculationUnits,
-    costLots,
-    consumedSlices = [],
-    realizedPnL,
-    warnings,
-    baseCurrency,
-    onTransactionClick,
-    onAssetClick,
-    quoteAssetId,
-    onPriceAdded,
-    assets,
-}) => {
-    return (
-        <Box mt={4}>
-            <Tabs.Root defaultValue="units">
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="units">
-                        <FiLayers style={{ marginRight: 4 }} />
-                        Calculation Units ({calculationUnits.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="lots">
-                        <FiDatabase style={{ marginRight: 4 }} />
-                        Cost Lots ({costLots.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="realized">
-                        <FiDollarSign style={{ marginRight: 4 }} />
-                        Realized P&L ({realizedPnL.length})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="warnings">
-                        <FiAlertTriangle style={{ marginRight: 4 }} />
-                        Warnings ({warnings.length})
-                    </Tabs.Trigger>
-                </Tabs.List>
-
-                <Tabs.Content value="units">
-                    <UnitsTab
-                        units={calculationUnits}
-                        baseCurrency={baseCurrency}
-                        costLots={costLots}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="lots">
-                    <CostLotsTab
-                        lots={costLots}
-                        consumedSlices={consumedSlices}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="realized">
-                    <RealizedPnLTab
-                        entries={realizedPnL}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Tabs.Content>
-
-                <Tabs.Content value="warnings">
-                    <WarningsTab
-                        warnings={warnings}
-                        baseCurrency={baseCurrency}
-                        onTransactionClick={onTransactionClick}
-                        quoteAssetId={quoteAssetId}
-                        onPriceAdded={onPriceAdded}
-                        assets={assets}
-                    />
-                </Tabs.Content>
-            </Tabs.Root>
-        </Box>
-    );
-};
-
-// ============================================================================
 // Lot Events Tab - Audit trail for lot lifecycle events
 // ============================================================================
 
@@ -2656,7 +2567,7 @@ const LotEventsTab: React.FC<{
         if (search) {
             const s = search.toLowerCase();
             result = result.filter(e =>
-                (e.asset?.name && e.asset.name.toLowerCase().includes(s)) ||
+                (e.asset?.symbol && e.asset.symbol.toLowerCase().includes(s)) ||
                 String(e.lot_id).includes(s)
             );
         }
@@ -2737,7 +2648,7 @@ const LotEventsTab: React.FC<{
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {filtered.slice(0, 500).map((event) => (
+                        {filtered.map((event) => (
                             <Table.Row key={event.event_id} bg={`${eventTypeColors[event.event_type] || 'gray'}.50`}>
                                 <Table.Cell>
                                     <Text fontSize="2xs" color="gray.600">
@@ -2754,7 +2665,7 @@ const LotEventsTab: React.FC<{
                                 </Table.Cell>
                                 <Table.Cell>
                                     <Text fontSize="xs" fontWeight="medium">
-                                        {event.asset?.name || '-'}
+                                        {event.asset?.symbol || '-'}
                                     </Text>
                                 </Table.Cell>
                                 <Table.Cell textAlign="right">
@@ -2803,12 +2714,6 @@ const LotEventsTab: React.FC<{
                     </Table.Body>
                 </Table.Root>
             </Box>
-
-            {filtered.length > 500 && (
-                <Text fontSize="xs" color="gray.500" mt={2} textAlign="center">
-                    Showing first 500 events. Use filters to narrow results.
-                </Text>
-            )}
         </Box>
     );
 };
@@ -2850,7 +2755,21 @@ interface PnLAuditViewProps {
     // Manual price entry support for warnings
     quoteAssetId?: number;
     onPriceAdded?: (assetId: number, warningId: string) => void;
-    assets?: Array<{ id: number; name: string }>;
+    assets?: Array<AssetRef>;
+    // Pagination props per tab
+    unitsPagination?: { page: number; pageSize: number; total: number };
+    lotsPagination?: { page: number; pageSize: number; total: number };
+    realizedPagination?: { page: number; pageSize: number; total: number };
+    feesPagination?: { page: number; pageSize: number; total: number };
+    warningsPagination?: { page: number; pageSize: number; total: number };
+    eventsPagination?: { page: number; pageSize: number; total: number };
+    // Pagination change handlers
+    onUnitsPageChange?: (page: number, pageSize: number) => void;
+    onLotsPageChange?: (page: number, pageSize: number) => void;
+    onRealizedPageChange?: (page: number, pageSize: number) => void;
+    onFeesPageChange?: (page: number, pageSize: number) => void;
+    onWarningsPageChange?: (page: number, pageSize: number) => void;
+    onEventsPageChange?: (page: number, pageSize: number) => void;
 }
 
 export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
@@ -2879,6 +2798,19 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
     quoteAssetId,
     onPriceAdded,
     assets,
+    // Pagination props
+    unitsPagination,
+    lotsPagination,
+    realizedPagination,
+    feesPagination,
+    warningsPagination,
+    eventsPagination,
+    onUnitsPageChange,
+    onLotsPageChange,
+    onRealizedPageChange,
+    onFeesPageChange,
+    onWarningsPageChange,
+    onEventsPageChange,
 }) => {
     // Controlled tab state - initialized from defaultTab prop and updates when it changes
     const [activeTab, setActiveTab] = useState<string>(defaultTab);
@@ -2903,16 +2835,16 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
     const settlements = propSettlements || [];
     const lotEvents = propLotEvents || [];
 
-    // Tab title counts: use idCounts from calculation (derived from ID array lengths)
+    // Tab title counts: use pagination total if available, otherwise idCounts from calculation
     // Shows accurate counts even before full data is lazy-loaded
-    const unitsCount = calculationUnits.length > 0 ? calculationUnits.length : (idCounts?.unitCount ?? 0);
-    const lotsCount = costLots.length > 0 ? costLots.length : (idCounts?.lotCount ?? 0);
+    const unitsCount = unitsPagination?.total ?? (calculationUnits.length > 0 ? calculationUnits.length : (idCounts?.unitCount ?? 0));
+    const lotsCount = lotsPagination?.total ?? (costLots.length > 0 ? costLots.length : (idCounts?.lotCount ?? 0));
     const consumedCount = consumedSlices.length > 0 ? consumedSlices.length : (idCounts?.consumedCount ?? 0);
-    const realizedCount = realizedPnL.length > 0 ? realizedPnL.length : (idCounts?.realizedCount ?? 0);
-    const feesCount = fees.length > 0 ? fees.length : (idCounts?.feeCount ?? 0);
-    const warningsCount = warnings.length > 0 ? warnings.length : (idCounts?.warningCount ?? 0);
+    const realizedCount = realizedPagination?.total ?? (realizedPnL.length > 0 ? realizedPnL.length : (idCounts?.realizedCount ?? 0));
+    const feesCount = feesPagination?.total ?? (fees.length > 0 ? fees.length : (idCounts?.feeCount ?? 0));
+    const warningsCount = warningsPagination?.total ?? (warnings.length > 0 ? warnings.length : (idCounts?.warningCount ?? 0));
     const settlementsCount = settlements.length > 0 ? settlements.length : (idCounts?.settlementCount ?? 0);
-    const eventsCount = lotEvents.length > 0 ? lotEvents.length : (idCounts?.eventCount ?? 0);
+    const eventsCount = eventsPagination?.total ?? (lotEvents.length > 0 ? lotEvents.length : (idCounts?.eventCount ?? 0));
 
     return (
         <Box mt={4}>
@@ -2944,100 +2876,197 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                 </Tabs.List>
 
                 <Tabs.Content value="units">
-                    {isLoadingUnits ? (
+                    {isLoadingUnits && calculationUnits.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading calculation units...</Text>
                         </Flex>
                     ) : (
-                        <UnitsTab
-                            units={calculationUnits}
-                            baseCurrency={baseCurrency}
-                            costLots={costLots}
-                            versionId={versionId}
-                            onTransactionClick={onTransactionClick}
-                        />
+                        <Box position="relative">
+                            {isLoadingUnits && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <UnitsTab
+                                units={calculationUnits}
+                                baseCurrency={baseCurrency}
+                                costLots={costLots}
+                                versionId={versionId}
+                                onTransactionClick={onTransactionClick}
+                                hidePagination={!!(unitsPagination && onUnitsPageChange)}
+                            />
+                            {unitsPagination && onUnitsPageChange && (
+                                <TablePagination
+                                    page={unitsPagination.page}
+                                    pageSize={unitsPagination.pageSize}
+                                    total={unitsPagination.total}
+                                    onPageChange={(page) => onUnitsPageChange(page, unitsPagination.pageSize)}
+                                    onPageSizeChange={(size) => onUnitsPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
 
                 <Tabs.Content value="lots">
-                    {isLoadingLots ? (
+                    {isLoadingLots && costLots.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading cost lots...</Text>
                         </Flex>
                     ) : (
-                        <CostLotsTab
-                            lots={costLots}
-                            consumedSlices={consumedSlices}
-                            settlements={settlements}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                        />
+                        <Box position="relative">
+                            {isLoadingLots && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <CostLotsTab
+                                lots={costLots}
+                                consumedSlices={consumedSlices}
+                                settlements={settlements}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                            />
+                            {lotsPagination && onLotsPageChange && (
+                                <TablePagination
+                                    page={lotsPagination.page}
+                                    pageSize={lotsPagination.pageSize}
+                                    total={lotsPagination.total}
+                                    onPageChange={(page) => onLotsPageChange(page, lotsPagination.pageSize)}
+                                    onPageSizeChange={(size) => onLotsPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
 
                 <Tabs.Content value="realized">
-                    {isLoadingRealized ? (
+                    {isLoadingRealized && realizedPnL.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading realized P&L...</Text>
                         </Flex>
                     ) : (
-                        <RealizedPnLTab
-                            entries={realizedPnL}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                        />
+                        <Box position="relative">
+                            {isLoadingRealized && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <RealizedPnLTab
+                                entries={realizedPnL}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                            />
+                            {realizedPagination && onRealizedPageChange && (
+                                <TablePagination
+                                    page={realizedPagination.page}
+                                    pageSize={realizedPagination.pageSize}
+                                    total={realizedPagination.total}
+                                    onPageChange={(page) => onRealizedPageChange(page, realizedPagination.pageSize)}
+                                    onPageSizeChange={(size) => onRealizedPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
 
                 <Tabs.Content value="fees">
-                    {isLoadingFees ? (
+                    {isLoadingFees && fees.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading fees...</Text>
                         </Flex>
                     ) : (
-                        <FeesTab
-                            fees={fees}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            onUnitClick={onUnitClick}
-                        />
+                        <Box position="relative">
+                            {isLoadingFees && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <FeesTab
+                                fees={fees}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                                onUnitClick={onUnitClick}
+                            />
+                            {feesPagination && onFeesPageChange && (
+                                <TablePagination
+                                    page={feesPagination.page}
+                                    pageSize={feesPagination.pageSize}
+                                    total={feesPagination.total}
+                                    onPageChange={(page) => onFeesPageChange(page, feesPagination.pageSize)}
+                                    onPageSizeChange={(size) => onFeesPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
 
                 <Tabs.Content value="events">
-                    {isLoadingEvents ? (
+                    {isLoadingEvents && lotEvents.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading lot events...</Text>
                         </Flex>
                     ) : (
-                        <LotEventsTab
-                            events={lotEvents}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                        />
+                        <Box position="relative">
+                            {isLoadingEvents && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <LotEventsTab
+                                events={lotEvents}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                            />
+                            {eventsPagination && onEventsPageChange && (
+                                <TablePagination
+                                    page={eventsPagination.page}
+                                    pageSize={eventsPagination.pageSize}
+                                    total={eventsPagination.total}
+                                    onPageChange={(page) => onEventsPageChange(page, eventsPagination.pageSize)}
+                                    onPageSizeChange={(size) => onEventsPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
 
                 <Tabs.Content value="warnings">
-                    {isLoadingWarnings ? (
+                    {isLoadingWarnings && warnings.length === 0 ? (
                         <Flex align="center" justify="center" py={8} gap={2}>
                             <FiLoader className="animate-spin" />
                             <Text color="gray.500">Loading warnings...</Text>
                         </Flex>
                     ) : (
-                        <WarningsTab
-                            warnings={warnings}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            quoteAssetId={quoteAssetId}
-                            onPriceAdded={onPriceAdded}
-                            assets={assets}
-                        />
+                        <Box position="relative">
+                            {isLoadingWarnings && (
+                                <Box position="absolute" top={0} left={0} right={0} bottom={0} bg="whiteAlpha.700" _dark={{ bg: "blackAlpha.700" }} zIndex={1} display="flex" alignItems="center" justifyContent="center">
+                                    <FiLoader className="animate-spin" size={24} />
+                                </Box>
+                            )}
+                            <WarningsTab
+                                warnings={warnings}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                                quoteAssetId={quoteAssetId}
+                                onPriceAdded={onPriceAdded}
+                                assets={assets}
+                            />
+                            {warningsPagination && onWarningsPageChange && (
+                                <TablePagination
+                                    page={warningsPagination.page}
+                                    pageSize={warningsPagination.pageSize}
+                                    total={warningsPagination.total}
+                                    onPageChange={(page) => onWarningsPageChange(page, warningsPagination.pageSize)}
+                                    onPageSizeChange={(size) => onWarningsPageChange(1, size)}
+                                />
+                            )}
+                        </Box>
                     )}
                 </Tabs.Content>
             </Tabs.Root>
@@ -3045,4 +3074,4 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
     );
 };
 
-export default DataExplorerPanel;
+export default PnLAuditView;

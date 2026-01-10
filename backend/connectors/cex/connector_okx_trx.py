@@ -34,10 +34,11 @@ class OKXConnectorTrx(BaseConnector):
         account_id: int = None,
         connector_id: int = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize OKX connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
         # In test mode, skip all API configuration
         if self.test_mode:
@@ -208,10 +209,32 @@ class OKXConnectorTrx(BaseConnector):
             list: List of trade objects
         """
         log.info("🔄 Fetching trades from OKX API using CCXT...")
+        
+        self.update_progress(
+            operation="Fetching trades",
+            current=0,
+            total=1,
+            log_message="Fetching trades from OKX API..."
+        )
+        
         all_trades = self.get_all_trades()
         if not all_trades:
             log.warning("⚠️ No trades fetched from OKX")
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message="ℹ️ No trades found on OKX"
+            )
             return []
+        
+        self.update_progress(
+            operation="Completed",
+            current=1,
+            total=1,
+            log_message=f"✅ Fetched {len(all_trades)} trades from OKX"
+        )
+        
         return all_trades
 
     # Inherits yield_normalized from BaseConnector

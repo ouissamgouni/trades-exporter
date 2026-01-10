@@ -18,6 +18,7 @@ import { FiExternalLink, FiAlertTriangle, FiAlertCircle, FiInfo, FiPlus } from '
 import { SlidePanel } from './SlidePanel';
 import { PnLWarningItem, WarningLevel } from './types';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { getWarningTypeConfig } from './warningStyles';
 
 interface WarningsPanelProps {
     warnings: PnLWarningItem[];
@@ -183,20 +184,18 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                     </Card.Body>
                 </Card.Root>
             ) : (
-                Object.entries(grouped).map(([type, items]) => (
-                    <Card.Root key={type} mb={4}>
-                        <Card.Header py={2}>
-                            <Flex align="center" gap={2}>
-                                <Badge
-                                    colorPalette={
-                                        items[0].level === 'error' ? 'red' :
-                                            items[0].level === 'warning' ? 'orange' : 'blue'
-                                    }
-                                >
-                                    {type}
-                                </Badge>
-                                <Text fontSize="sm" color="gray.500">
-                                    ({items.length} {items.length === 1 ? 'issue' : 'issues'})
+                Object.entries(grouped).map(([type, items]) => {
+                    const typeConfig = getWarningTypeConfig(type);
+                    return (
+                        <Card.Root key={type} mb={4}>
+                            <Card.Header py={2}>
+                                <Flex align="center" gap={2}>
+                                    <Badge colorPalette={typeConfig.colorPalette}>
+                                        {typeConfig.icon} {type}
+                                    </Badge>
+                                    <Text fontSize="sm" color="gray.500">
+                                        ({items.length} {items.length === 1 ? 'issue' : 'issues'})
+                                    </Text>
                                 </Text>
                             </Flex>
                         </Card.Header>
@@ -266,7 +265,8 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                             })}
                         </Card.Body>
                     </Card.Root>
-                ))
+                );
+                })
             )}
 
             {/* Manual Price Dialog */}

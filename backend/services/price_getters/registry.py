@@ -23,11 +23,15 @@ Adding New Price Getters:
     3. Set `name` class attribute
     4. Implement get_current_price and get_historical_price
     5. Add to PRICE_GETTER_CLASSES below
+
+Mock Price Getter for Testing:
+    Set PRICE_GETTER_OVERRIDE=mock to enable mock prices.
+    The MockPriceGetter is automatically registered when this override is set.
 """
 
 from typing import Dict, List, Type, Optional
 
-from backend.config.loader import configure_logging
+from backend.config.loader import configure_logging, get_price_getter_override
 
 log = configure_logging("price_getter_registry")
 
@@ -65,7 +69,7 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
     from backend.services.price_getters.datareader import DataReaderPriceGetter
     from backend.services.price_getters.forex import ForexPriceGetter
 
-    return [
+    classes = [
         DataReaderPriceGetter,  # Default for stocks - uses pandas_datareader with Stooq
         YahooPriceGetter,
         CoinGeckoPriceGetter,
@@ -74,6 +78,13 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
         # BinancePriceGetter,
         # KrakenPriceGetter,
     ]
+    
+    # Conditionally add MockPriceGetter when mock mode is enabled
+    if get_price_getter_override() == "mock":
+        from backend.services.price_getters.mock_getter import MockPriceGetter
+        classes.append(MockPriceGetter)
+    
+    return classes
 
 
 def _initialize_registry() -> None:

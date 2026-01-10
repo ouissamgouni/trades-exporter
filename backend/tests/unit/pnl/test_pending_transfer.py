@@ -8,9 +8,10 @@ Pending transfers occur when:
 Expected behavior:
 - Pattern should be PENDING_TRANSFER (not UNKNOWN)
 - P&L should NOT be realized for pending transfers
-- Warning should be created with slice details
-- Lots should still be consumed (for outflow) to track cost basis
-- Lots should NOT be created for inflow-only pending transfers
+- Warning should be created with details
+- Lots should be consumed (for outflow) to track cost basis
+- Provisional lots SHOULD be created for inflow-only pending transfers using FMV
+  (prevents negative lot errors when asset is later disposed before transfer is linked)
 """
 
 import pytest
@@ -239,7 +240,7 @@ class TestPendingTransferWarningDetails:
         assert "holding_period_days" in slice_detail
 
     def test_inflow_warning_details_structure(self):
-        """Warning details for inflow-only pending transfer."""
+        """Warning details for inflow-only pending transfer should include provisional cost basis info."""
         details = {
             "transfer_direction": "inflow",
             "asset_id": 2,
@@ -247,6 +248,8 @@ class TestPendingTransferWarningDetails:
             "account_id": 2,
             "total_quantity": 5.0,
             "timestamp": "2024-01-20T14:30:00+00:00",
+            "provisional_cost_basis": "fmv_at_acquisition",
+            "note": "Provisional lot will be replaced with actual cost basis when transfer is linked and P&L recalculated",
             "inflows": [{
                 "transaction_id": 123,
                 "quantity": 5.0,
@@ -256,6 +259,9 @@ class TestPendingTransferWarningDetails:
         
         assert details["transfer_direction"] == "inflow"
         assert "inflows" in details
+        assert "provisional_cost_basis" in details
+        assert details["provisional_cost_basis"] == "fmv_at_acquisition"
+        assert "note" in details
         assert "consumed_slices" not in details  # Only for outflows
 
 
