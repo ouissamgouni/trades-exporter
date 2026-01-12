@@ -7,13 +7,13 @@
 services:
   postgres_dev:
     image: postgres:15-alpine
-    container_name: trades_db_dev
+    container_name: trades_db_${ENV_NAME}
     env_file:
       - ../../.env.dev
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
-      - trades_dev_data:/var/lib/postgresql/data
+      - trades_${ENV_NAME}_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -23,4 +23,4 @@ services:
 
 volumes:
   trades_dev_data:
-    name: trades_dev_data
+    name: trades_${ENV_NAME}_data

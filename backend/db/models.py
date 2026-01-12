@@ -1428,6 +1428,9 @@ class CalculationUnitLeg(SQLModel, table=True):
     @property
     def direction(self) -> str:
         """Map leg_type to direction for ExpandedLeg compatibility."""
+        # leg_type might be string or enum, handle both
+        if isinstance(self.leg_type, str):
+            return self.leg_type if self.leg_type in ("inflow", "outflow") else "outflow"
         return self.leg_type.value if self.leg_type in (LegType.INFLOW, LegType.OUTFLOW) else "outflow"
     
     @property

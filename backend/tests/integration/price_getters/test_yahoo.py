@@ -139,8 +139,10 @@ class TestYahooPriceGetterIntegration:
 
     def test_invalid_ticker_raises_error(self, yahoo_getter):
         """Should raise error for invalid ticker symbol."""
+        from backend.services.price_getters.base import PriceGetterError
+        
         invalid_asset = MagicMock()
         invalid_asset.symbol = "ZZZINVALIDXYZ999"
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(PriceGetterError):
             yahoo_getter.get_current_price(invalid_asset)

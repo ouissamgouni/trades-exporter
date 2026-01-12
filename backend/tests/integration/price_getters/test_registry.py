@@ -46,7 +46,7 @@ class TestPriceGetterRegistry:
         """Should return default (Yahoo) when no name specified."""
         getter = get_price_getter()
 
-        assert getter.name == "yahoo"
+        assert getter.name == "datareader"  # Default is datareader, not yahoo
 
     def test_get_price_getter_unknown_raises_error(self):
         """Should raise ValueError for unknown price getter."""

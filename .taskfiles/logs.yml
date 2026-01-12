@@ -5,16 +5,16 @@ tasks:
     desc: View dev database logs
     dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter logs -f
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev logs -f
 
   test:
     desc: View test stack logs
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter logs -f
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test logs -f
 
   prod:
     desc: View prod stack logs
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter logs -f
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter-prod logs -f

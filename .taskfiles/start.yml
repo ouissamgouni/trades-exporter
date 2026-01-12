@@ -5,7 +5,7 @@ tasks:
     desc: Start dev environment (database)
     dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter up -d postgres_dev
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev up -d postgres_dev
       - |
         # Wait for postgres to be healthy
         for i in {1..30}; do
@@ -18,7 +18,7 @@ tasks:
         done
       - |
         echo ""
-        echo "✅ Dev database running on localhost:$POSTGRES_PORT"
+        echo "✅ Dev database running on localhost:${POSTGRES_PORT}"
         echo ""
         echo "Next steps:"
         echo "  task start:dev:backend        → Start backend"
@@ -37,9 +37,9 @@ tasks:
         echo "✅ Starting all services with live logs"
         echo ""
         echo "Services:"
-        echo "   [DB]  Database on localhost:$POSTGRES_PORT"
-        echo "   [API] Backend on localhost:$BACKEND_PORT (debugger: $DEBUGPY_PORT)"
-        echo "   [WEB] Frontend on localhost:$FRONTEND_PORT"
+        echo "   [DB]  Database on localhost:${POSTGRES_PORT}"
+        echo "   [API] Backend on localhost:${BACKEND_PORT} (debugger: ${DEBUGPY_PORT})"
+        echo "   [WEB] Frontend on localhost:${FRONTEND_PORT}"
         echo ""
         echo "To attach debugger: VSCode → F5 → 'Backend: Attach'"
         echo "Press Ctrl+C to stop all services"
@@ -51,7 +51,7 @@ tasks:
           --prefix-colors "blue.bold,yellow.bold,green.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
-          "docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter logs -f postgres_dev" \
+          "docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev logs -f postgres_dev" \
           "cd {{.ROOT_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB {{.BACKEND_DIR}}/.venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app --reload --port $BACKEND_PORT" \
           "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
 
@@ -81,24 +81,24 @@ tasks:
     desc: Start test stack (existing images)
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
       - sleep 3
       - |
         echo ""
         echo "✅ Test stack running"
-        echo "   Frontend: http://localhost:$FRONTEND_PORT"
-        echo "   Backend:  http://localhost:$BACKEND_PORT"
-        echo "   Database: localhost:$POSTGRES_PORT"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
 
   prod:
     desc: Start prod stack (existing images)
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter-prod up -d
       - sleep 3
       - |
         echo ""
         echo "✅ Prod stack running"
-        echo "   Frontend: http://localhost:$FRONTEND_PORT"
-        echo "   Backend:  http://localhost:$BACKEND_PORT"
-        echo "   Database: localhost:$POSTGRES_PORT"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"

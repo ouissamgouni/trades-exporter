@@ -12,7 +12,7 @@ tasks:
     desc: Stop dev database
     dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter stop
+      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev stop
       - echo "✅ Dev database stopped"
 
   dev:backend:
@@ -41,12 +41,12 @@ tasks:
     desc: Stop test stack
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter stop
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
       - echo "✅ Test stack stopped"
 
   prod:
     desc: Stop prod stack
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter stop
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod stack stopped"

@@ -1,22 +1,25 @@
 version: "3"
 
+includes:
+  build: build.yml
+
 tasks:
   test:local:
     desc: Build from develop and deploy to test environment
     dotenv: [.env, .env.test]
     cmds:
       - task: build:test
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter down
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
       - sleep 5
       - |
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Deployed to TEST (from develop branch)"
         echo ""
-        echo "   Frontend: http://localhost:$FRONTEND_PORT"
-        echo "   Backend:  http://localhost:$BACKEND_PORT"
-        echo "   Database: localhost:$POSTGRES_PORT"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
         echo ""
         echo "Next steps:"
         echo "   task test:int:test    → Run integration tests"
@@ -45,16 +48,16 @@ tasks:
         fi
 
         echo "Deploying version: $VERSION"
-        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter down
-        VERSION=$VERSION docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+        VERSION=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+        VERSION=$VERSION IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
         sleep 5
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Deployed to PROD: $VERSION"
         echo ""
-        echo "   Frontend: http://localhost:$FRONTEND_PORT"
-        echo "   Backend:  http://localhost:$BACKEND_PORT"
-        echo "   Database: localhost:$POSTGRES_PORT"
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
         echo "═══════════════════════════════════════════════════════════════"
 
   prod:cloud:

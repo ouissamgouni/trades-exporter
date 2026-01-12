@@ -2,41 +2,81 @@ version: "3"
 
 tasks:
   test:
-    desc: Build Docker images from develop branch (tagged :develop)
+    desc: Build both backend and frontend images from develop branch
+    dotenv: [.env, .env.test]
+    deps: [test:backend, test:frontend]
+    cmds:
+      - echo "✅ All test images built (:develop)"
+
+  test:backend:
+    desc: Build backend image from develop branch
     dotenv: [.env, .env.test]
     cmds:
       - git checkout develop
       - git pull origin develop
       - |
-        echo "Building images from develop..."
-        docker build -t trades-exporter-backend:develop ./backend
+        echo "Building backend from develop..."
+        docker build -t trades-exporter-backend:develop -f backend/Dockerfile .
+        echo "✅ Backend image built: :develop"
+
+  test:frontend:
+    desc: Build frontend image from develop branch
+    dotenv: [.env, .env.test]
+    cmds:
+      - git checkout develop
+      - git pull origin develop
+      - |
+        echo "Building frontend from develop..."
         docker build -t trades-exporter-frontend:develop \
           --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
           ./frontend
-        echo ""
-        echo "✅ Images built: :develop"
+        echo "✅ Frontend image built: :develop"
 
   prod:
-    desc: Build Docker images from main branch (e.g., task build:prod v1.2.0)
+    desc: Build both backend and frontend images from main branch (e.g., task build:prod v1.2.0)
+    dotenv: [.env, .env.prod]
+    cmds:
+      - task: prod:backend
+        vars: { VERSION: "{{.CLI_ARGS}}" }
+      - task: prod:frontend
+        vars: { VERSION: "{{.CLI_ARGS}}" }
+      - cmd: echo "✅ All prod images built{{if .CLI_ARGS}} :{{.CLI_ARGS}} and :latest{{end}}"
+
+  prod:backend:
+    desc: Build backend image from main branch (e.g., task build:prod:backend v1.2.0)
     dotenv: [.env, .env.prod]
     cmds:
       - |
-        VERSION={{.CLI_ARGS}}
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
         if [ -z "$VERSION" ]; then
-          echo "❌ Usage: task build:prod v1.2.0"
+          echo "❌ Usage: task build:prod:backend v1.2.0"
           exit 1
         fi
         git checkout main
         git pull origin main
-        echo "Building images from main as $VERSION..."
-        docker build -t trades-exporter-backend:$VERSION ./backend
+        echo "Building backend from main as $VERSION..."
+        docker build -t trades-exporter-backend:$VERSION -f backend/Dockerfile .
+        docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
+        echo "✅ Backend image built: :$VERSION and :latest"
+
+  prod:frontend:
+    desc: Build frontend image from main branch (e.g., task build:prod:frontend v1.2.0)
+    dotenv: [.env, .env.prod]
+    cmds:
+      - |
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
+        if [ -z "$VERSION" ]; then
+          echo "❌ Usage: task build:prod:frontend v1.2.0"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        echo "Building frontend from main as $VERSION..."
         docker build -t trades-exporter-frontend:$VERSION \
           --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
           ./frontend
-        docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
         docker tag trades-exporter-frontend:$VERSION trades-exporter-frontend:latest
-        echo ""
-        echo "✅ Images built: :$VERSION and :latest"
+        echo "✅ Frontend image built: :$VERSION and :latest"
 
   list:
     desc: List all trades-exporter Docker images

@@ -31,7 +31,7 @@ def make_tx(**kwargs) -> NormalizedTransaction:
         "source_transaction_type": "buy",
         "date_time": datetime(2024, 1, 1, 12, 0, 0),
         "direction": "inflow",
-        "transaction_type": "acquisition",
+        "transaction_type": "trade",  # For buy/sell transactions
         "source_asset_symbol": "SOL",
         "source_price_quote_asset_symbol": "USDT",
         "quantity": Decimal("5.0"),
@@ -70,17 +70,17 @@ class TestShouldExpandAsTrade:
 
     def test_should_not_expand_deposit(self):
         """Deposits should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="deposit")
+        tx = make_tx(source_transaction_type="deposit", transaction_type="acquisition")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_withdrawal(self):
         """Withdrawals should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="withdrawal", direction="outflow")
+        tx = make_tx(source_transaction_type="withdrawal", direction="outflow", transaction_type="disposal")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_transfer(self):
         """Transfers should not be expanded as trades."""
-        tx = make_tx(source_transaction_type="transfer")
+        tx = make_tx(source_transaction_type="transfer", transaction_type="transfer")
         assert should_expand_as_trade(tx) is False
 
     def test_should_not_expand_zero_quantity(self):
