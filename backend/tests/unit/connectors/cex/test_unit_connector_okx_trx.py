@@ -47,7 +47,7 @@ class TestOKXConnector:
         assert result.source == "okx-transactions"
         assert result.source_transaction_id == "okx12345"
         assert result.direction == "inflow"
-        assert result.transaction_type == "acquisition"
+        assert result.transaction_type == "trade"  # All CEX trades use 'trade' type
         assert result.source_transaction_type == "buy"
         assert result.quantity == 0.08
         assert result.price == 49500.0

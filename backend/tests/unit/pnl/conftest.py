@@ -130,7 +130,7 @@ def mock_price_service():
         """Mock get_price_with_source to return PriceResult-like object."""
         from types import SimpleNamespace
         price = prices.get(asset_id, Decimal("10"))
-        return SimpleNamespace(price=price, source="mock", timestamp=dt)
+        return SimpleNamespace(price=price, source="price_service", timestamp=dt)
     
     def get_price_with_fallback(asset_id, dt=None, price_quote=None, use_fallback=True, staleness_window_days=7):
         """Mock get_price_with_fallback to return PriceResult-like object."""
@@ -138,7 +138,7 @@ def mock_price_service():
         price = prices.get(asset_id, Decimal("10"))
         return SimpleNamespace(
             price=price,
-            source="mock",
+            source="price_service",
             actual_price_date=dt,
             is_fallback=False,
             is_stale=False,

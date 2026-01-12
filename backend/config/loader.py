@@ -31,6 +31,29 @@ CONFIG_DIR = Path(__file__).parent
 # Default database URL for local development
 DEFAULT_DATABASE_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
 
+# Test mode flag (used by e2e tests)
+_test_mode = os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
+
+
+def set_test_mode(enabled: bool = True) -> None:
+    """
+    Set test mode flag for the application.
+    
+    When enabled, uses test database configuration instead of production.
+    Primarily used by e2e tests to ensure isolated test environment.
+    """
+    global _test_mode
+    _test_mode = enabled
+    if enabled:
+        os.environ["TEST_MODE"] = "true"
+    else:
+        os.environ.pop("TEST_MODE", None)
+
+
+def is_test_mode() -> bool:
+    """Check if the application is running in test mode."""
+    return _test_mode or os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
+
 
 def get_database_url() -> str:
     """

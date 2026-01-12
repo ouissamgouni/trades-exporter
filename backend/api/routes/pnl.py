@@ -537,7 +537,7 @@ def build_consumed_slice_response(
         acquired_at=slice.cost_lot.acquired_at if slice.cost_lot else slice.created_at,
         holding_period_days=slice.holding_period_days,
         consumed_by_leg_id=slice.consumed_by_leg_id,
-        consumed_by_unit_id=slice.consumed_by_unit_id,
+        consumed_by_unit_id=slice.unit_id,
         consumed_at=slice.consumed_at,
     )
 
@@ -2436,12 +2436,11 @@ def get_version_units(
         # Build cost lots
         lots = [build_cost_lot_response(lot) for lot in u.cost_lots]
         
-        # Build consumed slices from realized entries (with unit label and consumption timestamp)
+        # Build consumed slices for this unit
         consumed = []
         for entry in u.consumed_slices:
-            for slice in entry.slices:
-                consumed.append(build_consumed_slice_response(
-                    slice
+            consumed.append(build_consumed_slice_response(
+                    entry
                 ))
         
         # Build settlements for this unit

@@ -301,7 +301,13 @@ class TestEnrichTransaction:
 
 
 def test_enrich_transfer_from_unowned_to_owned():
-    """Test that a transfer from unowned to owned account is marked non-taxable."""
+    """Test that a transfer from unowned to owned account is NOT marked as internal transfer.
+    
+    External transfers (from unowned to owned) should:
+    - NOT change transaction_type to "transfer"
+    - NOT modify disposal_taxable (keeps default False)
+    - Still resolve from_account_id and to_account_id
+    """
     from backend.services.transfer_detector import TransferDetector
 
     session = MockSession()
@@ -315,44 +321,49 @@ def test_enrich_transfer_from_unowned_to_owned():
     detector = TransferDetector(session)
     detector.raw_account_repo = mock_repo
 
-        tx = make_tx(
-            source="blockscout_base",
-            source_transaction_id="0xhash456",
-            source_transaction_type="token_transfer",
-            source_asset_symbol="ETH",
-            source_from_account="0xexchange",
-            source_to_account="0xmywallet",
-            quantity=2.0,
-            transaction_type="inflow",
-            taxable=True,
-        )
+    tx = make_tx(
+        source="blockscout_base",
+        source_transaction_id="0xhash456",
+        source_transaction_type="token_transfer",
+        source_asset_symbol="ETH",
+        source_from_account="0xexchange",
+        source_to_account="0xmywallet",
+        quantity=2.0,
+        transaction_type="inflow",
+    )
 
-        enriched = detector.enrich_transaction(tx, "blockscout_base")
+    enriched = detector.enrich_transaction(tx, "blockscout_base")
 
-        assert enriched.from_account_id == 1
-        assert enriched.to_account_id == 2
-        # Should NOT be changed to transfer type (external transfer)
-        assert enriched.transaction_type == "inflow"
-    assert enriched.disposal_taxable is True
+    assert enriched.from_account_id == 1
+    assert enriched.to_account_id == 2
+    # Should NOT be changed to transfer type (external transfer from unowned)
+    assert enriched.transaction_type == "inflow"
+    # disposal_taxable is NOT modified for external transfers (keeps default False)
+    assert enriched.disposal_taxable is False
 
-        session = MockSession()
-        detector = TransferDetector(session)
-        detector.raw_account_repo = MockRawAccountRepository()
 
-        tx = make_tx(
-            source="binance",
-            source_transaction_id="123",
-            source_transaction_type="buy",
-            source_asset_symbol="BTC",
-            quantity=1.0,
-            transaction_type="inflow",
-        )
+def test_enrich_non_transfer_transaction():
+    """Test that non-transfer transactions are not enriched with account IDs."""
+    from backend.services.transfer_detector import TransferDetector
 
-        enriched = detector.enrich_transaction(tx, "binance")
+    session = MockSession()
+    detector = TransferDetector(session)
+    detector.raw_account_repo = MockRawAccountRepository()
 
-        assert enriched.from_account_id is None
-        assert enriched.to_account_id is None
-        assert enriched.transaction_type == "inflow"
+    tx = make_tx(
+        source="binance",
+        source_transaction_id="123",
+        source_transaction_type="buy",
+        source_asset_symbol="BTC",
+        quantity=1.0,
+        transaction_type="inflow",
+    )
+
+    enriched = detector.enrich_transaction(tx, "binance")
+
+    assert enriched.from_account_id is None
+    assert enriched.to_account_id is None
+    assert enriched.transaction_type == "inflow"
 
 
 class TestCaching:

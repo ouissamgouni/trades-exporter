@@ -63,8 +63,9 @@ class TestLotEventEmission:
         assert event.qty_remaining_after == Decimal("1.5")
         assert event.cost_basis_remaining_after == Decimal("150")
         assert event.related_lot is None
-        assert event.triggered_by_transaction == mock_tx
-        assert event.triggered_by_unit == mock_unit
+        # Check IDs instead of relationship objects (Mocks don't work with SQLAlchemy relationships)
+        assert event.triggered_by_transaction_id == mock_tx.id
+        assert event.triggered_by_unit_id == mock_unit.id
 
     def test_consumed_event_on_partial_consumption(self, fifo_config, base_datetime):
         """Consuming part of a lot should emit a 'consumed' event."""
