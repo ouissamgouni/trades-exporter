@@ -120,10 +120,9 @@ class LotEventType(str, Enum):
     """
     
     CREATED = "created"
+    NEGATIVE_CREATED = "created-negative"
     CONSUMED = "consumed"
     SETTLED = "settled"
-    TRANSFERRED = "transferred"
-    ADJUSTED = "adjusted"
 
 
 class TransactionType(str, Enum):
@@ -1940,9 +1939,6 @@ class CostLotEvent(SQLModel, table=True):
     # Timestamp and sequencing
     timestamp: datetime = Field(default_factory=utc_now, index=True)
     sequence_num: int = Field(default=0)  # For ordering events at same timestamp
-    
-    # Extensible metadata (e.g., adjustment reason, transfer source/dest accounts)
-    event_metadata: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     
     created_at: datetime = Field(default_factory=utc_now)
     

@@ -112,6 +112,14 @@ export interface PnLVersionResponse {
     // Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: number;
     fee_entry_count: number;
+
+    // Entity ID lists for frontend count displays (populated for /calculate and /versions/{id})
+    calculation_unit_ids: number[];
+    warning_ids: number[];
+    cost_lot_ids: number[];
+    realized_pnl_ids: number[];
+    fee_ids: number[];
+    cost_lot_event_ids: number[];
 }
 
 /**
@@ -450,7 +458,14 @@ export interface ConsumedSliceDetail {
 // Cost Lot Event (audit trail for lot lifecycle)
 // ============================================================================
 
-export type LotEventType = 'created' | 'consumed' | 'settled' | 'transferred' | 'adjusted';
+export type LotEventType =
+    | 'created'           // Positive lot created
+    | 'created-negative'  // Negative lot created (short)
+    | 'consumed'          // Lot partially/fully consumed
+    | 'settled'           // Lot exhausted (zero balance)
+    | 'transferred'       // Lot moved between accounts
+    | 'adjusted'          // Manual cost basis adjustment
+    | 'merged';           // Multiple lots combined (future)
 
 export interface CostLotEventEntry {
     event_id: number;
@@ -474,9 +489,9 @@ export interface CostLotEventEntry {
     triggered_by_transaction_id?: number;
     triggered_by_unit_id?: number;
     triggered_by_unit_label?: string;
+    triggered_by_unit_pattern?: string;
 
     timestamp: string;
-    event_metadata?: Record<string, any>;
 }
 
 // ============================================================================
@@ -959,5 +974,57 @@ export function mapProcessedUnitToCalculationUnit(unit: ProcessedUnitResponse): 
         is_disposal_taxable: unit.is_disposal_taxable || false,
         event_ids: unit.event_ids || [],
     };
+}
+
+// ============================================================================
+// Filter Types (Display-time filtering in Portfolio View)
+// ============================================================================
+
+/**
+ * State for P&L display-time filters.
+ * Applied client-side to filter the Portfolio View (summary, charts, table).
+ * Does not affect Full Audit view.
+ */
+export interface PnLFilterState {
+    selectedAccountIds: number[];    // Empty = all accounts (no filter)
+    selectedCategoryIds: number[];   // Empty = all categories (no filter)
+    includeUnsettledNegative: boolean;
+}
+
+/**
+ * Per-account balance breakdown for a single asset.
+ * Used for expandable rows in the Asset P&L table.
+ */
+export interface AccountBalanceBreakdown {
+    account_id: number;
+    account_name: string;
+    qty: number;
+    cost_basis_in_base: number;
+    avg_unit_cost_in_base: number;
+    lot_count: number;
+    // Computed with live prices
+    market_value?: number;
+    unrealized_pnl?: number;
+    unrealized_pnl_pct?: number;
+}
+
+/**
+ * Raw balance response from GET /versions/{id}/balances?group_by_asset=false
+ * One entry per (asset, account) pair.
+ */
+export interface PerAccountBalanceItem {
+    asset: AssetRef;
+    account_id: number;
+    account_name: string;
+    qty: number;
+    cost_basis_in_base: number;
+    avg_unit_cost_in_base: number;
+    lot_count: number;
+    realized_pnl_in_base: number;
+    realized_event_count: number;
+    warning_count: number;
+    unsettled_negative_count: number;
+    total_fees_in_base?: number;
+    category_ids: number[];
 }
 

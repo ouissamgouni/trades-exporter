@@ -237,9 +237,9 @@ class CostLotEventResponse(BaseModel):
     triggered_by_transaction_id: Optional[int] = None
     triggered_by_unit_id: Optional[int] = None
     triggered_by_unit_label: Optional[str] = None
+    triggered_by_unit_pattern: Optional[str] = None
     
     timestamp: datetime
-    event_metadata: Optional[dict] = None
 
 
 class ConsumedSliceResponse(BaseModel):
@@ -664,6 +664,14 @@ class PnLVersionResponse(BaseModel):
     # Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: float = 0.0  # Total fee expense at FMV
     fee_entry_count: int = 0  # Number of fee entries
+    
+    # Entity ID lists for frontend count displays (populated for /calculate and /versions/{id})
+    calculation_unit_ids: List[int] = []  # IDs of CalculationUnit records
+    warning_ids: List[int] = []  # IDs of PnlWarning records
+    cost_lot_ids: List[int] = []  # IDs of CostLot records
+    realized_pnl_ids: List[int] = []  # IDs of RealizedPnl records
+    fee_ids: List[int] = []  # IDs of FeeEntry records
+    cost_lot_event_ids: List[int] = []  # IDs of CostLotEvent records
 
 
 # Backwards compatibility alias
@@ -759,12 +767,79 @@ def compute_total_realized_pnl(session: Session, version_id: int) -> Decimal:
     return Decimal(str(result)) if result else Decimal(0)
 
 
+def fetch_version_entity_ids(session: Session, version_id: int) -> Dict[str, List[int]]:
+    """
+    Fetch all entity IDs for a version for frontend count displays.
+    
+    Returns a dict with keys: calculation_unit_ids, warning_ids, cost_lot_ids, 
+    realized_pnl_ids, fee_ids, cost_lot_event_ids.
+    
+    This function is used by both /calculate and /versions/{id} endpoints to 
+    populate the ID lists in PnLVersionResponse.
+    """
+    # Fetch CalculationUnit IDs (direct version_id FK)
+    calculation_unit_ids = session.exec(
+        select(CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    ).all()
+    
+    # Fetch FeeEntry IDs (direct version_id FK)
+    fee_ids = session.exec(
+        select(FeeEntry.id)
+        .where(FeeEntry.version_id == version_id)
+    ).all()
+    
+    # Fetch CostLot IDs (via CalculationUnit)
+    cost_lot_ids = session.exec(
+        select(CostLot.cost_lot_id)
+        .join(CostLot.unit)
+        .where(CalculationUnit.version_id == version_id)
+    ).all()
+    
+    # Fetch RealizedPnl IDs (via CalculationUnit)
+    realized_pnl_ids = session.exec(
+        select(RealizedPnl.pnl_id)
+        .join(RealizedPnl.origin_unit)
+        .where(CalculationUnit.version_id == version_id)
+    ).all()
+    
+    # Fetch PnlWarning IDs (via CalculationUnit)
+    warning_ids = session.exec(
+        select(PnlWarning.id)
+        .join(PnlWarning.unit)
+        .where(CalculationUnit.version_id == version_id)
+    ).all()
+    
+    # Fetch CostLotEvent IDs (via CostLot → CalculationUnit)
+    cost_lot_event_ids = session.exec(
+        select(CostLotEvent.event_id)
+        .join(CostLotEvent.lot)
+        .join(CostLot.unit)
+        .where(CalculationUnit.version_id == version_id)
+    ).all()
+    
+    return {
+        "calculation_unit_ids": list(calculation_unit_ids),
+        "warning_ids": list(warning_ids),
+        "cost_lot_ids": list(cost_lot_ids),
+        "realized_pnl_ids": list(realized_pnl_ids),
+        "fee_ids": list(fee_ids),
+        "cost_lot_event_ids": list(cost_lot_event_ids),
+    }
+
+
 def build_version_response(
     version: CalculationVersion,
     base_currency_symbol: Optional[str] = None,
     total_realized_pnl: float = 0.0,
     total_fees_in_base: float = 0.0,
     fee_entry_count: int = 0,
+    calculation_unit_ids: List[int] = [],
+    warning_ids: List[int] = [],
+    cost_lot_ids: List[int] = [],
+    realized_pnl_ids: List[int] = [],
+    fee_ids: List[int] = [],
+    cost_lot_event_ids: List[int] = [],
 ) -> PnLVersionResponse:
     """
     Build PnLVersionResponse from a CalculationVersion with optional enrichment.
@@ -788,6 +863,12 @@ def build_version_response(
         total_realized_pnl=total_realized_pnl,
         total_fees_in_base=total_fees_in_base,
         fee_entry_count=fee_entry_count,
+        calculation_unit_ids=calculation_unit_ids,
+        warning_ids=warning_ids,
+        cost_lot_ids=cost_lot_ids,
+        realized_pnl_ids=realized_pnl_ids,
+        fee_ids=fee_ids,
+        cost_lot_event_ids=cost_lot_event_ids,
     )
 
 
@@ -884,6 +965,9 @@ def calculate_pnl(
         
         total_fees_in_base = float(fee_summary.total_fees) if fee_summary else 0.0
         fee_entry_count = fee_summary.fee_count if fee_summary else 0
+        
+        # Fetch entity IDs for frontend count displays
+        entity_ids = fetch_version_entity_ids(session, version.version_id)
 
         return build_version_response(
             version=version,
@@ -891,6 +975,12 @@ def calculate_pnl(
             total_realized_pnl=float(result.total_realized_pnl),
             total_fees_in_base=total_fees_in_base,
             fee_entry_count=fee_entry_count,
+            calculation_unit_ids=entity_ids["calculation_unit_ids"],
+            warning_ids=entity_ids["warning_ids"],
+            cost_lot_ids=entity_ids["cost_lot_ids"],
+            realized_pnl_ids=entity_ids["realized_pnl_ids"],
+            fee_ids=entity_ids["fee_ids"],
+            cost_lot_event_ids=entity_ids["cost_lot_event_ids"],
         )
 
     except HTTPException:
@@ -1164,10 +1254,19 @@ def get_version(
     # Compute total realized P&L via SQL aggregation
     total_pnl = compute_total_realized_pnl(session, version_id)
     
+    # Fetch entity IDs for frontend count displays
+    entity_ids = fetch_version_entity_ids(session, version_id)
+    
     return build_version_response(
         version=version,
         base_currency_symbol=base_currency_symbol,
         total_realized_pnl=float(total_pnl),
+        calculation_unit_ids=entity_ids["calculation_unit_ids"],
+        warning_ids=entity_ids["warning_ids"],
+        cost_lot_ids=entity_ids["cost_lot_ids"],
+        realized_pnl_ids=entity_ids["realized_pnl_ids"],
+        fee_ids=entity_ids["fee_ids"],
+        cost_lot_event_ids=entity_ids["cost_lot_event_ids"],
     )
 
 
@@ -1855,15 +1954,19 @@ def get_version_settlements(
 def get_version_lot_events(
     version_id: int,
     lot_id: Optional[int] = None,
-    event_type: Optional[str] = None,
-    asset_id: Optional[int] = None,
+    event_type: Optional[str] = None,  # Comma-separated
+    asset_id: Optional[str] = None,  # Comma-separated
+    account_id: Optional[str] = None,  # Comma-separated
+    unit_pattern: Optional[str] = None,  # Comma-separated: 'transfer', 'pending_transfer', etc.
     unit_id: Optional[int] = None,
+    date_start: Optional[str] = None,  # ISO datetime string for filtering
+    date_end: Optional[str] = None,  # ISO datetime string for filtering
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Get cost lot events for a calculation version.
+    Get cost lot events for a calculation version with filtering.
     
     Provides chronological audit trail of all lot state changes:
     - created: Lot created from acquisition
@@ -1872,7 +1975,13 @@ def get_version_lot_events(
     - transferred: Lot moved between accounts
     - adjusted: Manual cost basis adjustment
     
-    Use for tax audit trail and lot history reconstruction.
+    Query params:
+        event_type: Comma-separated event types to filter
+        asset_id: Comma-separated asset IDs to filter
+        account_id: Comma-separated account IDs to filter
+        unit_pattern: Comma-separated unit patterns ('transfer', 'pending_transfer', 'swap', etc.)
+        date_start: ISO datetime string for start of date range filter
+        date_end: ISO datetime string for end of date range filter
     
     Returns:
         PaginatedResponse with items, total, page, limit
@@ -1893,12 +2002,45 @@ def get_version_lot_events(
     # Apply filters
     if lot_id:
         base_query = base_query.where(CostLotEvent.lot_id == lot_id)
+    
+    # Event type filter (comma-separated)
     if event_type:
-        base_query = base_query.where(CostLotEvent.event_type == event_type)
+        types = [t.strip() for t in event_type.split(',')]
+        base_query = base_query.where(CostLotEvent.event_type.in_(types))
+    
+    # Asset filter (comma-separated)
     if asset_id:
-        base_query = base_query.where(CostLot.asset_id == asset_id)
+        asset_ids = [int(id.strip()) for id in asset_id.split(',')]
+        base_query = base_query.where(CostLot.asset_id.in_(asset_ids))
+    
+    # Account filter (comma-separated)
+    if account_id:
+        account_ids = [int(id.strip()) for id in account_id.split(',')]
+        base_query = base_query.where(CostLot.account_id.in_(account_ids))
+    
+    # Unit pattern filter (comma-separated)
+    if unit_pattern:
+        patterns = [p.strip() for p in unit_pattern.split(',')]
+        base_query = base_query.where(CalculationUnit.pattern.in_(patterns))
+    
+    # Specific unit filter
     if unit_id:
         base_query = base_query.where(CostLotEvent.triggered_by_unit_id == unit_id)
+    
+    # Date range filter
+    if date_start:
+        try:
+            start_dt = datetime.fromisoformat(date_start.replace('Z', '+00:00'))
+            base_query = base_query.where(CostLotEvent.timestamp >= start_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date_start format: {date_start}")
+    
+    if date_end:
+        try:
+            end_dt = datetime.fromisoformat(date_end.replace('Z', '+00:00'))
+            base_query = base_query.where(CostLotEvent.timestamp <= end_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date_end format: {date_end}")
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -1913,7 +2055,7 @@ def get_version_lot_events(
             selectinload(CostLotEvent.related_lot),
             selectinload(CostLotEvent.triggered_by_unit),
         )
-        .order_by(CostLotEvent.timestamp, CostLotEvent.sequence_num)
+        .order_by(CostLotEvent.timestamp.desc(), CostLotEvent.sequence_num.desc())
         .offset(offset)
         .limit(limit)
     )
@@ -1938,13 +2080,85 @@ def get_version_lot_events(
             triggered_by_transaction_id=e.triggered_by_transaction_id,
             triggered_by_unit_id=e.triggered_by_unit_id,
             triggered_by_unit_label=e.triggered_by_unit.unit_label if e.triggered_by_unit else None,
+            triggered_by_unit_pattern=e.triggered_by_unit.pattern if e.triggered_by_unit else None,
             timestamp=e.timestamp,
-            event_metadata=e.event_metadata,
         )
         for e in events
     ]
     
     return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+class FilterOptionsAsset(BaseModel):
+    """Asset option for filter dropdown."""
+    id: int
+    symbol: str
+    label: Optional[str] = None
+
+
+class FilterOptionsAccount(BaseModel):
+    """Account option for filter dropdown."""
+    id: int
+    name: str
+
+
+class LotEventsFilterOptionsResponse(BaseModel):
+    """Response for lot events filter options endpoint."""
+    assets: List[FilterOptionsAsset]
+    accounts: List[FilterOptionsAccount]
+
+
+@router.get("/versions/{version_id}/lot-events/filter-options", response_model=LotEventsFilterOptionsResponse)
+def get_lot_events_filter_options(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get all available filter options for lot events in a calculation version.
+    
+    Returns unique assets and accounts that have lot events in this version,
+    allowing the filter dropdowns to show ALL options regardless of current filter state.
+    
+    This enables filtering by any asset/account that exists in the version,
+    not just those currently displayed after filtering.
+    """
+    # Verify version exists
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+    
+    # Get unique assets from lot events in this version
+    asset_query = (
+        select(Asset.asset_id, Asset.symbol, Asset.label)
+        .select_from(CostLotEvent)
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(Asset, CostLot.asset_id == Asset.asset_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .distinct()
+        .order_by(Asset.symbol)
+    )
+    assets = session.exec(asset_query).all()
+    
+    # Get unique accounts from lot events in this version
+    from backend.db.models import Account
+    account_query = (
+        select(Account.id, Account.name)
+        .select_from(CostLotEvent)
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(Account, CostLot.account_id == Account.id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(CostLot.account_id.isnot(None))
+        .distinct()
+        .order_by(Account.name)
+    )
+    accounts = session.exec(account_query).all()
+    
+    return LotEventsFilterOptionsResponse(
+        assets=[FilterOptionsAsset(id=a[0], symbol=a[1], label=a[2]) for a in assets],
+        accounts=[FilterOptionsAccount(id=acc[0], name=acc[1]) for acc in accounts],
+    )
 
 
 # =============================================================================

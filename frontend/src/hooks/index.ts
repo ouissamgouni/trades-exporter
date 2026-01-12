@@ -14,3 +14,9 @@ export {
     type PaginationState,
     type PageSizeOption,
 } from './usePagination';
+
+export {
+    useLazyPaginatedQuery,
+    type UseLazyPaginatedQueryParams,
+    type UseLazyPaginatedQueryResult,
+} from './useLazyPaginatedQuery';

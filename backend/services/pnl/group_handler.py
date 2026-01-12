@@ -344,6 +344,7 @@ def _consume_lots(
     unit_id = unit.id
     disposal_dt = ensure_utc(disposal.date_time) if hasattr(disposal, 'date_time') and disposal.date_time else None
     
+
     try:
         slices, negative_lot = lot_manager.consume_lots(
             account_id=account_id,
@@ -352,7 +353,7 @@ def _consume_lots(
             qty=qty,
             allow_negative=config.allow_negative_balances,
             triggered_by_transaction=disposal.transaction,
-            triggered_by_unit=unit,
+            triggered_by_unit=unit
         )
     except ValueError as e:
         if unit.warnings is None:
@@ -880,6 +881,7 @@ def _handle_cost_basis_transfer(
             new_lot,
             triggered_by_transaction=inflow.transaction,
             triggered_by_unit=unit,
+            transfer_metadata={"is_transfer": True},
         )
         if unit.cost_lots is None:
             unit.cost_lots = []

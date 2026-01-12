@@ -51,7 +51,7 @@ interface BarDataItem extends BarDatum {
 /**
  * Format currency value for display (compact)
  */
-const formatCurrency = (value: number, currency: string): string => {
+const formatCurrency = (value: number, currency: string = ''): string => {
     const absValue = Math.abs(value);
     let formatted: string;
 
@@ -63,7 +63,8 @@ const formatCurrency = (value: number, currency: string): string => {
         formatted = value.toFixed(0);
     }
 
-    return `${currency} ${formatted}`;
+
+    return currency ? `${currency} ${formatted}` : formatted;
 };
 
 /**
@@ -346,7 +347,8 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
                             tickSize: 5,
                             tickPadding: 5,
                             tickRotation: 0,
-                            format: (v) => formatCurrency(Number(v), baseCurrency),
+                            tickValues: 5,
+                            format: (v) => formatCurrency(Number(v)),
                         }}
                         axisLeft={{
                             tickSize: 5,

@@ -196,9 +196,8 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                                     <Text fontSize="sm" color="gray.500">
                                         ({items.length} {items.length === 1 ? 'issue' : 'issues'})
                                     </Text>
-                                </Text>
-                            </Flex>
-                        </Card.Header>
+                                </Flex>
+                            </Card.Header>
                         <Card.Body py={2}>
                             {items.map((warning) => {
                                 const colors = getWarningColor(warning.level);
@@ -265,27 +264,29 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                             })}
                         </Card.Body>
                     </Card.Root>
-                );
-                })
+    );
+})
             )}
 
-            {/* Manual Price Dialog */}
-            {selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
-                <AddManualPriceDialog
-                    isOpen={dialogOpen}
-                    onClose={() => {
-                        setDialogOpen(false);
-                        setSelectedWarning(null);
-                    }}
-                    onSave={handlePriceSaved}
-                    assetId={selectedWarning.asset_id}
-                    assetName={getAssetName(selectedWarning.asset_id)}
-                    defaultDate={getDefaultDateFromWarning(selectedWarning)}
-                    quoteAssetId={quoteAssetId}
-                    quoteAssetName={baseCurrency}
-                />
-            )}
-        </SlidePanel>
+{/* Manual Price Dialog */ }
+{
+    selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
+        <AddManualPriceDialog
+            isOpen={dialogOpen}
+            onClose={() => {
+                setDialogOpen(false);
+                setSelectedWarning(null);
+            }}
+            onSave={handlePriceSaved}
+            assetId={selectedWarning.asset_id}
+            assetName={getAssetName(selectedWarning.asset_id)}
+            defaultDate={getDefaultDateFromWarning(selectedWarning)}
+            quoteAssetId={quoteAssetId}
+            quoteAssetName={baseCurrency}
+        />
+    )
+}
+        </SlidePanel >
     );
 };
 

@@ -379,15 +379,12 @@ function AssetDetailView({
                                 </Tabs.Content>
 
                                 <Tabs.Content value="events" p={0}>
-                                    {!eventsLoaded ? (
-                                        <LoadingPlaceholder label="Cost Lot Events" />
-                                    ) : (
-                                        <CostLotEventsTab
-                                            events={lotEvents}
-                                            baseCurrency={baseCurrency}
-                                            onTransactionClick={onTransactionClick}
-                                        />
-                                    )}
+                                    <CostLotEventsTab
+                                        versionId={versionId}
+                                        baseCurrency={baseCurrency}
+                                        onTransactionClick={onTransactionClick}
+                                        assetId={assetPnlRow.asset.id ?? undefined}
+                                    />
                                 </Tabs.Content>
 
                                 <Tabs.Content value="timeline" p={4}>

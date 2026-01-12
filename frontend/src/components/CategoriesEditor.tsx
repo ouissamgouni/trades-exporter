@@ -17,12 +17,12 @@ import {
     VStack,
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
-import { LuTriangleAlert, LuCheck, LuPencil, LuPlus, LuTrash2, LuX, LuChevronDown, LuChevronRight, LuGripVertical } from 'react-icons/lu';
+import { LuTriangleAlert, LuCheck, LuPencil, LuPlus, LuTrash2, LuX, LuChevronDown, LuChevronRight, LuGripVertical, LuShuffle } from 'react-icons/lu';
 import { Category, CategoryAssetsResponse, Dimension, DimensionWithCategories, LinkedAsset, UnclassifiedAssetsResponse } from '../types';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { Toaster, toaster } from './ui/toaster';
 import { ColorSelector } from './ColorSelector';
-import { getNextAvailableColor, getContrastTextColor, DEFAULT_CATEGORY_COLOR } from '../constants/colors';
+import { getNextAvailableColor, getContrastTextColor, DEFAULT_CATEGORY_COLOR, CATEGORY_COLOR_PALETTE } from '../constants/colors';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -64,6 +64,9 @@ export const CategoriesEditor: React.FC = () => {
 
     // Collapsible state per dimension (default expanded)
     const [collapsedDimensions, setCollapsedDimensions] = useState<Set<number>>(new Set());
+
+    // Randomizing state
+    const [randomizingDimensionId, setRandomizingDimensionId] = useState<number | null>(null);
 
     // Confirmation dialogs
     const deleteCategoryConfirm = useConfirmDialog<Category>();
@@ -332,6 +335,35 @@ export const CategoriesEditor: React.FC = () => {
         }
     };
 
+    const handleRandomizeColors = async (dimension: DimensionWithCategories) => {
+        setRandomizingDimensionId(dimension.id);
+        try {
+            // Shuffle the palette
+            const shuffled = [...CATEGORY_COLOR_PALETTE].sort(() => Math.random() - 0.5);
+            // Assign to categories
+            const updates = dimension.categories.map((category, index) => {
+                const newColor = shuffled[index % shuffled.length];
+                return fetch(`${API_BASE}/categories/${category.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        label: category.label,
+                        color: newColor,
+                        ordinal: category.ordinal,
+                    }),
+                });
+            });
+            // Wait for all updates
+            await Promise.all(updates);
+            toaster.success({ title: 'Success', description: `Randomized colors for ${dimension.label}` });
+            fetchCategories();
+        } catch (error: any) {
+            toaster.error({ title: 'Error', description: 'Failed to randomize colors' });
+        } finally {
+            setRandomizingDimensionId(null);
+        }
+    };
+
     // Open drawer to show linked assets for a category
     const openCategoryDrawer = async (category: Category) => {
         setDrawerCategory(category);
@@ -577,6 +609,15 @@ export const CategoriesEditor: React.FC = () => {
                                         onClick={() => startCreateCategory(dim.id)}
                                     >
                                         <Icon as={LuPlus} mr={1} /> Add
+                                    </Button>
+                                    <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() => handleRandomizeColors(dim)}
+                                        loading={randomizingDimensionId === dim.id}
+                                        loadingText="Randomizing"
+                                    >
+                                        <Icon as={LuShuffle} mr={1} /> Shuffle colors
                                     </Button>
                                     <IconButton
                                         aria-label="Delete dimension"

@@ -64,7 +64,6 @@ class LotManager:
         related_lot: Optional[CostLot] = None,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        metadata: Optional[dict] = None,
     ) -> CostLotEvent:
         """
         Emit a cost lot event for audit trail.
@@ -120,7 +119,6 @@ class LotManager:
             triggered_by_transaction_id=triggered_by_transaction.id if triggered_by_transaction else None,
             triggered_by_unit=triggered_by_unit,
             triggered_by_unit_id=triggered_by_unit.id if triggered_by_unit else None,
-            event_metadata=metadata,
             timestamp=event_timestamp,
         )
         
@@ -173,6 +171,7 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this lot creation
             triggered_by_unit: Calculation unit context
             emit_event: Whether to emit LOT_CREATED event (False for reloaded lots)
+            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true})
         """
         key = self._get_key(lot.account_id, lot.asset_id)
         
@@ -191,13 +190,12 @@ class LotManager:
             # Emit creation event for negative lot (unless reloading from DB)
             if emit_event:
                 self._emit_event(
-                    event_type=LotEventType.CREATED,
+                    event_type=LotEventType.NEGATIVE_CREATED,
                     lot=lot,
                     quantity_delta=lot.qty,  # Negative
                     cost_basis_delta=Decimal("0"),
                     triggered_by_transaction=triggered_by_transaction,
                     triggered_by_unit=triggered_by_unit,
-                    metadata={"is_negative": True, "provisional": True},
                 )
             return
         
@@ -243,7 +241,6 @@ class LotManager:
                 cost_basis_delta=lot.total_cost_in_base,
                 triggered_by_transaction=triggered_by_transaction,
                 triggered_by_unit=triggered_by_unit,
-                metadata={"method": self.config.lot_method.value},
             )
 
     def load_from_db(
@@ -294,7 +291,7 @@ class LotManager:
         allow_negative: bool = False,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        emit_event: bool = True,
+        emit_event: bool = True
     ) -> Tuple[List[ConsumedLotSlice], Optional[CostLot]]:
         """
         Consume lots for a disposal.
@@ -308,6 +305,7 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this consumption (required if emit_event=True)
             triggered_by_unit: Calculation unit context (required if emit_event=True)
             emit_event: Whether to emit CONSUMED events (False for testing)
+            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true, "pending_transfer": true})
 
         Returns:
             Tuple of (consumed_slices, negative_lot if created)
@@ -352,7 +350,7 @@ class LotManager:
                     quantity_delta=-consume_qty,
                     cost_basis_delta=-slice_record.total_cost_in_base,
                     triggered_by_transaction=triggered_by_transaction,
-                    triggered_by_unit=triggered_by_unit,
+                    triggered_by_unit=triggered_by_unit
                 )
 
             # Remove exhausted lot from front
@@ -426,8 +424,7 @@ class LotManager:
                         quantity_delta=-remaining_qty,
                         cost_basis_delta=-neg_slice.total_cost_in_base,
                         triggered_by_transaction=triggered_by_transaction,
-                        triggered_by_unit=triggered_by_unit,
-                        metadata={"is_negative_lot": True, "provisional": True},
+                        triggered_by_unit=triggered_by_unit
                     )
             else:
                 raise ValueError(
@@ -597,11 +594,7 @@ class LotManager:
                     cost_basis_delta=cost_applied,
                     related_lot=settling_lot,
                     triggered_by_transaction=settling_transaction,
-                    triggered_by_unit=triggered_by_unit,
-                    metadata={
-                        "settlement_id": settlement.settlement_id,
-                        "is_fully_settled": neg_lot.is_settled,
-                    },
+                    triggered_by_unit=triggered_by_unit
                 )
             
             remaining_qty -= settle_qty

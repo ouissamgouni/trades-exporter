@@ -18,11 +18,23 @@ Usage:
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import random
 from sqlmodel import Session, select
 
 from backend.db.models import Asset, AssetPriceGetter, Category, AssetCategory, Dimension
 from backend.file_loaders.asset_csv_loader import LoadResult, ParsedAsset, CategoryDefinition, PriceGetterConfig
 from backend.config.loader import configure_logging
+
+CATEGORY_COLOR_PALETTE = [
+    '#4E79A7', '#6B9AC4', '#2E5A87',
+    '#59A89C', '#76B7B2', '#2D8B84',
+    '#8CD17D', '#59A14F', '#A0CB8D',
+    '#F1CE63', '#D4A84B', '#B6992D',
+    '#F28E2B', '#E07B39', '#FF9D5C',
+    '#E15759', '#D4726A', '#B94A48',
+    '#B07AA1', '#9467BD', '#7B5A8C',
+    '#79706E', '#A8A39E', '#5E5855',
+]
 
 log = configure_logging("asset_import_service")
 
@@ -240,6 +252,7 @@ class AssetImportService:
                         category = Category(
                             dimension_id=dimension_id,
                             label=cat_def.label,
+                            color=random.choice(CATEGORY_COLOR_PALETTE),
                             created_at=utc_now()
                         )
                         
