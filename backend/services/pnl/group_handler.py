@@ -205,7 +205,8 @@ def _process_disposals(
         if negative_lot:
             if unit.cost_lots is None:
                 unit.cost_lots = []
-            unit.cost_lots.append(negative_lot)
+            if negative_lot not in unit.cost_lots:
+                unit.cost_lots.append(negative_lot)
 
         # For pending transfers: skip P&L realization, emit warning instead
         if is_pending_transfer and slices:
@@ -875,7 +876,14 @@ def _handle_cost_basis_transfer(
     for slice in consumed_slices:
         # Scale qty for splits, preserve cost basis
         new_qty = slice.quantity * qty_ratio
-        unit_cost = slice.total_cost_in_base / new_qty      
+        unit_cost = slice.total_cost_in_base / new_qty
+        
+        # Preserve original holding period from the source lot
+        original_acquired_at = None
+        if slice.cost_lot and slice.cost_lot.acquired_at:
+            original_acquired_at = ensure_utc(slice.cost_lot.acquired_at)
+        if not original_acquired_at:
+            original_acquired_at = utc_now()
 
         new_lot = CostLot(
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
@@ -887,7 +895,7 @@ def _handle_cost_basis_transfer(
             qty=new_qty,
             qty_remaining=new_qty,
             unit_cost_in_base=unit_cost,
-            acquired_at=ensure_utc(slice.acquired_at) if hasattr(slice, 'acquired_at') and slice.acquired_at else utc_now(),  # Preserve original holding period
+            acquired_at=original_acquired_at,  # Preserve original holding period
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
@@ -902,9 +910,11 @@ def _handle_cost_basis_transfer(
         )
         # Manual append needed when objects aren't persisted yet
         # SQLAlchemy relationship auto-population doesn't work reliably until commit
+        # Check if already added via back-populate to avoid duplicates
         if unit.cost_lots is None:
             unit.cost_lots = []
-        unit.cost_lots.append(new_lot)
+        if new_lot not in unit.cost_lots:
+            unit.cost_lots.append(new_lot)
 
         log.debug(
             "transfer_lot_created",
@@ -1048,7 +1058,8 @@ def _handle_acquisition(
         )
         if unit.cost_lots is None:
             unit.cost_lots = []
-        unit.cost_lots.append(settling_lot)
+        if settling_lot not in unit.cost_lots:
+            unit.cost_lots.append(settling_lot)
         
         log.debug(
             "acquisition_lot_created",

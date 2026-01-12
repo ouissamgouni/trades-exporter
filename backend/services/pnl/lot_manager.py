@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Deque, Tuple, Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel
 from sqlalchemy.orm import selectinload
 from sqlalchemy import and_
 
@@ -21,6 +21,11 @@ from backend.db.models import (
     Account, CalculationVersion, CostLot, ConsumedLotSlice, LotSettlement, 
     Asset, NormalizedTransaction, CostLotEvent, LotEventType
 )
+
+
+def _is_sqlmodel_instance(obj: Any) -> bool:
+    """Check if object is a proper SQLModel instance (not a Mock)."""
+    return obj is not None and isinstance(obj, SQLModel)
 
 
 log = configure_logging("pnl_lot_manager")
@@ -105,19 +110,25 @@ class LotManager:
         # Use transaction datetime for event timestamp (economic time, not system time)
         event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow()
         
+        # Only set relationship objects if they're proper SQLModel instances
+        # This allows tests to pass Mock objects (only IDs will be set)
+        tx_relationship = triggered_by_transaction if _is_sqlmodel_instance(triggered_by_transaction) else None
+        unit_relationship = triggered_by_unit if _is_sqlmodel_instance(triggered_by_unit) else None
+        related_lot_relationship = related_lot if _is_sqlmodel_instance(related_lot) else None
+        
         event = CostLotEvent(
             event_type=event_type.value,
             lot=lot,
-            related_lot=related_lot,
+            related_lot=related_lot_relationship,
             quantity_delta=quantity_delta,
             cost_basis_delta=cost_basis_delta,
             qty_remaining_after=lot.qty_remaining,
             cost_basis_remaining_after=lot.remaining_cost_in_base,
             balance_after=balance_after,
             account_balance_after=account_balance_after,
-            triggered_by_transaction=triggered_by_transaction,
+            triggered_by_transaction=tx_relationship,
             triggered_by_transaction_id=triggered_by_transaction.id if triggered_by_transaction else None,
-            triggered_by_unit=triggered_by_unit,
+            triggered_by_unit=unit_relationship,
             triggered_by_unit_id=triggered_by_unit.id if triggered_by_unit else None,
             timestamp=event_timestamp,
         )
@@ -154,6 +165,7 @@ class LotManager:
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
         emit_event: bool = True,
+        transfer_metadata: Optional[Dict] = None,
     ):
         """
         Add a new lot, maintaining proper ordering for the cost method.

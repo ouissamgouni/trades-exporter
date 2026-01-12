@@ -377,7 +377,7 @@ class PnLEngine:
         
         log.info("results_persisted", version_id=version.version_id, status=status)
 
-        return version
+        return version.version_id
     
     
     def save_draft(self, result: PnLResult, expires_in_hours: int = 1) -> int:

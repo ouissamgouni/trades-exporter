@@ -45,7 +45,7 @@ class TestMEXCConnector:
         assert result.source_transaction_id == "mx12345"
         assert result.direction == "inflow"
         assert result.source_transaction_type == "buy"  # Original preserved
-        assert result.transaction_type == "acquisition"  # Normalized from "buy"
+        assert result.transaction_type == "trade"  # All CEX trades use 'trade' type
         assert result.quantity == 0.05
         assert result.price == 48000.0
         assert result.source_price_quote_asset_symbol == "USDT"
