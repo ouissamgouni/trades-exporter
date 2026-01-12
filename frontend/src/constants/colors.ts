@@ -8,41 +8,52 @@ export const CATEGORY_COLOR_PALETTE = [
     '#4E79A7', // Steel blue
     '#6B9AC4', // Light steel
     '#2E5A87', // Dark steel
+    '#3C8DBC', // Medium blue
 
     // Teals & Cyans
     '#59A89C', // Teal
     '#76B7B2', // Soft teal
     '#2D8B84', // Deep teal
+    '#4FB3A4', // Vibrant teal
 
     // Greens
     '#8CD17D', // Sage green
     '#59A14F', // Forest green
     '#A0CB8D', // Soft sage
+    '#7FBF7F', // Soft lime green
 
     // Yellows & Ochres
     '#F1CE63', // Soft gold
     '#D4A84B', // Ochre
     '#B6992D', // Dark gold
+    '#E6B800', // Bright gold
 
     // Oranges
     '#F28E2B', // Soft orange
     '#E07B39', // Burnt orange
     '#FF9D5C', // Light coral
+    '#FF8C42', // Warm coral orange
 
     // Reds & Pinks
     '#E15759', // Soft red
     '#D4726A', // Dusty rose
     '#B94A48', // Deep red
+    '#D26969', // Muted crimson
 
     // Purples & Violets
     '#B07AA1', // Dusty purple
     '#9467BD', // Soft violet
     '#7B5A8C', // Deep purple
+    '#9B59B6', // Rich lavender
 
     // Neutrals
     '#79706E', // Warm gray
     '#A8A39E', // Light taupe
     '#5E5855', // Charcoal
+    '#708090', // Slate gray
+
+    // Browns
+    '#8B4513', // Saddle brown
 ];
 
 /**

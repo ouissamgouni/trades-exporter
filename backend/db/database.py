@@ -12,11 +12,7 @@ from typing import Generator
 from contextlib import contextmanager
 
 from sqlmodel import SQLModel, Session, create_engine
-from dotenv import load_dotenv
 from backend.config.loader import get_database_url, configure_logging
-
-# Load environment variables
-load_dotenv()
 
 log = configure_logging("database")
 

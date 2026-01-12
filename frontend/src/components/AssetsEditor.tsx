@@ -97,6 +97,10 @@ export const AssetsEditor: React.FC = () => {
     const [bulkPriceGetter, setBulkPriceGetter] = useState<{ price_getter: string; external_id: string; priority: number }>({ price_getter: '', external_id: '', priority: 100 });
     const [bulkOperationLoading, setBulkOperationLoading] = useState(false);
 
+    // Deletion impact check
+    const [deletionImpact, setDeletionImpact] = useState<Record<string, number>>({});
+    const [isImpactLoading, setIsImpactLoading] = useState(false);
+
     // Price getter management
     const [availableGetters, setAvailableGetters] = useState<string[]>([]);
     const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -297,7 +301,18 @@ export const AssetsEditor: React.FC = () => {
         const id = deleteAssetConfirm.data;
         try {
             const response = await fetch(`${API_URL}/assets/${id}`, { method: 'DELETE' });
-            if (!response.ok) throw new Error('Failed to delete asset');
+            if (!response.ok) {
+                const errData = await response.json();
+                // Check if it's a blocker error with details
+                if (errData.detail?.blockers) {
+                    const blockers = errData.detail.blockers;
+                    const blockerMessages = Object.entries(blockers).map(([key, count]) =>
+                        `${count} ${key.replace(/_/g, ' ')}`
+                    ).join(', ');
+                    throw new Error(`Cannot delete: Asset has ${blockerMessages}. Delete transactions first.`);
+                }
+                throw new Error(errData.detail?.message || errData.detail || 'Failed to delete asset');
+            }
             await refreshAssets();
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete asset' });
@@ -635,6 +650,27 @@ export const AssetsEditor: React.FC = () => {
         }
     };
 
+    // Fetch deletion impact
+    const fetchDeletionImpact = async (ids: number[]) => {
+        setIsImpactLoading(true);
+        setDeletionImpact({});
+        try {
+            const response = await fetch(`${API_URL}/assets/bulk/check-linked`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ asset_ids: ids })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setDeletionImpact(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch deletion impact:', err);
+        } finally {
+            setIsImpactLoading(false);
+        }
+    };
+
     // Bulk Delete
     const executeBulkDelete = async () => {
         if (selectedIds.size === 0) return;
@@ -649,8 +685,15 @@ export const AssetsEditor: React.FC = () => {
             });
             if (!response.ok) {
                 const errData = await response.json();
-                throw new Error(errData.detail || 'Failed to delete assets');
+                // Check if it's a blocker error with details
+                if (errData.detail?.blockers) {
+                    const affectedCount = errData.detail.affected_assets?.length || 0;
+                    throw new Error(`Cannot delete ${affectedCount} asset(s) with existing transactions or P&L data. Delete transactions first.`);
+                }
+                throw new Error(errData.detail?.message || errData.detail || 'Failed to delete assets');
             }
+            const result = await response.json();
+            toaster.success({ title: 'Success', description: result.message || `Deleted ${result.deleted_count} assets` });
             await refreshAssets();
             setShowBulkDeleteDialog(false);
             setSelectedIds(new Set());
@@ -1029,7 +1072,10 @@ export const AssetsEditor: React.FC = () => {
                             <Button size="sm" colorPalette="orange" variant="outline" onClick={() => { setBulkPriceGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100 }); setShowBulkPriceGettersDialog(true); }}>
                                 💰 Assign Price Getters
                             </Button>
-                            <Button size="sm" colorPalette="red" variant="outline" onClick={() => setShowBulkDeleteDialog(true)}>
+                            <Button size="sm" colorPalette="red" variant="outline" onClick={() => {
+                                fetchDeletionImpact(Array.from(selectedIds));
+                                setShowBulkDeleteDialog(true);
+                            }}>
                                 🗑️ Delete
                             </Button>
                             <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
@@ -2297,7 +2343,15 @@ export const AssetsEditor: React.FC = () => {
             </Dialog.Root>
 
             {/* Bulk Delete Dialog */}
-            <Dialog.Root open={showBulkDeleteDialog} onOpenChange={(e) => setShowBulkDeleteDialog(e.open)}>
+            <Dialog.Root
+                open={showBulkDeleteDialog}
+                onOpenChange={(e) => {
+                    setShowBulkDeleteDialog(e.open);
+                    if (!e.open) {
+                        setDeletionImpact({});
+                    }
+                }}
+            >
                 <Portal>
                     <Dialog.Backdrop />
                     <Dialog.Positioner>
@@ -2306,23 +2360,77 @@ export const AssetsEditor: React.FC = () => {
                                 <Dialog.Title>Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}?</Dialog.Title>
                             </Dialog.Header>
                             <Dialog.Body>
-                                <Box p={4} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-                                    <Text color="red.700" fontWeight="medium" mb={2}>⚠️ Warning</Text>
-                                    <Text color="red.600" fontSize="sm">
-                                        This action cannot be undone. All selected assets and their associated
-                                        price getters and category assignments will be permanently deleted.
-                                    </Text>
-                                </Box>
-                                <Box mt={4}>
-                                    <Text fontSize="sm" color="gray.600">
-                                        You are about to delete <strong>{selectedIds.size}</strong> asset{selectedIds.size > 1 ? 's' : ''}.
-                                    </Text>
-                                </Box>
+                                <Text color="red.600" fontWeight="bold" mb={2}>
+                                    ⚠️ Warning: This action cannot be undone!
+                                </Text>
+                                <Text mb={4}>
+                                    You are about to delete <strong>{selectedIds.size}</strong> asset{selectedIds.size > 1 ? 's' : ''}.
+                                </Text>
+
+                                {isImpactLoading ? (
+                                    <Flex align="center" gap={2} mt={4}>
+                                        <Spinner size="xs" />
+                                        <Text fontSize="xs" color="gray.500">Checking for linked data...</Text>
+                                    </Flex>
+                                ) : (
+                                    <>
+                                        {/* Blockers (prevent deletion) */}
+                                        {(deletionImpact.transactions || deletionImpact.cost_lots || deletionImpact.realized_pnl) ? (
+                                            <Box mt={4} p={3} bg="red.50" border="1px solid" borderColor="red.300" borderRadius="md">
+                                                <Text fontSize="xs" fontWeight="bold" color="red.800" mb={1}>
+                                                    🚫 Cannot delete - Linked data exists:
+                                                </Text>
+                                                <Flex direction="column" gap={0.5}>
+                                                    {deletionImpact.transactions && (
+                                                        <Text fontSize="10px" color="red.700">
+                                                            • {deletionImpact.transactions} transaction(s) - delete transactions first
+                                                        </Text>
+                                                    )}
+                                                    {deletionImpact.cost_lots && (
+                                                        <Text fontSize="10px" color="red.700">
+                                                            • {deletionImpact.cost_lots} cost lot(s) - delete transactions first
+                                                        </Text>
+                                                    )}
+                                                    {deletionImpact.realized_pnl && (
+                                                        <Text fontSize="10px" color="red.700">
+                                                            • {deletionImpact.realized_pnl} P&L record(s) - delete transactions first
+                                                        </Text>
+                                                    )}
+                                                </Flex>
+                                                <Text fontSize="10px" color="red.800" mt={2} fontStyle="italic">
+                                                    Assets with transaction history cannot be deleted. Delete all related transactions first.
+                                                </Text>
+                                            </Box>
+                                        ) : Object.keys(deletionImpact).length > 0 ? (
+                                            /* Cascade deletions (informational) */
+                                            <Box mt={4} p={3} bg="orange.50" border="1px solid" borderColor="orange.200" borderRadius="md">
+                                                <Text fontSize="xs" fontWeight="bold" color="orange.800" mb={1}>
+                                                    ⚠️ Linked objects that will also be deleted:
+                                                </Text>
+                                                <Flex direction="column" gap={0.5}>
+                                                    {Object.entries(deletionImpact).map(([key, count]) => (
+                                                        <Text key={key} fontSize="10px" color="orange.700">
+                                                            • {count} {key.replace(/_/g, ' ')}
+                                                        </Text>
+                                                    ))}
+                                                </Flex>
+                                                <Text fontSize="10px" color="orange.800" mt={2} fontStyle="italic">
+                                                    This data is linked to these asset(s) and will be removed due to cascade deletion.
+                                                </Text>
+                                            </Box>
+                                        ) : null}
+                                    </>
+                                )}
                             </Dialog.Body>
                             <Dialog.Footer>
                                 <Flex gap={2}>
                                     <Button variant="outline" onClick={() => setShowBulkDeleteDialog(false)}>Cancel</Button>
-                                    <Button colorPalette="red" onClick={executeBulkDelete} loading={bulkOperationLoading}>
+                                    <Button
+                                        colorPalette="red"
+                                        onClick={executeBulkDelete}
+                                        loading={bulkOperationLoading}
+                                        disabled={bulkOperationLoading || deletionImpact.transactions > 0 || deletionImpact.cost_lots > 0 || deletionImpact.realized_pnl > 0}
+                                    >
                                         🗑️ Delete {selectedIds.size} Asset{selectedIds.size > 1 ? 's' : ''}
                                     </Button>
                                 </Flex>

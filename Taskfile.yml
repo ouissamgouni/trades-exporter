@@ -1,25 +1,17 @@
 # https://taskfile.dev
 version: "3"
 
+# Note: Individual taskfiles override this with specific env files
+# Common pattern: dotenv: [".env", ".env.dev"] for dev tasks
+dotenv: [".env"]
+
 vars:
   BACKEND_DIR: ./backend
   FRONTEND_DIR: ./frontend
-
-  # Port configuration
-  DEV_DB_PORT: 5432
-  DEV_BACKEND_PORT: 8000
-  DEV_FRONTEND_PORT: 5173
-  DEV_DEBUGPY_PORT: 5678
-
-  TEST_DB_PORT: 5433
-  TEST_BACKEND_PORT: 8001
-  TEST_FRONTEND_PORT: 3001
-
-  PROD_DB_PORT: 5434
-  PROD_BACKEND_PORT: 8080
-  PROD_FRONTEND_PORT: 3000
+  ROOT_DIR: .
 
 includes:
+  branch: .taskfiles/branch.yml
   build: .taskfiles/build.yml
   clean: .taskfiles/clean.yml
   db: .taskfiles/db.yml
@@ -32,48 +24,6 @@ includes:
   test: .taskfiles/test.yml
 
 tasks:
-  feature:
-    desc: Create a new feature branch from develop
-    cmds:
-      - |
-        NAME={{.CLI_ARGS}}
-        if [ -z "$NAME" ]; then
-          echo "❌ Usage: task feature <name>"
-          exit 1
-        fi
-        git checkout develop
-        git pull origin develop
-        git checkout -b feature/$NAME
-        echo "✅ Created branch: feature/$NAME"
-
-  fix:
-    desc: Create a new fix branch from develop
-    cmds:
-      - |
-        NAME={{.CLI_ARGS}}
-        if [ -z "$NAME" ]; then
-          echo "❌ Usage: task fix <name>"
-          exit 1
-        fi
-        git checkout develop
-        git pull origin develop
-        git checkout -b fix/$NAME
-        echo "✅ Created branch: fix/$NAME"
-
-  hotfix:
-    desc: Create a hotfix branch from main
-    cmds:
-      - |
-        NAME={{.CLI_ARGS}}
-        if [ -z "$NAME" ]; then
-          echo "❌ Usage: task hotfix <name>"
-          exit 1
-        fi
-        git checkout main
-        git pull origin main
-        git checkout -b hotfix/$NAME
-        echo "✅ Created branch: hotfix/$NAME"
-
   install:
     desc: Install all dependencies
     cmds:
@@ -104,9 +54,9 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
         echo ""
         echo "BRANCHING"
-        echo "  task feature <name>     Create feature branch"
-        echo "  task fix <name>         Create fix branch"
-        echo "  task hotfix <name>      Create hotfix branch"
+        echo "  task branch:feature -- <name>   Create feature branch from develop"
+        echo "  task branch:fix -- <name>       Create fix branch from develop"
+        echo "  task branch:hotfix -- <name>    Create hotfix branch from main"
         echo ""
         echo "DEVELOPMENT"
         echo "  task start:dev          Start dev DB"

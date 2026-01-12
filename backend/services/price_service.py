@@ -20,7 +20,7 @@ from typing import Optional, List, Tuple, Dict
 from sqlmodel import Session, select
 from sqlalchemy import func
 
-from backend.config.loader import configure_logging
+from backend.config.loader import configure_logging, get_price_getter_override
 from backend.db.database import get_engine
 from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter
 from backend.services.price_getters import (
@@ -58,6 +58,7 @@ class PriceGetterResolver:
     Resolves which price getter(s) to use for an asset.
     
     Priority order:
+    0. Global override (PRICE_GETTER_OVERRIDE env var) - highest priority
     1. Explicitly configured getters (AssetPriceGetter table)
     2. Default getters based on price_type
     3. Global fallback getters
@@ -76,7 +77,16 @@ class PriceGetterResolver:
         Returns:
             List of (getter_name, config) tuples in priority order
         """
-        # First check for explicitly configured getters
+        # Priority 0: Global override (highest priority, for testing)
+        global_override = get_price_getter_override()
+        if global_override:
+            log.debug(
+                f"[PriceService] Using global override getter '{global_override}' "
+                f"for {asset.symbol} (PRICE_GETTER_OVERRIDE is set)"
+            )
+            return [(global_override, PriceGetterConfig())]
+        
+        # Priority 1: Explicitly configured getters
         configured = self._get_configured_getters(session, asset.asset_id)
         if configured:
             log.debug(
@@ -85,7 +95,7 @@ class PriceGetterResolver:
             )
             return configured
         
-        # Fall back to asset type defaults
+        # Priority 2-3: Asset type defaults / fallback
         defaults = self._get_default_getters(asset)
         log.debug(
             f"[PriceService] Using default getters for {asset.symbol} "

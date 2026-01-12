@@ -53,6 +53,13 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
     def get_raws(self) -> List[Dict[str, Any]]:
         """Get raw normal transactions without mapping (for JSON logging)."""
         try:
+            self.update_progress(
+                operation="Fetching normal transactions",
+                current=0,
+                total=1,
+                log_message=f"Fetching normal transactions for {self.wallet_address[:10]}..."
+            )
+            
             # Blockscout API v2 transactions endpoint
             result = self.safe_request(f"/addresses/{self.wallet_address}/transactions")
 
@@ -65,9 +72,23 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             log.info(
                 f"   ✅ Found {len(items)} normal transactions on {self.chain_name}"
             )
+            
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message=f"✅ Found {len(items)} normal transactions on {self.chain_name}"
+            )
+            
             return items
         except Exception as e:
             log.error(f"   ⚠️ Error fetching normal transactions: {e}")
+            self.update_progress(
+                operation="Failed",
+                current=1,
+                total=1,
+                log_message=f"❌ Error: {str(e)[:100]}"
+            )
             raise
 
     def raw_to_normalized(self, tx: Dict) -> NormalizedTransaction:

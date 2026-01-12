@@ -8,16 +8,14 @@ services:
   postgres_test:
     image: postgres:15-alpine
     container_name: trades_db_test
-    environment:
-      POSTGRES_USER: trades_user
-      POSTGRES_PASSWORD: trades_password
-      POSTGRES_DB: trades_db_test
+    env_file:
+      - ../../.env.test
     ports:
       - "5433:5432"
     volumes:
       - trades_test_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trades_user -d trades_db_test"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -28,8 +26,10 @@ services:
   backend_test:
     image: trades-exporter-backend:develop
     container_name: trades_backend_test
+    env_file:
+      - ../../.env.test
     environment:
-      DATABASE_URL: postgresql://trades_user:trades_password@postgres_test:5432/trades_db_test
+      DATABASE_URL: postgresql://${TEST_DB_USER}:${TEST_DB_PASSWORD}@postgres_test:5432/${TEST_DB_NAME}
       CORS_ORIGINS: http://localhost:3001,http://frontend_test:80
     ports:
       - "8001:8000"

@@ -4,6 +4,7 @@ Uses CCXT library for robust API handling.
 Object-oriented design implementing BaseConnector interface.
 """
 
+import threading
 from datetime import datetime, timezone
 import ccxt
 from typing import Dict, Any, List
@@ -33,10 +34,11 @@ class BinanceTrxConnector(BaseConnector):
         connector_id: int = None,
         symbols: List[str] = None,
         config: Dict[str, Any] = None,
+        progress_callback=None,
         **kwargs,
     ):
         """Initialize Binance connector with API credentials from settings.yaml if not provided."""
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
         # Store symbols filter (if provided, only fetch trades for these symbols)
         self._symbols_filter = symbols
@@ -138,13 +140,37 @@ class BinanceTrxConnector(BaseConnector):
             return []
 
         log.debug(f"Starting to fetch trades for {len(symbols)} symbols in parallel")
+        
+        # Report initial progress
+        self.update_progress(
+            operation="Fetching symbols",
+            current=0,
+            total=len(symbols),
+            log_message=f"Starting to fetch trades for {len(symbols)} symbols"
+        )
+        
+        # Track completed symbols for progress
+        completed_count = 0
+        completed_lock = threading.Lock()
 
         def fetch_symbol_trades(indexed_symbol):
             """Helper function to fetch trades for a single symbol with progress tracking."""
+            nonlocal completed_count
             idx, symbol = indexed_symbol
             prefix = f"[{idx + 1}/{len(symbols)}]"
             try:
                 trades = self.get_trades_by_symbol(symbol)
+                
+                # Update progress
+                with completed_lock:
+                    completed_count += 1
+                    self.update_progress(
+                        operation=f"Fetching {symbol}",
+                        current=completed_count,
+                        total=len(symbols),
+                        log_message=f"{prefix} Fetched {len(trades) if trades else 0} trades for {symbol}" if trades else None
+                    )
+                
                 if trades:
                     log.info(f"{prefix} ✅ Found {len(trades)} trades for {symbol}")
                     return [
@@ -180,6 +206,15 @@ class BinanceTrxConnector(BaseConnector):
             sorted_trades = self.exchange.sort_by(sorted_trades, "timestamp")
             if sorted_trades is None:
                 sorted_trades = list(all_trades.values())
+        
+        # Final progress update
+        self.update_progress(
+            operation="Completed",
+            current=len(symbols),
+            total=len(symbols),
+            log_message=f"✅ Total trades fetched: {len(sorted_trades)}"
+        )
+        
         log.info(f"✅ Total trades fetched: {len(sorted_trades)}")
         return sorted_trades
 

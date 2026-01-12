@@ -103,7 +103,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Set mode
+    # Set mode (deprecated - use DATABASE_URL env var instead)
     if args.test:
         set_test_mode(True)
         mode_label = "TEST"
@@ -112,7 +112,7 @@ def main():
         mode_label = "PRODUCTION"
 
     # Get database URL
-    db_url = get_database_url(test_mode=args.test)
+    db_url = get_database_url()
     safe_url = db_url.split("@")[-1] if "@" in db_url else db_url
 
     print("=" * 55)

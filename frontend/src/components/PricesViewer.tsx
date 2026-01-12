@@ -11,9 +11,8 @@ import { AssetBadge } from './AssetBadge';
 import { AssetSelector } from './AssetSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
-
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
-const DEFAULT_PAGE_SIZE = 100;
+import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
+import { TablePagination } from './TablePagination';
 
 export const PricesViewer: React.FC = () => {
     const [prices, setPrices] = useState<PriceSnapshot[]>([]);
@@ -33,19 +32,18 @@ export const PricesViewer: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
     const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
-    // Pagination state
-    const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_PAGE_SIZE);
+
+    // Pagination
+    const pagination = usePagination({ storageKey: 'prices', initialPageSize: DEFAULT_PAGE_SIZE });
 
     const deleteConfirm = useConfirmDialog<PriceSnapshot>();
 
-    // Calculate pagination
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
-    const offset = (currentPage - 1) * itemsPerPage;
+    // Calculate pagination offset for server-side pagination
+    const offset = (pagination.page - 1) * pagination.pageSize;
 
     useEffect(() => {
         fetchPrices();
-    }, [assetIdFilter, quoteAssetIdFilter, sourceFilter, snapshotTimeFrom, snapshotTimeTo, currentPage, itemsPerPage]);
+    }, [assetIdFilter, quoteAssetIdFilter, sourceFilter, snapshotTimeFrom, snapshotTimeTo, pagination.page, pagination.pageSize]);
 
     useEffect(() => {
         fetchAssets();
@@ -71,7 +69,7 @@ export const PricesViewer: React.FC = () => {
             if (sourceFilter) params.append('source', sourceFilter);
             if (snapshotTimeFrom) params.append('snapshot_time_from', snapshotTimeFrom);
             if (snapshotTimeTo) params.append('snapshot_time_to', snapshotTimeTo);
-            params.append('limit', String(itemsPerPage));
+            params.append('limit', String(pagination.pageSize));
             params.append('offset', String(offset));
             const response = await fetch(`${API_URL}/price-snapshots?${params}`);
             if (!response.ok) throw new Error('Failed to fetch prices');
@@ -119,24 +117,13 @@ export const PricesViewer: React.FC = () => {
         }
     };
 
-    const goToPage = (page: number) => {
-        if (page >= 1 && page <= totalPages) {
-            setCurrentPage(page);
-        }
-    };
-
-    const handleItemsPerPageChange = (newSize: number) => {
-        setItemsPerPage(newSize);
-        setCurrentPage(1); // Reset to first page when changing page size
-    };
-
     const clearFilters = () => {
         setAssetIdFilter(null);
         setQuoteAssetIdFilter(null);
         setSourceFilter('');
         setSnapshotTimeFrom('');
         setSnapshotTimeTo('');
-        setCurrentPage(1);
+        pagination.firstPage();
     };
 
     const hasActiveFilters = assetIdFilter !== null || quoteAssetIdFilter !== null || sourceFilter || snapshotTimeFrom || snapshotTimeTo;
@@ -295,7 +282,7 @@ export const PricesViewer: React.FC = () => {
                     <Box width="180px">
                         <AssetSelector
                             value={assetIdFilter}
-                            onChange={(id) => { setAssetIdFilter(id); setCurrentPage(1); }}
+                            onChange={(id) => { setAssetIdFilter(id); pagination.firstPage(); }}
                             assets={assets}
                             placeholder="All Assets"
                             size="sm"
@@ -307,7 +294,7 @@ export const PricesViewer: React.FC = () => {
                     <Box width="180px">
                         <AssetSelector
                             value={quoteAssetIdFilter}
-                            onChange={(id) => { setQuoteAssetIdFilter(id); setCurrentPage(1); }}
+                            onChange={(id) => { setQuoteAssetIdFilter(id); pagination.firstPage(); }}
                             assets={assets}
                             placeholder="All Quote Assets"
                             size="sm"
@@ -319,7 +306,7 @@ export const PricesViewer: React.FC = () => {
                     <NativeSelect.Root size="sm" width="150px">
                         <NativeSelect.Field
                             value={sourceFilter}
-                            onChange={e => { setSourceFilter(e.target.value); setCurrentPage(1); }}
+                            onChange={e => { setSourceFilter(e.target.value); pagination.firstPage(); }}
                         >
                             <option value="">All Sources</option>
                             {availableSources.map(source => (
@@ -338,7 +325,7 @@ export const PricesViewer: React.FC = () => {
                         width="180px"
                         placeholder="From"
                         value={snapshotTimeFrom}
-                        onChange={e => { setSnapshotTimeFrom(e.target.value); setCurrentPage(1); }}
+                        onChange={e => { setSnapshotTimeFrom(e.target.value); pagination.firstPage(); }}
                     />
                     <Text fontSize="sm">to</Text>
                     <Input
@@ -347,7 +334,7 @@ export const PricesViewer: React.FC = () => {
                         width="180px"
                         placeholder="To"
                         value={snapshotTimeTo}
-                        onChange={e => { setSnapshotTimeTo(e.target.value); setCurrentPage(1); }}
+                        onChange={e => { setSnapshotTimeTo(e.target.value); pagination.firstPage(); }}
                     />
                 </Flex>
                 {hasActiveFilters && (
@@ -404,7 +391,7 @@ export const PricesViewer: React.FC = () => {
                                         <Table.Cell>
                                             <AssetBadge
                                                 asset={{
-                                                    asset_id: price.asset_id,
+                                                    id: price.asset_id,
                                                     symbol: price.asset_symbol || getAssetSymbol(price.asset_id),
                                                     label: price.asset_label,
                                                 }}
@@ -415,7 +402,7 @@ export const PricesViewer: React.FC = () => {
                                         <Table.Cell>
                                             <AssetBadge
                                                 asset={price.quote_asset_id ? {
-                                                    asset_id: price.quote_asset_id,
+                                                    id: price.quote_asset_id,
                                                     symbol: price.quote_asset_symbol || getAssetSymbol(price.quote_asset_id),
                                                     label: price.quote_asset_label,
                                                 } : null}
@@ -486,89 +473,18 @@ export const PricesViewer: React.FC = () => {
                 <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
                     {/* Left side: Info */}
                     <Text fontSize="sm" color="gray.600">
-                        Showing {totalItems === 0 ? 0 : offset + 1}-{Math.min(offset + itemsPerPage, totalItems)} of <strong>{totalItems}</strong> records
+                        Showing {totalItems === 0 ? 0 : offset + 1}-{Math.min(offset + pagination.pageSize, totalItems)} of <strong>{totalItems}</strong> records
                         {selectedIds.size > 0 && (
                             <> | <strong>Selected:</strong> {selectedIds.size}</>
                         )}
                     </Text>
-
-                    {/* Center: Pagination controls */}
-                    {totalPages > 1 && (
-                        <Flex align="center" gap={2}>
-                            <Button
-                                size="xs"
-                                variant="outline"
-                                onClick={() => goToPage(1)}
-                                disabled={currentPage === 1}
-                            >
-                                ⟪
-                            </Button>
-                            <Button
-                                size="xs"
-                                variant="outline"
-                                onClick={() => goToPage(currentPage - 1)}
-                                disabled={currentPage === 1}
-                            >
-                                ←
-                            </Button>
-                            {/* Page numbers */}
-                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                let pageNum: number;
-                                if (totalPages <= 5) {
-                                    pageNum = i + 1;
-                                } else if (currentPage <= 3) {
-                                    pageNum = i + 1;
-                                } else if (currentPage >= totalPages - 2) {
-                                    pageNum = totalPages - 4 + i;
-                                } else {
-                                    pageNum = currentPage - 2 + i;
-                                }
-                                return (
-                                    <Button
-                                        key={pageNum}
-                                        size="xs"
-                                        variant={currentPage === pageNum ? 'solid' : 'outline'}
-                                        colorPalette={currentPage === pageNum ? 'blue' : undefined}
-                                        onClick={() => goToPage(pageNum)}
-                                    >
-                                        {pageNum}
-                                    </Button>
-                                );
-                            })}
-                            <Button
-                                size="xs"
-                                variant="outline"
-                                onClick={() => goToPage(currentPage + 1)}
-                                disabled={currentPage === totalPages}
-                            >
-                                →
-                            </Button>
-                            <Button
-                                size="xs"
-                                variant="outline"
-                                onClick={() => goToPage(totalPages)}
-                                disabled={currentPage === totalPages}
-                            >
-                                ⟫
-                            </Button>
-                        </Flex>
-                    )}
-
-                    {/* Right side: Items per page */}
-                    <Flex align="center" gap={2}>
-                        <Text fontSize="sm" color="gray.600">Items per page:</Text>
-                        <NativeSelect.Root size="sm" width="80px">
-                            <NativeSelect.Field
-                                value={itemsPerPage}
-                                onChange={e => handleItemsPerPageChange(Number(e.target.value))}
-                            >
-                                {PAGE_SIZE_OPTIONS.map(size => (
-                                    <option key={size} value={size}>{size}</option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
                 </Flex>
+
+                {/* Pagination controls */}
+                <TablePagination
+                    pagination={pagination}
+                    total={totalItems}
+                />
             </Box>
 
             {/* Bulk Action Bar */}

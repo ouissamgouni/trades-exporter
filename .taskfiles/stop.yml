@@ -2,19 +2,51 @@ version: "3"
 
 tasks:
   dev:
-    desc: Stop dev services
+    desc: Stop all dev services (db + backend + frontend)
+    dotenv: [.env, .env.dev]
+    deps: [dev:db, dev:backend, dev:frontend]
+    cmds:
+      - echo "✅ All dev services stopped"
+
+  dev:db:
+    desc: Stop dev database
+    dotenv: [.env, .env.dev]
     cmds:
       - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter stop
-      - echo "✅ Dev services stopped"
+      - echo "✅ Dev database stopped"
+
+  dev:backend:
+    desc: Stop dev backend
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        if pkill -f "uvicorn backend.api.main:app" 2>/dev/null; then
+          echo "✅ Backend stopped"
+        else
+          echo "ℹ️  Backend not running"
+        fi
+
+  dev:frontend:
+    desc: Stop dev frontend
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        if pkill -f "vite" 2>/dev/null; then
+          echo "✅ Frontend stopped"
+        else
+          echo "ℹ️  Frontend not running"
+        fi
 
   test:
     desc: Stop test stack
+    dotenv: [.env, .env.test]
     cmds:
       - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter stop
       - echo "✅ Test stack stopped"
 
   prod:
     desc: Stop prod stack
+    dotenv: [.env, .env.prod]
     cmds:
       - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter stop
       - echo "✅ Prod stack stopped"

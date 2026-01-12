@@ -175,6 +175,7 @@ class TransactionPipeline:
         result.skipped_count = context.skipped_count
         result.split_count = context.split_count
         result.transfer_count = context.transfer_count
+        result.persistence_result = context.persistence_result  # For sync job tracking
 
         # Calculate split count if not set by stage
         if result.split_count == 0 and len(current_transactions) > original_count:

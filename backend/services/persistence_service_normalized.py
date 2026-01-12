@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Dict, Any, Union, Optional, Tuple
 from sqlmodel import Session, select
 
-from backend.config.loader import configure_logging, is_test_mode
+from backend.config.loader import configure_logging
 from backend.db.database import get_engine
 from backend.db.models import NormalizedTransaction
 from backend.db.repositories import (
@@ -89,10 +89,7 @@ class PersistenceServiceNormalizedTrx:
     def __init__(self):
         """
         Initialize the persistence service with database session.
-
-        Note: Test mode is determined by the TEST_MODE environment variable.
         """
-        self.test_mode = is_test_mode()
         self.engine = get_engine()
         self._session: Optional[Session] = None
 

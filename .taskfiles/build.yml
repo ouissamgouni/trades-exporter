@@ -3,6 +3,7 @@ version: "3"
 tasks:
   test:
     desc: Build Docker images from develop branch (tagged :develop)
+    dotenv: [.env, .env.test]
     cmds:
       - git checkout develop
       - git pull origin develop
@@ -10,13 +11,14 @@ tasks:
         echo "Building images from develop..."
         docker build -t trades-exporter-backend:develop ./backend
         docker build -t trades-exporter-frontend:develop \
-          --build-arg VITE_API_URL=http://localhost:{{.TEST_BACKEND_PORT}} \
+          --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
           ./frontend
         echo ""
         echo "✅ Images built: :develop"
 
   prod:
     desc: Build Docker images from main branch (e.g., task build:prod v1.2.0)
+    dotenv: [.env, .env.prod]
     cmds:
       - |
         VERSION={{.CLI_ARGS}}
@@ -29,7 +31,7 @@ tasks:
         echo "Building images from main as $VERSION..."
         docker build -t trades-exporter-backend:$VERSION ./backend
         docker build -t trades-exporter-frontend:$VERSION \
-          --build-arg VITE_API_URL=http://localhost:{{.PROD_BACKEND_PORT}} \
+          --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
           ./frontend
         docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
         docker tag trades-exporter-frontend:$VERSION trades-exporter-frontend:latest

@@ -53,6 +53,13 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
     def get_raws(self) -> List[Dict[str, Any]]:
         """Get raw token transfers without mapping (for JSON logging)."""
         try:
+            self.update_progress(
+                operation="Fetching token transfers",
+                current=0,
+                total=1,
+                log_message=f"Fetching token transfers for {self.wallet_address[:10]}..."
+            )
+            
             # Blockscout API v2 token transfers endpoint
             result = self.safe_request(
                 f"/addresses/{self.wallet_address}/token-transfers"
@@ -65,9 +72,23 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 return []
 
             log.info(f"   ✅ Found {len(items)} token transfers on {self.chain_name}")
+            
+            self.update_progress(
+                operation="Completed",
+                current=1,
+                total=1,
+                log_message=f"✅ Found {len(items)} token transfers on {self.chain_name}"
+            )
+            
             return items
         except Exception as e:
             log.error(f"   ⚠️ Error fetching token transfers: {e}")
+            self.update_progress(
+                operation="Failed",
+                current=1,
+                total=1,
+                log_message=f"❌ Error: {str(e)[:100]}"
+            )
             raise
 
     def raw_to_normalized(self, tx: Dict) -> NormalizedTransaction:

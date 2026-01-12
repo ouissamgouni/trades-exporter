@@ -19,6 +19,7 @@ from backend.db.repositories.realized_pnl_repository import RealizedPnlRepositor
 from backend.db.repositories.account_connector_repository import (
     AccountConnectorRepository,
 )
+from backend.db.repositories.sync_job_repository import SyncJobRepository
 
 __all__ = [
     "make_json_serializable",
@@ -31,4 +32,5 @@ __all__ = [
     "CostLotRepository",
     "RealizedPnlRepository",
     "AccountConnectorRepository",
+    "SyncJobRepository",
 ]

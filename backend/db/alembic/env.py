@@ -18,16 +18,13 @@ config = context.config
 
 # Check for test_mode flag: alembic -x test_mode=true upgrade head
 x_args = context.get_x_argument(as_dictionary=True)
-test_mode = (
-    x_args.get("test_mode") == "true" or os.getenv("TEST_MODE") == "1"
-)
 
 # Override sqlalchemy.url with our dynamic database URL
-database_url = get_database_url(test_mode=test_mode)
+database_url = get_database_url()
 config.set_main_option("sqlalchemy.url", database_url)
 
 print(
-    f"[Alembic] Using database: {'TEST' if test_mode else 'PROD'} - {database_url.split('@')[-1]}"
+    f"[Alembic] Using database: {os.getenv("APP_ENV")} - {database_url.split('@')[-1]}"
 )
 
 # Interpret the config file for Python logging.

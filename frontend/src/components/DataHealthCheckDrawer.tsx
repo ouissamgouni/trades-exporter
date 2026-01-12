@@ -31,9 +31,9 @@ import {
     FiX,
     FiZap,
 } from 'react-icons/fi';
-import { 
-    API_URL, 
-    DataHealthCheckResponse, 
+import {
+    API_URL,
+    DataHealthCheckResponse,
     TransactionIssue,
     IssueType,
     Asset,
@@ -74,8 +74,8 @@ const ISSUE_CONFIG: Record<IssueType, { color: string; label: string }> = {
 
 const formatDate = (dateStr: string): string => {
     try {
-        return new Date(dateStr).toLocaleDateString('en-US', { 
-            month: 'short', day: 'numeric', year: '2-digit' 
+        return new Date(dateStr).toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: '2-digit'
         });
     } catch {
         return dateStr.slice(0, 10);
@@ -107,7 +107,7 @@ const DirectionIcon: React.FC<{ direction: string }> = ({ direction }) => {
 
 /** Table header row */
 const TableHeader: React.FC = () => (
-    <Flex 
+    <Flex
         px={2} py={1.5}
         bg="gray.50"
         borderBottomWidth={1}
@@ -138,23 +138,23 @@ interface IssueRowProps {
     onAccountsUpdated?: () => void;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ 
-    issue, assets, accounts, onFixed, onAssetsUpdated, onAccountsUpdated 
+const IssueRow: React.FC<IssueRowProps> = ({
+    issue, assets, accounts, onFixed, onAssetsUpdated, onAccountsUpdated
 }) => {
     const [isFixed, setIsFixed] = useState(false);
     const [isApplying, setIsApplying] = useState(false);
-    
+
     const config = ISSUE_CONFIG[issue.issue_type];
     const isAccountIssue = issue.issue_type === 'account';
-    
+
     // API call to map raw asset/account
     const mapRawItem = async (id: number) => {
         const endpoint = isAccountIssue ? 'raw-accounts' : 'raw-assets';
         const idKey = isAccountIssue ? 'account_id' : 'asset_id';
-        const createBody = isAccountIssue 
+        const createBody = isAccountIssue
             ? { label: issue.raw_value, source: issue.source, account_id: id }
             : { symbol: issue.raw_value, source: issue.source, asset_id: id };
-        
+
         const response = await fetch(
             `${API_URL}/${endpoint}/${encodeURIComponent(issue.source)}/${encodeURIComponent(issue.raw_value)}`,
             {
@@ -163,7 +163,7 @@ const IssueRow: React.FC<IssueRowProps> = ({
                 body: JSON.stringify({ [idKey]: id }),
             }
         );
-        
+
         // If not found, create it
         if (response.status === 404) {
             await fetch(`${API_URL}/${endpoint}`, {
@@ -175,7 +175,7 @@ const IssueRow: React.FC<IssueRowProps> = ({
             throw new Error(`Failed to map ${isAccountIssue ? 'account' : 'asset'}`);
         }
     };
-    
+
     // Handle selector change (selector handles API call via linkRawAsset/linkRawAccount)
     const handleSelect = (id: number | null) => {
         if (!id) return;
@@ -186,11 +186,11 @@ const IssueRow: React.FC<IssueRowProps> = ({
         });
         onFixed();
     };
-    
+
     // Handle suggestion accept (direct API call)
     const handleAcceptSuggestion = async () => {
         if (!issue.suggestion || !issue.raw_value) return;
-        
+
         setIsApplying(true);
         try {
             await mapRawItem(issue.suggestion.id);
@@ -209,13 +209,13 @@ const IssueRow: React.FC<IssueRowProps> = ({
             setIsApplying(false);
         }
     };
-    
+
     const suggestionConfidence = issue.suggestion?.confidence ?? 0;
-    const suggestionColor = suggestionConfidence >= 0.9 ? 'green' 
+    const suggestionColor = suggestionConfidence >= 0.9 ? 'green'
         : suggestionConfidence >= 0.7 ? 'blue' : 'gray';
-    
+
     return (
-        <Flex 
+        <Flex
             px={2} py={1}
             bg={isFixed ? 'green.50' : 'white'}
             borderBottomWidth={1}
@@ -227,9 +227,9 @@ const IssueRow: React.FC<IssueRowProps> = ({
             {/* ID with tooltip */}
             <Box w={COLS.ID}>
                 <TransactionTooltip txId={issue.transaction_id}>
-                    <Text 
-                        color="blue.500" 
-                        fontFamily="mono" 
+                    <Text
+                        color="blue.500"
+                        fontFamily="mono"
                         cursor="help"
                         _hover={{ textDecoration: 'underline' }}
                     >
@@ -237,12 +237,12 @@ const IssueRow: React.FC<IssueRowProps> = ({
                     </Text>
                 </TransactionTooltip>
             </Box>
-            
+
             {/* Date */}
             <Box w={COLS.DATE}>
                 <Text color="gray.500">{formatDate(issue.date_time)}</Text>
             </Box>
-            
+
             {/* Transaction */}
             <Box w={COLS.TX}>
                 <Flex align="center" gap={1}>
@@ -252,21 +252,21 @@ const IssueRow: React.FC<IssueRowProps> = ({
                     </Text>
                 </Flex>
             </Box>
-            
+
             {/* Issue Type */}
             <Box w={COLS.TYPE}>
                 <Badge size="xs" colorPalette={config.color} variant="subtle">
                     {config.label}
                 </Badge>
             </Box>
-            
+
             {/* Raw Value */}
             <Box w={COLS.VALUE}>
                 <Text color="gray.600" truncate title={issue.raw_value}>
                     {issue.raw_value || '—'}
                 </Text>
             </Box>
-            
+
             {/* Action */}
             <Box w={COLS.ACTION}>
                 {isFixed ? (
@@ -337,6 +337,7 @@ interface DataHealthCheckDrawerProps {
     accounts?: Account[];
     onAssetsUpdated?: () => void;
     onAccountsUpdated?: () => void;
+    onIssueFixed?: () => void;
 }
 
 export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
@@ -350,6 +351,7 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     accounts = [],
     onAssetsUpdated,
     onAccountsUpdated,
+    onIssueFixed,
 }) => {
     const [data, setData] = useState<DataHealthCheckResponse | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -370,10 +372,10 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
             if (accountIds?.length) {
                 params.set('account_ids', accountIds.join(','));
             }
-            
+
             const response = await fetch(`${API_URL}/transactions/data-health-check?${params}`);
             if (!response.ok) throw new Error('Failed to fetch data health check');
-            
+
             setData(await response.json());
             setPage(pageNum);
         } catch (err) {
@@ -394,8 +396,9 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
             fetchData(page);
             onAssetsUpdated?.();
             onAccountsUpdated?.();
+            onIssueFixed?.();
         }, 500);
-    }, [page, fetchData, onAssetsUpdated, onAccountsUpdated]);
+    }, [page, fetchData, onAssetsUpdated, onAccountsUpdated, onIssueFixed]);
 
     // High confidence suggestions for bulk apply
     const highConfidenceIssues = (data?.issues_list ?? []).filter(
@@ -405,13 +408,13 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     // Apply all high-confidence suggestions
     const handleApplyAll = async () => {
         if (!highConfidenceIssues.length) return;
-        
+
         setIsApplyingAll(true);
         try {
             // Group by type
             const assetIssues = highConfidenceIssues.filter(i => i.issue_type !== 'account');
             const accountIssues = highConfidenceIssues.filter(i => i.issue_type === 'account');
-            
+
             // Bulk map assets (deduplicated)
             if (assetIssues.length) {
                 const unique = new Map(assetIssues.map(i => [`${i.source}:${i.raw_value}`, i]));
@@ -427,7 +430,7 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                     }),
                 });
             }
-            
+
             // Map accounts individually (deduplicated)
             if (accountIssues.length) {
                 const unique = new Map(accountIssues.map(i => [`${i.source}:${i.raw_value}`, i]));
@@ -442,7 +445,7 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                     );
                 }
             }
-            
+
             toaster.success({
                 title: 'Applied suggestions',
                 description: `${highConfidenceIssues.length} fix(es) applied`,
@@ -557,11 +560,11 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                     {data && (
                         <VStack gap={3} align="stretch">
                             {/* Summary */}
-                            <Flex 
-                                align="center" 
-                                gap={3} 
-                                p={2} 
-                                bg="gray.50" 
+                            <Flex
+                                align="center"
+                                gap={3}
+                                p={2}
+                                bg="gray.50"
                                 borderRadius="md"
                                 justify="space-between"
                                 flexWrap="wrap"
@@ -572,9 +575,9 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                 </Text>
                                 <HStack gap={3}>
                                     <Text><b>{data.total_count}</b> total</Text>
-                                    <Text><b style={{color: 'var(--chakra-colors-green-600)'}}>{data.valid_count}</b> valid</Text>
-                                    <Text><b style={{color: 'var(--chakra-colors-yellow-600)'}}>{data.pending_count}</b> pending</Text>
-                                    <Text><b style={{color: 'var(--chakra-colors-red-600)'}}>{data.invalid_count}</b> invalid</Text>
+                                    <Text><b style={{ color: 'var(--chakra-colors-green-600)' }}>{data.valid_count}</b> valid</Text>
+                                    <Text><b style={{ color: 'var(--chakra-colors-yellow-600)' }}>{data.pending_count}</b> pending</Text>
+                                    <Text><b style={{ color: 'var(--chakra-colors-red-600)' }}>{data.invalid_count}</b> invalid</Text>
                                 </HStack>
                             </Flex>
 

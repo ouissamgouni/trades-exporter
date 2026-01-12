@@ -2,7 +2,7 @@
 Configuration loader with environment variable support.
 
 This module provides configuration loading from both:
-- Environment variables (.env file) - for secrets and database config
+- Environment variables - for secrets and database config
 - YAML files - for non-sensitive settings
 
 Environment variables take precedence over YAML settings.
@@ -10,6 +10,10 @@ Environment variables take precedence over YAML settings.
 DATABASE_URL: The primary way to configure the database connection.
 If DATABASE_URL is set, it is used directly. Otherwise, falls back to
 constructing URL from individual POSTGRES_* environment variables.
+
+Note: Environment variables should be loaded by the orchestration layer
+(Taskfile, Docker, K8s). The optional load_dotenv() call below is a 
+fallback for running Python scripts directly outside of task orchestration.
 """
 
 import os
@@ -19,11 +23,9 @@ import logging
 import structlog
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
-
+# Note: Environment variables are loaded by the orchestration layer (Taskfile, Docker, K8s)
+# This module only reads from os.getenv() - no dotenv loading needed
 CONFIG_DIR = Path(__file__).parent
 
 # Default database URL for local development
@@ -67,46 +69,6 @@ def get_database_path() -> str:
     return get_database_url()
 
 
-# Legacy functions for backward compatibility during migration
-# TODO: Remove these after full migration to DATABASE_URL
-
-_test_mode_override: bool | None = None
-
-
-def set_test_mode(enabled: bool):
-    """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Set global test mode override.
-    """
-    global _test_mode_override
-    _test_mode_override = enabled
-    # Log deprecation warning
-    logging.warning(
-        "set_test_mode() is deprecated. Use DATABASE_URL environment variable instead."
-    )
-
-
-def is_test_mode() -> bool:
-    """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Check if test mode is enabled (via override, env var, or settings).
-    """
-    global _test_mode_override
-    if _test_mode_override is not None:
-        return _test_mode_override
-
-    # Check environment variable first
-    env_test_mode = os.getenv("TEST_MODE", "").lower()
-    if env_test_mode in ("true", "1", "yes"):
-        return True
-    if env_test_mode in ("false", "0", "no"):
-        return False
-
-    # Fall back to settings.yaml
-    settings = load_settings()
-    return settings.get("test_mode", False)
-
-
 def load_settings(path: str | None = None) -> dict:
     """Load settings.yaml from config directory or provided path."""
     p = Path(path) if path else CONFIG_DIR / "settings.yaml"
@@ -138,6 +100,68 @@ def get_coingecko_api_keys() -> List[str]:
 
     settings = load_settings()
     return settings.get("coingecko_api_keys", [])
+
+
+def get_price_getter_override() -> Optional[str]:
+    """
+    Get global price getter override for testing.
+    
+    When set, forces ALL assets to use the specified price getter,
+    bypassing asset-specific configurations and defaults.
+    
+    Environment variable takes precedence over settings.yaml.
+    
+    Usage:
+        # Enable mock prices for quick manual testing
+        PRICE_GETTER_OVERRIDE=mock python -m backend.api.run
+    
+    Returns:
+        Price getter name to use globally, or None if not set.
+    """
+    override = os.getenv("PRICE_GETTER_OVERRIDE")
+    if override:
+        return override.lower()
+    
+    settings = load_settings()
+    override_setting = settings.get("price_getter_override")
+    if override_setting:
+        return override_setting.lower()
+    
+    return None
+
+
+def get_mock_prices_seed() -> Optional[int]:
+    """
+    Get seed for mock price generator for reproducible tests.
+    
+    When set, MockPriceGetter will use this seed for random.seed(),
+    making generated prices deterministic across runs.
+    
+    Environment variable takes precedence over settings.yaml.
+    
+    Usage:
+        # Reproducible mock prices
+        PRICE_GETTER_OVERRIDE=mock MOCK_PRICES_SEED=42 python -m backend.api.run
+    
+    Returns:
+        Integer seed value, or None if not set.
+    """
+    env_seed = os.getenv("MOCK_PRICES_SEED")
+    if env_seed:
+        try:
+            return int(env_seed)
+        except ValueError:
+            return None
+    
+    settings = load_settings()
+    seed_setting = settings.get("mock_prices_seed")
+    if seed_setting is not None:
+        try:
+            return int(seed_setting)
+        except (ValueError, TypeError):
+            return None
+    
+    return None
 
 
 def load_credentials(exchange_name: str) -> dict:
