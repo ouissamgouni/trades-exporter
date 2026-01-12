@@ -297,19 +297,23 @@ class TestEnrichTransaction:
         assert enriched.from_account_id == 1
         assert enriched.to_account_id == 2
         assert enriched.transaction_type == "transfer"
-    assert enriched.disposal_taxable is False  # Should be marked non-taxable
-        from backend.services.transfer_detector import TransferDetector
+        assert enriched.disposal_taxable is False  # Should be marked non-taxable
 
-        session = MockSession()
-        session.accounts[1] = Account(id=1, name="Exchange", owned=False)
-        session.accounts[2] = Account(id=2, name="My Wallet", owned=True)
 
-        mock_repo = MockRawAccountRepository()
-        mock_repo.add_mapping("blockscout_base", "0xexchange", 1)
-        mock_repo.add_mapping("blockscout_base", "0xmywallet", 2)
+def test_enrich_transfer_from_unowned_to_owned():
+    """Test that a transfer from unowned to owned account is marked non-taxable."""
+    from backend.services.transfer_detector import TransferDetector
 
-        detector = TransferDetector(session)
-        detector.raw_account_repo = mock_repo
+    session = MockSession()
+    session.accounts[1] = Account(id=1, name="Exchange", owned=False)
+    session.accounts[2] = Account(id=2, name="My Wallet", owned=True)
+
+    mock_repo = MockRawAccountRepository()
+    mock_repo.add_mapping("blockscout_base", "0xexchange", 1)
+    mock_repo.add_mapping("blockscout_base", "0xmywallet", 2)
+
+    detector = TransferDetector(session)
+    detector.raw_account_repo = mock_repo
 
         tx = make_tx(
             source="blockscout_base",
