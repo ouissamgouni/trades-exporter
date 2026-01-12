@@ -297,10 +297,7 @@ class TestEnrichTransaction:
         assert enriched.from_account_id == 1
         assert enriched.to_account_id == 2
         assert enriched.transaction_type == "transfer"
-        assert enriched.taxable is False  # Should be marked non-taxable
-
-    def test_enrich_external_transfer(self):
-        """External transfer should NOT be marked as transfer type."""
+    assert enriched.disposal_taxable is False  # Should be marked non-taxable
         from backend.services.transfer_detector import TransferDetector
 
         session = MockSession()
@@ -332,11 +329,7 @@ class TestEnrichTransaction:
         assert enriched.to_account_id == 2
         # Should NOT be changed to transfer type (external transfer)
         assert enriched.transaction_type == "inflow"
-        assert enriched.taxable is True
-
-    def test_enrich_no_addresses(self):
-        """Transaction without addresses should pass through unchanged."""
-        from backend.services.transfer_detector import TransferDetector
+    assert enriched.disposal_taxable is True
 
         session = MockSession()
         detector = TransferDetector(session)

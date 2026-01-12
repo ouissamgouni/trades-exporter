@@ -2279,7 +2279,6 @@ def get_unit_warnings(
     unit_warnings = session.exec(
         select(PnlWarning)
         .where(PnlWarning.unit_id == unit_id)
-        .where(PnlWarning.version_id == version_id)
         .order_by(PnlWarning.created_at)
     ).all()
     
@@ -2532,29 +2531,56 @@ def delete_version(
     Delete a calculation version and all associated data.
     
     Use with caution - this permanently removes the version.
+    Cannot delete committed versions.
     """
     version = session.get(CalculationVersion, version_id)
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
+    if version.status == "committed":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete committed version {version_id}"
+        )
+    
     # Delete in order due to FK constraints
-    # (Most child tables have ON DELETE CASCADE in migrations, but be explicit)
-    for w in session.exec(select(PnlWarning).where(PnlWarning.version_id == version_id)).all():
-        session.delete(w)
+    # Delete child records. Most have ON DELETE CASCADE in the DB, but we explicitly
+    # delete them here for clarity and to ensure proper cleanup.
+    # Note: Many child tables don't have direct version_id FK - they access version via
+    # parent relationships (e.g., PnlWarning→unit→version, CostLot→unit→version).
     
-    for s in session.exec(select(LotSettlement).where(LotSettlement.version_id == version_id)).all():
-        session.delete(s)
+    # Get all units for this version first
+    units = session.exec(select(CalculationUnit).where(CalculationUnit.version_id == version_id)).all()
     
-    for cs in session.exec(select(ConsumedLotSlice).where(ConsumedLotSlice.version_id == version_id)).all():
-        session.delete(cs)
+    # Delete PnlWarnings (owned by units, no direct version_id FK)
+    for unit in units:
+        for w in unit.warnings or []:
+            session.delete(w)
     
-    for r in session.exec(select(RealizedPnl).where(RealizedPnl.version_id == version_id)).all():
-        session.delete(r)
+    # Delete LotSettlements (owned by lots, no direct version_id FK)
+    for unit in units:
+        for lot in unit.cost_lots or []:
+            for s in lot.outgoing_settlements or []:
+                session.delete(s)
     
-    for l in session.exec(select(CostLot).where(CostLot.version_id == version_id)).all():
-        session.delete(l)
+    # Delete ConsumedLotSlices (owned by lots, no direct version_id FK)
+    for unit in units:
+        for lot in unit.cost_lots or []:
+            for cs in lot.consumed_slices or []:
+                session.delete(cs)
     
-    for u in session.exec(select(CalculationUnit).where(CalculationUnit.version_id == version_id)).all():
+    # Delete RealizedPnl (owned by units, no direct version_id FK)
+    for unit in units:
+        for r in unit.realized_pnl_records or []:
+            session.delete(r)
+    
+    # Delete CostLots (owned by units, no direct version_id FK)
+    for unit in units:
+        for lot in unit.cost_lots or []:
+            session.delete(lot)
+    
+    # Finally delete the units themselves
+    for u in units:
         session.delete(u)
     
     session.delete(version)

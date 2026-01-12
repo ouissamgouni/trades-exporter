@@ -153,6 +153,11 @@ def _process_disposals(
     - Lots are consumed normally
     - P&L realization is SKIPPED (no RealizedPnl created)
     - Warning is emitted with consumed slice details for user visibility
+    
+    For cost-basis transfers (transfer/split patterns):
+    - Lots are consumed normally
+    - P&L realization is SKIPPED (no RealizedPnl created)
+    - Cost basis is preserved and transferred to new lots
 
     Returns:
         List of all consumed slices (for inflow processing)
@@ -160,6 +165,7 @@ def _process_disposals(
     all_consumed_slices: List[ConsumedLotSlice] = []
     taxability_calculator = TaxabilityCalculator(config)
     is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
+    is_cost_basis_transfer = unit.is_cost_basis_transfer
 
     for disposal in disposals:
         asset_id = disposal.asset_id
@@ -209,7 +215,11 @@ def _process_disposals(
                 legs=[disposal],
                 slices=slices,
             )
-        # Compute P&L if disposal is taxable (and not pending transfer)
+        # For cost-basis transfers (transfer/split): skip P&L realization
+        # Cost basis will be preserved and transferred to new lots in _handle_cost_basis_transfer
+        elif is_cost_basis_transfer and slices:
+            pass  # No P&L realization for transfers/splits
+        # Compute P&L for taxable disposals (not transfers/splits)
         elif slices:
             _proceeds_and_pnl_entry(
                 disposal=disposal,
@@ -372,6 +382,12 @@ def _consume_lots(
     for slice in slices:
         slice.consumed_at = disposal_dt
         slice.consumed_by_leg_id = disposal.id  # Link to the leg that consumed this slice
+        slice.unit_id = unit.id  # Link to the unit that consumed this slice
+        slice.unit = unit  # Set relationship for auto-population of unit.consumed_slices
+        # Manually add to unit.consumed_slices since relationship might not be bidirectional
+        if unit.consumed_slices is None:
+            unit.consumed_slices = []
+        unit.consumed_slices.append(slice)
 
     if negative_lot:
         # Set origin traceability on the negative lot
@@ -871,11 +887,12 @@ def _handle_cost_basis_transfer(
             qty=new_qty,
             qty_remaining=new_qty,
             unit_cost_in_base=unit_cost,
-            acquired_at=ensure_utc(slice.cost_lot.acquired_at) if slice.cost_lot and slice.cost_lot.acquired_at else utc_now(),  # Preserve original holding period
+            acquired_at=ensure_utc(slice.acquired_at) if hasattr(slice, 'acquired_at') and slice.acquired_at else utc_now(),  # Preserve original holding period
             origin_transaction_id=inflow.origin_transaction_id,
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
-            notes=f"Transfer (from lot {slice.cost_lot.cost_lot_id if slice.cost_lot else 'unknown'})",
+            unit=unit,  # Relationship object for persistence - auto-populates unit.cost_lots
+            notes=f"Transfer (from lot {slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else 'unknown'})",
         )
         lot_manager.add_lot(
             new_lot,
@@ -883,6 +900,8 @@ def _handle_cost_basis_transfer(
             triggered_by_unit=unit,
             transfer_metadata={"is_transfer": True},
         )
+        # Manual append needed when objects aren't persisted yet
+        # SQLAlchemy relationship auto-population doesn't work reliably until commit
         if unit.cost_lots is None:
             unit.cost_lots = []
         unit.cost_lots.append(new_lot)

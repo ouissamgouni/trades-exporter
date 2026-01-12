@@ -14,14 +14,14 @@ tasks:
     desc: Run database migrations on test
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test python -m alembic upgrade head
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend python -m alembic upgrade head
       - echo "✅ Test database migrated"
 
   migrate:prod:
     desc: Run database migrations on prod
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter exec backend_prod python -m alembic upgrade head
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend python -m alembic upgrade head
       - echo "✅ Prod database migrated"
 
   seed:dev:
@@ -37,7 +37,7 @@ tasks:
     desc: Seed test database
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test python scripts/seed.py
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend python scripts/seed.py
       - echo "✅ Test database seeded"
 
   reset:dev:
@@ -57,7 +57,7 @@ tasks:
     prompt: This will DELETE all data in test database. Continue?
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter exec backend_test sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
       - echo "✅ Test database reset and seeded"
 
   reset:prod:
@@ -65,5 +65,5 @@ tasks:
     prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter exec backend_prod sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
       - echo "⚠️ Prod database reset"
