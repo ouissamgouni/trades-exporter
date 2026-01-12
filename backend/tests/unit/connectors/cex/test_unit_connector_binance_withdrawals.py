@@ -55,7 +55,7 @@ class TestBinanceWithdrawalsConnector:
         assert result.source_transaction_id == "wd12345"
         assert result.direction == "outflow"
         assert result.source_transaction_type == "withdrawal"
-        assert result.transaction_type is None  # To be classified later
+        assert result.transaction_type == "transfer"  # Withdrawals are transfers
         assert result.source_asset_symbol == "ETH"
         assert result.quantity == 1.5
         assert result.fee == 0.005

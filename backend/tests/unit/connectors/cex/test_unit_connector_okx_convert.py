@@ -59,7 +59,7 @@ class TestOKXConvertConnector:
         assert result.source_transaction_id == "conv12345"
         assert result.direction == "inflow"  # Buy = inflow of base asset
         assert result.source_transaction_type == "buy"
-        assert result.transaction_type == "acquisition"  # Buy converts to acquisition
+        assert result.transaction_type == "trade"  # All converts use 'trade' type
         assert result.source_asset_symbol == "BTC"
         assert result.quantity == 0.02
         assert result.price == 50000.0
@@ -110,7 +110,7 @@ class TestOKXConvertConnector:
         assert result.source_transaction_id == "conv67890"
         assert result.direction == "outflow"  # Sell = outflow of base asset
         assert result.source_transaction_type == "sell"
-        assert result.transaction_type == "disposal"  # Sell converts to disposal
+        assert result.transaction_type == "trade"  # All converts use 'trade' type
         assert result.source_asset_symbol == "ETH"
         assert result.quantity == 1.0
         assert result.price == 3500.0

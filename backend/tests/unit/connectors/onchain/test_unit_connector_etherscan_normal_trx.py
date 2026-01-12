@@ -47,7 +47,7 @@ class TestEtherscanNormalTxConnector:
             )
             assert normalized_tx.source_asset_symbol == "ETH"
             assert normalized_tx.direction == "inflow"
-            assert normalized_tx.transaction_type is None  # To be classified later
+            assert normalized_tx.transaction_type == "transfer"  # Onchain transactions are transfers
             assert normalized_tx.quantity == 2.0  # 2 ETH
             assert normalized_tx.fee == 0.0021  # 0.0021 ETH
             assert normalized_tx.source_fee_quote_asset_symbol == "ETH"
@@ -93,7 +93,7 @@ class TestEtherscanNormalTxConnector:
             assert normalized_tx.direction == "outflow"
             assert normalized_tx.quantity == 1.5  # 1.5 ETH
             assert normalized_tx.source_transaction_type == "normal-tx"
-            assert normalized_tx.transaction_type is None  # To be classified later
+            assert normalized_tx.transaction_type == "transfer"  # Onchain transactions are transfers
             assert normalized_tx.fee == 0.00168
             assert normalized_tx.source_fee_quote_asset_symbol == "ETH"
             assert normalized_tx.include_fee is True

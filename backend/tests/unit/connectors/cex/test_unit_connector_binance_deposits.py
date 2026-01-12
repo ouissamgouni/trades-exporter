@@ -55,7 +55,7 @@ class TestBinanceDepositsConnector:
         assert result.source_transaction_id == "dep12345"
         assert result.direction == "inflow"
         assert result.source_transaction_type == "deposit"
-        assert result.transaction_type is None  # To be classified later
+        assert result.transaction_type == "transfer"  # Deposits are transfers
         assert result.source_asset_symbol == "ETH"
         assert result.quantity == 1.5
         assert result.fee == 0.001

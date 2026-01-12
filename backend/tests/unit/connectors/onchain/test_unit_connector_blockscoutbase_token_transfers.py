@@ -53,7 +53,7 @@ class TestBlockscoutBaseTokenTransfersConnector:
             assert normalized_tx.source_to_account == "0xtest_wallet"
             assert normalized_tx.direction == "inflow"
             assert normalized_tx.quantity == 1000.0  # 1000 USDC
-            assert normalized_tx.transaction_type is None  # To be classified later
+            assert normalized_tx.transaction_type == "transfer"  # Onchain transactions are transfers
             assert normalized_tx.fee == 0.0013  # 0.0013 ETH
             assert normalized_tx.source_fee_quote_asset_symbol == "ETH"
             assert normalized_tx.include_fee is False
@@ -102,7 +102,7 @@ class TestBlockscoutBaseTokenTransfersConnector:
             assert normalized_tx.source_to_account == "0xRECEIVER_ADDRESS"
             assert normalized_tx.direction == "outflow"
             assert normalized_tx.quantity == 500.0  # 500 DAI
-            assert normalized_tx.transaction_type is None  # To be classified later
+            assert normalized_tx.transaction_type == "transfer"  # Onchain transactions are transfers
             assert normalized_tx.fee == 0.00175  # 0.00175 ETH
             assert normalized_tx.source_fee_quote_asset_symbol == "ETH"
             assert normalized_tx.include_fee is True

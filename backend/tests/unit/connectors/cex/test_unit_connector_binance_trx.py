@@ -44,7 +44,7 @@ class TestBinanceConnector:
         assert result.source == "binance-transactions"
         assert result.source_transaction_id == "12345"
         assert result.direction == "inflow"
-        assert result.transaction_type == "acquisition"  # Normalized from "buy"
+        assert result.transaction_type == "trade"  # All CEX trades use 'trade' type
         assert result.source_transaction_type == "buy"  # Original preserved
         assert result.quantity == 0.1
         assert result.price == 50000.0

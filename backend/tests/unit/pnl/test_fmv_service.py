@@ -56,7 +56,8 @@ class TestFMVService:
     def test_fallback_on_price_service_error(self, fifo_config, base_datetime):
         """Should return zero on price service error."""
         mock_service = Mock()
-        mock_service.get_price.side_effect = Exception("API error")
+        # FMVService calls get_price_with_fallback when use_price_fallback=True (default)
+        mock_service.get_price_with_fallback.side_effect = Exception("API error")
 
         fmv_service = FMVService(mock_service, fifo_config)
 
@@ -76,7 +77,8 @@ class TestFMVService:
     def test_caches_failed_lookups(self, fifo_config, base_datetime):
         """Should cache failed lookups to avoid repeated calls."""
         mock_service = Mock()
-        mock_service.get_price.side_effect = Exception("API error")
+        # FMVService calls get_price_with_fallback when use_price_fallback=True (default)
+        mock_service.get_price_with_fallback.side_effect = Exception("API error")
 
         fmv_service = FMVService(mock_service, fifo_config)
 
@@ -91,13 +93,14 @@ class TestFMVService:
         # Second call (should use cache)
         fmv_service.get_fmv_in_base(tx)
 
-        # Price service should only be called once
-        assert mock_service.get_price.call_count == 1
+        # Price service should only be called once (get_price_with_fallback is the method used)
+        assert mock_service.get_price_with_fallback.call_count == 1
 
     def test_clear_cache(self, fifo_config, base_datetime):
         """Should clear failed lookup cache."""
         mock_service = Mock()
-        mock_service.get_price.side_effect = Exception("API error")
+        # FMVService calls get_price_with_fallback when use_price_fallback=True (default)
+        mock_service.get_price_with_fallback.side_effect = Exception("API error")
 
         fmv_service = FMVService(mock_service, fifo_config)
 
@@ -116,4 +119,4 @@ class TestFMVService:
         # Second call (should hit service again)
         fmv_service.get_fmv_in_base(tx)
 
-        assert mock_service.get_price.call_count == 2
+        assert mock_service.get_price_with_fallback.call_count == 2

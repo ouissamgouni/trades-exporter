@@ -147,11 +147,17 @@ def mock_realized_pnl():
     entry.proceeds_in_base = Decimal("2000")
     entry.cost_basis_in_base = Decimal("1000")
     entry.pnl_in_base = Decimal("1000")
-    entry.taxable = True
+    entry.disposal_taxable = True  # Actual field name in RealizedPnl
     entry.transaction_id = 100
     entry.origin_unit_id = 1
     entry.realized_at = datetime.utcnow()
     entry.holding_period_days = 400
+    
+    # Proceeds tracking metadata
+    entry.proceeds_source = "inflow_value"
+    entry.proceeds_price = Decimal("2000")
+    entry.proceeds_price_source = "price_service"
+    entry.proceeds_price_timestamp = datetime.utcnow()
     
     # Mock asset relationship
     entry.asset = MagicMock()
@@ -172,11 +178,13 @@ class TestGetVersionLots:
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = []
+        mock_exec_result.one.return_value = 0  # total count
         mock_session.exec.return_value = mock_exec_result
         
         result = get_version_lots(version_id=1, session=mock_session)
         
-        assert result == []
+        assert result["items"] == []
+        assert result["total"] == 0
 
     def test_get_lots_returns_formatted_lots(self, mock_session, mock_version, mock_cost_lot):
         """Test getting lots returns properly formatted response."""
@@ -185,14 +193,15 @@ class TestGetVersionLots:
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = [mock_cost_lot]
+        mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
         result = get_version_lots(version_id=1, session=mock_session)
         
-        assert len(result) == 1
-        lot = result[0]
+        assert len(result["items"]) == 1
+        lot = result["items"][0]
         assert lot.asset.id == 2
-        assert lot.asset.name == "BTC"
+        assert lot.asset.symbol == "BTC"
         assert lot.qty_original == 10.0
         assert lot.qty_remaining == 8.0
         assert lot.account_name == "Binance"
@@ -216,16 +225,16 @@ class TestGetVersionLots:
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = [mock_cost_lot]
+        mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
         result = get_version_lots(version_id=1, asset_id=2, session=mock_session)
         
         # Verify the query was built with asset_id filter
-        mock_session.exec.assert_called_once()
-        query = mock_session.exec.call_args[0][0]
+        mock_session.exec.assert_called()
         
-        assert len(result) == 1
-        lot = result[0]
+        assert len(result["items"]) == 1
+        lot = result["items"][0]
         assert lot.asset.id == 2
 
 
@@ -264,14 +273,15 @@ class TestGetVersionRealizedPnl:
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = [mock_realized_pnl]
+        mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
         result = get_version_realized_pnl(version_id=1, session=mock_session)
         
-        assert len(result) == 1
-        entry = result[0]
+        assert len(result["items"]) == 1
+        entry = result["items"][0]
         assert entry.asset.id == 2
-        assert entry.asset.name == "BTC"
+        assert entry.asset.symbol == "BTC"
         assert entry.qty == 1.0
         assert entry.pnl_in_base == 1000.0
         assert entry.taxable is True
@@ -340,7 +350,7 @@ class TestListVersions:
         version = result[0]
         assert version.version_id == 1
         assert version.status == "draft"
-        assert version.method == "FIFO"
+        assert version.lot_method == "FIFO"
 
     def test_list_versions_filters_by_status(self, mock_session):
         """Test listing versions with status filter."""

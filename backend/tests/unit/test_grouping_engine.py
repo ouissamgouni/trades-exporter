@@ -21,6 +21,7 @@ from backend.services.grouping_engine import (
     PATTERN_SWAP,
     PATTERN_UNKNOWN,
 )
+from backend.db.models import NormalizedTransaction
 
 
 # =============================================================================
@@ -60,9 +61,9 @@ def make_tx(
     quantity: Decimal = Decimal("1.0"),
     total_in_base: Decimal = None,
     network: str = None,
-) -> TransactionData:
+) -> NormalizedTransaction:
     """Helper to create test transaction data."""
-    return TransactionData(
+    tx = NormalizedTransaction(
         id=id,
         source=source,
         source_transaction_id=source_transaction_id,
@@ -73,7 +74,6 @@ def make_tx(
         asset_id=asset_id,
         source_asset_symbol=symbol,
         quantity=quantity,
-        total_in_base=total_in_base,
         account_id=account_id,
         to_account_id=to_account_id,
         from_account_id=from_account_id,
@@ -81,6 +81,11 @@ def make_tx(
         source_from_account=None,
         network=network,
     )
+    # Set total property (which derives price from total/quantity)
+    # The grouping engine uses total property for value matching
+    if total_in_base is not None:
+        tx.total = total_in_base
+    return tx
 
 
 # =============================================================================
