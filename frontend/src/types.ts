@@ -731,5 +731,46 @@ export interface ValidationSummary {
     total_issues: number;
 }
 
-export const API_URL = 'http://localhost:8000';
+/**
+ * Get the default API URL based on the current frontend port.
+ * This provides safe fallback behavior when VITE_API_URL is not set.
+ * 
+ * Port mapping:
+ * - 5173 (Vite dev server) → Backend on 8000 (dev)
+ * - 3001 (Docker test) → Backend on 8001 (test)
+ * - 3000 (Docker prod) → Backend on 8080 (prod)
+ */
+const getDefaultApiUrl = (): string => {
+    // Server-side rendering guard (not applicable for this SPA, but good practice)
+    if (typeof window === 'undefined') {
+        return 'http://localhost:8000';
+    }
+
+    const port = window.location.port;
+
+    // Map frontend port to corresponding backend port
+    switch (port) {
+        case '5173': // Vite dev server
+            return 'http://localhost:8000';
+        case '3001': // Docker test environment
+            return 'http://localhost:8001';
+        case '3000': // Docker prod environment
+            return 'http://localhost:8080';
+        default:
+            // Fallback for unknown ports (e.g., running on different port)
+            console.warn(`Unknown frontend port: ${port}. Defaulting to dev backend (8000).`);
+            return 'http://localhost:8000';
+    }
+};
+
+/**
+ * Backend API URL
+ * 
+ * Priority:
+ * 1. VITE_API_URL environment variable (set at Docker build time)
+ * 2. Runtime detection based on window.location.port (safe fallback)
+ * 
+ * This prevents dangerous cross-environment connections (e.g., prod frontend → dev backend)
+ */
+export const API_URL = import.meta.env.VITE_API_URL || getDefaultApiUrl();
 

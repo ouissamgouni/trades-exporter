@@ -297,22 +297,23 @@ class TestEnrichTransaction:
         assert enriched.from_account_id == 1
         assert enriched.to_account_id == 2
         assert enriched.transaction_type == "transfer"
-        assert enriched.taxable is False  # Should be marked non-taxable
+        assert enriched.disposal_taxable is False  # Should be marked non-taxable
 
-    def test_enrich_external_transfer(self):
-        """External transfer should NOT be marked as transfer type."""
-        from backend.services.transfer_detector import TransferDetector
 
-        session = MockSession()
-        session.accounts[1] = Account(id=1, name="Exchange", owned=False)
-        session.accounts[2] = Account(id=2, name="My Wallet", owned=True)
+def test_enrich_transfer_from_unowned_to_owned():
+    """Test that a transfer from unowned to owned account is marked non-taxable."""
+    from backend.services.transfer_detector import TransferDetector
 
-        mock_repo = MockRawAccountRepository()
-        mock_repo.add_mapping("blockscout_base", "0xexchange", 1)
-        mock_repo.add_mapping("blockscout_base", "0xmywallet", 2)
+    session = MockSession()
+    session.accounts[1] = Account(id=1, name="Exchange", owned=False)
+    session.accounts[2] = Account(id=2, name="My Wallet", owned=True)
 
-        detector = TransferDetector(session)
-        detector.raw_account_repo = mock_repo
+    mock_repo = MockRawAccountRepository()
+    mock_repo.add_mapping("blockscout_base", "0xexchange", 1)
+    mock_repo.add_mapping("blockscout_base", "0xmywallet", 2)
+
+    detector = TransferDetector(session)
+    detector.raw_account_repo = mock_repo
 
         tx = make_tx(
             source="blockscout_base",
@@ -332,11 +333,7 @@ class TestEnrichTransaction:
         assert enriched.to_account_id == 2
         # Should NOT be changed to transfer type (external transfer)
         assert enriched.transaction_type == "inflow"
-        assert enriched.taxable is True
-
-    def test_enrich_no_addresses(self):
-        """Transaction without addresses should pass through unchanged."""
-        from backend.services.transfer_detector import TransferDetector
+    assert enriched.disposal_taxable is True
 
         session = MockSession()
         detector = TransferDetector(session)

@@ -17,7 +17,6 @@ from decimal import Decimal
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
-    TransactionData,
     PATTERN_TRANSFER,
     PATTERN_SWAP,
     PATTERN_UNKNOWN,

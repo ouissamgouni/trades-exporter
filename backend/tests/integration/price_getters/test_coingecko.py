@@ -137,9 +137,11 @@ class TestCoinGeckoPriceGetterIntegration:
 
     def test_invalid_coin_id_raises_error(self, coingecko_getter):
         """Should raise error for invalid CoinGecko ID."""
+        from backend.services.price_getters.base import PriceGetterError
+        
         invalid_asset = MagicMock()
         invalid_asset.symbol = "INVALID"
         invalid_config = PriceGetterConfig(asset_id="zzzinvalidcoinxyz999")
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(PriceGetterError):
             coingecko_getter.get_current_price(invalid_asset, config=invalid_config)

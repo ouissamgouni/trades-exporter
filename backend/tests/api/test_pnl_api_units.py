@@ -78,6 +78,8 @@ def mock_unit_with_legs():
     mock_leg_outflow = MagicMock()
     mock_leg_outflow.transaction_id = 100
     mock_leg_outflow.leg_type = "outflow"
+    mock_leg_outflow.direction = "outflow"
+    mock_leg_outflow.disposal_taxable = False
     mock_leg_outflow.quantity = Decimal("-0.5")
     mock_leg_outflow.asset = mock_asset_btc
     mock_leg_outflow.asset_id = 1
@@ -87,6 +89,8 @@ def mock_unit_with_legs():
     mock_leg_inflow = MagicMock()
     mock_leg_inflow.transaction_id = 100
     mock_leg_inflow.leg_type = "inflow"
+    mock_leg_inflow.direction = "inflow"
+    mock_leg_inflow.disposal_taxable = False
     mock_leg_inflow.quantity = Decimal("25000.00")
     mock_leg_inflow.asset = mock_asset_usd
     mock_leg_inflow.asset_id = 2
@@ -97,8 +101,15 @@ def mock_unit_with_legs():
     mock_unit.id = 1
     mock_unit.unit_label = "Trade: -0.5 BTC → +25000.0 USD"
     mock_unit.timestamp = datetime(2025, 1, 1, 10, 0, 0)
+    mock_unit.pattern = "swap"
     mock_unit.is_taxable = True
     mock_unit.legs = [mock_leg_outflow, mock_leg_inflow]
+    mock_unit.cost_lots = []
+    mock_unit.consumed_slices = []
+    mock_unit.realized_pnl_records = []
+    mock_unit.warnings = []
+    mock_unit.fee_entries = []
+    mock_unit.total_realized_pnl_in_base = Decimal("0")
     
     return mock_unit
 
@@ -106,16 +117,10 @@ def mock_unit_with_legs():
 class TestGetVersionUnits:
     """Tests for GET /pnl/versions/{version_id}/units endpoint."""
     
-    @patch("backend.api.routes.pnl.session.exec")
-    def test_units_response_structure(self, mock_exec, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_units_response_structure(self, client, mock_session, mock_version, mock_unit_with_legs):
         """Test that units response has correct structure with deduplicated transactions."""
         # Setup mocks
         mock_session.get.return_value = mock_version
-        
-        # Mock the query results
-        mock_result = MagicMock()
-        mock_result.all.return_value = [mock_unit_with_legs]
-        mock_exec.return_value = mock_result
         
         response = client.get("/pnl/versions/123/units?page=1&page_size=10")
         
@@ -126,18 +131,18 @@ class TestGetVersionUnits:
         assert "items" in data
         assert "total" in data
         assert "page" in data
-        assert "page_size" in data
+        assert "limit" in data  # API returns 'limit', not 'page_size'
         
         # Check unit structure
         assert len(data["items"]) > 0
         unit = data["items"][0]
         
         # Check new structure
-        assert "transactions" in unit, "Unit should have transactions dict"
+        assert "transactions" in unit, "Unit should have transactions list"
         assert "legs" in unit, "Unit should have legs array"
         
-        # Verify transactions is a dict (not list)
-        assert isinstance(unit["transactions"], dict)
+        # Verify transactions is a list (changed from dict)
+        assert isinstance(unit["transactions"], list)
         
         # Verify legs is a list
         assert isinstance(unit["legs"], list)
@@ -150,36 +155,27 @@ class TestGetVersionUnits:
             assert "qty" in leg
             assert leg["leg_type"] in ["inflow", "outflow", "fee"]
     
-    @patch("backend.api.routes.pnl.session.exec")
-    def test_transaction_deduplication(self, mock_exec, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_transaction_deduplication(self, client, mock_session, mock_version, mock_unit_with_legs):
         """Test that transactions are deduplicated at unit level."""
         # Both legs reference the same transaction (tx_id=100)
         mock_session.get.return_value = mock_version
-        
-        mock_result = MagicMock()
-        mock_result.all.return_value = [mock_unit_with_legs]
-        mock_exec.return_value = mock_result
         
         response = client.get("/pnl/versions/123/units?page=1&page_size=10")
         
         assert response.status_code == 200
         unit = response.json()["items"][0]
         
-        # Both legs reference transaction 100, but it should appear only once
+        # Both legs reference transaction 100, but it should appear only once in the transactions list
         assert len(unit["transactions"]) == 1
-        assert 100 in unit["transactions"]
+        # Check that the transaction with id 100 is in the list
+        assert unit["transactions"][0]["id"] == 100
         
         # Both legs should reference the same transaction_id
         assert all(leg["transaction_id"] == 100 for leg in unit["legs"])
     
-    @patch("backend.api.routes.pnl.session.exec")
-    def test_leg_type_filtering(self, mock_exec, client, mock_session, mock_version, mock_unit_with_legs):
+    def test_leg_type_filtering(self, client, mock_session, mock_version, mock_unit_with_legs):
         """Test that legs can be filtered by leg_type."""
         mock_session.get.return_value = mock_version
-        
-        mock_result = MagicMock()
-        mock_result.all.return_value = [mock_unit_with_legs]
-        mock_exec.return_value = mock_result
         
         response = client.get("/pnl/versions/123/units?page=1&page_size=10")
         

@@ -20,7 +20,7 @@ from backend.db.models import CostLot, Asset, Account, CalculationUnit, Calculat
 
 class MockTransaction:
     """Mock transaction for testing."""
-    def __init__(self, id: int, direction: str = None, asset_id: int = None, quantity: Decimal = None, 
+    def __init__(self, id: int = 1, direction: str = None, asset_id: int = None, quantity: Decimal = None, 
                  date_time: datetime = None, total_in_base: Decimal = None, **kwargs):
         self.id = id
         self.direction = direction
@@ -125,8 +125,29 @@ def mock_price_service():
 
     def get_price(asset_id, dt=None, price_quote=None):
         return prices.get(asset_id, Decimal("10"))
+    
+    def get_price_with_source(asset_id, dt=None, price_quote=None):
+        """Mock get_price_with_source to return PriceResult-like object."""
+        from types import SimpleNamespace
+        price = prices.get(asset_id, Decimal("10"))
+        return SimpleNamespace(price=price, source="mock", timestamp=dt)
+    
+    def get_price_with_fallback(asset_id, dt=None, price_quote=None, use_fallback=True, staleness_window_days=7):
+        """Mock get_price_with_fallback to return PriceResult-like object."""
+        from types import SimpleNamespace
+        price = prices.get(asset_id, Decimal("10"))
+        return SimpleNamespace(
+            price=price,
+            source="mock",
+            actual_price_date=dt,
+            is_fallback=False,
+            is_stale=False,
+            staleness_days=0,
+        )
 
     service.get_price = Mock(side_effect=get_price)
+    service.get_price_with_source = Mock(side_effect=get_price_with_source)
+    service.get_price_with_fallback = Mock(side_effect=get_price_with_fallback)
     service.prices = prices  # Allow test modification
     return service
 
@@ -382,8 +403,8 @@ def create_transfer_group(
     """Create a TRANSFER group: same asset, different accounts."""
     inflow_qty = qty - fee_qty if fee_qty else qty
 
-    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty)
-    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty)
+    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty, account_id=from_account_id)
+    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty, account_id=to_account_id)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
@@ -392,7 +413,7 @@ def create_transfer_group(
 
     # Add fee leg if specified
     if fee_qty:
-        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, is_fee=True)
+        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, account_id=from_account_id)
         legs.append(make_leg(asset_id=asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx))
 
     return make_unit(legs=legs, pattern="transfer", unit_label=f"Transfer {qty} of asset {asset_id}")

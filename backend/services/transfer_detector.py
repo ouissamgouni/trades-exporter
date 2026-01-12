@@ -157,8 +157,8 @@ class TransferDetector:
         # Mark as transfer if internal
         if is_internal:
             transaction.transaction_type = "transfer"
-            # Internal transfers are typically not taxable
-            transaction.taxable = False
+            # Internal transfers are typically not taxable disposals
+            transaction.disposal_taxable = False
             log.debug(
                 f"Marked transaction as internal transfer: "
                 f"{transaction.source_transaction_id}"

@@ -247,12 +247,23 @@ class PriceGetterConfig:
       (e.g., "BTC-USD" for Yahoo, "bitcoin" for CoinGecko). This is the
       primary override for ticker resolution. Stored in the external_id
       column of asset_price_getters table.
+    - asset_id: Alias for external_id (for backward compatibility)
     - extra: Additional getter-specific parameters from the params JSON column
       (e.g., native_quote_currency, source, to_currency).
     """
 
     external_id: Optional[str] = None  # The identifier for this asset in the price getter's API
     extra: Dict[str, Any] = field(default_factory=dict)  # Additional getter-specific params
+    
+    def __init__(self, external_id: Optional[str] = None, asset_id: Optional[str] = None, extra: Optional[Dict[str, Any]] = None):
+        # Support both external_id and asset_id (alias)
+        self.external_id = asset_id if asset_id is not None else external_id
+        self.extra = extra or {}
+    
+    @property
+    def asset_id(self) -> Optional[str]:
+        """Alias for external_id for backward compatibility."""
+        return self.external_id
 
     @classmethod
     def from_db(cls, external_id: Optional[str], params: Optional[Dict[str, Any]]) -> "PriceGetterConfig":
