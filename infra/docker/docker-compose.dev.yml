@@ -8,16 +8,14 @@ services:
   postgres_dev:
     image: postgres:15-alpine
     container_name: trades_db_dev
-    environment:
-      POSTGRES_USER: trades_user
-      POSTGRES_PASSWORD: trades_password
-      POSTGRES_DB: trades_db_dev
+    env_file:
+      - ../../.env.dev
     ports:
       - "5432:5432"
     volumes:
       - trades_dev_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trades_user -d trades_db_dev"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 5

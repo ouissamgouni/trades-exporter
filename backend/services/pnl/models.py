@@ -206,10 +206,10 @@ class PnLResult:
     
     @property
     def consumed_slices(self) -> List[ConsumedLotSlice]:
-        """All consumed slices across all cost lots."""
+        """All consumed slices across all calculation units."""
         slices = []
-        for lot in self.created_lots:
-            slices.extend(lot.consumed_slices or [])
+        for unit in self.calculation_units:
+            slices.extend(unit.consumed_slices or [])
         return slices
     
     @property

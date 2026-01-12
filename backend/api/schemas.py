@@ -37,6 +37,29 @@ class AssetRef(BaseModel):
 
 
 # =============================================================================
+# Sync Job Schemas
+# =============================================================================
+
+
+class ConnectorOverrideRequest(BaseModel):
+    """Per-sync override for a single connector."""
+    
+    connector_id: int = Field(..., description="ID of the connector to override")
+    enabled: Optional[bool] = Field(None, description="Override enabled status for this sync")
+    test_mode: Optional[bool] = Field(None, description="Override test mode for this sync")
+    test_file_path: Optional[str] = Field(None, description="Override test file path for this sync")
+
+
+class SyncJobStartRequest(BaseModel):
+    """Request body for starting a sync job with optional overrides."""
+    
+    connector_overrides: Optional[List[ConnectorOverrideRequest]] = Field(
+        None,
+        description="List of per-connector overrides for this sync only"
+    )
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 

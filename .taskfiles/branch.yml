@@ -1,0 +1,72 @@
+version: "3"
+
+tasks:
+  feature:
+    desc: Create a new feature branch from develop
+    cmds:
+      - |
+        NAME="{{.CLI_ARGS}}"
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task branch:feature -- <branch-name>"
+          exit 1
+        fi
+        # Create develop from main if it doesn't exist
+        if ! git show-ref --verify --quiet refs/heads/develop; then
+          echo "📝 Creating develop branch from main..."
+          git checkout main
+          git pull origin main
+          git checkout -b develop
+          git push -u origin develop
+        fi
+        git checkout develop
+        git pull origin develop 2>/dev/null || git pull origin main
+        # Check if feature branch already exists
+        if git show-ref --verify --quiet refs/heads/feature/$NAME; then
+          echo "ℹ️  Branch feature/$NAME already exists, switching to it..."
+          git checkout feature/$NAME
+        else
+          git checkout -b feature/$NAME
+          echo "✅ Created branch: feature/$NAME"
+        fi
+
+  fix:
+    desc: Create a new fix branch from develop
+    cmds:
+      - |
+        NAME="{{.CLI_ARGS}}"
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task branch:fix -- <branch-name>"
+          exit 1
+        fi
+        # Create develop from main if it doesn't exist
+        if ! git show-ref --verify --quiet refs/heads/develop; then
+          echo "📝 Creating develop branch from main..."
+          git checkout main
+          git pull origin main
+          git checkout -b develop
+          git push -u origin develop
+        fi
+        git checkout develop
+        git pull origin develop 2>/dev/null || git pull origin main
+        # Check if fix branch already exists
+        if git show-ref --verify --quiet refs/heads/fix/$NAME; then
+          echo "ℹ️  Branch fix/$NAME already exists, switching to it..."
+          git checkout fix/$NAME
+        else
+          git checkout -b fix/$NAME
+          echo "✅ Created branch: fix/$NAME"
+        fi
+
+  hotfix:
+    desc: Create a hotfix branch from main
+    cmds:
+      - |
+        NAME="{{.CLI_ARGS}}"
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task branch:hotfix -- <branch-name>"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        git checkout -b hotfix/$NAME
+        echo "✅ Created branch: hotfix/$NAME"

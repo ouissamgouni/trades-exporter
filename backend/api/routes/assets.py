@@ -12,9 +12,21 @@ from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from backend.db.database import get_db
-from backend.db.models import Asset, AssetPriceGetter, Category, AssetCategory, Dimension
+from backend.db.models import (
+    Asset,
+    AssetPriceGetter,
+    Category,
+    AssetCategory,
+    Dimension,
+    NormalizedTransaction,
+    PriceSnapshot,
+    RawAsset,
+    CostLot,
+    RealizedPnl,
+)
 from backend.services.price_getters import list_price_getters
 from backend.file_loaders.asset_csv_loader import AssetCSVLoader
 from backend.services.asset_import_service import AssetImportService
@@ -551,6 +563,72 @@ def bulk_assign_price_getters(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@router.post("/bulk/check-linked", response_model=Dict[str, int])
+def check_bulk_delete_impact(
+    request: BulkDeleteRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Check for linked objects that would be affected by deleting these assets.
+    
+    Returns counts of related objects:
+    - Cascade deletions (will be automatically deleted): categories, price_getters, raw_assets, price_snapshots
+    - Blockers (will prevent deletion): transactions, cost_lots, realized_pnl
+    """
+    if not request.asset_ids:
+        return {}
+    
+    impact = {
+        # Will cascade delete (informational)
+        "asset_categories": 0,
+        "price_getters": 0,
+        "raw_assets": 0,
+        "price_snapshots": 0,
+        
+        # Will block deletion (errors)
+        "transactions": 0,
+        "cost_lots": 0,
+        "realized_pnl": 0,
+    }
+    
+    # Count cascade deletions
+    impact["asset_categories"] = session.exec(
+        select(func.count(AssetCategory.asset_id)).where(AssetCategory.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    impact["price_getters"] = session.exec(
+        select(func.count(AssetPriceGetter.id)).where(AssetPriceGetter.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    impact["raw_assets"] = session.exec(
+        select(func.count(RawAsset.id)).where(RawAsset.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    impact["price_snapshots"] = session.exec(
+        select(func.count(PriceSnapshot.snapshot_id)).where(PriceSnapshot.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    # Count blockers (transactions referencing these assets)
+    impact["transactions"] = session.exec(
+        select(func.count(NormalizedTransaction.id)).where(
+            (NormalizedTransaction.asset_id.in_(request.asset_ids)) |
+            (NormalizedTransaction.price_quote_asset_id.in_(request.asset_ids)) |
+            (NormalizedTransaction.fee_quote_asset_id.in_(request.asset_ids))
+        )
+    ).first() or 0
+    
+    impact["cost_lots"] = session.exec(
+        select(func.count(CostLot.cost_lot_id)).where(CostLot.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    impact["realized_pnl"] = session.exec(
+        select(func.count(RealizedPnl.pnl_id)).where(RealizedPnl.asset_id.in_(request.asset_ids))
+    ).first() or 0
+    
+    # Filter out zeros for cleaner response
+    return {k: v for k, v in impact.items() if v > 0}
+
+
 @router.post("/bulk/delete")
 def bulk_delete_assets(
     request: BulkDeleteRequest,
@@ -561,6 +639,57 @@ def bulk_delete_assets(
         if not request.asset_ids:
             raise HTTPException(status_code=400, detail="No asset IDs provided")
         
+        # Check for blocking relationships across all assets
+        blockers = {}
+        assets_with_blockers = []
+        
+        for asset_id in request.asset_ids:
+            asset_blockers = {}
+            
+            # Check for transactions referencing this asset
+            tx_count = session.exec(
+                select(func.count(NormalizedTransaction.id)).where(
+                    (NormalizedTransaction.asset_id == asset_id) |
+                    (NormalizedTransaction.price_quote_asset_id == asset_id) |
+                    (NormalizedTransaction.fee_quote_asset_id == asset_id)
+                )
+            ).first() or 0
+            
+            if tx_count > 0:
+                asset_blockers["transactions"] = tx_count
+            
+            # Check for cost lots
+            lot_count = session.exec(
+                select(func.count(CostLot.cost_lot_id)).where(CostLot.asset_id == asset_id)
+            ).first() or 0
+            
+            if lot_count > 0:
+                asset_blockers["cost_lots"] = lot_count
+            
+            # Check for realized P&L
+            pnl_count = session.exec(
+                select(func.count(RealizedPnl.pnl_id)).where(RealizedPnl.asset_id == asset_id)
+            ).first() or 0
+            
+            if pnl_count > 0:
+                asset_blockers["realized_pnl"] = pnl_count
+            
+            if asset_blockers:
+                assets_with_blockers.append(asset_id)
+                blockers[str(asset_id)] = asset_blockers
+        
+        # If any assets have blocking relationships, reject the entire operation
+        if blockers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Cannot delete assets with existing transactions or P&L data",
+                    "blockers": blockers,
+                    "affected_assets": assets_with_blockers,
+                }
+            )
+        
+        # Proceed with deletion
         deleted_count = 0
         errors = []
         
@@ -599,6 +728,49 @@ def delete_asset(
 
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
+        
+        # Check for blocking relationships
+        blockers = {}
+        
+        # Check for transactions
+        tx_count = session.exec(
+            select(func.count(NormalizedTransaction.id)).where(
+                (NormalizedTransaction.asset_id == asset_id) |
+                (NormalizedTransaction.price_quote_asset_id == asset_id) |
+                (NormalizedTransaction.fee_quote_asset_id == asset_id)
+            )
+        ).first() or 0
+        
+        if tx_count > 0:
+            blockers["transactions"] = tx_count
+        
+        # Check for cost lots
+        lot_count = session.exec(
+            select(func.count(CostLot.cost_lot_id)).where(CostLot.asset_id == asset_id)
+        ).first() or 0
+        
+        if lot_count > 0:
+            blockers["cost_lots"] = lot_count
+        
+        # Check for realized P&L
+        pnl_count = session.exec(
+            select(func.count(RealizedPnl.pnl_id)).where(RealizedPnl.asset_id == asset_id)
+        ).first() or 0
+        
+        if pnl_count > 0:
+            blockers["realized_pnl"] = pnl_count
+        
+        # If any blocking relationships exist, reject deletion
+        if blockers:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": f"Cannot delete asset '{asset.symbol}' with existing transactions or P&L data",
+                    "asset_id": asset_id,
+                    "asset_symbol": asset.symbol,
+                    "blockers": blockers,
+                }
+            )
 
         session.delete(asset)
         session.commit()
@@ -922,7 +1094,7 @@ async def preview_csv_import(
                         }
                         for pg in a.price_getters
                     ],
-                    "categories": [f"{dim}:{key}" for dim, key in a.category_keys]
+                    "categories": [f"{dim}:{cat}" for dim, cat in a.category_keys]
                 }
                 for a in load_result.assets
             ],

@@ -10,7 +10,7 @@ from typing import Optional, List
 
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import RuntimeUnitType
-from backend.db.models import CostLot, Asset, Account, CalculationUnit, CalculationUnitLeg, NormalizedTransaction
+from backend.db.models import CostLot, Asset, Account, CalculationUnit, CalculationUnitLeg, NormalizedTransaction, LegType
 
 
 # ============================================================================
@@ -209,7 +209,7 @@ def make_transaction(
 
 def make_leg(
     asset_id: int,
-    leg_type: str,
+    leg_type: LegType,
     quantity: Decimal,
     transaction: NormalizedTransaction = None,
     tx_disposal_taxable: bool = False,
@@ -322,8 +322,8 @@ def create_buy_group(
     inflow_tx = make_transaction(id=2, asset_id=asset_id, quantity=qty)
     
     legs = [
-        make_leg(asset_id=base_currency_id, leg_type="outflow", quantity=cost_in_base, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=qty, transaction=inflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.OUTFLOW, quantity=cost_in_base, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Buy {qty} of asset {asset_id}")
@@ -342,8 +342,8 @@ def create_sell_group(
     inflow_tx = make_transaction(id=4, asset_id=base_currency_id, quantity=proceeds_in_base)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=proceeds_in_base, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=proceeds_in_base, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Sell {qty} of asset {asset_id}")
@@ -364,8 +364,8 @@ def create_swap_group(
     inflow_tx = make_transaction(id=6, asset_id=to_asset_id, quantity=to_qty)
     
     legs = [
-        make_leg(asset_id=from_asset_id, leg_type="outflow", quantity=from_qty, transaction=outflow_tx),
-        make_leg(asset_id=to_asset_id, leg_type="inflow", quantity=to_qty, transaction=inflow_tx),
+        make_leg(asset_id=from_asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
+        make_leg(asset_id=to_asset_id, leg_type=LegType.INFLOW, quantity=to_qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Swap {from_qty} asset {from_asset_id} for {to_qty} asset {to_asset_id}")
@@ -386,14 +386,14 @@ def create_transfer_group(
     inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
         make_leg(asset_id=asset_id, leg_type="inflow", quantity=inflow_qty, transaction=inflow_tx),
     ]
 
     # Add fee leg if specified
     if fee_qty:
         fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, is_fee=True)
-        legs.append(make_leg(asset_id=asset_id, leg_type="fee", quantity=fee_qty, transaction=fee_tx))
+        legs.append(make_leg(asset_id=asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx))
 
     return make_unit(legs=legs, pattern="transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
 
@@ -410,8 +410,8 @@ def create_split_group(
     inflow_tx = make_transaction(id=11, asset_id=asset_id, quantity=to_qty)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=from_qty, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=to_qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=to_qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern="split", unit_label=f"Split {from_qty} → {to_qty} of asset {asset_id}")
@@ -428,7 +428,7 @@ def create_airdrop_group(
     inflow_tx = make_transaction(id=12, asset_id=asset_id, quantity=qty)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=qty, transaction=inflow_tx),
     ]
     
     return make_unit(legs=legs, pattern=None, unit_label=f"Airdrop {qty} of asset {asset_id}")
@@ -445,7 +445,7 @@ def create_payment_group(
     outflow_tx = make_transaction(id=13, asset_id=asset_id, quantity=qty)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
     ]
     
     return make_unit(legs=legs, pattern=None, unit_label=f"Payment {qty} of asset {asset_id}")
@@ -471,9 +471,9 @@ def create_sell_with_fee_group(
     fee_tx = make_transaction(id=22, asset_id=fee_asset_id, quantity=fee_qty, date_time=base_dt)
     
     legs = [
-        make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=proceeds_in_base, transaction=inflow_tx),
-        make_leg(asset_id=fee_asset_id, leg_type="fee", quantity=fee_qty, transaction=fee_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
+        make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=proceeds_in_base, transaction=inflow_tx),
+        make_leg(asset_id=fee_asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx),
     ]
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Sell {qty} of asset {asset_id} with {fee_qty} fee")
@@ -496,11 +496,11 @@ def create_multi_asset_sell_group(
     
     for asset_id, qty in outflows:
         outflow_tx = make_transaction(id=tx_id, asset_id=asset_id, quantity=qty, date_time=base_dt)
-        legs.append(make_leg(asset_id=asset_id, leg_type="outflow", quantity=qty, transaction=outflow_tx))
+        legs.append(make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx))
         tx_id += 1
     
     inflow_tx = make_transaction(id=tx_id, asset_id=base_currency_id, quantity=total_proceeds_in_base, date_time=base_dt)
-    legs.append(make_leg(asset_id=base_currency_id, leg_type="inflow", quantity=total_proceeds_in_base, transaction=inflow_tx))
+    legs.append(make_leg(asset_id=base_currency_id, leg_type=LegType.INFLOW, quantity=total_proceeds_in_base, transaction=inflow_tx))
     
     return make_unit(legs=legs, pattern="swap", unit_label=f"Multi-asset sell for {total_proceeds_in_base} EUR")
 

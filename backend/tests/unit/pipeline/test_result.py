@@ -3,6 +3,7 @@ Unit tests for PipelineResult.
 """
 
 from backend.services.pipeline import PipelineResult
+from backend.services.pipeline.context import PersistenceResult
 
 
 class TestPipelineResult:
@@ -55,3 +56,31 @@ class TestPipelineResult:
         assert result.skipped_count == 0
         assert result.split_count == 0
         assert result.transfer_count == 0
+        assert result.persistence_result is None
+
+    def test_result_with_persistence_result(self):
+        """Test result with persistence tracking data."""
+        persistence = PersistenceResult(
+            synced_ids=["tx1", "tx2"],
+            updated_ids=["tx3"],
+            skipped_ids=["tx4"],
+            error_details=[],
+        )
+
+        result = PipelineResult(
+            success=True,
+            transactions=[],
+            pydantic_transactions=[],
+            units=[],
+            errors=[],
+            warnings=[],
+            new_count=2,
+            updated_count=1,
+            skipped_count=1,
+            persistence_result=persistence,
+        )
+
+        assert result.persistence_result is not None
+        assert len(result.persistence_result.synced_ids) == 2
+        assert len(result.persistence_result.updated_ids) == 1
+        assert len(result.persistence_result.skipped_ids) == 1

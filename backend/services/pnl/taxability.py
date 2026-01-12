@@ -24,7 +24,7 @@ taxability hints, using the same logic but adapted for bundle-level context
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from backend.db.models import TaxabilityStatus
+from backend.db.models import TaxabilityStatus, LegType
 
 if TYPE_CHECKING:
     from backend.db.models import CalculationUnitLeg, CalculationUnit
@@ -113,7 +113,7 @@ def suggest_bundle_taxability(
 class LegLike(Protocol):
     """Protocol for leg-like objects (CalculationUnitLeg)."""
     asset_id: int
-    leg_type: str
+    leg_type: LegType
     tx_disposal_taxable: bool
     unit: "CalculationUnit"
 

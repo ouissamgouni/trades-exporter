@@ -27,7 +27,7 @@ import {
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { FiChevronDown, FiChevronRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader } from 'react-icons/fi';
-import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, TransactionAssetRef } from '../types';
+import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, AssetRef } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetBadge } from './AssetBadge';
@@ -74,9 +74,9 @@ interface TransactionDetail {
     source_from_account?: string;
     source_to_account?: string;
     // Nested asset references (preferred)
-    linked_asset?: TransactionAssetRef | null;
-    price_quote_asset?: TransactionAssetRef | null;
-    fee_quote_asset?: TransactionAssetRef | null;
+    linked_asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
     // Legacy flat fields for fallback
     asset_id?: number;
     asset_symbol?: string;
@@ -124,19 +124,12 @@ const formatCurrency = (value: number, currency: string): string => {
 
 // Using getDateRangeDisplay from dateUtils for consistent date range display
 
-const getUniqueAssets = (transactions: TransactionSummary[]): TransactionAssetRef[] => {
+const getUniqueAssets = (transactions: TransactionSummary[]): AssetRef[] => {
     if (!transactions) return [];
-    const assetMap = new Map<string, TransactionAssetRef>();
+    const assetMap = new Map<string, AssetRef>();
     transactions.forEach(t => {
-        // Prefer nested asset ref
-        if (t.linked_asset?.symbol) {
-            assetMap.set(t.linked_asset.symbol, t.linked_asset);
-        } else {
-            // Fallback to flat symbol
-            const symbol = t.symbol || t.asset_symbol;
-            if (symbol && !assetMap.has(symbol)) {
-                assetMap.set(symbol, { symbol });
-            }
+        if (t.asset && t.asset.symbol) {
+            assetMap.set(t.asset.symbol, t.asset);
         }
     });
     return Array.from(assetMap.values());

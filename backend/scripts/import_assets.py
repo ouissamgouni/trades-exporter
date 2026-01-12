@@ -9,7 +9,6 @@ Usage:
 Options:
     --dry-run      Preview changes without committing
     --merge        Merge price getters instead of replacing
-    --test         Use test database
 
 Examples:
     # Preview import
@@ -27,10 +26,10 @@ import argparse
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from backend.config.loader import set_test_mode, configure_logging
+from backend.config.loader import configure_logging
 from backend.db.database import get_session
 from backend.file_loaders.asset_csv_loader import AssetCSVLoader
 from backend.services.asset_import_service import AssetImportService
@@ -59,18 +58,8 @@ def main():
         action="store_true",
         help="Merge price getters with existing (default: replace)"
     )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Use test database"
-    )
     
     args = parser.parse_args()
-    
-    # Set test mode if requested
-    if args.test:
-        set_test_mode(True)
-        print("🧪 Using TEST database")
     
     # Validate file
     csv_path = args.csv_file

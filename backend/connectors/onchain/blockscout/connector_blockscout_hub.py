@@ -10,7 +10,7 @@ from backend.connectors.onchain.chain_config import (
     get_blockscout_api_url,
     CHAIN_CONFIG,
 )
-from backend.config.loader import configure_logging, is_test_mode
+from backend.config.loader import configure_logging
 
 log = configure_logging(__name__)
 
@@ -32,7 +32,6 @@ class ConnectorBlockscoutHub(BaseHubConnector):
     ):
         """
         Initialize Blockscout Hub connector that aggregates both transaction types.
-        In test mode, creates child connectors so they return test data.
 
         Args:
             wallet_address: The wallet address to scan
@@ -40,25 +39,27 @@ class ConnectorBlockscoutHub(BaseHubConnector):
         """
         self.wallet_address = wallet_address
         self.chain_name = chain_name
-        test_mode = is_test_mode()
 
-        # Import specialized connectors (needed for both test and live mode)
+        # Import specialized connectors
         from .connector_blockscout_normal_tx import ConnectorBlockscoutNormalTx
         from .connector_blockscout_token_transfers import (
             ConnectorBlockscoutTokenTransfers,
         )
 
-        # Validate wallet configuration (required in both test and live mode)
+        # Validate wallet configuration
         if not self.wallet_address:
             raise ValueError("Missing wallet address")
 
-        # Validate chain is supported (required in both test and live mode)
+        # Validate chain is supported
         chain_config = get_chain_config(self.chain_name)
         if not chain_config:
             raise ValueError(
                 f"Unknown chain '{chain_name}'. Available: {list(CHAIN_CONFIG.keys())}"
             )
 
+        # Get test mode from config
+        test_mode = kwargs.get("config", {}).get("test_mode", False)
+        
         if not test_mode:
             # Live mode: validate API-related configuration
             blockscout_url = get_blockscout_api_url(self.chain_name)

@@ -7,13 +7,16 @@ import json
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Generator, Dict, List, Any, Optional
+from typing import Generator, Dict, List, Any, Optional, Callable
 
-from backend.config.loader import configure_logging, is_test_mode
+from backend.config.loader import configure_logging
 
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("base_connector")
+
+# Type alias for progress callback
+ProgressCallback = Callable[[int, str, int, int, Optional[str]], None]
 
 
 class BaseConnector(ABC):
@@ -32,6 +35,7 @@ class BaseConnector(ABC):
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
         config: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ):
         """
         Initialize the connector.
@@ -40,6 +44,8 @@ class BaseConnector(ABC):
             account_id: The Account ID this connector belongs to (from accounts table)
             connector_id: The AccountConnector ID for this specific connector instance
             config: Connector configuration dict (may include test_mode, test_file_path)
+            progress_callback: Optional callback to report progress updates.
+                              Signature: (connector_id, operation, current, total, log_message)
 
         Note: Test mode priority:
             1. Per-connector config["test_mode"] (if set)
@@ -49,6 +55,7 @@ class BaseConnector(ABC):
         self.connector_id = connector_id
         self.config = config or {}
         self.exchange = None
+        self._progress_callback = progress_callback
         
         # Per-connector test mode takes priority over global setting
         self._test_mode = self.config.get("test_mode", None)
@@ -58,6 +65,31 @@ class BaseConnector(ABC):
         log.info(
             f"Initialized {self.__class__.__name__} for {self.connector_name}{account_info} [{mode_str}]"
         )
+
+    def update_progress(
+        self,
+        operation: str,
+        current: int,
+        total: int,
+        log_message: Optional[str] = None,
+    ):
+        """
+        Report progress update via callback if available.
+        
+        Args:
+            operation: Description of current operation (e.g., "Fetching BTC/USDT")
+            current: Current progress count
+            total: Total items to process
+            log_message: Optional log message to record
+        """
+        if self._progress_callback and self.connector_id:
+            self._progress_callback(
+                self.connector_id,
+                operation,
+                current,
+                total,
+                log_message,
+            )
 
     @property
     @abstractmethod
@@ -99,13 +131,10 @@ class BaseConnector(ABC):
         """
         Check if connector is in test mode.
         
-        Priority:
-            1. Per-connector config["test_mode"] (if explicitly set)
-            2. Global TEST_MODE from environment/settings
+        Test mode is determined by per-connector config["test_mode"].
+        Defaults to False (live mode) if not explicitly set.
         """
-        if self._test_mode is not None:
-            return self._test_mode
-        return is_test_mode()
+        return self._test_mode if self._test_mode is not None else False
 
     def _get_raws(self) -> List[Dict[str, Any]]:
         """

@@ -3,11 +3,11 @@ Config endpoints for the Trade Exporter API.
 Provides endpoints for retrieving application configuration and status.
 """
 
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
-from backend.config.loader import is_test_mode
 from backend.db.database import get_db
 from backend.db.models import Account, Asset, AccountConnector, AppSettings
 
@@ -15,11 +15,13 @@ from backend.db.models import Account, Asset, AccountConnector, AppSettings
 router = APIRouter(prefix="/config", tags=["Config"])
 
 
-class ConfigResponse(BaseModel):
-    """Response model for configuration status."""
+class AppInfoResponse(BaseModel):
+    """Response model for application information."""
 
-    test_mode: bool
-    mode_label: str
+    environment: str
+    backend_version: str
+    frontend_version: str | None = None
+    db_schema_version: str | None = None
 
 
 class AppSettingsResponse(BaseModel):
@@ -60,18 +62,29 @@ def get_or_create_app_settings(session: Session) -> AppSettings:
     return settings
 
 
-@router.get("/status", response_model=ConfigResponse)
-def get_config_status():
+@router.get("/info", response_model=AppInfoResponse)
+def get_app_info():
     """
-    Get the current application configuration status.
+    Get application information including environment and versions.
 
     Returns:
-    - test_mode: Whether the application is running in test mode
-    - mode_label: Human-readable label for the current mode
+    - environment: Current environment (dev/test/prod) from APP_ENV
+    - backend_version: Backend API version
+    - frontend_version: Frontend app version (if available)
+    - db_schema_version: Database schema version from Alembic (if available)
     """
-    test_mode = is_test_mode()
-    return ConfigResponse(
-        test_mode=test_mode, mode_label="Test Mode" if test_mode else "Live Mode"
+    environment = os.getenv("APP_ENV", "unknown")
+    backend_version = "1.0.0"  # From backend/__init__.py or main.py
+    
+    # TODO: Add database schema version from Alembic if needed
+    # from alembic import script
+    # from alembic.runtime import migration
+    
+    return AppInfoResponse(
+        environment=environment,
+        backend_version=backend_version,
+        frontend_version=None,
+        db_schema_version=None,
     )
 
 
@@ -122,21 +135,6 @@ def update_app_settings(
     session.refresh(settings)
     
     return AppSettingsResponse(base_currency=settings.base_currency)
-
-
-@router.get("/status", response_model=ConfigResponse)
-def get_config_status():
-    """
-    Get the current application configuration status.
-
-    Returns:
-    - test_mode: Whether the application is running in test mode
-    - mode_label: Human-readable label for the current mode
-    """
-    test_mode = is_test_mode()
-    return ConfigResponse(
-        test_mode=test_mode, mode_label="Test Mode" if test_mode else "Live Mode"
-    )
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)

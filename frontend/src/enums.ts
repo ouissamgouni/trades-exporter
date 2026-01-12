@@ -106,27 +106,7 @@ export enum LotMode {
   MEGA_WALLET = 'MEGA_WALLET',
 }
 
-/**
- * Lot event types for cost lot lifecycle tracking.
- */
-export enum LotEventType {
-  CREATED = 'created',
-  CONSUMED = 'consumed',
-  SETTLED = 'settled',
-  TRANSFERRED = 'transferred',
-  ADJUSTED = 'adjusted',
-}
 
-/**
- * Leg types for expanded transactions (P&L calculation).
- */
-export enum LegType {
-  COST = 'cost',
-  PROCEEDS = 'proceeds',
-  ACQUIRED = 'acquired',
-  DISPOSED = 'disposed',
-  FEE = 'fee',
-}
 
 // ============================================================================
 // Helper functions for enum display

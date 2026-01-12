@@ -51,7 +51,7 @@ interface BarDataItem extends BarDatum {
 /**
  * Format currency value for display (compact)
  */
-const formatCurrency = (value: number, currency: string): string => {
+const formatCurrency = (value: number, currency: string = ''): string => {
     const absValue = Math.abs(value);
     let formatted: string;
 
@@ -63,7 +63,8 @@ const formatCurrency = (value: number, currency: string): string => {
         formatted = value.toFixed(0);
     }
 
-    return `${currency} ${formatted}`;
+
+    return currency ? `${currency} ${formatted}` : formatted;
 };
 
 /**
@@ -170,7 +171,7 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
         const categoryMap = new Map<number, number>();
         const dimensionCategories = allCategories.filter(c => c.dimension_id === selectedDimensionId);
         const dimensionCategoryIds = new Set(dimensionCategories.map(c => c.id));
-        
+
         for (const asset of assets) {
             const assetCategories = asset.category_ids.filter(id => dimensionCategoryIds.has(id));
             if (assetCategories.length === 0) continue;
@@ -189,8 +190,8 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
 
         if (viewMode === 'asset') {
             return assets.map(asset => ({
-                id: asset.asset_id,
-                name: asset.asset_symbol,
+                id: asset.asset.id || 0,
+                name: asset.asset.symbol || 'Unknown',
                 value: asset.unrealized_pnl,
                 positiveValue: asset.unrealized_pnl >= 0 ? asset.unrealized_pnl : 0,
                 negativeValue: asset.unrealized_pnl < 0 ? asset.unrealized_pnl : 0,
@@ -346,7 +347,8 @@ export const PerformanceBarChart: React.FC<PerformanceBarChartProps> = ({
                             tickSize: 5,
                             tickPadding: 5,
                             tickRotation: 0,
-                            format: (v) => formatCurrency(Number(v), baseCurrency),
+                            tickValues: 5,
+                            format: (v) => formatCurrency(Number(v)),
                         }}
                         axisLeft={{
                             tickSize: 5,

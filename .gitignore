@@ -84,6 +84,7 @@ pip-delete-this-directory.txt
 # Data files
 data/*.db
 data/*.sqlite
+data/output
 *.db
 *.sqlite
 *.sqlite3
@@ -191,3 +192,4 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/
+

@@ -113,6 +113,23 @@ class AccountConnectorRepository:
         statement = select(AccountConnector).order_by(AccountConnector.sync_priority)
         return list(self.session.exec(statement).all())
 
+    def get_all_with_accounts(self) -> List[Tuple[AccountConnector, Account]]:
+        """
+        Get all connectors with their accounts (enabled and disabled).
+        
+        Returns all connectors regardless of enabled status, joined with account info.
+        Used by sync config panel to allow enabling/disabling any connector.
+
+        Returns:
+            List of (AccountConnector, Account) tuples ordered by account name, sync_priority
+        """
+        statement = (
+            select(AccountConnector, Account)
+            .join(Account)
+            .order_by(Account.name, AccountConnector.sync_priority)
+        )
+        return list(self.session.exec(statement).all())
+
     def update(self, connector: AccountConnector) -> AccountConnector:
         """Update an account connector."""
         self.session.add(connector)

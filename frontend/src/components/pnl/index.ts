@@ -14,11 +14,13 @@ export { default as AssetDetailView } from './AssetDetailView';
 export { PnLImpactPanel } from './PnLImpactPanel';
 export { FeesPanel } from './FeesPanel';
 export { WarningsPanel } from './WarningsPanel';
-export { DataExplorerPanel, DataExplorerContent, PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
+export { PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 export { SlidePanel } from './SlidePanel';
 export { CategoryFilterBar } from './CategoryFilterBar';
 export { MarketValuePieChart } from './MarketValuePieChart';
 export { PerformanceBarChart } from './PerformanceBarChart';
+// Re-export from unified hooks
+export { getPersistedPageSize, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 
 // Types
 export type {
@@ -43,6 +45,16 @@ export type {
     BundleSummary,
     TransactionSummary,
     PieChartDataPoint,
+    // Paginated response types
+    PaginatedResponse,
+    PaginatedUnitsResponse,
+    PaginatedLotsResponse,
+    PaginatedConsumedSlicesResponse,
+    PaginatedRealizedPnLResponse,
+    PaginatedFeesResponse,
+    PaginatedWarningsResponse,
+    PaginatedEventsResponse,
+    PaginatedSettlementsResponse,
 } from './types';
 
 // Utility functions

@@ -12,7 +12,7 @@ from backend.db.repositories import (
     RawTransactionRepository,
 )
 from backend.services.pipeline.base import PipelineStage
-from backend.services.pipeline.context import PipelineContext
+from backend.services.pipeline.context import PersistenceResult, PipelineContext
 
 log = configure_logging("persistence_stage")
 
@@ -45,6 +45,7 @@ class PersistenceStage(PipelineStage):
         Updates context with:
         - Persisted NormalizedTransaction instances (SQLModel)
         - new_count, updated_count, skipped_count statistics
+        - persistence_result: PersistenceResult with detailed ID tracking
         """
         raw_repo = RawTransactionRepository(context.session)
         norm_repo = NormalizedTransactionRepository(context.session)
@@ -52,6 +53,9 @@ class PersistenceStage(PipelineStage):
         new_count = 0
         updated_count = 0
         skipped_count = 0
+
+        # Track IDs for sync job connector runs
+        result = PersistenceResult()
 
         for tx in transactions:
             try:
@@ -61,12 +65,14 @@ class PersistenceStage(PipelineStage):
                 if existing:
                     # Check if update needed
                     if self._needs_update(existing, tx):
-                        self._update_transaction(existing, tx)
+                        self._update_transaction(existing, tx, context.sync_connector_run_id)
                         context.session.add(existing)
                         updated_count += 1
+                        result.updated_ids.append(tx.source_transaction_id)
                         log.debug(f"Updated transaction {tx.source_transaction_id}")
                     else:
                         skipped_count += 1
+                        result.skipped_ids.append(tx.source_transaction_id)
                         log.debug(f"Skipped duplicate {tx.source_transaction_id}")
                     continue
 
@@ -80,15 +86,20 @@ class PersistenceStage(PipelineStage):
                     )
 
                 # Create normalized transaction
-                db_tx = self._pydantic_to_sqlmodel(tx, raw_id)
+                db_tx = self._pydantic_to_sqlmodel(tx, raw_id, context.sync_connector_run_id)
                 norm_repo.create(db_tx)
                 new_count += 1
+                result.synced_ids.append(tx.source_transaction_id)
 
                 log.debug(f"Created transaction {tx.source_transaction_id}")
 
             except Exception as e:
                 error_msg = f"Failed to persist {tx.source_transaction_id}: {e}"
                 context.errors.append(error_msg)
+                result.error_details.append({
+                    "source_transaction_id": tx.source_transaction_id,
+                    "error": str(e),
+                })
                 log.error(error_msg)
 
         # Commit all changes
@@ -103,6 +114,9 @@ class PersistenceStage(PipelineStage):
         context.new_count += new_count
         context.updated_count += updated_count
         context.skipped_count += skipped_count
+
+        # Store persistence result on context for sync job tracking
+        context.persistence_result = result
 
         log.info(
             f"Persistence complete: {new_count} new, "
@@ -163,6 +177,7 @@ class PersistenceStage(PipelineStage):
         self,
         existing: NormalizedTransaction,
         new: NormalizedTransaction,
+        sync_connector_run_id: Optional[int] = None,
     ) -> None:
         """Update existing transaction with new values."""
         # Update fields that changed
@@ -193,10 +208,15 @@ class PersistenceStage(PipelineStage):
 
         existing.synced_at = datetime.now(timezone.utc)
 
+        # Track which sync run last touched this transaction
+        if sync_connector_run_id:
+            existing.sync_connector_run_id = sync_connector_run_id
+
     def _pydantic_to_sqlmodel(
         self,
         tx: NormalizedTransaction,
         raw_id: Optional[int],
+        sync_connector_run_id: Optional[int] = None,
     ) -> NormalizedTransaction:
         """Convert Pydantic model to SQLModel."""
         # Handle tags
@@ -211,6 +231,7 @@ class PersistenceStage(PipelineStage):
             source_price_quote_asset_symbol=tx.source_price_quote_asset_symbol,
             source_fee_quote_asset_symbol=tx.source_fee_quote_asset_symbol,
             raw_transaction_id=raw_id,
+            sync_connector_run_id=sync_connector_run_id,
             asset_id=tx.asset_id,
             price_quote_asset_id=tx.price_quote_asset_id,
             fee_quote_asset_id=tx.fee_quote_asset_id,

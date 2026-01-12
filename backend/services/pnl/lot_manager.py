@@ -64,7 +64,6 @@ class LotManager:
         related_lot: Optional[CostLot] = None,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        metadata: Optional[dict] = None,
     ) -> CostLotEvent:
         """
         Emit a cost lot event for audit trail.
@@ -97,6 +96,15 @@ class LotManager:
                 "All lot events must be associated with a calculation unit."
             )
         
+        # Compute balances after this event
+        # Asset-level balance (across all accounts)
+        balance_after = self.get_asset_balance(asset_id=lot.asset_id)
+        # Account-level balance (for this specific account)
+        account_balance_after = self.get_balance(account_id=lot.account_id, asset_id=lot.asset_id)
+        
+        # Use transaction datetime for event timestamp (economic time, not system time)
+        event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow()
+        
         event = CostLotEvent(
             event_type=event_type.value,
             lot=lot,
@@ -105,12 +113,13 @@ class LotManager:
             cost_basis_delta=cost_basis_delta,
             qty_remaining_after=lot.qty_remaining,
             cost_basis_remaining_after=lot.remaining_cost_in_base,
+            balance_after=balance_after,
+            account_balance_after=account_balance_after,
             triggered_by_transaction=triggered_by_transaction,
             triggered_by_transaction_id=triggered_by_transaction.id if triggered_by_transaction else None,
             triggered_by_unit=triggered_by_unit,
             triggered_by_unit_id=triggered_by_unit.id if triggered_by_unit else None,
-            event_metadata=metadata,
-            timestamp=datetime.utcnow(),
+            timestamp=event_timestamp,
         )
         
         # Note: Setting lot=lot in constructor auto-populates lot.events via SQLAlchemy back_populates
@@ -162,6 +171,7 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this lot creation
             triggered_by_unit: Calculation unit context
             emit_event: Whether to emit LOT_CREATED event (False for reloaded lots)
+            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true})
         """
         key = self._get_key(lot.account_id, lot.asset_id)
         
@@ -180,13 +190,12 @@ class LotManager:
             # Emit creation event for negative lot (unless reloading from DB)
             if emit_event:
                 self._emit_event(
-                    event_type=LotEventType.CREATED,
+                    event_type=LotEventType.NEGATIVE_CREATED,
                     lot=lot,
                     quantity_delta=lot.qty,  # Negative
                     cost_basis_delta=Decimal("0"),
                     triggered_by_transaction=triggered_by_transaction,
                     triggered_by_unit=triggered_by_unit,
-                    metadata={"is_negative": True, "provisional": True},
                 )
             return
         
@@ -232,7 +241,6 @@ class LotManager:
                 cost_basis_delta=lot.total_cost_in_base,
                 triggered_by_transaction=triggered_by_transaction,
                 triggered_by_unit=triggered_by_unit,
-                metadata={"method": self.config.lot_method.value},
             )
 
     def load_from_db(
@@ -283,7 +291,7 @@ class LotManager:
         allow_negative: bool = False,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        emit_event: bool = True,
+        emit_event: bool = True
     ) -> Tuple[List[ConsumedLotSlice], Optional[CostLot]]:
         """
         Consume lots for a disposal.
@@ -297,6 +305,7 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this consumption (required if emit_event=True)
             triggered_by_unit: Calculation unit context (required if emit_event=True)
             emit_event: Whether to emit CONSUMED events (False for testing)
+            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true, "pending_transfer": true})
 
         Returns:
             Tuple of (consumed_slices, negative_lot if created)
@@ -341,7 +350,7 @@ class LotManager:
                     quantity_delta=-consume_qty,
                     cost_basis_delta=-slice_record.total_cost_in_base,
                     triggered_by_transaction=triggered_by_transaction,
-                    triggered_by_unit=triggered_by_unit,
+                    triggered_by_unit=triggered_by_unit
                 )
 
             # Remove exhausted lot from front
@@ -370,7 +379,7 @@ class LotManager:
                     qty=-remaining_qty,  # Negative qty indicates debt
                     qty_remaining=-remaining_qty,  # Negative - amount of debt outstanding
                     unit_cost=unit_cost,
-                    acquired_at=datetime.utcnow(),
+                    acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow(),
                     is_zero_cost=not is_base_currency,
                     is_negative=True,
                     is_settled=False,  # Will be settled by later acquisition
@@ -415,8 +424,7 @@ class LotManager:
                         quantity_delta=-remaining_qty,
                         cost_basis_delta=-neg_slice.total_cost_in_base,
                         triggered_by_transaction=triggered_by_transaction,
-                        triggered_by_unit=triggered_by_unit,
-                        metadata={"is_negative_lot": True, "provisional": True},
+                        triggered_by_unit=triggered_by_unit
                     )
             else:
                 raise ValueError(
@@ -444,6 +452,32 @@ class LotManager:
         )
         
         return positive_balance - negative_balance
+    
+    def get_asset_balance(self, asset_id: int) -> Decimal:
+        """
+        Get total balance for an asset across all accounts.
+        In MEGA_WALLET mode, this is the same as get_balance(None, asset_id).
+        In LOT_TRAVEL mode, this sums balances across all accounts.
+        """
+        if self.config.lot_mode == LotMode.MEGA_WALLET:
+            return self.get_balance(None, asset_id)
+        
+        # LOT_TRAVEL mode: sum across all accounts for this asset
+        total_balance = Decimal("0")
+        
+        # Sum positive lots across all accounts
+        for key, lots in self.lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance += sum(lot.qty_remaining for lot in lots if not lot.is_negative)
+        
+        # Subtract unsettled negative lots across all accounts
+        for key, neg_lots in self.negative_lots_map.items():
+            _, key_asset_id = key
+            if key_asset_id == asset_id:
+                total_balance -= sum(abs(lot.qty) for lot in neg_lots if not lot.is_settled)
+        
+        return total_balance
 
     def get_cost_basis(self, account_id: Optional[int], asset_id: int) -> Decimal:
         """Get total remaining cost basis for account/asset."""
@@ -560,11 +594,7 @@ class LotManager:
                     cost_basis_delta=cost_applied,
                     related_lot=settling_lot,
                     triggered_by_transaction=settling_transaction,
-                    triggered_by_unit=triggered_by_unit,
-                    metadata={
-                        "settlement_id": settlement.settlement_id,
-                        "is_fully_settled": neg_lot.is_settled,
-                    },
+                    triggered_by_unit=triggered_by_unit
                 )
             
             remaining_qty -= settle_qty

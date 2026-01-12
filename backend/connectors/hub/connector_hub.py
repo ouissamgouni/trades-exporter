@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Type
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, load_settings, is_test_mode
+from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging("connector_hub")
 
@@ -46,8 +46,6 @@ class ConnectorHub(BaseHubConnector):
 
         Args:
             enabled_connectors: List of connector names to enable. If None, all are enabled.
-
-        Note: Test mode is determined by the TEST_MODE environment variable.
         """
         # Load settings for configuration
         settings = load_settings()
@@ -55,9 +53,6 @@ class ConnectorHub(BaseHubConnector):
 
         # Get connector map from registry
         connector_map = self.get_connector_map()
-
-        # Get test mode from environment
-        test_mode = is_test_mode()
 
         # Configure which connectors to run
         if enabled_connectors is None:
@@ -73,9 +68,8 @@ class ConnectorHub(BaseHubConnector):
 
         self.connector_instances = {}
 
-        # Build child connectors first
-        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
-        log.info("initializing_connector_hub", mode=mode_str)
+        # Build child connectors
+        log.info("initializing_connector_hub")
         log.info("enabled_connectors", connectors=self.enabled_connectors)
 
         # Initialize all enabled connector instances

@@ -246,7 +246,7 @@ class TestGetVersionBalances:
         assert len(result) == 1
         balance = result[0]
         assert balance.asset.id == 2
-        assert balance.asset.name == "BTC"
+        assert balance.asset.symbol == "BTC"
         # Qty should be lot's qty_remaining (8)
         assert balance.qty == 8.0
         # Cost should be qty_remaining * unit_cost = 8 * 100 = 800

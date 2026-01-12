@@ -32,6 +32,8 @@ import {
     toDateTimeLocalString,
     dateTimeLocalToISO,
 } from '../utils/dateUtils';
+import { usePagination, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
+import { TablePagination } from './TablePagination';
 
 // Types for CSV import
 interface TradesImportPreviewTransaction {
@@ -69,9 +71,6 @@ interface TradesImportResult {
     dry_run: boolean;
     summary: { total_transactions: number; total_raw_accounts: number; total_raw_assets: number; total_errors: number };
 }
-
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 200];
-const DEFAULT_PAGE_SIZE = 25;
 
 // Direction color mapping for row backgrounds
 const directionRowColors: Record<string, string> = {
@@ -273,8 +272,11 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         ...defaultFilterState,
         reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : [],
     }));
-    // Pagination items per page
-    const [itemsPerPage, setItemsPerPage] = useState<number>(DEFAULT_PAGE_SIZE);
+    // Pagination via unified hook (client-side pagination for transactions table)
+    const pagination = usePagination({
+        storageKey: 'transactions',
+        initialPageSize: DEFAULT_PAGE_SIZE,
+    });
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [showBundleDialog, setShowBundleDialog] = useState(false);
     const [bundleLabel, setBundleLabel] = useState('');
@@ -338,8 +340,8 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const [dryRunMode, setDryRunMode] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Pagination state
-    const [currentPage, setCurrentPage] = useState(1);
+    // Reset pagination when filters change
+    useEffect(() => { pagination.firstPage(); }, [filters]);
 
     // TanStack Query for transactions - filters are part of the query key
     const { data: transactions = [], isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
@@ -397,9 +399,6 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         fetchAssets();
         fetchAccounts();
     }, [showBundles, showSuggestions]);
-
-    // Reset to first page when filters change
-    useEffect(() => { setCurrentPage(1); }, [filters]);
 
     // Keep editValuesRef in sync with editValues state
     useEffect(() => { editValuesRef.current = editValues; }, [editValues]);
@@ -580,19 +579,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     };
 
     // Pagination calculations
-    const totalPages = Math.ceil(transactions.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedTransactions = transactions.slice(startIndex, endIndex);
-
-    const goToPage = (page: number) => {
-        if (page >= 1 && page <= totalPages) {
-            setCurrentPage(page);
-            // Close drawer when changing pages
-            setIsDrawerOpen(false);
-            setDrawerTransactionId(null);
-        }
-    };
+    const paginatedTransactions = pagination.paginate(transactions);
 
     // Start editing a specific cell
     const startCellEdit = (tx: Transaction, field: EditableField) => {
@@ -2058,96 +2045,15 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                     </Box>
 
                     {/* Pagination Controls */}
-                    {
-                        totalPages > 1 && (
-                            <Flex justify="center" align="center" mt={4} gap={2}>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => goToPage(1)}
-                                    disabled={currentPage === 1}
-                                >
-                                    ⟪
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => goToPage(currentPage - 1)}
-                                    disabled={currentPage === 1}
-                                >
-                                    ←
-                                </Button>
-
-                                {/* Page numbers */}
-                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                    let pageNum: number;
-                                    if (totalPages <= 5) {
-                                        pageNum = i + 1;
-                                    } else if (currentPage <= 3) {
-                                        pageNum = i + 1;
-                                    } else if (currentPage >= totalPages - 2) {
-                                        pageNum = totalPages - 4 + i;
-                                    } else {
-                                        pageNum = currentPage - 2 + i;
-                                    }
-                                    return (
-                                        <Button
-                                            key={pageNum}
-                                            size="sm"
-                                            variant={currentPage === pageNum ? 'solid' : 'outline'}
-                                            colorPalette={currentPage === pageNum ? 'blue' : undefined}
-                                            onClick={() => goToPage(pageNum)}
-                                        >
-                                            {pageNum}
-                                        </Button>
-                                    );
-                                })}
-
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => goToPage(currentPage + 1)}
-                                    disabled={currentPage === totalPages}
-                                >
-                                    →
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => goToPage(totalPages)}
-                                    disabled={currentPage === totalPages}
-                                >
-                                    ⟫
-                                </Button>
-
-                                {/* Items per page selector */}
-                                <Flex align="center" gap={2} ml={4}>
-                                    <Text fontSize="sm" color="gray.600">Show:</Text>
-                                    <NativeSelect.Root size="sm" width="80px">
-                                        <NativeSelect.Field
-                                            value={itemsPerPage}
-                                            onChange={e => {
-                                                setItemsPerPage(Number(e.target.value));
-                                                setCurrentPage(1);
-                                            }}
-                                        >
-                                            {PAGE_SIZE_OPTIONS.map(size => (
-                                                <option key={size} value={size}>{size}</option>
-                                            ))}
-                                        </NativeSelect.Field>
-                                    </NativeSelect.Root>
-                                </Flex>
-                            </Flex>
-                        )
-                    }
+                    <TablePagination
+                        pagination={pagination}
+                        total={transactions.length}
+                    />
 
                     <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
                         <Flex justify="space-between" align="center">
                             <Text fontSize="sm" color="gray.600">
                                 <strong>Total:</strong> {transactions.length} transactions
-                                {totalPages > 1 && (
-                                    <Text as="span"> • Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (showing {startIndex + 1}-{Math.min(endIndex, transactions.length)})</Text>
-                                )}
                                 {selectedIds.size > 0 && <Text as="span"> • <strong>{selectedIds.size}</strong> selected</Text>}
                             </Text>
                         </Flex>

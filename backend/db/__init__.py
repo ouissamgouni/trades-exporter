@@ -38,13 +38,18 @@ log = configure_logging("db_init")
 
 def init_db(test_mode: bool = None):
     """
-    Initialize the PostgreSQL database: create tables and seed default data.
+    Initialize the PostgreSQL database: create tables only.
+
+    Data seeding should be done explicitly via:
+    - `task db:seed:dev` for development
+    - `task db:seed:test` for testing
+    - `python scripts/seed.py` manually
 
     Args:
         test_mode: Deprecated - use DATABASE_URL environment variable instead.
     """
+    import os
     from backend.db.database import init_db as _init_db, get_database_url
-    from backend.db.seed import seed_database
 
     db_url = get_database_url()
     # Mask password in log
@@ -55,8 +60,11 @@ def init_db(test_mode: bool = None):
         _init_db()
         log.info("db_tables_initialized")
 
-        # Seed is idempotent - safe to call every time
-        seed_database()
+        # Optional: Auto-seed in local development only
+        if os.environ.get("DEV_AUTO_SEED", "false").lower() == "true":
+            from backend.db.seed import seed_database
+            log.info("dev_auto_seed_enabled")
+            seed_database()
 
     except Exception as e:
         log.exception("db_init_failed", error=str(e))

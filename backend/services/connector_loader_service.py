@@ -6,7 +6,7 @@ actual connector instances used for syncing.
 """
 
 import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 from sqlmodel import Session
 
@@ -16,6 +16,9 @@ from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging("connector_loader")
+
+# Type alias for progress callback
+ProgressCallback = Callable[[int, str, int, int, Optional[str]], None]
 
 
 class ConnectorLoaderService:
@@ -85,6 +88,34 @@ class ConnectorLoaderService:
             List of AccountConnector records
         """
         return self.repo.get_by_account(account_id)
+
+    def load_connector_by_id(
+        self,
+        connector_id: int,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> Optional[Any]:
+        """
+        Load and instantiate a connector by its ID.
+
+        Args:
+            connector_id: The AccountConnector ID
+            progress_callback: Optional callback for reporting progress
+
+        Returns:
+            Instantiated connector or None if not found
+        """
+        result = self.repo.get_with_account(connector_id)
+        if not result:
+            log.warning(f"Connector {connector_id} not found")
+            return None
+
+        account_connector, account = result
+
+        return self.instantiate_connector(
+            account_connector,
+            account,
+            progress_callback=progress_callback,
+        )
 
     def resolve_credentials(self, credentials_ref: Optional[str]) -> Optional[str]:
         """
@@ -167,6 +198,8 @@ class ConnectorLoaderService:
         self,
         account_connector: AccountConnector,
         account: Account,
+        override: Optional[Any] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> Optional[Any]:
         """
         Instantiate a connector with full account context.
@@ -179,12 +212,23 @@ class ConnectorLoaderService:
         Args:
             account_connector: The AccountConnector record
             account: The parent Account record
+            override: Optional override settings (enabled, test_mode, test_file_path)
+            progress_callback: Optional callback for reporting connector progress
 
         Returns:
             Instantiated connector or None if connector type not found
         """
         connector_type = account_connector.connector_type
         config = self.build_connector_config(account_connector, account)
+
+        # Apply overrides to config
+        if override:
+            test_mode = getattr(override, 'test_mode', None) if hasattr(override, 'test_mode') else override.get('test_mode') if isinstance(override, dict) else None
+            test_file_path = getattr(override, 'test_file_path', None) if hasattr(override, 'test_file_path') else override.get('test_file_path') if isinstance(override, dict) else None
+            if test_mode is not None:
+                config['test_mode'] = test_mode
+            if test_file_path:
+                config['test_file_path'] = test_file_path
 
         # Get connector class from registry
         connector_class = self._registry.get_class(connector_type)
@@ -202,6 +246,7 @@ class ConnectorLoaderService:
                 "account_id": account_id,
                 "connector_id": connector_id,
                 "config": config,  # Pass full config for test_mode, test_file_path, etc.
+                "progress_callback": progress_callback,  # Pass progress callback for reporting
             }
 
             # Add connector-specific config based on type

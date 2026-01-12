@@ -11,7 +11,7 @@ import {
     Icon,
 } from '@chakra-ui/react';
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiClock, FiDatabase, FiPlus } from 'react-icons/fi';
-import { PriceResponse } from '../../types';
+import { AssetRef, PriceResponse } from '../../types';
 import { formatTimeLocale } from '../../utils/dateUtils';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 
@@ -44,10 +44,13 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
 
     // State for manual price dialog
     const [dialogOpen, setDialogOpen] = useState(false);
-    const [selectedAsset, setSelectedAsset] = useState<{ id: number; name: string } | null>(null);
+    const [selectedAsset, setSelectedAsset] = useState<{ id: number; symbol: string } | null>(null);
 
-    const handleAddPriceClick = (asset: { id: number; name: string }) => {
-        setSelectedAsset(asset);
+    const handleAddPriceClick = (asset: AssetRef) => {
+        if (asset.id == null || asset.symbol == null) {
+            return; // Early return if id or symbol is null/undefined
+        }
+        setSelectedAsset({ id: asset.id, symbol: asset.symbol });
         setDialogOpen(true);
     };
 
@@ -60,7 +63,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
     };
 
     const filtered = prices.filter(p =>
-        p.asset.name.toLowerCase().includes(search.toLowerCase()) ||
+        (p.asset.symbol && p.asset.symbol.toLowerCase().includes(search.toLowerCase())) ||
         (p.source && p.source.toLowerCase().includes(search.toLowerCase()))
     );
 
@@ -74,7 +77,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
         if (!aErr && bErr) return 1;
         if (aStale && !bStale) return -1;
         if (!aStale && bStale) return 1;
-        return a.asset.name.localeCompare(b.asset.name);
+        return (a.asset.symbol || '').localeCompare(b.asset.symbol || '');
     });
 
     // Count stats
@@ -155,7 +158,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                             </Icon>
                                         </Table.Cell>
                                         <Table.Cell fontWeight="medium">
-                                            {item.asset.name}
+                                            {item.asset.symbol}
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Text fontWeight={isError ? 'normal' : 'bold'}>
@@ -224,7 +227,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                     }}
                     onSave={handlePriceSaved}
                     assetId={selectedAsset.id}
-                    assetName={selectedAsset.name}
+                    assetName={selectedAsset.symbol}
                     defaultDate={new Date().toISOString()}
                     quoteAssetId={quoteAssetId}
                     quoteAssetName={baseCurrency}
