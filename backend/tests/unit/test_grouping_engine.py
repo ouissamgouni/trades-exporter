@@ -21,6 +21,7 @@ from backend.services.grouping_engine import (
     PATTERN_SWAP,
     PATTERN_UNKNOWN,
 )
+from db.models import NormalizedTransaction
 
 
 # =============================================================================
@@ -60,9 +61,9 @@ def make_tx(
     quantity: Decimal = Decimal("1.0"),
     total_in_base: Decimal = None,
     network: str = None,
-) -> TransactionData:
+) -> NormalizedTransaction:
     """Helper to create test transaction data."""
-    return TransactionData(
+    return NormalizedTransaction(
         id=id,
         source=source,
         source_transaction_id=source_transaction_id,
