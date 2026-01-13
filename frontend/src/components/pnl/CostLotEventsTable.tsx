@@ -21,7 +21,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Box, Flex, Input, Button, Badge, Text, IconButton, Spinner } from '@chakra-ui/react';
 import { Table } from '@chakra-ui/react';
 import { Tooltip } from '../ui/tooltip';
-import { FiSearch, FiHelpCircle, FiCalendar } from 'react-icons/fi';
+import { FiSearch, FiHelpCircle, FiCalendar, FiRefreshCw } from 'react-icons/fi';
 import { usePagination } from '../../hooks/usePagination';
 import { TablePagination } from '../TablePagination';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
@@ -630,6 +630,20 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
 
     // Empty state - still show filter bar so user can adjust filters
     if (events.length === 0) {
+        const defaultTypes = getDefaultEventTypes();
+        const defaultPatterns = getDefaultUnitPatterns();
+        const hasActiveFilters = (
+            filterState.dateStart !== '' ||
+            filterState.dateEnd !== '' ||
+            filterState.assetIds.length > 0 ||
+            filterState.accountIds.length > 0 ||
+            filterState.search !== '' ||
+            filterState.eventTypes.length !== defaultTypes.length ||
+            !filterState.eventTypes.every(t => defaultTypes.includes(t)) ||
+            filterState.unitPatterns.length !== defaultPatterns.length ||
+            !filterState.unitPatterns.every(p => defaultPatterns.includes(p))
+        );
+
         return (
             <Box>
                 {/* Filter Bar - shown even when empty so user can adjust filters */}
@@ -650,6 +664,32 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                         defaultCollapsed={false}
                     />
                 )}
+                {/* Compact mode filter header */}
+                {compact && enabledFeatures.eventTypeFilters && (
+                    <Flex gap={2} mb={3} align="center" justify="space-between" pb={2} borderBottom="1px solid" borderColor="gray.200">
+                        <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                            Event Filters
+                        </Text>
+                        {hasActiveFilters && (
+                            <Button
+                                size="xs"
+                                variant="ghost"
+                                colorPalette="gray"
+                                onClick={() => {
+                                    setFilterState(prev => ({
+                                        ...prev,
+                                        eventTypes: getDefaultEventTypes(),
+                                        unitPatterns: getDefaultUnitPatterns(),
+                                    }));
+                                    setActivePreset(null);
+                                }}
+                            >
+                                <FiRefreshCw size={12} />
+                                <span style={{ marginLeft: '4px' }}>Reset Filters</span>
+                            </Button>
+                        )}
+                    </Flex>
+                )}
                 <Flex
                     direction="column"
                     align="center"
@@ -661,13 +701,37 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     minH="200px"
                 >
                     <Text fontSize="lg" fontWeight="medium" color="gray.600" mb={2}>
-                        No Cost Lot Events
+                        {hasActiveFilters ? 'No Events Match Filters' : 'No Cost Lot Events'}
                     </Text>
-                    <Text fontSize="sm" color="gray.500" textAlign="center">
-                        {(filterState.dateStart || filterState.dateEnd || filterState.assetIds.length > 0)
-                            ? 'No events match your current filters. Try adjusting the filter criteria above.'
-                            : 'Cost lot events will appear here after P&L calculation.'}
+                    <Text fontSize="sm" color="gray.500" textAlign="center" mb={hasActiveFilters ? 3 : 0}>
+                        {hasActiveFilters
+                            ? 'No events match your current filter criteria. Try adjusting or clearing the filters.'
+                            : unitId
+                                ? 'No cost lot events for this unit.'
+                                : 'Cost lot events will appear here after P&L calculation.'}
                     </Text>
+                    {hasActiveFilters && (
+                        <Button
+                            size="sm"
+                            colorPalette="blue"
+                            variant="outline"
+                            onClick={() => {
+                                setFilterState({
+                                    dateStart: '',
+                                    dateEnd: '',
+                                    eventTypes: getDefaultEventTypes(),
+                                    unitPatterns: getDefaultUnitPatterns(),
+                                    accountIds: [],
+                                    assetIds: [],
+                                    search: '',
+                                });
+                                setActivePreset(null);
+                            }}
+                        >
+                            <FiRefreshCw />
+                            <span style={{ marginLeft: '6px' }}>Clear All Filters</span>
+                        </Button>
+                    )}
                 </Flex>
             </Box>
         );
@@ -697,43 +761,74 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
             {/* Compact mode filters - for unit detail expanded rows */}
             {compact && enabledFeatures.eventTypeFilters && (
                 <>
-                    {/* Quick Filter Presets */}
-                    <Flex gap={2} mb={3} wrap="wrap" pb={2} borderBottom="1px solid" borderColor="gray.200">
-                        <Text fontSize="xs" fontWeight="semibold" color="gray.600" alignSelf="center">
-                            Quick Filters:
-                        </Text>
-                        {Object.entries(QUICK_PRESETS).map(([key, preset]) => (
-                            <Button
-                                key={key}
-                                size="xs"
-                                variant={activePreset === key ? 'solid' : 'outline'}
-                                colorPalette={activePreset === key ? 'blue' : 'gray'}
-                                onClick={() => applyPreset(key)}
-                                disabled={isRefreshing}
-                            >
-                                {activeAction === key && isRefreshing ? (
-                                    <Spinner size="xs" />
-                                ) : (
-                                    <span>{preset.icon}</span>
-                                )}
-                                <span style={{ marginLeft: '4px' }}>{preset.label}</span>
-                            </Button>
-                        ))}
-                        {activePreset && (
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                colorPalette="gray"
-                                onClick={() => applyPreset(activePreset)}
-                                disabled={isRefreshing}
-                            >
-                                Clear
-                            </Button>
-                        )}
+                    {/* Filter Header with Count Badge and Reset */}
+                    <Flex gap={2} mb={3} align="center" justify="space-between" pb={2} borderBottom="1px solid" borderColor="gray.200">
+                        <Flex gap={2} align="center">
+                            <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                                Event Filters
+                            </Text>
+                            {(() => {
+                                const defaultTypes = getDefaultEventTypes();
+                                const activeFilterCount = (
+                                    (filterState.eventTypes.length !== defaultTypes.length || !filterState.eventTypes.every(t => defaultTypes.includes(t)) ? 1 : 0) +
+                                    (filterState.unitPatterns.length !== getDefaultUnitPatterns().length ? 1 : 0)
+                                );
+                                return activeFilterCount > 0 ? (
+                                    <Badge size="xs" colorPalette="blue">
+                                        {activeFilterCount} active
+                                    </Badge>
+                                ) : null;
+                            })()}
+                        </Flex>
+                        {(() => {
+                            const defaultTypes = getDefaultEventTypes();
+                            const hasActiveFilters = (
+                                filterState.eventTypes.length !== defaultTypes.length ||
+                                !filterState.eventTypes.every(t => defaultTypes.includes(t)) ||
+                                filterState.unitPatterns.length !== getDefaultUnitPatterns().length
+                            );
+                            return hasActiveFilters ? (
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    colorPalette="gray"
+                                    onClick={() => {
+                                        setFilterState(prev => ({
+                                            ...prev,
+                                            eventTypes: getDefaultEventTypes(),
+                                            unitPatterns: getDefaultUnitPatterns(),
+                                        }));
+                                        setActivePreset(null);
+                                    }}
+                                    disabled={isRefreshing}
+                                >
+                                    <FiRefreshCw size={12} />
+                                    <span style={{ marginLeft: '4px' }}>Reset</span>
+                                </Button>
+                            ) : null;
+                        })()}
                     </Flex>
 
                     {/* Event Type Filter Buttons */}
-                    <Flex gap={1} mb={3} wrap="wrap">
+                    <Flex gap={1} mb={3} wrap="wrap" position="relative">
+                        {isRefreshing && (
+                            <Box
+                                position="absolute"
+                                top={0}
+                                left={0}
+                                right={0}
+                                bottom={0}
+                                bg="white"
+                                opacity={0.7}
+                                borderRadius="md"
+                                zIndex={1}
+                                display="flex"
+                                alignItems="center"
+                                justifyContent="center"
+                            >
+                                <Spinner size="sm" />
+                            </Box>
+                        )}
                         {getSortedEventTypes().map(type => {
                             const cfg = EVENT_TYPE_CONFIG[type];
                             const count = eventCounts[type];
@@ -748,9 +843,6 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                     onClick={() => toggleEventType(type)}
                                     disabled={isRefreshing}
                                 >
-                                    {activeAction === `toggle-${type}` && isRefreshing && (
-                                        <Spinner size="xs" mr={1} />
-                                    )}
                                     {cfg.icon} {cfg.label} ({count})
                                 </Button>
                             );

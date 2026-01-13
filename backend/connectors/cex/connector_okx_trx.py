@@ -88,6 +88,11 @@ class OKXConnectorTrx(BaseConnector):
             after = None
 
             while True:
+                # Check for abort at start of each pagination iteration
+                if self.is_abort_requested():
+                    log.info("⚠️ Abort requested, stopping OKX trade fetching")
+                    break
+                    
                 log.info("Fetching trades batch...")
                 params = {}
                 if after:

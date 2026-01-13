@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Flex, Text, Spinner } from '@chakra-ui/react';
+import { Box, Flex, Text, Spinner, Button } from '@chakra-ui/react';
 import { usePagination } from '../../hooks/usePagination';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
 import { TablePagination } from '../TablePagination';
@@ -50,7 +50,7 @@ export const TabLoadingState: React.FC<{ message?: string }> = ({ message = 'Loa
     </Flex>
 );
 
-export const TabErrorState: React.FC<{ error: string }> = ({ error }) => (
+export const TabErrorState: React.FC<{ error: string; onRetry?: () => void }> = ({ error, onRetry }) => (
     <Flex
         direction="column"
         align="center"
@@ -64,9 +64,19 @@ export const TabErrorState: React.FC<{ error: string }> = ({ error }) => (
         <Text fontSize="lg" fontWeight="medium" color="red.600" mb={2}>
             Error Loading Data
         </Text>
-        <Text fontSize="sm" color="gray.600" textAlign="center">
+        <Text fontSize="sm" color="gray.600" textAlign="center" mb={onRetry ? 3 : 0}>
             {error}
         </Text>
+        {onRetry && (
+            <Button
+                size="sm"
+                colorPalette="red"
+                variant="outline"
+                onClick={onRetry}
+            >
+                Retry
+            </Button>
+        )}
     </Flex>
 );
 
@@ -115,7 +125,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_units' });
 
-    const { data: units, total, isLoading, error } = useLazyPaginatedQuery<CalculationUnit>({
+    const { data: units, total, isLoading, error, refetch } = useLazyPaginatedQuery<CalculationUnit>({
         endpoint: `/pnl/versions/${versionId}/units`,
         page: pagination.page,
         limit: pagination.pageSize,
@@ -129,7 +139,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
     }, [total]);
 
     if (isLoading) return <TabLoadingState message="Loading calculation units..." />;
-    if (error) return <TabErrorState error={error} />;
+    if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (units.length === 0) return <TabEmptyState title="No Calculation Units" description="Units will appear here after P&L calculation." />;
 
     return (
@@ -177,7 +187,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_lots' });
 
-    const { data: lots, total, isLoading, error } = useLazyPaginatedQuery<CostLot>({
+    const { data: lots, total, isLoading, error, refetch } = useLazyPaginatedQuery<CostLot>({
         endpoint: `/pnl/versions/${versionId}/lots`,
         page: pagination.page,
         limit: pagination.pageSize,
@@ -195,7 +205,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
     }, [total]);
 
     if (isLoading) return <TabLoadingState message="Loading cost lots..." />;
-    if (error) return <TabErrorState error={error} />;
+    if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (lots.length === 0) return <TabEmptyState title="No Cost Lots" description="Cost lots will appear here after P&L calculation." />;
 
     return (
@@ -240,7 +250,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_realized' });
 
-    const { data: entries, total, isLoading, error } = useLazyPaginatedQuery<RealizedPnLRow>({
+    const { data: entries, total, isLoading, error, refetch } = useLazyPaginatedQuery<RealizedPnLRow>({
         endpoint: `/pnl/versions/${versionId}/realized-pnl`,
         page: pagination.page,
         limit: pagination.pageSize,
@@ -257,7 +267,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
     }, [total]);
 
     if (isLoading) return <TabLoadingState message="Loading realized P&L..." />;
-    if (error) return <TabErrorState error={error} />;
+    if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (entries.length === 0) return <TabEmptyState title="No Realized P&L" description="Realized P&L entries will appear here after disposals." />;
 
     return (
@@ -304,7 +314,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
     const pagination = usePagination({ storageKey: 'pnl_audit_fees' });
     const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null);
 
-    const { data: fees, total, isLoading, error } = useLazyPaginatedQuery<FeeEntry>({
+    const { data: fees, total, isLoading, error, refetch } = useLazyPaginatedQuery<FeeEntry>({
         endpoint: `/pnl/versions/${versionId}/fees`,
         page: pagination.page,
         limit: pagination.pageSize,
@@ -335,7 +345,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
     }, [total]);
 
     if (isLoading) return <TabLoadingState message="Loading fees..." />;
-    if (error) return <TabErrorState error={error} />;
+    if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (fees.length === 0) return <TabEmptyState title="No Fees Recorded" description="Fee entries will appear here after calculation." />;
 
     return (
@@ -388,7 +398,7 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_warnings' });
 
-    const { data: rawWarnings, total, isLoading, error } = useLazyPaginatedQuery<any>({
+    const { data: rawWarnings, total, isLoading, error, refetch } = useLazyPaginatedQuery<any>({
         endpoint: `/pnl/versions/${versionId}/warnings`,
         page: pagination.page,
         limit: pagination.pageSize,
@@ -416,7 +426,7 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
     }, [total]);
 
     if (isLoading) return <TabLoadingState message="Loading warnings..." />;
-    if (error) return <TabErrorState error={error} />;
+    if (error) return <TabErrorState error={error} onRetry={refetch} />;
     if (warnings.length === 0) {
         return (
             <Flex
