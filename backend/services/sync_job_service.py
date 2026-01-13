@@ -41,6 +41,7 @@ class ConnectorSyncStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    ABORTED = "aborted"
 
 
 class PipelineStage(str, Enum):
@@ -551,6 +552,7 @@ class SyncJobService:
                     session,
                     connector_overrides=overrides_map,
                     progress_callback=self._create_progress_callback(),
+                    abort_event=self._abort_event,
                 )
                 
                 # Initialize per-connector statuses for database connectors
@@ -619,8 +621,28 @@ class SyncJobService:
                 if self._abort_event.is_set():
                     self.logger.info("⚠️ Abort requested, stopping job...")
                     self.progress.status = JobStatus.ABORTED
+                    
+                    # Persist KPIs for current connector before aborting
+                    if current_connector_id and current_connector_id in self.progress.connector_statuses:
+                        cstatus = self.progress.connector_statuses[current_connector_id]
+                        cstatus.status = ConnectorSyncStatus.ABORTED
+                        cstatus.finished_at = datetime.now()
+                        if current_connector_id in self.progress.db_connector_run_ids and sync_job_repo:
+                            self._persist_connector_run_results(
+                                sync_job_repo,
+                                current_connector_id,
+                                cstatus,
+                                connector_persistence_results.get(current_connector_id, {}),
+                            )
+                            sync_job_repo.update_connector_run_status(
+                                self.progress.db_connector_run_ids[current_connector_id],
+                                SyncJobConnectorStatus.ABORTED,
+                            )
+                    
                     # Mark remaining connectors as skipped
                     for cid, cstatus in self.progress.connector_statuses.items():
+                        if cid == current_connector_id:
+                            continue  # Already handled above
                         if cstatus.status == ConnectorSyncStatus.QUEUED:
                             cstatus.status = ConnectorSyncStatus.SKIPPED
                             if cid in self.progress.db_connector_run_ids and sync_job_repo:
@@ -629,47 +651,83 @@ class SyncJobService:
                                     SyncJobConnectorStatus.SKIPPED,
                                 )
                         elif cstatus.status == ConnectorSyncStatus.RUNNING:
-                            cstatus.status = ConnectorSyncStatus.SKIPPED
+                            cstatus.status = ConnectorSyncStatus.ABORTED
                             cstatus.finished_at = datetime.now()
                             if cid in self.progress.db_connector_run_ids and sync_job_repo:
                                 sync_job_repo.update_connector_run_status(
                                     self.progress.db_connector_run_ids[cid],
-                                    SyncJobConnectorStatus.SKIPPED,
+                                    SyncJobConnectorStatus.ABORTED,
                                 )
+                    session.commit()
                     break
 
-                # Track current connector from raw_item metadata
-                if raw_item and "_master_source" in raw_item:
-                    current = raw_item["_master_source"]
-                    if current != self.progress.current_connector:
-                        # Mark previous connector as completed and persist results
-                        if self.progress.current_connector and current_connector_id:
+                # Track current connector from wrapper metadata (connector_id at top level)
+                # Hub connector wraps items: {"connector_id": X, "connector_name": Y, "raw_item": {...}, ...}
+                new_connector_id = raw_item.get("connector_id") if raw_item else None
+                nested_raw = raw_item.get("raw_item", raw_item) if raw_item else {}
+                current = nested_raw.get("_master_source") if nested_raw else None
+                
+                # Check for end-of-connector marker (connector finished all its items)
+                is_connector_complete = raw_item.get("is_connector_complete", False) if raw_item else False
+                if is_connector_complete and new_connector_id:
+                    self.logger.debug(f"📋 Connector {new_connector_id} signaled completion")
+                    if new_connector_id in self.progress.connector_statuses:
+                        cstatus = self.progress.connector_statuses[new_connector_id]
+                        if cstatus.status == ConnectorSyncStatus.RUNNING:
+                            cstatus.status = ConnectorSyncStatus.COMPLETED
+                            cstatus.finished_at = datetime.now()
                             self.progress.connectors_completed.append(
-                                self.progress.current_connector
+                                raw_item.get("connector_name", f"connector_{new_connector_id}")
                             )
-                            if current_connector_id in self.progress.connector_statuses:
-                                cstatus = self.progress.connector_statuses[current_connector_id]
-                                if cstatus.status == ConnectorSyncStatus.RUNNING:
-                                    cstatus.status = ConnectorSyncStatus.COMPLETED
-                                    cstatus.finished_at = datetime.now()
-                                    
-                                    # Persist final connector run results
-                                    if current_connector_id in self.progress.db_connector_run_ids and sync_job_repo:
-                                        self._persist_connector_run_results(
-                                            sync_job_repo,
-                                            current_connector_id,
-                                            cstatus,
-                                            connector_persistence_results.get(current_connector_id, {}),
-                                        )
-                                        session.commit()  # Commit after each connector to ensure durability
-                        
-                        self.progress.current_connector = current
-                        
-                        # Try to extract connector_id from raw_item or master_source
-                        new_connector_id = raw_item.get("_connector_id")
-                        if new_connector_id and new_connector_id in self.progress.connector_statuses:
-                            current_connector_id = new_connector_id
+                            
+                            # Persist final connector run results
+                            if new_connector_id in self.progress.db_connector_run_ids and sync_job_repo:
+                                self._persist_connector_run_results(
+                                    sync_job_repo,
+                                    new_connector_id,
+                                    cstatus,
+                                    connector_persistence_results.get(new_connector_id, {}),
+                                )
+                                sync_job_repo.update_connector_run_status(
+                                    self.progress.db_connector_run_ids[new_connector_id],
+                                    SyncJobConnectorStatus.COMPLETED,
+                                )
+                                session.commit()
+                    # Skip further processing for completion marker
+                    continue
+                
+                if current and current != self.progress.current_connector:
+                    # Connector switch detected via _master_source change
+                    # Note: With end-of-connector markers, this is a fallback path
+                    if self.progress.current_connector and current_connector_id:
+                        # Only mark as completed if not already done via marker
+                        if current_connector_id in self.progress.connector_statuses:
                             cstatus = self.progress.connector_statuses[current_connector_id]
+                            if cstatus.status == ConnectorSyncStatus.RUNNING:
+                                cstatus.status = ConnectorSyncStatus.COMPLETED
+                                cstatus.finished_at = datetime.now()
+                                self.progress.connectors_completed.append(
+                                    self.progress.current_connector
+                                )
+                                
+                                # Persist final connector run results
+                                if current_connector_id in self.progress.db_connector_run_ids and sync_job_repo:
+                                    self._persist_connector_run_results(
+                                        sync_job_repo,
+                                        current_connector_id,
+                                        cstatus,
+                                        connector_persistence_results.get(current_connector_id, {}),
+                                    )
+                                    session.commit()  # Commit after each connector to ensure durability
+                    
+                    self.progress.current_connector = current
+                    
+                    # Use connector_id from wrapper (at top level, not nested in raw_item)
+                    if new_connector_id and new_connector_id in self.progress.connector_statuses:
+                        current_connector_id = new_connector_id
+                        cstatus = self.progress.connector_statuses[current_connector_id]
+                        # Only mark as RUNNING if not already completed
+                        if cstatus.status != ConnectorSyncStatus.COMPLETED:
                             cstatus.status = ConnectorSyncStatus.RUNNING
                             cstatus.started_at = datetime.now()
                             
@@ -679,14 +737,25 @@ class SyncJobService:
                                     self.progress.db_connector_run_ids[current_connector_id],
                                     SyncJobConnectorStatus.RUNNING,
                                 )
-                            
-                            # Initialize persistence results tracker for this connector
+                        
+                        # Initialize persistence results tracker for this connector
+                        if current_connector_id not in connector_persistence_results:
                             connector_persistence_results[current_connector_id] = {
                                 "synced_ids": [],
                                 "updated_ids": [],
                                 "skipped_ids": [],
                                 "error_details": [],
                             }
+                elif new_connector_id and new_connector_id != current_connector_id and new_connector_id in self.progress.connector_statuses:
+                    # Connector changed but no _master_source - still update tracking
+                    current_connector_id = new_connector_id
+                    if current_connector_id not in connector_persistence_results:
+                        connector_persistence_results[current_connector_id] = {
+                            "synced_ids": [],
+                            "updated_ids": [],
+                            "skipped_ids": [],
+                            "error_details": [],
+                        }
 
                 # Handle errors from connector
                 if error:

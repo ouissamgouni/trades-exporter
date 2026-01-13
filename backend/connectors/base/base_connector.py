@@ -7,6 +7,7 @@ import json
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime
+from threading import Event
 from typing import Generator, Dict, List, Any, Optional, Callable
 
 from backend.config.loader import configure_logging
@@ -36,6 +37,7 @@ class BaseConnector(ABC):
         connector_id: Optional[int] = None,
         config: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[ProgressCallback] = None,
+        abort_event: Optional[Event] = None,
     ):
         """
         Initialize the connector.
@@ -46,6 +48,8 @@ class BaseConnector(ABC):
             config: Connector configuration dict (may include test_mode, test_file_path)
             progress_callback: Optional callback to report progress updates.
                               Signature: (connector_id, operation, current, total, log_message)
+            abort_event: Optional threading.Event to signal abort request. When set,
+                        connector should stop processing gracefully and return partial results.
 
         Note: Test mode priority:
             1. Per-connector config["test_mode"] (if set)
@@ -56,6 +60,7 @@ class BaseConnector(ABC):
         self.config = config or {}
         self.exchange = None
         self._progress_callback = progress_callback
+        self._abort_event = abort_event
         
         # Per-connector test mode takes priority over global setting
         self._test_mode = self.config.get("test_mode", None)
@@ -90,6 +95,15 @@ class BaseConnector(ABC):
                 total,
                 log_message,
             )
+
+    def is_abort_requested(self) -> bool:
+        """
+        Check if abort has been requested.
+        
+        Returns:
+            True if abort_event is set and abort was requested, False otherwise.
+        """
+        return self._abort_event is not None and self._abort_event.is_set()
 
     @property
     @abstractmethod

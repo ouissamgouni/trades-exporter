@@ -68,12 +68,12 @@ def get_app_info():
     Get application information including environment and versions.
 
     Returns:
-    - environment: Current environment (dev/test/prod) from APP_ENV
+    - environment: Current environment (dev/test/prod) from ENV_NAME
     - backend_version: Backend API version
     - frontend_version: Frontend app version (if available)
     - db_schema_version: Database schema version from Alembic (if available)
     """
-    environment = os.getenv("APP_ENV", "unknown")
+    environment = os.getenv("ENV_NAME", "unknown")
     backend_version = "1.0.0"  # From backend/__init__.py or main.py
     
     # TODO: Add database schema version from Alembic if needed

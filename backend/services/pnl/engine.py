@@ -341,7 +341,7 @@ class PnLEngine:
         result: PnLResult, 
         status: str = "draft",
         expires_in_hours: int = 1,
-    ) -> int:
+    ) -> CalculationVersion:
         """
         Persist calculation results to database.
         
@@ -377,10 +377,10 @@ class PnLEngine:
         
         log.info("results_persisted", version_id=version.version_id, status=status)
 
-        return version.version_id
+        return version
     
     
-    def save_draft(self, result: PnLResult, expires_in_hours: int = 1) -> int:
+    def save_draft(self, result: PnLResult, expires_in_hours: int = 1) -> CalculationVersion:
         """
         Save calculation results as a draft (auto-expires).
         

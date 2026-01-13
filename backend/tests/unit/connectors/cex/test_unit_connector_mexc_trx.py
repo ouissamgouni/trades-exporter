@@ -13,8 +13,8 @@ from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
 class TestMEXCConnector:
     """Unit tests for MEXC connector trade mapping."""
 
-    @patch("backend.connectors.cex.connector_mexc_trx.load_credentials")
-    @patch("ccxt.mexc")
+    @patch("backend.connectors.cex.connector_mexc_base.load_credentials")
+    @patch("backend.connectors.cex.connector_mexc_base.ccxt.mexc")
     def test_map_trade_buy(self, mock_ccxt, mock_creds):
         """Test mapping a buy trade from CCXT format to normalized format."""
         mock_creds.return_value = {"api_key": "test_key", "api_secret": "test_secret"}

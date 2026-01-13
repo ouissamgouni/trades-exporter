@@ -150,12 +150,12 @@ class TestPersistResults:
     ):
         """Test persist_results updates version with draft status by default."""
         engine = PnLEngine(mock_session, mock_price_service, fifo_config)
-        version_id = engine.persist_results(sample_result, status="draft")
+        version = engine.persist_results(sample_result, status="draft")
         
         # Verify version was updated with draft status
         assert sample_result.version.status == "draft"
         assert sample_result.version.expires_at is not None
-        assert version_id == sample_result.version.version_id
+        assert version.version_id == sample_result.version.version_id
 
     def test_persist_committed_has_no_expiry(
         self,
@@ -166,7 +166,7 @@ class TestPersistResults:
     ):
         """Test persist_results with committed status has no expiry."""
         engine = PnLEngine(mock_session, mock_price_service, fifo_config)
-        version_id = engine.persist_results(sample_result, status="committed")
+        version = engine.persist_results(sample_result, status="committed")
         
         # Verify version was updated with committed status and no expiry
         assert sample_result.version.status == "committed"
@@ -219,10 +219,10 @@ class TestSaveDraft:
     ):
         """Test save_draft calls persist_results with status='draft'."""
         engine = PnLEngine(mock_session, mock_price_service, fifo_config)
-        version_id = engine.save_draft(sample_result, expires_in_hours=2)
+        version = engine.save_draft(sample_result, expires_in_hours=2)
         
         assert sample_result.version.status == "draft"
-        assert version_id == sample_result.version.version_id
+        assert version.version_id == sample_result.version.version_id
 
 
 class TestCommitDraft:
