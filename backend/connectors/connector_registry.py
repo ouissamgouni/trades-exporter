@@ -150,6 +150,26 @@ class ConnectorRegistry:
 
         self._register(
             ConnectorInfo(
+                type="mexc-deposits",
+                category="cex",
+                display_name="MEXC Deposits",
+                required_config=[],
+                optional_config=["start_date"],
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
+                type="mexc-withdrawals",
+                category="cex",
+                display_name="MEXC Withdrawals",
+                required_config=[],
+                optional_config=["start_date"],
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
                 type="okx-transactions",
                 category="cex",
                 display_name="OKX Transactions",
@@ -287,6 +307,8 @@ class ConnectorRegistry:
 
         # Import connector classes here to avoid circular imports
         from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
+        from backend.connectors.cex.connector_mexc_deposits import MEXCDepositsConnector
+        from backend.connectors.cex.connector_mexc_withdrawals import MEXCWithdrawalsConnector
         from backend.connectors.cex.connector_binance_trx import BinanceTrxConnector
         from backend.connectors.cex.connector_okx_trx import OKXConnectorTrx
         from backend.connectors.cex.connector_okx_convert import OKXConvertConnector
@@ -309,6 +331,8 @@ class ConnectorRegistry:
             "binance-deposits": ConnectorBinanceDeposits,
             "binance-withdrawals": BinanceWithdrawalsConnector,
             "mexc-transactions": MEXCConnectorTrx,
+            "mexc-deposits": MEXCDepositsConnector,
+            "mexc-withdrawals": MEXCWithdrawalsConnector,
             "okx-transactions": OKXConnectorTrx,
             "okx-convert": OKXConvertConnector,
             "coinbase-transactions": ConnectorCoinbaseTrx,

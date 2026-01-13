@@ -190,6 +190,12 @@ class BinanceTrxConnector(BaseConnector):
                 for item in enumerate(symbols)
             }
             for future in as_completed(futures):
+                # Check for abort before processing next future
+                if self.is_abort_requested():
+                    log.info("⚠️ Abort requested, stopping Binance symbol fetching")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                    
                 try:
                     results = future.result()
                     for trade_id, trade in results:

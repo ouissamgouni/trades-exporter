@@ -24,7 +24,7 @@ database_url = get_database_url()
 config.set_main_option("sqlalchemy.url", database_url)
 
 print(
-    f"[Alembic] Using database: {os.getenv("APP_ENV")} - {database_url.split('@')[-1]}"
+    f"[Alembic] Using database: {os.getenv(key="ENV_NAME")} - {database_url.split('@')[-1]}"
 )
 
 # Interpret the config file for Python logging.

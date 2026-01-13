@@ -69,6 +69,7 @@ class SyncJobConnectorStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    ABORTED = "aborted"
 
 
 class PriceType(str, Enum):

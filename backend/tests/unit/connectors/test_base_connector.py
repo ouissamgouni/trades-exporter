@@ -260,3 +260,65 @@ class TestProgressCallback:
         connector.update_progress(operation="Step 3", current=3, total=3)
         
         assert callback.call_count == 3
+
+
+# ============================================================================
+# Test Abort Event
+# ============================================================================
+
+
+class TestAbortEvent:
+    """Tests for abort event functionality."""
+
+    def test_connector_accepts_abort_event(self):
+        """Test that connector accepts abort_event parameter."""
+        from threading import Event
+        
+        abort_event = Event()
+        connector = ConcreteConnector(abort_event=abort_event)
+        
+        assert connector._abort_event is abort_event
+
+    def test_connector_without_abort_event(self):
+        """Test that connector works without abort event."""
+        connector = ConcreteConnector()
+        
+        assert connector._abort_event is None
+
+    def test_is_abort_requested_false_initially(self):
+        """Test that is_abort_requested returns False initially."""
+        from threading import Event
+        
+        abort_event = Event()
+        connector = ConcreteConnector(abort_event=abort_event)
+        
+        assert connector.is_abort_requested() is False
+
+    def test_is_abort_requested_true_when_set(self):
+        """Test that is_abort_requested returns True when event is set."""
+        from threading import Event
+        
+        abort_event = Event()
+        connector = ConcreteConnector(abort_event=abort_event)
+        
+        abort_event.set()
+        assert connector.is_abort_requested() is True
+
+    def test_is_abort_requested_false_without_event(self):
+        """Test that is_abort_requested returns False when no event provided."""
+        connector = ConcreteConnector()
+        
+        assert connector.is_abort_requested() is False
+
+    def test_is_abort_requested_after_clear(self):
+        """Test that is_abort_requested returns False after event is cleared."""
+        from threading import Event
+        
+        abort_event = Event()
+        connector = ConcreteConnector(abort_event=abort_event)
+        
+        abort_event.set()
+        assert connector.is_abort_requested() is True
+        
+        abort_event.clear()
+        assert connector.is_abort_requested() is False

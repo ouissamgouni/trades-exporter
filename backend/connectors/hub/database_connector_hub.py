@@ -6,6 +6,7 @@ instead of hardcoded settings, enabling dynamic connector management via API.
 """
 
 from typing import Dict, Any, List, Optional, Generator, Tuple, Callable
+from threading import Event
 
 from sqlmodel import Session
 
@@ -42,6 +43,7 @@ class DatabaseConnectorHub(BaseHubConnector):
         session: Session,
         connector_overrides: Optional[Dict[int, Any]] = None,
         progress_callback: Optional[ProgressCallback] = None,
+        abort_event: Optional[Event] = None,
     ):
         """
         Initialize the database connector hub.
@@ -51,6 +53,7 @@ class DatabaseConnectorHub(BaseHubConnector):
             connector_overrides: Optional dict of connector_id -> override settings
                                  (enabled, test_mode, test_file_path)
             progress_callback: Optional callback for reporting connector progress
+            abort_event: Optional threading.Event to signal abort request
         """
         self.session = session
         self.loader_service = ConnectorLoaderService(session)
@@ -58,6 +61,7 @@ class DatabaseConnectorHub(BaseHubConnector):
         self._account_connector_map: Dict[str, AccountConnector] = {}
         self._connector_overrides = connector_overrides or {}
         self._progress_callback = progress_callback
+        self._abort_event = abort_event
 
         log.info("🔄 Initializing DatabaseConnectorHub...")
         if self._connector_overrides:
@@ -71,6 +75,7 @@ class DatabaseConnectorHub(BaseHubConnector):
         super().__init__(
             child_connectors=child_connectors_list,
             parallel_strategy="futures",
+            abort_event=abort_event,
         )
 
         log.info("⚡ Parallel processing: enabled (futures strategy)")
