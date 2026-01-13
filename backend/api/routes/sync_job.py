@@ -27,6 +27,7 @@ class ConnectorProgressResponse(BaseModel):
     new_count: int = 0
     updated_count: int = 0
     skipped_count: int = 0
+    error_count: int = 0
     error: Optional[str] = None
     current_operation: Optional[str] = None
     operation_progress: int = 0

@@ -258,6 +258,12 @@ class ConnectorCoinbaseTrx(BaseConnector):
                 for item in enumerate(symbols)
             }
             for future in as_completed(futures):
+                # Check for abort before processing next future
+                if self.is_abort_requested():
+                    log.info("⚠️ Abort requested, stopping Coinbase symbol fetching")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                    
                 try:
                     trades = future.result()
                     all_trades.extend(trades)

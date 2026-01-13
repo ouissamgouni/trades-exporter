@@ -223,6 +223,7 @@ class SyncJobRepository:
             SyncJobConnectorStatus.COMPLETED,
             SyncJobConnectorStatus.FAILED,
             SyncJobConnectorStatus.SKIPPED,
+            SyncJobConnectorStatus.ABORTED,
         ):
             run.finished_at = datetime.now(timezone.utc)
 
