@@ -42,6 +42,24 @@ class ConnectorSyncStatus(str, Enum):
 
 
 @dataclass
+class ConnectorOverride:
+    """Per-sync override for a single connector."""
+    
+    connector_id: int
+    enabled: Optional[bool] = None
+    test_mode: Optional[bool] = None
+    test_file_path: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "connector_id": self.connector_id,
+            "enabled": self.enabled,
+            "test_mode": self.test_mode,
+            "test_file_path": self.test_file_path,
+        }
+
+
+@dataclass
 class ConnectorProgress:
     """Tracks progress for a single connector."""
     
@@ -214,15 +232,20 @@ class SyncJobService:
         }
 
     def start_job(
-        self, connector_overrides: Optional[Dict[int, Optional[datetime]]] = None
+        self,
+        connector_overrides: Optional[List[ConnectorOverride]] = None,
+        since_overrides: Optional[Dict[int, Optional[datetime]]] = None
     ) -> Dict[str, Any]:
         """
         Start a new sync job.
 
-        Test mode is determined by the global is_test_mode() setting.
+        Test mode is determined by the global is_test_mode() setting, unless
+        overridden per-connector.
 
         Args:
-            connector_overrides: Optional dict mapping connector_id to since_datetime.
+            connector_overrides: Optional list of per-connector overrides for
+                enable/disable and test mode settings.
+            since_overrides: Optional dict mapping connector_id to since_datetime.
                 - If since_datetime is provided, sync from that datetime
                 - If since_datetime is None, perform full sync (no since filter)
                 - If connector not in dict, use computed default (max transaction datetime)
@@ -242,8 +265,16 @@ class SyncJobService:
         self.progress.reset()
         self._abort_event.clear()
         
-        # Store connector overrides for the job thread
+        # Store overrides for the job thread
         self._connector_overrides = connector_overrides
+        self._since_overrides = since_overrides
+        
+        # Count how many overrides are configured
+        overrides_count = 0
+        if connector_overrides:
+            overrides_count += len(connector_overrides)
+        if since_overrides:
+            overrides_count += len(since_overrides)
 
         # Start the job in a background thread
         self._job_thread = threading.Thread(target=self._run_job, daemon=True)
@@ -254,6 +285,7 @@ class SyncJobService:
             "status": "started",
             "message": f"Sync job started in {'test' if test_mode else 'live'} mode",
             "test_mode": test_mode,
+            "overrides_count": overrides_count,
         }
 
     def abort_job(self) -> Dict[str, Any]:
@@ -288,8 +320,23 @@ class SyncJobService:
         connector_hub = None
         session = None
         
-        # Get connector overrides passed from start_job
-        connector_overrides = getattr(self, '_connector_overrides', None)
+        # Get overrides passed from start_job
+        connector_overrides: Optional[List[ConnectorOverride]] = getattr(self, '_connector_overrides', None)
+        since_overrides: Optional[Dict[int, Optional[datetime]]] = getattr(self, '_since_overrides', None)
+        
+        # Build override lookup maps
+        override_enabled: Dict[int, bool] = {}
+        override_test_mode: Dict[int, bool] = {}
+        override_test_file: Dict[int, str] = {}
+        
+        if connector_overrides:
+            for o in connector_overrides:
+                if o.enabled is not None:
+                    override_enabled[o.connector_id] = o.enabled
+                if o.test_mode is not None:
+                    override_test_mode[o.connector_id] = o.test_mode
+                if o.test_file_path is not None:
+                    override_test_file[o.connector_id] = o.test_file_path
 
         try:
             self.logger.info(
@@ -324,18 +371,27 @@ class SyncJobService:
                 repo = AccountConnectorRepository(session)
                 registry = get_connector_registry()
                 
+                # Collect enabled connectors, filtering by overrides
+                enabled_connectors = []
                 for account_connector, account in repo.get_enabled():
                     connector_id = account_connector.id
+                    
+                    # Check if this connector is disabled by override
+                    if connector_id in override_enabled and not override_enabled[connector_id]:
+                        self.logger.info(f"⏭️ Connector {connector_id} ({account_connector.connector_type}) disabled by override, skipping")
+                        continue
+                    
+                    enabled_connectors.append((account_connector, account))
                     connector_info = registry.get(account_connector.connector_type)
                     
                     # Only compute since for connectors that support incremental sync
                     if connector_info and connector_info.supports_incremental_sync:
-                        if connector_overrides and connector_id in connector_overrides:
+                        if since_overrides and connector_id in since_overrides:
                             # Use explicit override (can be None for full sync)
-                            connector_since_map[connector_id] = connector_overrides[connector_id]
-                            if connector_overrides[connector_id]:
+                            connector_since_map[connector_id] = since_overrides[connector_id]
+                            if since_overrides[connector_id]:
                                 self.logger.info(
-                                    f"📅 Connector {connector_id} using override since: {connector_overrides[connector_id]}"
+                                    f"📅 Connector {connector_id} using override since: {since_overrides[connector_id]}"
                                 )
                             else:
                                 self.logger.info(
@@ -354,17 +410,25 @@ class SyncJobService:
                     session,
                     parent_output_path=sync_output_path,
                     connector_since_map=connector_since_map,
+                    connector_overrides=connector_overrides,  # Pass enable/disable/test_mode overrides
                 )
                 
                 # Initialize per-connector statuses for database connectors
-                for account_connector, account in repo.get_enabled():
+                for account_connector, account in enabled_connectors:
                     config = account_connector.config or {}
-                    self.progress.connector_statuses[account_connector.id] = ConnectorProgress(
-                        connector_id=account_connector.id,
+                    connector_id = account_connector.id
+                    
+                    # Determine test mode: override > config > global
+                    effective_test_mode = override_test_mode.get(
+                        connector_id, config.get("test_mode", test_mode)
+                    )
+                    
+                    self.progress.connector_statuses[connector_id] = ConnectorProgress(
+                        connector_id=connector_id,
                         connector_type=account_connector.connector_type,
                         account_name=account.name,
                         status=ConnectorSyncStatus.QUEUED,
-                        test_mode=config.get("test_mode", False),
+                        test_mode=effective_test_mode,
                     )
             else:
                 self.logger.info("📁 Using file-configured connectors")

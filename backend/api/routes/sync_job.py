@@ -5,14 +5,42 @@ Provides endpoints for starting, monitoring, and aborting sync jobs.
 
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, Dict
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from sqlmodel import Session
 
 from backend.db.database import get_session_dependency
-from backend.services.sync_job_service import get_sync_job_service
+from backend.services.sync_job_service import get_sync_job_service, ConnectorOverride
+from backend.api.schemas import SyncJobStartRequest, ConnectorOverrideRequest
 
 router = APIRouter(prefix="/sync-job", tags=["Sync Job"])
+
+
+class ConnectorProgressResponse(BaseModel):
+    """Response model for individual connector progress."""
+    
+    connector_id: int
+    connector_type: str
+    account_name: str
+    status: str
+    test_mode: bool = False
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    processed: int = 0
+    new_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    error: Optional[str] = None
+    current_operation: Optional[str] = None
+    operation_progress: int = 0
+    operation_total: int = 0
+    pipeline_stage: Optional[str] = None
+    stage_stats: Optional[Dict[str, Any]] = None
+    logs: Optional[List[Dict[str, Any]]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class JobStatusResponse(BaseModel):
@@ -33,24 +61,16 @@ class JobStatusResponse(BaseModel):
     abort_requested: bool = False
     error_message: Optional[str] = None
     use_database_connectors: bool = False
+    connector_statuses: Optional[Dict[int, ConnectorProgressResponse]] = None
+
+    class Config:
+        extra = "allow"
 
 
 class ConnectorSourceRequest(BaseModel):
     """Request model for setting connector source."""
 
     use_database: bool
-
-
-class ConnectorSinceOverride(BaseModel):
-    """Override settings for a single connector's since datetime."""
-    
-    since_datetime: Optional[str] = None  # ISO format datetime, null for full sync
-
-
-class SyncJobStartRequest(BaseModel):
-    """Request model for starting a sync job with optional connector overrides."""
-    
-    connector_overrides: Optional[Dict[int, ConnectorSinceOverride]] = None
 
 
 class ConnectorDefaultInfo(BaseModel):
@@ -84,33 +104,50 @@ def start_sync_job(request: Optional[SyncJobStartRequest] = None):
     """
     Start a new sync job to fetch transactions from all sources.
 
-    Test mode is determined by the TEST_MODE environment variable or settings.yaml.
-    Returns an error if a job is already running.
+    Test mode is determined by the TEST_MODE environment variable or settings.yaml,
+    unless overridden per-connector in the request body.
     
-    Optionally accepts connector_overrides to specify since_datetime per connector:
-    - connector_overrides: Dict mapping connector_id to {since_datetime: "ISO string" | null}
-    - If since_datetime is provided, sync from that datetime
-    - If since_datetime is null/None, perform a full sync (ignore default since)
-    - If connector not in overrides, use computed default (max transaction datetime)
+    Args:
+        request: Optional request body with:
+            - connector_overrides: List of per-connector enable/disable/test_mode overrides
+            - since_overrides: Dict mapping connector_id to since_datetime for incremental sync
+    
+    Returns an error if a job is already running.
     """
     service = get_sync_job_service()
 
     try:
-        # Parse connector overrides
+        # Convert connector overrides (enable/disable, test mode) to internal format
         connector_overrides = None
         if request and request.connector_overrides:
-            connector_overrides = {}
-            for connector_id, override in request.connector_overrides.items():
+            connector_overrides = [
+                ConnectorOverride(
+                    connector_id=o.connector_id,
+                    enabled=o.enabled,
+                    test_mode=o.test_mode,
+                    test_file_path=o.test_file_path,
+                )
+                for o in request.connector_overrides
+            ]
+        
+        # Parse since datetime overrides for incremental sync
+        since_overrides = None
+        if request and request.since_overrides:
+            since_overrides = {}
+            for connector_id, override in request.since_overrides.items():
                 if override.since_datetime:
                     # Parse ISO datetime string
-                    connector_overrides[connector_id] = datetime.fromisoformat(
+                    since_overrides[connector_id] = datetime.fromisoformat(
                         override.since_datetime.replace('Z', '+00:00')
                     )
                 else:
                     # Explicit null means full sync (no since filter)
-                    connector_overrides[connector_id] = None
+                    since_overrides[connector_id] = None
         
-        result = service.start_job(connector_overrides=connector_overrides)
+        result = service.start_job(
+            connector_overrides=connector_overrides,
+            since_overrides=since_overrides
+        )
         return result
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))

@@ -41,6 +41,7 @@ class DatabaseConnectorHub(BaseHubConnector):
         session: Session,
         parent_output_path: str = None,
         connector_since_map: Optional[Dict[int, Optional[datetime]]] = None,
+        connector_overrides: Optional[List[Any]] = None,
     ):
         """
         Initialize the database connector hub.
@@ -52,6 +53,8 @@ class DatabaseConnectorHub(BaseHubConnector):
                 - If datetime is provided, connector will sync from that datetime
                 - If None, connector will perform full sync
                 - If connector_id not in map, connector will perform full sync
+            connector_overrides: Optional list of ConnectorOverride objects for
+                enable/disable and test_mode overrides per connector.
         """
         self.session = session
         self.loader_service = ConnectorLoaderService(session)
@@ -59,6 +62,20 @@ class DatabaseConnectorHub(BaseHubConnector):
         self._account_connector_map: Dict[str, AccountConnector] = {}
         self._parent_output_path = parent_output_path
         self._connector_since_map = connector_since_map or {}
+        
+        # Build override lookup maps
+        self._override_enabled: Dict[int, bool] = {}
+        self._override_test_mode: Dict[int, bool] = {}
+        self._override_test_file: Dict[int, str] = {}
+        
+        if connector_overrides:
+            for o in connector_overrides:
+                if o.enabled is not None:
+                    self._override_enabled[o.connector_id] = o.enabled
+                if o.test_mode is not None:
+                    self._override_test_mode[o.connector_id] = o.test_mode
+                if o.test_file_path is not None:
+                    self._override_test_file[o.connector_id] = o.test_file_path
 
         test_mode = is_test_mode()
         mode_str = "TEST MODE" if test_mode else "LIVE MODE"
@@ -96,6 +113,11 @@ class DatabaseConnectorHub(BaseHubConnector):
             connector_type = account_connector.connector_type
             connector_key = f"{account.name}_{connector_type}_{account_connector.id}"
             connector_id = account_connector.id
+            
+            # Check if connector is disabled by override
+            if connector_id in self._override_enabled and not self._override_enabled[connector_id]:
+                log.info(f"⏭️ Connector {connector_key} disabled by override, skipping")
+                continue
 
             try:
                 # Build config for all connectors with parent output path
@@ -104,6 +126,16 @@ class DatabaseConnectorHub(BaseHubConnector):
                 )
                 # Add parent output path from this hub
                 config["parent_output_path"] = self.output_path
+                
+                # Apply test_mode override if specified
+                if connector_id in self._override_test_mode:
+                    config["test_mode"] = self._override_test_mode[connector_id]
+                    log.info(f"🧪 Connector {connector_key} test_mode override: {config['test_mode']}")
+                
+                # Apply test_file_path override if specified
+                if connector_id in self._override_test_file:
+                    config["test_file_path"] = self._override_test_file[connector_id]
+                    log.info(f"📂 Connector {connector_key} test_file override: {config['test_file_path']}")
                 
                 # Add since_datetime if provided for this connector
                 if connector_id in self._connector_since_map:

@@ -42,7 +42,7 @@ class AssetRef(BaseModel):
 
 
 class ConnectorOverrideRequest(BaseModel):
-    """Per-sync override for a single connector."""
+    """Per-sync override for a single connector (enable/disable, test mode)."""
     
     connector_id: int = Field(..., description="ID of the connector to override")
     enabled: Optional[bool] = Field(None, description="Override enabled status for this sync")
@@ -50,12 +50,22 @@ class ConnectorOverrideRequest(BaseModel):
     test_file_path: Optional[str] = Field(None, description="Override test file path for this sync")
 
 
+class SinceOverrideRequest(BaseModel):
+    """Per-connector since datetime override for incremental sync."""
+    
+    since_datetime: Optional[str] = Field(None, description="ISO datetime string for incremental sync, null for full sync")
+
+
 class SyncJobStartRequest(BaseModel):
     """Request body for starting a sync job with optional overrides."""
     
     connector_overrides: Optional[List[ConnectorOverrideRequest]] = Field(
         None,
-        description="List of per-connector overrides for this sync only"
+        description="List of per-connector overrides (enable/disable, test mode) for this sync only"
+    )
+    since_overrides: Optional[Dict[int, SinceOverrideRequest]] = Field(
+        None,
+        description="Dict mapping connector_id to since datetime for incremental sync"
     )
 
 

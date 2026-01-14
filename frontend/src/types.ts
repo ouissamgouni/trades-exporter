@@ -525,8 +525,27 @@ export interface ConnectorOverride {
     test_file_path?: string;
 }
 
+// Connector override for incremental sync (since datetime)
+export interface ConnectorSinceOverride {
+    since_datetime: string | null;  // ISO datetime string or null for full sync
+}
+
+// Connector default info for sync configuration UI
+export interface ConnectorDefaultInfo {
+    connector_id: number;
+    connector_type: string;
+    account_name: string;
+    display_name: string;
+    supports_incremental_sync: boolean;
+    default_since_datetime?: string | null;  // ISO datetime from max transaction
+}
+
+// Request payload for starting sync job with overrides
 export interface SyncJobStartRequest {
+    // Enable/disable connectors and test mode overrides
     connector_overrides?: ConnectorOverride[];
+    // Since datetime overrides for incremental sync
+    since_overrides?: Record<number, ConnectorSinceOverride>;
 }
 
 export interface EnabledConnector {
@@ -561,25 +580,6 @@ export interface AllConnectorsResponse {
     accounts: AccountSummary[];
     connector_count: number;
     account_count: number;
-}
-
-// Connector override for incremental sync
-export interface ConnectorSinceOverride {
-    since_datetime: string | null;  // ISO datetime string or null for full sync
-}
-
-// Connector default info for sync configuration UI
-export interface ConnectorDefaultInfo {
-    connector_id: number;
-    connector_type: string;
-    account_name: string;
-    supports_incremental_sync: boolean;
-    default_since_datetime?: string | null;  // ISO datetime from max transaction
-}
-
-// Request payload for starting sync job with overrides
-export interface SyncJobStartRequest {
-    connector_overrides?: Record<number, ConnectorSinceOverride>;
 }
 
 export interface ConnectorsInfo {
