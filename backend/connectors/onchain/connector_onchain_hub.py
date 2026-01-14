@@ -4,7 +4,7 @@ Combines Blockscout and Etherscan connectors for comprehensive blockchain transa
 Object-oriented design implementing BaseConnector interface.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.config.loader import configure_logging, load_settings
@@ -26,11 +26,14 @@ class ConnectorOnchainHub(BaseHubConnector):
     def connector_name(self) -> str:
         return "onchain_hub"
 
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         Initialize Onchain Hub connector.
         Reads wallet addresses and scanner configuration from settings.yaml.
         In test mode, creates child connectors so they return test data.
+        
+        Args:
+            config: Configuration dict (may include parent_output_path)
         """
         # Load wallet configuration from settings (used in both test and live mode)
         settings = load_settings()
@@ -39,6 +42,13 @@ class ConnectorOnchainHub(BaseHubConnector):
 
         if not self.wallet_configs:
             raise ValueError("No wallet addresses configured")
+
+        # Initialize parent first to get output_path
+        super().__init__(
+            child_connectors=[],  # Will populate after creating children
+            parallel_strategy="queue",
+            config=config,
+        )
 
         child_connectors = []
 
@@ -59,11 +69,9 @@ class ConnectorOnchainHub(BaseHubConnector):
         log.info(
             f"🔄 Created {len(child_connectors)} connector(s) from {len(self.wallet_configs)} wallet(s)"
         )
-        # Initialize as BaseHubConnector with queue strategy (streaming for multiple wallets)
-        super().__init__(
-            child_connectors=child_connectors,
-            parallel_strategy="queue",
-        )
+        
+        # Update child connectors after creation
+        self.child_connectors = child_connectors
 
         if not self.wallet_configs:
             log.warning("⚠️ No wallet addresses configured in settings.yaml")
@@ -89,6 +97,9 @@ class ConnectorOnchainHub(BaseHubConnector):
         scanner_type = wallet_config.get("scanner", "").lower()
         wallet_address = wallet_config.get("wallet_address")
         chain_name = wallet_config.get("chain_name")
+        
+        # Build config with parent output path for child connectors
+        child_config = {"parent_output_path": self.output_path}
 
         if "etherscan" in scanner_type:
             # Use Etherscan Hub connector
@@ -97,6 +108,7 @@ class ConnectorOnchainHub(BaseHubConnector):
             return ConnectorEtherscanHub(
                 wallet_address=wallet_address,
                 chain_name=chain_name,
+                config=child_config,
             )
         elif "blockscout" in scanner_type:
             # Use Blockscout Hub connector
@@ -105,6 +117,7 @@ class ConnectorOnchainHub(BaseHubConnector):
             return ConnectorBlockscoutHub(
                 wallet_address=wallet_address,
                 chain_name=chain_name,
+                config=child_config,
             )
         else:
             raise ValueError(

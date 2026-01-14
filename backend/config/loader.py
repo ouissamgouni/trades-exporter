@@ -2,7 +2,7 @@
 Configuration loader with environment variable support.
 
 This module provides configuration loading from both:
-- Environment variables - for secrets and database config
+- Environment variables (.env file) - for secrets and database config
 - YAML files - for non-sensitive settings
 
 Environment variables take precedence over YAML settings.
@@ -10,10 +10,6 @@ Environment variables take precedence over YAML settings.
 DATABASE_URL: The primary way to configure the database connection.
 If DATABASE_URL is set, it is used directly. Otherwise, falls back to
 constructing URL from individual POSTGRES_* environment variables.
-
-Note: Environment variables should be loaded by the orchestration layer
-(Taskfile, Docker, K8s). The optional load_dotenv() call below is a 
-fallback for running Python scripts directly outside of task orchestration.
 """
 
 import os
@@ -23,36 +19,15 @@ import logging
 import structlog
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
 
-# Note: Environment variables are loaded by the orchestration layer (Taskfile, Docker, K8s)
-# This module only reads from os.getenv() - no dotenv loading needed
+# Load environment variables from .env file
+load_dotenv()
+
 CONFIG_DIR = Path(__file__).parent
 
 # Default database URL for local development
 DEFAULT_DATABASE_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
-
-# Test mode flag (used by e2e tests)
-_test_mode = os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
-
-
-def set_test_mode(enabled: bool = True) -> None:
-    """
-    Set test mode flag for the application.
-    
-    When enabled, uses test database configuration instead of production.
-    Primarily used by e2e tests to ensure isolated test environment.
-    """
-    global _test_mode
-    _test_mode = enabled
-    if enabled:
-        os.environ["TEST_MODE"] = "true"
-    else:
-        os.environ.pop("TEST_MODE", None)
-
-
-def is_test_mode() -> bool:
-    """Check if the application is running in test mode."""
-    return _test_mode or os.getenv("TEST_MODE", "").lower() in ("1", "true", "yes")
 
 
 def get_database_url() -> str:
@@ -92,6 +67,46 @@ def get_database_path() -> str:
     return get_database_url()
 
 
+# Legacy functions for backward compatibility during migration
+# TODO: Remove these after full migration to DATABASE_URL
+
+_test_mode_override: bool | None = None
+
+
+def set_test_mode(enabled: bool):
+    """
+    DEPRECATED: Use DATABASE_URL environment variable instead.
+    Set global test mode override.
+    """
+    global _test_mode_override
+    _test_mode_override = enabled
+    # Log deprecation warning
+    logging.warning(
+        "set_test_mode() is deprecated. Use DATABASE_URL environment variable instead."
+    )
+
+
+def is_test_mode() -> bool:
+    """
+    DEPRECATED: Use DATABASE_URL environment variable instead.
+    Check if test mode is enabled (via override, env var, or settings).
+    """
+    global _test_mode_override
+    if _test_mode_override is not None:
+        return _test_mode_override
+
+    # Check environment variable first
+    env_test_mode = os.getenv("TEST_MODE", "").lower()
+    if env_test_mode in ("true", "1", "yes"):
+        return True
+    if env_test_mode in ("false", "0", "no"):
+        return False
+
+    # Fall back to settings.yaml
+    settings = load_settings()
+    return settings.get("test_mode", False)
+
+
 def load_settings(path: str | None = None) -> dict:
     """Load settings.yaml from config directory or provided path."""
     p = Path(path) if path else CONFIG_DIR / "settings.yaml"
@@ -125,66 +140,25 @@ def get_coingecko_api_keys() -> List[str]:
     return settings.get("coingecko_api_keys", [])
 
 
-def get_price_getter_override() -> Optional[str]:
+def get_connectors_output_path() -> str:
     """
-    Get global price getter override for testing.
+    Get the base output path for connector logs and raw data.
     
-    When set, forces ALL assets to use the specified price getter,
-    bypassing asset-specific configurations and defaults.
-    
-    Environment variable takes precedence over settings.yaml.
-    
-    Usage:
-        # Enable mock prices for quick manual testing
-        PRICE_GETTER_OVERRIDE=mock python -m backend.api.run
+    Priority:
+    1. CONNECTORS_OUTPUT_PATH environment variable
+    2. Default: backend/data/output/connectors
     
     Returns:
-        Price getter name to use globally, or None if not set.
+        Absolute path to connectors output directory
     """
-    override = os.getenv("PRICE_GETTER_OVERRIDE")
-    if override:
-        return override.lower()
+    env_path = os.getenv("CONNECTORS_OUTPUT_PATH")
+    if env_path:
+        return os.path.abspath(env_path)
     
-    settings = load_settings()
-    override_setting = settings.get("price_getter_override")
-    if override_setting:
-        return override_setting.lower()
-    
-    return None
-
-
-def get_mock_prices_seed() -> Optional[int]:
-    """
-    Get seed for mock price generator for reproducible tests.
-    
-    When set, MockPriceGetter will use this seed for random.seed(),
-    making generated prices deterministic across runs.
-    
-    Environment variable takes precedence over settings.yaml.
-    
-    Usage:
-        # Reproducible mock prices
-        PRICE_GETTER_OVERRIDE=mock MOCK_PRICES_SEED=42 python -m backend.api.run
-    
-    Returns:
-        Integer seed value, or None if not set.
-    """
-    env_seed = os.getenv("MOCK_PRICES_SEED")
-    if env_seed:
-        try:
-            return int(env_seed)
-        except ValueError:
-            return None
-    
-    settings = load_settings()
-    seed_setting = settings.get("mock_prices_seed")
-    if seed_setting is not None:
-        try:
-            return int(seed_setting)
-        except (ValueError, TypeError):
-            return None
-    
-    return None
+    # Default to backend/data/output/connectors
+    # Get backend directory (parent of config directory)
+    backend_dir = Path(__file__).parent.parent
+    return str(backend_dir / "data" / "output" / "connectors")
 
 
 def load_credentials(exchange_name: str) -> dict:

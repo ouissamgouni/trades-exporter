@@ -23,9 +23,20 @@ class RawTransactionRepository:
         return raw_tx
 
     def insert(
-        self, source: str, source_transaction_id: str, raw_data: Dict[str, Any]
+        self, source: str, source_transaction_id: str, raw_data: Dict[str, Any],
+        connector_id: Optional[int] = None
     ) -> int:
-        """Insert a raw transaction and return its ID."""
+        """Insert a raw transaction and return its ID.
+        
+        Args:
+            source: Source identifier (e.g., "binance_trx")
+            source_transaction_id: External transaction ID for deduplication
+            raw_data: Raw JSON data from the source API
+            connector_id: Optional FK to account_connectors.id (for incremental sync tracking)
+        
+        Returns:
+            The ID of the created raw transaction
+        """
         # Ensure raw_data is JSON-serializable
         serializable_data = make_json_serializable(raw_data)
 
@@ -33,6 +44,7 @@ class RawTransactionRepository:
             source=source,
             source_transaction_id=source_transaction_id,
             raw_data=serializable_data,
+            connector_id=connector_id,
         )
         self.create(raw_tx)
         return raw_tx.id

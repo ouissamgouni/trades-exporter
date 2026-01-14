@@ -93,6 +93,7 @@ class ConnectorCoinbaseTrx(BaseConnector):
         """
         Fetch private trade history from Coinbase for a specific symbol using CCXT.
         Retries on rate limit (429) errors with exponential backoff.
+        If since_datetime is set, fetches only trades after that timestamp.
 
         Args:
             symbol (str): Trading pair symbol (e.g., 'BTC/USD')
@@ -106,7 +107,7 @@ class ConnectorCoinbaseTrx(BaseConnector):
 
         for attempt in range(max_retries):
             try:
-                trades = self.exchange.fetch_my_trades(symbol, limit=limit)
+                trades = self.exchange.fetch_my_trades(symbol, since=self.since_timestamp_ms, limit=limit)
                 return trades
             except ccxt.RateLimitExceeded:
                 if attempt < max_retries - 1:

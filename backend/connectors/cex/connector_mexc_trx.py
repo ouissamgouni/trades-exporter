@@ -1,14 +1,15 @@
 """
 MEXC Exchange connector: API access and trade mapping to trade_sync format.
 Uses CCXT library for robust API handling.
-Inherits from MEXCBaseConnector for common MEXC functionality.
+Object-oriented design implementing BaseConnector interface.
 """
 
+import ccxt
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from backend.connectors.cex.connector_mexc_base import MEXCBaseConnector
-from backend.config.loader import configure_logging
+from backend.connectors.base.base_connector import BaseConnector
+from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("mexc")
@@ -17,16 +18,12 @@ log = configure_logging("mexc")
 # ===== MEXC Connector Class =====
 
 
-class MEXCConnectorTrx(MEXCBaseConnector):
+class MEXCConnectorTrx(BaseConnector):
     """MEXC exchange connector using CCXT library with symbol iteration pattern."""
 
     @property
     def connector_name(self) -> str:
         return "mexc_trx"
-
-    def _get_logger(self):
-        """Return the logger instance for this connector."""
-        return log
 
     def __init__(
         self,
@@ -36,33 +33,54 @@ class MEXCConnectorTrx(MEXCBaseConnector):
         connector_id: int = None,
         symbols: List[str] = None,
         config: Dict[str, Any] = None,
-        progress_callback=None,
         **kwargs,
     ):
-        """Initialize MEXC transactions connector. Inherits exchange setup from MEXCBaseConnector."""
-        super().__init__(
-            api_key=api_key,
-            api_secret=api_secret,
-            account_id=account_id,
-            connector_id=connector_id,
-            symbols=symbols,
-            config=config,
-            progress_callback=progress_callback,
-            **kwargs
-        )
+        """Initialize MEXC connector with API credentials from settings.yaml if not provided."""
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+
+        # Store symbols filter (if provided, only fetch trades for these symbols)
+        self._symbols_filter = symbols
+
+        # In test mode, skip all API configuration
+        if self.test_mode:
+            return
+
+        # Load credentials from settings.yaml if not provided
+        if api_key is None or api_secret is None:
+            creds = load_credentials("mexc")
+            api_key = creds.get("api_key")
+            api_secret = creds.get("api_secret")
+
+        self.api_key = api_key
+        self.api_secret = api_secret
+
+        # Validate configuration
+        if not self.api_key or not self.api_secret:
+            raise ValueError("Missing API credentials for MEXC")
+
+        # Initialize CCXT exchange
+        try:
+            self.exchange = ccxt.mexc(
+                {
+                    "apiKey": self.api_key,
+                    "secret": self.api_secret,
+                    "enableRateLimit": True,
+                }
+            )
+            self.exchange.load_markets()
+            log.info("✅ MEXC exchange initialized successfully")
+        except Exception as e:
+            log.error(f"❌ Failed to initialize MEXC exchange: {e}")
+            raise
 
     def get_symbols(self) -> List[str]:
         """
         Get list of trading symbols from MEXC.
-        Priority order:
-        1. If symbols filter was provided at init, returns only those symbols
-        2. Fetches balance first to identify user's currencies, then builds symbols
-           from those currencies paired with common quotes (USDT, USDC, BTC, ETH)
-           Returns user-relevant symbols first, followed by remaining symbols
-        3. Adds remaining symbols from exchange to ensure complete coverage
+        If symbols filter was provided at init, returns only those symbols.
+        Otherwise fetches all available symbols from the exchange.
 
         Returns:
-            list: List of symbols with user-relevant symbols first (e.g., ['BTC/USDT', 'ETH/USDT', ...])
+            list: List of symbols (e.g., ['BTC/USDT', 'ETH/USDT', ...])
         """
         # Use provided symbols filter if available
         if self._symbols_filter:
@@ -71,59 +89,17 @@ class MEXCConnectorTrx(MEXCBaseConnector):
             )
             return self._symbols_filter
 
-        user_symbols = []
-        
-        # First: Try to build symbols from user's balance currencies
-        user_currencies = self._get_balance_currencies()
-        if user_currencies:
-            # Common quote currencies to pair with
-            quote_currencies = ['USDT', 'USDC', 'BTC', 'ETH', 'BUSD']
-            
-            # Build symbols from user's currencies
-            all_exchange_symbols = set(self.exchange.symbols)
-            for currency in user_currencies:
-                for quote in quote_currencies:
-                    # Try both base/quote and quote/base combinations
-                    symbol1 = f"{currency}/{quote}"
-                    symbol2 = f"{quote}/{currency}"
-                    
-                    if symbol1 in all_exchange_symbols:
-                        user_symbols.append(symbol1)
-                    if symbol2 in all_exchange_symbols and currency != quote:
-                        user_symbols.append(symbol2)
-            
-            # Remove duplicates while preserving order
-            user_symbols = list(dict.fromkeys(user_symbols))
-            
-            if user_symbols:
-                log.info(f"📊 Built {len(user_symbols)} symbols from {len(user_currencies)} user currencies (will be processed first)")
-
-        # Second: Get all available symbols from exchange
         try:
-            log.debug("Fetching all available symbols from exchange...")
-            all_symbols = self.exchange.symbols
-            
-            # Remove user symbols from all_symbols to avoid duplicates
-            user_symbols_set = set(user_symbols)
-            remaining_symbols = [s for s in all_symbols if s not in user_symbols_set]
-            
-            # Combine: user symbols first, then remaining symbols
-            final_symbols = user_symbols + remaining_symbols
-            
-            log.info(f"📊 Total symbols: {len(final_symbols)} ({len(user_symbols)} from balance + {len(remaining_symbols)} others)")
-            return final_symbols
+            symbols = self.exchange.symbols
+            log.info(f"📊 Found {len(symbols)} symbols on MEXC")
+            return symbols
         except Exception as e:
-            log.error(f"❌ Error fetching symbols from exchange: {e}")
-            # If fetching all symbols fails but we have user symbols, use those
-            if user_symbols:
-                log.warning(f"Using {len(user_symbols)} symbols from balance only")
-                return user_symbols
+            log.error(f"Error fetching symbols: {e}")
             return []
 
     def get_trades(self, symbol: str) -> List[Dict[str, Any]]:
         """
         Fetch private trade history from MEXC for a specific symbol using CCXT.
-        Uses base class retry logic with exponential backoff for rate limit errors.
 
         Args:
             symbol (str): Trading pair symbol (e.g., 'BTC/USDT')
@@ -131,11 +107,21 @@ class MEXCConnectorTrx(MEXCBaseConnector):
         Returns:
             list: List of trade objects from CCXT or empty list on error
         """
-        return self._fetch_with_retry(
-            fetch_func=lambda: self.exchange.fetch_my_trades(symbol),
-            entity_name=symbol,
-            entity_type="trade"
-        )
+        try:
+            # Use since_timestamp_ms from base class for incremental sync
+            trades = self.exchange.fetch_my_trades(symbol, since=self.since_timestamp_ms)
+            return trades
+        except Exception as e:
+            error_str = str(e).lower()
+            # MEXC error 703 can mean either: no trades OR no permission
+            # Treat it as "no trades" since most symbols won't have any trades
+            if "703" in error_str or "permission" in error_str or "权限" in error_str:
+                log.debug(f"ℹ️ No trades available for {symbol} (code 703)")
+            elif "no trades" in error_str or "empty" in error_str:
+                log.debug(f"ℹ️ No trades found for {symbol}")
+            else:
+                log.debug(f"ℹ️ Error fetching trades for {symbol}: {e}")
+            return []
 
     def raw_to_normalized(self, ccxt_trade: dict) -> "NormalizedTransaction":
         """
@@ -214,34 +200,12 @@ class MEXCConnectorTrx(MEXCBaseConnector):
             log.warning("⚠️ No symbols fetched from MEXC")
             return []
 
-        self.update_progress(
-            operation="Fetching symbols",
-            current=0,
-            total=len(symbols),
-            log_message=f"Starting to fetch trades for {len(symbols)} symbols"
-        )
-
-        import threading
-        completed_count = 0
-        completed_lock = threading.Lock()
-
         def fetch_symbol_trades(indexed_symbol):
             """Helper function to fetch trades for a single symbol."""
-            nonlocal completed_count
             idx, symbol = indexed_symbol
             prefix = f"[{idx + 1}/{len(symbols)}]"
             try:
                 trades = self.get_trades(symbol)
-                
-                with completed_lock:
-                    completed_count += 1
-                    self.update_progress(
-                        operation=f"Fetching {symbol}",
-                        current=completed_count,
-                        total=len(symbols),
-                        log_message=f"{prefix} Fetched {len(trades)} trades for {symbol}" if trades else None
-                    )
-                
                 if trades:
                     log.info(f"{prefix} ✅ Found {len(trades)} trades for {symbol}")
                     return trades
@@ -262,24 +226,11 @@ class MEXCConnectorTrx(MEXCBaseConnector):
                 for item in enumerate(symbols)
             }
             for future in as_completed(futures):
-                # Check for abort before processing next future
-                if self.is_abort_requested():
-                    log.info("⚠️ Abort requested, stopping MEXC symbol fetching")
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    break
-                    
                 try:
                     trades = future.result()
                     all_trades.extend(trades)
                 except Exception as e:
                     log.debug(f"Error processing future result: {e}")
-
-        self.update_progress(
-            operation="Completed",
-            current=len(symbols),
-            total=len(symbols),
-            log_message=f"✅ Total trades fetched: {len(all_trades)}"
-        )
 
         return all_trades
 

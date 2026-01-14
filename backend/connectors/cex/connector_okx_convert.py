@@ -79,12 +79,14 @@ class OKXConvertConnector(BaseConnector):
     def get_convert_trades(self) -> List[Dict[str, Any]]:
         """
         Fetch convert trade history from OKX using CCXT.
+        If since_datetime is set, filters out trades before that timestamp.
 
         Returns:
             list: List of convert trade objects from CCXT
         """
         try:
             all_trades = {}
+            since_ms = self.since_timestamp_ms
 
             # Fetch convert trade history
             log.info("Fetching convert trades...")
@@ -97,9 +99,15 @@ class OKXConvertConnector(BaseConnector):
 
             log.info(f"✅ Fetched {len(trades)} convert trades")
 
-            # Track trades by ID to avoid duplicates
+            # Track trades by ID to avoid duplicates, filtering by since_datetime if set
             for trade in trades:
                 trade_id = trade.get("id")
+                trade_timestamp = trade.get("timestamp")
+                
+                # Skip trades before since_datetime if incremental sync
+                if since_ms and trade_timestamp and trade_timestamp < since_ms:
+                    continue
+                    
                 if trade_id and trade_id not in all_trades:
                     all_trades[trade_id] = trade
 

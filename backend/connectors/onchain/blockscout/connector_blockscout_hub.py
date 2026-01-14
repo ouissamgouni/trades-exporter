@@ -1,8 +1,10 @@
-"""
+"""  
 Blockscout Hub connector: Aggregates normal transactions and token transfers for a single wallet address.
 Uses Blockscout API v2. Supports multiple networks (Base, Ethereum, Arbitrum, etc.).
 Object-oriented design implementing BaseConnector interface.
 """
+
+from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.onchain.chain_config import (
@@ -28,6 +30,7 @@ class ConnectorBlockscoutHub(BaseHubConnector):
         chain_name: str = "base",
         account_id: int = None,
         connector_id: int = None,
+        config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """
@@ -36,6 +39,7 @@ class ConnectorBlockscoutHub(BaseHubConnector):
         Args:
             wallet_address: The wallet address to scan
             chain_name: Chain identifier (e.g., "base", "ethereum", "arbitrum")
+            config: Configuration dict (may include parent_output_path)
         """
         self.wallet_address = wallet_address
         self.chain_name = chain_name
@@ -67,29 +71,39 @@ class ConnectorBlockscoutHub(BaseHubConnector):
                 raise ValueError(
                     f"Blockscout API not available for chain '{chain_name}'"
                 )
+        
+        # Initialize parent first to get output_path
+        super().__init__(
+            child_connectors=[],  # Will populate after creating children
+            parallel_strategy="queue",
+            account_id=account_id,
+            connector_id=connector_id,
+            config=config,
+        )
 
-        # Create specialized connectors (they get native_token from chain_config)
+        # Create specialized connectors with parent output path
         # In test mode, each child connector will return its own test data
+        child_config = {"parent_output_path": self.output_path}
+        
         normal_tx_connector = ConnectorBlockscoutNormalTx(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            config=child_config,
         )
 
         token_transfers_connector = ConnectorBlockscoutTokenTransfers(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            config=child_config,
         )
 
         child_connectors = [
             ("normal transactions", normal_tx_connector),
             ("token transfers", token_transfers_connector),
         ]
-
-        # Initialize as BaseHubConnector with queue strategy (good for 2 children)
-        super().__init__(
-            child_connectors=child_connectors,
-            parallel_strategy="queue",
-        )
+        
+        # Update child connectors after creation
+        self.child_connectors = child_connectors
 
 
 # Tests available at:

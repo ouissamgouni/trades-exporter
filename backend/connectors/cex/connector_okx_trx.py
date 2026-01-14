@@ -79,6 +79,7 @@ class OKXConnectorTrx(BaseConnector):
         """
         Fetch all private trades from OKX across all symbols using CCXT.
         Handles pagination with 'after' parameter to get complete trade history.
+        If since_datetime is set, filters out trades before that datetime.
 
         Returns:
             list: List of all trade objects from CCXT
@@ -86,6 +87,7 @@ class OKXConnectorTrx(BaseConnector):
         try:
             all_trades = {}
             after = None
+            since_ms = self.since_timestamp_ms
 
             while True:
                 # Check for abort at start of each pagination iteration
@@ -113,13 +115,24 @@ class OKXConnectorTrx(BaseConnector):
                     f"✅ Fetched {len(trades)} trades from {first_trade.get('datetime', 'unknown')} to {last_trade.get('datetime', 'unknown')}"
                 )
 
-                # Track new trades
+                # Track new trades, filtering by since_datetime if set
                 fetched_new_trades = False
                 for trade in trades:
                     trade_id = trade.get("id")
+                    trade_timestamp = trade.get("timestamp")
+                    
+                    # Skip trades before since_datetime if incremental sync
+                    if since_ms and trade_timestamp and trade_timestamp < since_ms:
+                        continue
+                    
                     if trade_id and trade_id not in all_trades:
                         fetched_new_trades = True
                         all_trades[trade_id] = trade
+
+                # If all trades in batch are before since_datetime, we can stop
+                if since_ms and last_trade.get("timestamp", 0) < since_ms:
+                    log.info(f"Reached trades before since datetime, stopping pagination")
+                    break
 
                 if not fetched_new_trades:
                     log.info("No new trades found. Done.")

@@ -547,15 +547,11 @@ def get_data_health_check(
         )
         missing_account_count = session.exec(missing_account_query).one()
         
-        # Missing price_quote_asset_id when price > 0
-        # Only flag as issue when there IS a price that needs attribution to a quote asset
+        # Missing price_quote_asset_id
         missing_price_quote_query = base_filter(
             select(func.count(NormalizedTransaction.id))
-            .where(
-                NormalizedTransaction.price.isnot(None),
-                NormalizedTransaction.price > 0,
-                NormalizedTransaction.price_quote_asset_id.is_(None)
-            )
+            .where(NormalizedTransaction.source_price_quote_asset_symbol.isnot(None),
+                NormalizedTransaction.price_quote_asset_id.is_(None))
         )
         missing_price_quote_count = session.exec(missing_price_quote_query).one()
         
@@ -563,7 +559,7 @@ def get_data_health_check(
         missing_fee_quote_query = base_filter(
             select(func.count(NormalizedTransaction.id))
             .where(
-                NormalizedTransaction.fee > 0,
+                NormalizedTransaction.source_fee_quote_asset_symbol.isnot(None),
                 NormalizedTransaction.fee_quote_asset_id.is_(None)
             )
         )
@@ -587,13 +583,12 @@ def get_data_health_check(
             bundle_suggestions_count = len(suggestions)
         
         # Compute aggregate flags
-        # Note: pending_count is NOT included in total_issues - pending transactions
-        # are awaiting review, not data completeness issues
         total_issues = (
             missing_asset_count + 
             missing_account_count + 
             missing_price_quote_count + 
-            missing_fee_quote_count
+            missing_fee_quote_count +
+            pending_count
         )
         has_issues = total_issues > 0 or bundle_suggestions_count > 0
         
@@ -684,7 +679,7 @@ def get_data_health_check(
                         )
                 response_data["missing_accounts_detail"] = missing_accounts_detail[:detail_limit]
             
-            # Get unique raw assets missing price_quote_asset_id (only when price > 0)
+            # Get unique raw assets missing price_quote_asset_id
             if missing_price_quote_count > 0:
                 missing_price_quotes_query = (
                     select(
@@ -693,8 +688,6 @@ def get_data_health_check(
                         func.count(NormalizedTransaction.id).label('count')
                     )
                     .where(
-                        NormalizedTransaction.price.isnot(None),
-                        NormalizedTransaction.price > 0,
                         NormalizedTransaction.price_quote_asset_id.is_(None),
                         NormalizedTransaction.source_price_quote_asset_symbol.isnot(None)
                     )

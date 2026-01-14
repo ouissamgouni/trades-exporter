@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Type
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, load_settings
+from backend.config.loader import configure_logging, load_settings, is_test_mode
 
 log = configure_logging("connector_hub")
 
@@ -40,12 +40,16 @@ class ConnectorHub(BaseHubConnector):
     def __init__(
         self,
         enabled_connectors: List[str] = None,
+        parent_output_path: str = None,
     ):
         """
         Initialize the master trades connector.
 
         Args:
             enabled_connectors: List of connector names to enable. If None, all are enabled.
+            parent_output_path: Parent output path for connector logs and raw data
+
+        Note: Test mode is determined by the TEST_MODE environment variable.
         """
         # Load settings for configuration
         settings = load_settings()
@@ -53,6 +57,9 @@ class ConnectorHub(BaseHubConnector):
 
         # Get connector map from registry
         connector_map = self.get_connector_map()
+
+        # Get test mode from environment
+        test_mode = is_test_mode()
 
         # Configure which connectors to run
         if enabled_connectors is None:
@@ -67,18 +74,31 @@ class ConnectorHub(BaseHubConnector):
             self.enabled_connectors = enabled_connectors
 
         self.connector_instances = {}
+        
+        # Build config with parent_output_path for BaseHubConnector
+        hub_config = {"parent_output_path": parent_output_path} if parent_output_path else {}
 
-        # Build child connectors
-        log.info("initializing_connector_hub")
+        # Build child connectors first
+        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
+        log.info("initializing_connector_hub", mode=mode_str)
         log.info("enabled_connectors", connectors=self.enabled_connectors)
+        
+        # Initialize as BaseHubConnector first to get self.output_path
+        child_connectors_list = []  # Will populate after creating instances
+        super().__init__(
+            child_connectors=child_connectors_list,
+            parallel_strategy="futures",  # Better for many connectors
+            config=hub_config,
+        )
 
-        # Initialize all enabled connector instances
+        # Initialize all enabled connector instances with propagated path
         for connector_name in self.enabled_connectors:
             try:
                 connector_class = connector_map[connector_name]
 
-                # Child connectors also read test_mode from environment
-                self.connector_instances[connector_name] = connector_class()
+                # Pass hub's output_path as parent for children
+                child_config = {"parent_output_path": self.output_path}
+                self.connector_instances[connector_name] = connector_class(config=child_config)
 
                 log.info("connector_initialized", connector=connector_name.upper())
             except Exception as e:
@@ -92,12 +112,8 @@ class ConnectorHub(BaseHubConnector):
             total=len(self.enabled_connectors),
         )
 
-        # Initialize as BaseHubConnector with child connectors and metadata key
-        child_connectors_list = list(self.connector_instances.items())
-        super().__init__(
-            child_connectors=child_connectors_list,
-            parallel_strategy="futures",  # Better for many connectors
-        )
+        # Update child connectors list after instantiation
+        self.child_connectors = list(self.connector_instances.items())
 
         log.info("parallel_processing_enabled", strategy="futures")
 
