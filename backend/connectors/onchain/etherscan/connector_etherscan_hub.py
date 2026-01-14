@@ -4,6 +4,8 @@ Supports EVM chains through Etherscan API v2.
 Object-oriented design implementing BaseConnector interface.
 """
 
+from typing import Optional, Dict, Any
+
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.onchain.chain_config import get_chain_config, CHAIN_CONFIG
 from backend.config.loader import configure_logging, load_settings
@@ -27,6 +29,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
         chain_name: str = "ethereum",
         account_id: int = None,
         connector_id: int = None,
+        config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """
@@ -35,6 +38,7 @@ class ConnectorEtherscanHub(BaseHubConnector):
         Args:
             wallet_address: The wallet address to scan
             chain_name: The chain name (e.g., "Ethereum", "BSC")
+            config: Configuration dict (may include parent_output_path)
         """
         # Set variables needed for connector_name BEFORE super().__init__()
         self.chain_name = chain_name
@@ -66,28 +70,39 @@ class ConnectorEtherscanHub(BaseHubConnector):
             api_key = web3_config.get("etherscan_api_key", "")
             if not api_key:
                 raise ValueError("Missing API KEY")
+        
+        # Initialize parent first to get output_path
+        super().__init__(
+            child_connectors=[],  # Will populate after creating children
+            parallel_strategy="queue",
+            account_id=account_id,
+            connector_id=connector_id,
+            config=config,
+        )
 
-        # Create specialized connectors (they get native_token from chain_config)
+        # Create specialized connectors with parent output path
         # In test mode, each child connector will detect test mode and return test data
+        child_config = {"parent_output_path": self.output_path}
+        
         normal_tx_connector = ConnectorEtherscanNormalTx(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            config=child_config,
         )
 
         token_transfers_connector = ConnectorEtherscanTokenTransfers(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            config=child_config,
         )
 
         child_connectors = [
             ("normal transactions", normal_tx_connector),
             ("token transfers", token_transfers_connector),
         ]
-        # Initialize as BaseHubConnector with queue strategy (good for 2 children)
-        super().__init__(
-            child_connectors=child_connectors,
-            parallel_strategy="queue",
-        )
+        
+        # Update child connectors after creation
+        self.child_connectors = child_connectors
 
 
 # Tests available at:

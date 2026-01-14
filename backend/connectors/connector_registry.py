@@ -37,6 +37,9 @@ class ConnectorInfo:
     # On-chain specific
     supported_chains: Optional[List[str]] = None
 
+    # Incremental sync support - True for CEX connectors that support "since" parameter
+    supports_incremental_sync: bool = False
+
     def to_api_dict(self) -> Dict[str, Any]:
         """Convert to API-friendly dictionary."""
         return {
@@ -46,6 +49,7 @@ class ConnectorInfo:
             "supported_chains": self.supported_chains,
             "required_config": self.required_config,
             "optional_config": self.optional_config,
+            "supports_incremental_sync": self.supports_incremental_sync,
         }
 
 
@@ -115,6 +119,7 @@ class ConnectorRegistry:
                 display_name="Binance Transactions",
                 required_config=[],
                 optional_config=["symbols", "start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -125,6 +130,7 @@ class ConnectorRegistry:
                 display_name="Binance Deposits",
                 required_config=[],
                 optional_config=["start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -135,6 +141,7 @@ class ConnectorRegistry:
                 display_name="Binance Withdrawals",
                 required_config=[],
                 optional_config=["start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -145,6 +152,7 @@ class ConnectorRegistry:
                 display_name="MEXC Transactions",
                 required_config=[],
                 optional_config=["symbols", "start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -175,6 +183,7 @@ class ConnectorRegistry:
                 display_name="OKX Transactions",
                 required_config=[],
                 optional_config=["symbols", "start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -185,6 +194,7 @@ class ConnectorRegistry:
                 display_name="OKX Convert",
                 required_config=[],
                 optional_config=["start_date"],
+                supports_incremental_sync=True,
             )
         )
 
@@ -195,6 +205,7 @@ class ConnectorRegistry:
                 display_name="Coinbase Transactions",
                 required_config=[],
                 optional_config=["start_date"],
+                supports_incremental_sync=True,
             )
         )
 

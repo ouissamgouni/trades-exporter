@@ -5,19 +5,17 @@ Defines the interface and common functionality for exchange-specific implementat
 
 import json
 import os
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from threading import Event
-from typing import Generator, Dict, List, Any, Optional, Callable
+from logging.handlers import RotatingFileHandler
+from typing import Generator, Dict, List, Any, Optional
 
-from backend.config.loader import configure_logging
+from backend.config.loader import configure_logging, is_test_mode, get_connectors_output_path
 
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("base_connector")
-
-# Type alias for progress callback
-ProgressCallback = Callable[[int, str, int, int, Optional[str]], None]
 
 
 class BaseConnector(ABC):
@@ -30,14 +28,15 @@ class BaseConnector(ABC):
     - get_raws(): Abstract method to fetch raw data from the exchange/blockchain
     - raw_to_normalized(): Abstract method to convert raw data to NormalizedTransaction
     """
+    
+    # Flag to identify hub connectors (overridden in BaseHubConnector)
+    is_hub_connector = False
 
     def __init__(
         self,
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
         config: Optional[Dict[str, Any]] = None,
-        progress_callback: Optional[ProgressCallback] = None,
-        abort_event: Optional[Event] = None,
     ):
         """
         Initialize the connector.
@@ -45,65 +44,109 @@ class BaseConnector(ABC):
         Args:
             account_id: The Account ID this connector belongs to (from accounts table)
             connector_id: The AccountConnector ID for this specific connector instance
-            config: Connector configuration dict (may include test_mode, test_file_path)
-            progress_callback: Optional callback to report progress updates.
-                              Signature: (connector_id, operation, current, total, log_message)
-            abort_event: Optional threading.Event to signal abort request. When set,
-                        connector should stop processing gracefully and return partial results.
+            config: Connector configuration dict (may include test_mode, test_file_path, 
+                   parent_output_path, since_datetime)
 
         Note: Test mode priority:
             1. Per-connector config["test_mode"] (if set)
             2. Global TEST_MODE environment variable / settings.yaml
+        
+        Note: since_datetime in config:
+            If provided, the connector should only fetch transactions since this datetime.
+            This enables incremental sync for connectors that support it.
         """
         self.account_id = account_id
         self.connector_id = connector_id
         self.config = config or {}
         self.exchange = None
-        self._progress_callback = progress_callback
-        self._abort_event = abort_event
         
         # Per-connector test mode takes priority over global setting
         self._test_mode = self.config.get("test_mode", None)
+        
+        # Since datetime for incremental sync (if supported by connector)
+        self._since_datetime: Optional[datetime] = self.config.get("since_datetime")
+        
+        # Build output path: {parent_output_path}/{connector_name}/{timestamp}/
+        parent_path = self.config.get("parent_output_path")
+        if parent_path is None:
+            parent_path = get_connectors_output_path()
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_path = os.path.join(parent_path, self.connector_name, timestamp)
+        
+        # Setup file logging if not disabled
+        self.file_logger = None
+        if not self.config.get("disable_file_output", False):
+            self._setup_file_logger()
 
         mode_str = "TEST MODE" if self.test_mode else "LIVE MODE"
         account_info = f" (account_id={account_id})" if account_id else ""
+        since_info = f" since={self._since_datetime}" if self._since_datetime else ""
         log.info(
-            f"Initialized {self.__class__.__name__} for {self.connector_name}{account_info} [{mode_str}]"
+            f"Initialized {self.__class__.__name__} for {self.connector_name}{account_info} [{mode_str}]{since_info}"
         )
+        log.info(f"Output path: {self.output_path}")
 
-    def update_progress(
-        self,
-        operation: str,
-        current: int,
-        total: int,
-        log_message: Optional[str] = None,
-    ):
+    @property
+    def since_datetime(self) -> Optional[datetime]:
+        """Get the since datetime for incremental sync, or None for full sync."""
+        return self._since_datetime
+    
+    @property
+    def since_timestamp_ms(self) -> Optional[int]:
+        """Get the since datetime as milliseconds timestamp (for CCXT APIs)."""
+        if self._since_datetime:
+            return int(self._since_datetime.timestamp() * 1000)
+        return None
+
+    def _setup_file_logger(self):
         """
-        Report progress update via callback if available.
-        
-        Args:
-            operation: Description of current operation (e.g., "Fetching BTC/USDT")
-            current: Current progress count
-            total: Total items to process
-            log_message: Optional log message to record
+        Setup rotating file logger for this connector.
+        Logs are written to {output_path}/log/connector.log with 10MB max size and 3 backups.
         """
-        if self._progress_callback and self.connector_id:
-            self._progress_callback(
-                self.connector_id,
-                operation,
-                current,
-                total,
-                log_message,
+        try:
+            log_dir = os.path.join(self.output_path, "log")
+            os.makedirs(log_dir, exist_ok=True)
+            
+            log_file = os.path.join(log_dir, "connector.log")
+            
+            # Create rotating file handler (10MB max, 3 backups)
+            handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=3,
+                encoding="utf-8"
             )
-
-    def is_abort_requested(self) -> bool:
+            
+            # Set format
+            formatter = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S"
+            )
+            handler.setFormatter(formatter)
+            
+            # Get the structlog logger's underlying logger and add handler
+            self.file_logger = logging.getLogger(f"connector.{self.connector_name}")
+            self.file_logger.addHandler(handler)
+            self.file_logger.setLevel(logging.INFO)
+            self.file_logger.propagate = False  # Prevent duplicate logs
+            
+            log.info(f"📝 [{self.connector_name}] File logging enabled: {log_file}")
+        except Exception as e:
+            log.error(f"❌ [{self.connector_name}] Failed to setup file logger: {e}")
+            self.file_logger = None
+    
+    def cleanup(self):
         """
-        Check if abort has been requested.
-        
-        Returns:
-            True if abort_event is set and abort was requested, False otherwise.
+        Cleanup resources, particularly file handlers.
+        Call this when the connector is done to prevent file handle leaks.
         """
-        return self._abort_event is not None and self._abort_event.is_set()
+        if self.file_logger:
+            # Close and remove all handlers
+            for handler in self.file_logger.handlers[:]:
+                handler.close()
+                self.file_logger.removeHandler(handler)
+            self.file_logger = None
 
     @property
     @abstractmethod
@@ -145,10 +188,13 @@ class BaseConnector(ABC):
         """
         Check if connector is in test mode.
         
-        Test mode is determined by per-connector config["test_mode"].
-        Defaults to False (live mode) if not explicitly set.
+        Priority:
+            1. Per-connector config["test_mode"] (if explicitly set)
+            2. Global TEST_MODE from environment/settings
         """
-        return self._test_mode if self._test_mode is not None else False
+        if self._test_mode is not None:
+            return self._test_mode
+        return is_test_mode()
 
     def _get_raws(self) -> List[Dict[str, Any]]:
         """
@@ -291,21 +337,33 @@ class BaseConnector(ABC):
                 )
 
     def dump_trades_to_json(self, trades: List[Dict]) -> str:
+        """Save raw trades data to JSON file in connector's output directory."""
+        # Skip if file output is disabled
+        if self.config.get("disable_file_output", False):
+            return ""
+        
+        # Skip for hub connectors (they don't produce raw data)
+        if self.is_hub_connector:
+            log.debug(f"[{self.connector_name}] Skipping raw data dump (hub connector)")
+            return ""
+        
         if not trades:
             return ""
 
-        # Get or create the output directory using connector_name
-        output_dir = f"data/output/raw/{self.connector_name}"
-        os.makedirs(output_dir, exist_ok=True)
+        # Save to {output_path}/raw.json
+        os.makedirs(self.output_path, exist_ok=True)
+        raw_file = os.path.join(self.output_path, "raw.json")
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        combined_trades_file = f"{output_dir}/{timestamp}.json"
-
-        # Write back to file
-        with open(combined_trades_file, "w") as f:
+        # Write to file
+        with open(raw_file, "w") as f:
             json.dump(trades, f, indent=2, default=str)
 
         log.info(
-            f"💾 [{self.connector_name}] Raw data logged to {combined_trades_file}"
+            f"💾 [{self.connector_name}] Raw data logged to {raw_file}"
         )
-        return combined_trades_file
+        
+        # Also log to file logger if available
+        if self.file_logger:
+            self.file_logger.info(f"Saved {len(trades)} raw items to {raw_file}")
+        
+        return raw_file

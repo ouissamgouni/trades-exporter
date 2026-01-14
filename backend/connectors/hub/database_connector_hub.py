@@ -5,22 +5,19 @@ This hub uses AccountConnector configurations stored in the database
 instead of hardcoded settings, enabling dynamic connector management via API.
 """
 
-from typing import Dict, Any, List, Optional, Generator, Tuple, Callable
-from threading import Event
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Generator, Tuple
 
 from sqlmodel import Session
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging
+from backend.config.loader import configure_logging, is_test_mode
 from backend.db.models import AccountConnector
 from backend.services.connector_loader_service import ConnectorLoaderService
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("database_connector_hub")
-
-# Type alias for progress callback
-ProgressCallback = Callable[[int, str, int, int, Optional[str]], None]
 
 
 class DatabaseConnectorHub(BaseHubConnector):
@@ -32,6 +29,7 @@ class DatabaseConnectorHub(BaseHubConnector):
     - Per-account connector configuration
     - Sync status tracking per connector
     - Credential resolution from env/vault
+    - Incremental sync support via since_datetime
     """
 
     @property
@@ -41,42 +39,47 @@ class DatabaseConnectorHub(BaseHubConnector):
     def __init__(
         self,
         session: Session,
-        connector_overrides: Optional[Dict[int, Any]] = None,
-        progress_callback: Optional[ProgressCallback] = None,
-        abort_event: Optional[Event] = None,
+        parent_output_path: str = None,
+        connector_since_map: Optional[Dict[int, Optional[datetime]]] = None,
     ):
         """
         Initialize the database connector hub.
 
         Args:
             session: Database session for loading connectors
-            connector_overrides: Optional dict of connector_id -> override settings
-                                 (enabled, test_mode, test_file_path)
-            progress_callback: Optional callback for reporting connector progress
-            abort_event: Optional threading.Event to signal abort request
+            parent_output_path: Parent output path for connector logs and raw data
+            connector_since_map: Optional dict mapping connector_id to since_datetime.
+                - If datetime is provided, connector will sync from that datetime
+                - If None, connector will perform full sync
+                - If connector_id not in map, connector will perform full sync
         """
         self.session = session
         self.loader_service = ConnectorLoaderService(session)
         self.connector_instances: Dict[str, Any] = {}
         self._account_connector_map: Dict[str, AccountConnector] = {}
-        self._connector_overrides = connector_overrides or {}
-        self._progress_callback = progress_callback
-        self._abort_event = abort_event
+        self._parent_output_path = parent_output_path
+        self._connector_since_map = connector_since_map or {}
 
-        log.info("🔄 Initializing DatabaseConnectorHub...")
-        if self._connector_overrides:
-            log.info(f"📋 {len(self._connector_overrides)} connector overrides provided")
+        test_mode = is_test_mode()
+        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
+        log.info(f"🔄 Initializing DatabaseConnectorHub [{mode_str}]...")
+        
+        # Build config with parent_output_path for BaseHubConnector
+        hub_config = {"parent_output_path": parent_output_path} if parent_output_path else {}
+
+        # Initialize as BaseHubConnector first to get self.output_path
+        child_connectors_list = []  # Will populate after loading
+        super().__init__(
+            child_connectors=child_connectors_list,
+            parallel_strategy="futures",
+            config=hub_config,
+        )
 
         # Load and initialize connectors from database
         self._load_connectors()
 
-        # Initialize as BaseHubConnector
-        child_connectors_list = list(self.connector_instances.items())
-        super().__init__(
-            child_connectors=child_connectors_list,
-            parallel_strategy="futures",
-            abort_event=abort_event,
-        )
+        # Update child connectors list after loading
+        self.child_connectors = list(self.connector_instances.items())
 
         log.info("⚡ Parallel processing: enabled (futures strategy)")
 
@@ -90,52 +93,40 @@ class DatabaseConnectorHub(BaseHubConnector):
         onchain_configs = []
 
         for account_connector, account in enabled_connectors:
-            connector_id = account_connector.id
             connector_type = account_connector.connector_type
-            connector_key = f"{account.name}_{connector_type}_{connector_id}"
-
-            # Check for overrides
-            override = self._connector_overrides.get(connector_id)
-            if override:
-                # Skip if explicitly disabled via override
-                if hasattr(override, 'enabled') and override.enabled is False:
-                    log.info(f"⏭️ Skipping {connector_key} (disabled via override)")
-                    continue
-                # Handle dict-style override
-                elif isinstance(override, dict) and override.get('enabled') is False:
-                    log.info(f"⏭️ Skipping {connector_key} (disabled via override)")
-                    continue
+            connector_key = f"{account.name}_{connector_type}_{account_connector.id}"
+            connector_id = account_connector.id
 
             try:
+                # Build config for all connectors with parent output path
+                config = self.loader_service.build_connector_config(
+                    account_connector, account
+                )
+                # Add parent output path from this hub
+                config["parent_output_path"] = self.output_path
+                
+                # Add since_datetime if provided for this connector
+                if connector_id in self._connector_since_map:
+                    since_dt = self._connector_since_map[connector_id]
+                    if since_dt:
+                        config["since_datetime"] = since_dt
+                        log.info(f"📅 Connector {connector_key} will sync since: {since_dt}")
+                
                 if registry.is_onchain(connector_type):
-                    # Build config for on-chain connector
-                    config = self.loader_service.build_connector_config(
-                        account_connector, account
-                    )
-                    # Apply test_mode override if specified
-                    if override:
-                        test_mode = getattr(override, 'test_mode', None) if hasattr(override, 'test_mode') else override.get('test_mode')
-                        test_file_path = getattr(override, 'test_file_path', None) if hasattr(override, 'test_file_path') else override.get('test_file_path')
-                        if test_mode is not None:
-                            config['test_mode'] = test_mode
-                        if test_file_path:
-                            config['test_file_path'] = test_file_path
-                    
                     # Store config with account context for batch initialization
                     config["_connector_key"] = connector_key
                     config["_account_connector"] = account_connector
-                    config["_progress_callback"] = self._progress_callback
                     onchain_configs.append(config)
                     log.info(f"✅ Queued on-chain connector: {connector_key}")
                 else:
-                    # Use instantiate_connector for CEX connectors
-                    # This properly passes account_id, connector_id, and config
-                    instance = self.loader_service.instantiate_connector(
-                        account_connector, account,
-                        override=override,
-                        progress_callback=self._progress_callback
-                    )
-                    if instance:
+                    # CEX connectors: manually instantiate with updated config
+                    connector_class = registry.get_class(connector_type)
+                    if connector_class:
+                        instance = connector_class(
+                            account_id=account.id,
+                            connector_id=account_connector.id,
+                            config=config,
+                        )
                         self.connector_instances[connector_key] = instance
                         self._account_connector_map[connector_key] = account_connector
                         log.info(f"✅ Initialized connector: {connector_key}")
@@ -155,7 +146,6 @@ class DatabaseConnectorHub(BaseHubConnector):
             for config in onchain_configs:
                 connector_key = config.pop("_connector_key")
                 account_connector = config.pop("_account_connector")
-                progress_callback = config.pop("_progress_callback", None)
                 try:
                     connector_type = account_connector.connector_type
                     connector_class = registry.get_class(connector_type)
@@ -167,7 +157,6 @@ class DatabaseConnectorHub(BaseHubConnector):
                             account_id=config.get("_account_id"),
                             connector_id=config.get("_connector_id"),
                             config=config,
-                            progress_callback=progress_callback,
                         )
                         self.connector_instances[connector_key] = instance
                         self._account_connector_map[connector_key] = account_connector

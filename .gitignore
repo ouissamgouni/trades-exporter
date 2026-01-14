@@ -90,6 +90,7 @@ data/output
 *.sqlite3
 
 # Output data (large files)
+data/output
 backend/data
 
 # Logs

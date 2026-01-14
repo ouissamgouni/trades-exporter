@@ -624,12 +624,18 @@ class RawTransaction(SQLModel, table=True):
     source_transaction_id: str = Field(nullable=False, index=True)
     raw_data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     ingestion_time: datetime = Field(default_factory=utc_now)
+    
+    # Link to the connector that produced this transaction (nullable for legacy data)
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
 
     # Relationships
     normalized_transactions: List["NormalizedTransaction"] = Relationship(
         back_populates="raw_transaction",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
+    connector: Optional["AccountConnector"] = Relationship()
 
 
 class NormalizedTransaction(SQLModel, table=True):

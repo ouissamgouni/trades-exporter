@@ -4,8 +4,8 @@ Provides common functionality for connectors that aggregate other connectors.
 """
 
 from typing import Generator, Dict, Any, List, Tuple, Optional
-from queue import Queue, Empty
-from threading import Thread, Event
+from queue import Queue
+from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from backend.connectors.base.base_connector import BaseConnector
@@ -26,6 +26,9 @@ class BaseHubConnector(BaseConnector):
     1. Queue-based streaming (for smaller number of children, real-time streaming)
     2. ThreadPoolExecutor with futures (for larger number of children, better resource management)
     """
+    
+    # Hub connectors don't produce raw data themselves
+    is_hub_connector = True
 
     def __init__(
         self,
@@ -33,7 +36,7 @@ class BaseHubConnector(BaseConnector):
         parallel_strategy: str = "queue",  # "queue" or "futures"
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
-        abort_event: Optional[Event] = None,
+        config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the hub connector.
@@ -43,19 +46,14 @@ class BaseHubConnector(BaseConnector):
             parallel_strategy: "queue" for streaming or "futures" for batch processing
             account_id: The Account ID this connector belongs to
             connector_id: The AccountConnector ID for this specific connector
-            abort_event: Optional threading.Event to signal abort request
+            config: Connector configuration dict (includes parent_output_path)
 
         Note: Test mode is determined by the TEST_MODE environment variable.
         """
         self.child_connectors = child_connectors
         self.parallel_strategy = parallel_strategy
 
-        super().__init__(account_id=account_id, connector_id=connector_id, abort_event=abort_event)
-        
-        # Propagate abort_event to all child connectors
-        if abort_event:
-            for _, connector in self.child_connectors:
-                connector._abort_event = abort_event
+        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
 
     def get_test_data_path(self) -> str:
         """
@@ -106,7 +104,6 @@ class BaseHubConnector(BaseConnector):
 
                 for raw_item, normalized_item, error in connector.yield_normalized():
                     wrapped_raw = {
-                        "connector_id": connector.connector_id,
                         "connector_name": connector.connector_name,
                         "raw_item": raw_item,
                         "normalized_item": normalized_item,
@@ -114,17 +111,6 @@ class BaseHubConnector(BaseConnector):
                     }
                     queue.put(wrapped_raw)
                     item_count += 1
-
-                # Send end-of-connector marker so sync service knows this connector finished
-                queue.put({
-                    "connector_id": connector.connector_id,
-                    "connector_name": connector.connector_name,
-                    "is_connector_complete": True,
-                    "items_count": item_count,
-                    "raw_item": None,
-                    "normalized_item": None,
-                    "error": None,
-                })
 
                 log.info(
                     f"   ✅ [{connector.connector_name}] Completed fetching ({item_count} items)"
@@ -138,7 +124,6 @@ class BaseHubConnector(BaseConnector):
                 )
                 queue.put(
                     {
-                        "connector_id": connector.connector_id,
                         "connector_name": connector.connector_name,
                         "raw_item": {"error_type": "connector_failure"},
                         "normalized_item": None,
@@ -164,14 +149,9 @@ class BaseHubConnector(BaseConnector):
         total_connectors = len(threads)
 
         while completed_connectors < total_connectors:
-            # Check for abort before waiting for next item
-            if self.is_abort_requested():
-                log.info(f"⚠️ [{self.connector_name}] Abort requested, stopping queue processing")
-                break
-                
             try:
-                # Use timeout to detect potential hangs and allow abort checks
-                item = queue.get(timeout=1)  # Reduced timeout for faster abort response
+                # Use timeout to detect potential hangs
+                item = queue.get(timeout=60)
                 if item is None:
                     completed_connectors += 1
                     log.info(
@@ -179,13 +159,6 @@ class BaseHubConnector(BaseConnector):
                     )
                 else:
                     yield item
-            except Empty:
-                # Timeout - check for abort and thread status periodically
-                if self.is_abort_requested():
-                    log.info(f"⚠️ [{self.connector_name}] Abort requested during queue wait")
-                    break
-                # Only log timeout warning after 60 seconds of no items
-                continue
             except Exception as e:
                 # Timeout or other error - check thread status
                 alive_threads = [t for t in threads if t.is_alive()]
@@ -231,7 +204,6 @@ class BaseHubConnector(BaseConnector):
 
                 for raw_item, normalized_item, error in connector.yield_normalized():
                     wrapped_raw = {
-                        "connector_id": connector.connector_id,
                         "connector_name": connector.connector_name,
                         "raw_item": raw_item,
                         "normalized_item": normalized_item,
@@ -253,7 +225,6 @@ class BaseHubConnector(BaseConnector):
                 log.error(f"❌ [{connector.connector_name}] Error: {e}")
                 results.append(
                     {
-                        "connector_id": connector.connector_id,
                         "connector_name": connector.connector_name,
                         "raw_item": {"error_type": "connector_failure"},
                         "normalized_item": None,
@@ -274,36 +245,12 @@ class BaseHubConnector(BaseConnector):
 
             # Collect results as they complete
             for future in as_completed(futures):
-                # Check for abort before processing next future's results
-                if self.is_abort_requested():
-                    log.info(f"⚠️ [{self.connector_name}] Abort requested, stopping futures processing")
-                    # Cancel remaining futures (Python 3.9+ supports cancel_futures in shutdown)
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    break
-                    
                 connector_name = futures[future]
                 try:
                     results = future.result()
                     # Yield all results from this connector
                     for wrapped_raw in results:
-                        # Check abort between yielding items
-                        if self.is_abort_requested():
-                            log.info(f"⚠️ [{self.connector_name}] Abort requested while yielding results")
-                            break
                         yield wrapped_raw
-                    
-                    # Send end-of-connector marker so sync service knows this connector finished
-                    # Get connector_id from the first result if available
-                    connector_id = results[0].get("connector_id") if results else None
-                    yield {
-                        "connector_id": connector_id,
-                        "connector_name": connector_name,
-                        "is_connector_complete": True,
-                        "items_count": len(results),
-                        "raw_item": None,
-                        "normalized_item": None,
-                        "error": None,
-                    }
 
                 except Exception as e:
                     log.error(f"❌ Future failed for {connector_name}: {e}")

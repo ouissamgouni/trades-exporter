@@ -31,6 +31,7 @@ class PipelineContext:
     session: Session
     raw_item: Optional[Dict[str, Any]] = None  # Original raw data (for sync jobs)
     source: Optional[str] = None  # Source identifier (e.g., 'binance', 'manual')
+    connector_id: Optional[int] = None  # FK to account_connectors.id (for incremental sync)
 
     # Sync job tracking
     sync_connector_run_id: Optional[int] = None  # FK to SyncJobConnectorRun for tracking

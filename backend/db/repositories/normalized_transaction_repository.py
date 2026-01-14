@@ -2,10 +2,12 @@
 Normalized Transaction Repository - CRUD operations for normalized transactions.
 """
 
+from datetime import datetime
 from typing import Optional, List
 from sqlmodel import Session, select
+from sqlalchemy import func
 
-from backend.db.models import NormalizedTransaction
+from backend.db.models import NormalizedTransaction, RawTransaction
 
 
 class NormalizedTransactionRepository:
@@ -32,6 +34,31 @@ class NormalizedTransactionRepository:
             NormalizedTransaction.source_transaction_id == source_transaction_id,
         )
         return self.session.exec(statement).first() is not None
+
+    def get_max_datetime_by_connector(self, connector_id: int) -> Optional[datetime]:
+        """
+        Get the maximum transaction datetime for a specific connector.
+        
+        This is used to determine the "since" datetime for incremental sync.
+        Joins normalized_transactions with raw_transactions to filter by connector_id.
+        
+        Args:
+            connector_id: The AccountConnector ID to filter by
+            
+        Returns:
+            The maximum date_time value for transactions from this connector,
+            or None if no transactions found.
+        """
+        statement = (
+            select(func.max(NormalizedTransaction.date_time))
+            .join(
+                RawTransaction,
+                NormalizedTransaction.raw_transaction_id == RawTransaction.id
+            )
+            .where(RawTransaction.connector_id == connector_id)
+        )
+        result = self.session.exec(statement).first()
+        return result
 
     def list_all(
         self,

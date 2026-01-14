@@ -83,6 +83,7 @@ class PersistenceStage(PipelineStage):
                         source=tx.source,
                         source_transaction_id=tx.source_transaction_id,
                         raw_data=context.raw_item,
+                        connector_id=context.connector_id,
                     )
 
                 # Create normalized transaction

@@ -563,6 +563,25 @@ export interface AllConnectorsResponse {
     account_count: number;
 }
 
+// Connector override for incremental sync
+export interface ConnectorSinceOverride {
+    since_datetime: string | null;  // ISO datetime string or null for full sync
+}
+
+// Connector default info for sync configuration UI
+export interface ConnectorDefaultInfo {
+    connector_id: number;
+    connector_type: string;
+    account_name: string;
+    supports_incremental_sync: boolean;
+    default_since_datetime?: string | null;  // ISO datetime from max transaction
+}
+
+// Request payload for starting sync job with overrides
+export interface SyncJobStartRequest {
+    connector_overrides?: Record<number, ConnectorSinceOverride>;
+}
+
 export interface ConnectorsInfo {
     available_connectors: string[];
     connector_count: number;

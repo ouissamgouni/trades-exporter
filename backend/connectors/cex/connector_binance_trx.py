@@ -110,7 +110,8 @@ class BinanceTrxConnector(BaseConnector):
             list: List of trade objects from CCXT or empty list on error
         """
         try:
-            trades = self.exchange.fetch_my_trades(symbol)
+            # Use since_timestamp_ms from base class for incremental sync
+            trades = self.exchange.fetch_my_trades(symbol, since=self.since_timestamp_ms)
             return trades
         except Exception as e:
             error_str = str(e).lower()

@@ -6,6 +6,8 @@ version: "3"
 dotenv: [".env"]
 
 vars:
+  ROOT_DIR:
+    sh: pwd
   BACKEND_DIR: ./backend
   FRONTEND_DIR: ./frontend
   ROOT_DIR: .
