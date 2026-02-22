@@ -524,6 +524,27 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             }
                         />
                     )}
+                    {/* Spam/Phishing Detection Alert */}
+                    {tx.review_status === 'invalid' && tx.review_notes && tx.review_notes.includes('Auto-flagged') && (
+                        <Box
+                            mt={2}
+                            p={2}
+                            bg="red.950"
+                            borderWidth="1px"
+                            borderColor="red.700"
+                            borderRadius="md"
+                        >
+                            <Flex align="center" gap={1.5} mb={1}>
+                                <Box color="red.400"><FiAlertTriangle size={14} /></Box>
+                                <Text fontSize="10px" fontWeight="bold" color="red.300">
+                                    Spam / Phishing Detection
+                                </Text>
+                            </Flex>
+                            <Text fontSize="9px" color="red.200" whiteSpace="pre-wrap" fontFamily="mono">
+                                {tx.review_notes}
+                            </Text>
+                        </Box>
+                    )}
                 </Section>
 
                 {/* P&L */}

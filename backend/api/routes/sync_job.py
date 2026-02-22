@@ -219,6 +219,26 @@ def abort_sync_job():
     return service.abort_job()
 
 
+@router.post("/retry/{connector_id}")
+def retry_connector(connector_id: int):
+    """
+    Retry a failed connector within the current (or most recent) sync job.
+
+    Resets the connector's progress card in-place, creates a new
+    SyncJobConnectorRun for audit, and re-runs the connector in a
+    background thread.  Works whether the job is still running or
+    already finished.
+    """
+    service = get_sync_job_service()
+    try:
+        result = service.retry_connector(connector_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return result
+
+
 @router.get("/all-connectors")
 def get_all_connectors(session: Session = Depends(get_session_dependency)):
     """

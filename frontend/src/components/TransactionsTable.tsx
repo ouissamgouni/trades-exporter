@@ -268,6 +268,13 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 }: TransactionsTableProps<T>) => {
     const queryClient = useQueryClient();
 
+    // Centralized cache invalidation after any transaction mutation.
+    // Ensures both the transaction list AND bundle suggestions are refreshed together.
+    const invalidateTransactionData = () => {
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+    };
+
     // Resolve table configuration with defaults
     const tableConfig = useMemo(() => resolveTableConfig(configProp), [configProp]);
 
@@ -643,7 +650,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 body: JSON.stringify({ [field]: value })
             });
             if (!response.ok) throw new Error('Failed to update');
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
@@ -763,7 +770,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error('Failed to update transaction');
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
         } catch (err) {
@@ -780,7 +787,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 body: JSON.stringify({ [field]: !tx[field] })
             });
             if (!response.ok) throw new Error('Failed to update');
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
@@ -876,6 +883,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             toaster.success({ title: 'Bundle created', description: `"${label}" with ${selectedIds.size} transaction(s)` });
             await refetchTransactions();
             queryClient.invalidateQueries({ queryKey: ["bundles"] });
+            queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
             refreshHealthData();
             onDataChange?.();
             setSelectedIds(new Set());
@@ -903,6 +911,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
             await refetchTransactions();
+            queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
             refreshHealthData();
             onDataChange?.();
             setSelectedIds(new Set());
@@ -928,7 +937,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
             setSelectedIds(new Set());
             setShowBulkTypeDialog(false);
             setBulkType('');
@@ -953,7 +962,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (!response.ok) throw new Error('Failed to delete transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
             setSelectedIds(new Set());
             setShowBulkDeleteDialog(false);
         } catch (err) {
@@ -977,7 +986,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (!response.ok) throw new Error('Failed to delete transaction');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
             setShowDeleteDialog(false);
             setTransactionToDelete(null);
         } catch (err) {
@@ -1067,7 +1076,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
             // Refresh transactions list if not a dry run
             if (!dryRunMode) {
-                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                invalidateTransactionData();
                 refreshHealthData();
                 onDataChange?.();
             }
@@ -1143,6 +1152,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     const handleRefresh = () => {
         refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
         // Always refresh validation summary for Data Health Check
         refreshHealthData();
     };
@@ -1154,6 +1164,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const handleRetry = () => {
         // Force refetch without changing filters (useful when error occurs with same filter state)
         refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
         refreshHealthData();
     };
 
@@ -1244,7 +1255,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 title: 'Auto-link complete',
                 description: `Linked ${linkedCount} field(s) with ≥95% confidence matches${errors.length > 0 ? `. ${errors.length} error(s).` : ''}`
             });
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            invalidateTransactionData();
         } else {
             toaster.info({
                 title: 'No high-confidence matches',
@@ -1420,7 +1431,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         {error ? "🔄 Retry" : "↺ Reset"}
                     </Button>
                     <Button
-                        onClick={() => refetchTransactions()}
+                        onClick={() => handleRefresh()}
                         variant="outline"
                         size="sm"
                     >
@@ -1807,7 +1818,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                     console.warn('Failed to link raw account:', linkErr);
                                                                                 }
                                                                             }
-                                                                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                            invalidateTransactionData();
                                                                         } catch (err) {
                                                                             toaster.error({ title: 'Error', description: 'Failed to link account' });
                                                                         }
@@ -1834,7 +1845,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                             body: JSON.stringify({ from_account_id: accountId })
                                                                                         });
                                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                        invalidateTransactionData();
                                                                                         setEditingCell(null);
                                                                                         setEditValues({});
                                                                                     } catch (err) {
@@ -1872,7 +1883,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                             body: JSON.stringify({ from_account_id: s.item.id })
                                                                                                         });
                                                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                         setEditingCell(null);
                                                                                                         setEditValues({});
                                                                                                     } catch (err) {
@@ -1944,7 +1955,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                                 });
                                                                                                             } catch { }
                                                                                                         }
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                     } catch (err) {
                                                                                                         toaster.error({ title: 'Error', description: 'Failed to link account' });
                                                                                                     }
@@ -1985,7 +1996,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                             body: JSON.stringify({ to_account_id: accountId })
                                                                                         });
                                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                        invalidateTransactionData();
                                                                                         setEditingCell(null);
                                                                                         setEditValues({});
                                                                                     } catch (err) {
@@ -2023,7 +2034,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                             body: JSON.stringify({ to_account_id: s.item.id })
                                                                                                         });
                                                                                                         if (!response.ok) throw new Error('Failed to update');
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                         setEditingCell(null);
                                                                                                         setEditValues({});
                                                                                                     } catch (err) {
@@ -2095,7 +2106,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                                 });
                                                                                                             } catch { }
                                                                                                         }
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                     } catch (err) {
                                                                                                         toaster.error({ title: 'Error', description: 'Failed to link account' });
                                                                                                     }
@@ -2140,7 +2151,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                     body: JSON.stringify({ direction: newDir })
                                                                                 });
                                                                                 if (!response.ok) throw new Error('Failed to update');
-                                                                                queryClient.invalidateQueries({ queryKey: ["transactions"] });
+                                                                                invalidateTransactionData();
                                                                                 setEditingCell(null);
                                                                                 setEditValues({});
                                                                             } catch (err) {
@@ -2184,7 +2195,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                     body: JSON.stringify({ transaction_type: newType })
                                                                                 });
                                                                                 if (!response.ok) throw new Error('Failed to update');
-                                                                                queryClient.invalidateQueries({ queryKey: ["transactions"] });
+                                                                                invalidateTransactionData();
                                                                                 setEditingCell(null);
                                                                                 setEditValues({});
                                                                             } catch (err) {
@@ -2322,7 +2333,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                                 });
                                                                                                             } catch { }
                                                                                                         }
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                     } catch (err) {
                                                                                                         toaster.error({ title: 'Error', description: 'Failed to link asset' });
                                                                                                     }
@@ -2484,7 +2495,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                                 });
                                                                                                             } catch { }
                                                                                                         }
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                     } catch (err) {
                                                                                                         toaster.error({ title: 'Error', description: 'Failed to link asset' });
                                                                                                     }
@@ -2626,7 +2637,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                                                 });
                                                                                                             } catch { }
                                                                                                         }
-                                                                                                        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                                        invalidateTransactionData();
                                                                                                     } catch (err) {
                                                                                                         toaster.error({ title: 'Error', description: 'Failed to link asset' });
                                                                                                     }
@@ -2765,7 +2776,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                         body: JSON.stringify({ review_status: 'valid' }),
                                                                                     });
                                                                                     if (!response.ok) throw new Error('Failed to update');
-                                                                                    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                                    invalidateTransactionData();
                                                                                 } catch (err) {
                                                                                     toaster.error({ title: 'Error', description: 'Failed to set status' });
                                                                                 }
@@ -2850,9 +2861,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                 body: JSON.stringify({ transaction_ids: [tx.id] }),
                                                                             });
                                                                             if (!response.ok) throw new Error('Failed to unbundle');
-                                                                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                                                                            invalidateTransactionData();
                                                                             queryClient.invalidateQueries({ queryKey: ['bundles'] });
-                                                                            queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
                                                                             toaster.success({ title: 'Unbundled', description: `Transaction #${tx.id} removed from bundle` });
                                                                         } catch (err) {
                                                                             toaster.error({ title: 'Error', description: 'Failed to remove from bundle' });
@@ -3514,7 +3524,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             body: JSON.stringify({ review_notes: notes }),
                         });
                         if (response.ok) {
-                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            invalidateTransactionData();
                             onDataChange?.();
                         }
                     } catch (err) {
@@ -3529,7 +3539,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             body: JSON.stringify({ tags }),
                         });
                         if (response.ok) {
-                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            invalidateTransactionData();
                             onDataChange?.();
                         }
                     } catch (err) {

@@ -150,7 +150,7 @@ def list_bundles(
 
 @router.get("/suggestions", response_model=List[SuggestionResponse])
 def get_suggestions(
-    max_suggestions: int = Query(20, ge=1, le=100),
+    max_suggestions: int = Query(50, ge=1, le=200),
     session: Session = Depends(get_db),
 ):
     """

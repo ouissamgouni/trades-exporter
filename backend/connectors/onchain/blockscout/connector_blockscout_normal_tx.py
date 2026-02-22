@@ -11,6 +11,7 @@ from backend.connectors.onchain.blockscout.base_blockscout_connector import (
 )
 from backend.config.loader import configure_logging
 from backend.core.network_normalizer import normalize_network
+from backend.core.spam_detection import detect_blockscout_phishing, apply_spam_markers
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("blockscout_normal_tx")
@@ -163,11 +164,12 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             # Build tags
             tags = {}
 
-            return NormalizedTransaction(
+            normalized = NormalizedTransaction(
                 source=f"blockscout_{self.chain_name.lower()}_normal_tx",
                 account_id=self.account_id,
-                source_account=self.wallet_address,  # Raw account identifier for mapping
+                source_account=self.wallet_address,
                 source_transaction_id=tx_hash,
+                network_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
                 transaction_type="technical" if value == 0 else "transfer",
@@ -182,6 +184,18 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
                 network=normalize_network(self.chain_name),
                 tags=tags,
             )
+
+            # Phishing / spam detection
+            spam_reasons = detect_blockscout_phishing(tx)
+            if spam_reasons:
+                apply_spam_markers(
+                    normalized,
+                    reasons=spam_reasons,
+                    tags=tags,
+                    tx_id=tx_hash,
+                )
+
+            return normalized
         except Exception as e:
             log.error(f"   ⚠️ Error mapping normal transaction: {e}")
             raise

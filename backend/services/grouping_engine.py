@@ -7,7 +7,8 @@ This engine analyzes ungrouped transactions and suggests CalculationUnit groupin
 - Rule 3: Same source_transaction_id grouping (swap detection)
 - Rule 4: Swap detection (different assets, same account, short time window)
 - Rule 4b: Split detection (same asset, different quantities, same total value)
-- Rule 5: Bridge detection (same asset, different accounts, not to_account match)
+- Rule 5: Bridge detection (same asset, different accounts)
+- Rule 5b: Same-account cross-chain bridge (same asset, same account, different networks)
 - Rule 6: Catch-all for remaining ungrouped transactions
 
 Returns GroupingSuggestion objects that can be converted to CalculationUnit for persistence.
@@ -115,6 +116,7 @@ class GroupingEngine:
         4. Swap detection (different assets, same account)
         4b. Split detection (same asset, different qty, same value)
         5. Bridge detection (same asset, different chains/accounts)
+        5b. Same-account cross-chain bridge (same asset, same account, different networks)
         6. Catch-all for remaining transactions
 
         Args:
@@ -147,7 +149,10 @@ class GroupingEngine:
         suggestions.extend(self._rule4_swap_detection(outflows, inflows))
 
 
-        # Rule 5: Bridge detection
+        # Rule 5b: Same-account cross-chain bridge (higher priority - more specific match)
+        suggestions.extend(self._rule5b_same_account_bridge(outflows, inflows))
+
+        # Rule 5: Bridge detection (different accounts)
         suggestions.extend(self._rule5_bridge_detection(outflows, inflows))
 
         # Rule 6: Catch-all for remaining ungrouped
@@ -588,6 +593,87 @@ class GroupingEngine:
                     reason = f"Same asset transfer between accounts (no explicit link)"
 
                 # Bridges/transfers are internal transfers (same asset, non-taxable)
+                suggestions.append(
+                    GroupingSuggestion(
+                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        label=label,
+                        reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
+                        confidence=confidence,
+                        transactions=[
+                            self._make_tx_summary(outflow),
+                            self._make_tx_summary(inflow),
+                        ],
+                    )
+                )
+                break
+
+        return suggestions
+
+    def _rule5b_same_account_bridge(
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+    ) -> List[GroupingSuggestion]:
+        """
+        Rule 5b: Same-account cross-chain bridge.
+
+        Detects bridges where the user sends and receives on the same account
+        (same wallet address tracked across multiple chains).
+
+        Conditions:
+        - outflow.asset_id == inflow.asset_id (or same canonical symbol)
+        - outflow.account_id == inflow.account_id (same account)
+        - outflow.network != inflow.network (different chains)
+        - Both networks must be present (non-empty)
+        - |qty_out - qty_in| / qty_out <= tolerance
+        - time difference <= bridge_time_window
+
+        Confidence: 0.85-0.95 depending on quantity closeness
+        """
+        suggestions = []
+
+        for outflow in outflows:
+            if outflow.id in self._used_tx_ids:
+                continue
+
+            for inflow in inflows:
+                if inflow.id in self._used_tx_ids:
+                    continue
+
+                # Check asset match
+                if not self._assets_match(outflow, inflow):
+                    continue
+
+                # Must be same account
+                if outflow.account_id != inflow.account_id:
+                    continue
+
+                # Both must have a network set
+                if not outflow.network or not inflow.network:
+                    continue
+
+                # Must be different networks (case-insensitive)
+                if outflow.network.lower() == inflow.network.lower():
+                    continue
+
+                # Check time window
+                time_diff = abs((inflow.date_time - outflow.date_time).total_seconds())
+                if time_diff > self.config.bridge_time_window:
+                    continue
+
+                # Check quantity tolerance
+                qty_ratio = self._quantity_diff_ratio(outflow.quantity, inflow.quantity)
+                if qty_ratio > self.config.quantity_tolerance:
+                    continue
+
+                # Calculate confidence — same account + different network is strong bridge signal
+                confidence = self._calculate_transfer_confidence(qty_ratio, time_diff)
+
+                self._used_tx_ids.add(outflow.id)
+                self._used_tx_ids.add(inflow.id)
+
+                symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
+                label = f"{symbol} Bridge ({outflow.network} \u2192 {inflow.network})"
+                reason = f"Same asset bridged across networks on same account ({outflow.network} \u2192 {inflow.network})"
+
                 suggestions.append(
                     GroupingSuggestion(
                         pattern=PATTERN_INTERNAL_TRANSFER,

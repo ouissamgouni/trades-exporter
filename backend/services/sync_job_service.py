@@ -286,6 +286,10 @@ class SyncJobService:
         self._use_database_connectors = self._settings.get(
             "use_database_connectors", False
         )
+        # Worker coordination for retry support
+        self._active_worker_count: int = 0
+        self._worker_lock = threading.Lock()
+        self._retry_threads: Dict[int, threading.Thread] = {}  # connector_id -> Thread
 
     def get_status(self) -> Dict[str, Any]:
         """Get the current job status and progress."""
@@ -648,6 +652,713 @@ class SyncJobService:
             # Don't fail the sync if database update fails
             self.logger.warning(f"⚠️ Failed to update connector run {run_id} metrics: {e}")
     
+    def _create_progress_callback(self):
+        """
+        Create a progress callback function for updating ConnectorProgress during fetching.
+        
+        This callback handles:
+        - Updating in-memory progress fields (operation, counts)
+        - QUEUED → RUNNING transitions during initialization
+        - FAILED transitions on initialization failure
+        
+        Returns:
+            Callback function compatible with DatabaseConnectorHub's progress_callback parameter
+        """
+        def connector_progress_callback(
+            connector_id: int,
+            operation: str,
+            current: int,
+            total: int,
+            log_message: Optional[str] = None,
+            fetched_count: Optional[int] = None,
+            new_count: Optional[int] = None,
+            updated_count: Optional[int] = None,
+            skipped_count: Optional[int] = None,
+        ):
+            """Update connector progress from child connectors, including metrics if provided."""
+            if connector_id in self.progress.connector_statuses:
+                cstatus = self.progress.connector_statuses[connector_id]
+                
+                # Update in-memory progress
+                cstatus.current_operation = operation
+                cstatus.operation_progress = current
+                cstatus.operation_total = total
+                if fetched_count is not None:
+                    cstatus.fetched_count = fetched_count
+                if new_count is not None:
+                    cstatus.new_count = new_count
+                if updated_count is not None:
+                    cstatus.updated_count = updated_count
+                if skipped_count is not None:
+                    cstatus.skipped_count = skipped_count
+                if log_message:
+                    cstatus.add_log("INFO", log_message)
+                
+                # Handle initialization lifecycle events from worker threads
+                if operation == "Initializing connector" and cstatus.status == ConnectorSyncStatus.QUEUED:
+                    cstatus.status = ConnectorSyncStatus.RUNNING
+                    cstatus.started_at = datetime.now()
+                    self._persist_connector_status(connector_id, "running")
+                    self.logger.debug(f"🔄 Connector {connector_id} started initialization")
+                elif operation == "Initialization failed":
+                    cstatus.status = ConnectorSyncStatus.FAILED
+                    cstatus.finished_at = datetime.now()
+                    if log_message and log_message.startswith("ERROR_DETAIL:"):
+                        error_msg = log_message.replace("ERROR_DETAIL:", "", 1)
+                        cstatus.error = error_msg
+                    elif log_message and "failed:" in log_message:
+                        error_msg = log_message.split("failed:", 1)[1].strip()
+                        cstatus.error = error_msg
+                    else:
+                        cstatus.error = "Connector initialization failed"
+                    self._persist_connector_status(connector_id, "failed", cstatus.error)
+                    self.logger.warning(f"❌ Connector {connector_id} initialization failed: {cstatus.error[:100]}")
+            else:
+                self.logger.warning(f"⚠️ Progress callback: connector_id={connector_id} not found in statuses")
+
+        return connector_progress_callback
+
+    def _create_processor(
+        self,
+        session: Session,
+        db_connector_runs: Dict[int, int],
+        connector_progress_callback: Callable,
+        renormalize: bool = False,
+    ) -> ParallelPipelineProcessor:
+        """
+        Create a pipeline and parallel processor.
+        
+        Shared by _run_job() and _run_single_connector().
+        
+        Args:
+            session: Database session
+            db_connector_runs: Mapping of connector_id -> SyncJobConnectorRun.id
+            connector_progress_callback: Progress callback for hub/connectors
+            renormalize: Whether this is a renormalize operation
+            
+        Returns:
+            Started ParallelPipelineProcessor
+        """
+        pipeline = create_default_pipeline(session)
+        
+        processor = ParallelPipelineProcessor(
+            session=session,
+            pipeline=pipeline,
+            db_connector_runs=db_connector_runs,
+            progress_callback=lambda connector_id, result, context: self._handle_pipeline_result(
+                connector_id, result, context, connector_progress_callback
+            ),
+            abort_event=self._abort_event,
+            num_workers=4,
+            queue_size=500,
+            renormalize_mode=renormalize,
+        )
+        processor.start()
+        return processor
+
+    def _finalize_connector(
+        self,
+        connector_id: int,
+        db_connector_runs: Dict[int, int],
+        sync_job_repo: Any,
+    ) -> None:
+        """
+        Finalize a connector that is still in RUNNING state after processing is complete.
+        
+        Sets status to COMPLETED or WARNING based on error count, persists to DB.
+        Shared by _run_job() and _run_single_connector().
+        
+        Args:
+            connector_id: The connector ID to finalize
+            db_connector_runs: Mapping of connector_id -> SyncJobConnectorRun.id
+            sync_job_repo: SyncJobRepository instance
+        """
+        if connector_id not in self.progress.connector_statuses:
+            return
+        
+        cstatus = self.progress.connector_statuses[connector_id]
+        if cstatus.status != ConnectorSyncStatus.RUNNING:
+            return
+        
+        self.logger.info(f"ℹ️ Connector {connector_id} still in RUNNING state - finalizing now")
+        
+        cstatus.finished_at = datetime.now()
+        cstatus.current_operation = None
+        
+        if cstatus.error_count > 0:
+            cstatus.status = ConnectorSyncStatus.WARNING
+            cstatus.add_log("WARNING", f"Completed with {cstatus.error_count} errors: {cstatus.new_count} new, {cstatus.updated_count} updated, {cstatus.skipped_count} skipped")
+            self._persist_connector_status(connector_id, "warning")
+            if connector_id in db_connector_runs:
+                from backend.db.models import SyncJobConnectorStatus
+                run_id = db_connector_runs[connector_id]
+                sync_job_repo.update_connector_run_status(
+                    run_id,
+                    SyncJobConnectorStatus.WARNING,
+                    finished_at=cstatus.finished_at
+                )
+            self.logger.warning(f"⚠️ Connector {connector_id} completed with {cstatus.error_count} errors")
+        else:
+            cstatus.status = ConnectorSyncStatus.COMPLETED
+            cstatus.add_log("INFO", f"Completed sync: {cstatus.new_count} new, {cstatus.updated_count} updated, {cstatus.skipped_count} skipped")
+            self._persist_connector_status(connector_id, "success")
+            if connector_id in db_connector_runs:
+                from backend.db.models import SyncJobConnectorStatus
+                run_id = db_connector_runs[connector_id]
+                sync_job_repo.update_connector_run_status(
+                    run_id,
+                    SyncJobConnectorStatus.COMPLETED,
+                    finished_at=cstatus.finished_at
+                )
+            self.logger.info(f"✅ Connector {connector_id} completed after processing queue")
+        
+        # Add to completed list
+        connector_name = cstatus.connector_type
+        if connector_name not in self.progress.connectors_completed:
+            self.progress.connectors_completed.append(connector_name)
+
+    def _determine_and_set_job_status(self, sync_job_repo: Any = None) -> None:
+        """
+        Determine final job status from all connector statuses and persist to DB.
+        
+        Called by the last active worker (either _run_job or _run_single_connector).
+        Shared by _run_job() and _run_single_connector().
+        
+        Args:
+            sync_job_repo: Optional SyncJobRepository instance for DB persistence
+        """
+        # Mark remaining queued connectors as completed (no data produced)
+        for cid, cstatus in self.progress.connector_statuses.items():
+            if cstatus.status == ConnectorSyncStatus.QUEUED:
+                cstatus.status = ConnectorSyncStatus.COMPLETED
+                cstatus.finished_at = datetime.now()
+                cstatus.add_log("INFO", "Completed (no items fetched)")
+        
+        # Determine job-level status based on connector outcomes
+        has_failures = any(
+            cstatus.status == ConnectorSyncStatus.FAILED 
+            for cstatus in self.progress.connector_statuses.values()
+        )
+        has_warnings = any(
+            cstatus.status == ConnectorSyncStatus.WARNING or cstatus.error_count > 0
+            for cstatus in self.progress.connector_statuses.values()
+        )
+        
+        if has_failures:
+            self.progress.status = JobStatus.FAILED
+            self.logger.warning(f"⚠️ Sync job completed with failures")
+        elif has_warnings:
+            self.progress.status = JobStatus.WARNING
+            self.logger.warning(f"⚠️ Sync job completed with warnings")
+        else:
+            self.progress.status = JobStatus.COMPLETED
+            self.logger.info(
+                f"✅ Sync job completed. Added {self.progress.new_entries_added} new, "
+                f"updated {self.progress.entries_updated}, "
+                f"skipped {self.progress.duplicates_skipped} duplicates."
+            )
+        
+        self.progress.finished_at = datetime.now()
+        self.progress.current_connector = None
+
+    def _persist_job_finalization(
+        self,
+        session: Session,
+        db_job_id: int,
+        db_connector_runs: Dict[int, int],
+        sync_job_repo: Any,
+    ) -> None:
+        """
+        Persist final job and connector run records to database.
+        
+        Shared by _run_job() and _run_single_connector().
+        
+        Args:
+            session: Database session
+            db_job_id: The SyncJob database ID
+            db_connector_runs: Mapping of connector_id -> SyncJobConnectorRun.id
+            sync_job_repo: SyncJobRepository instance
+        """
+        try:
+            from backend.db.models import SyncJobStatus, SyncJobConnectorStatus
+            
+            # Map internal status to database status
+            status_map = {
+                JobStatus.COMPLETED: SyncJobStatus.COMPLETED,
+                JobStatus.WARNING: SyncJobStatus.WARNING,
+                JobStatus.FAILED: SyncJobStatus.FAILED,
+                JobStatus.ABORTED: SyncJobStatus.ABORTED,
+            }
+            db_status = status_map.get(self.progress.status, SyncJobStatus.FAILED)
+            
+            # Update each connector run with final metrics and outcomes
+            for cid, cstatus in self.progress.connector_statuses.items():
+                if cid in db_connector_runs:
+                    run_id = db_connector_runs[cid]
+                    connector_status_map = {
+                        ConnectorSyncStatus.COMPLETED: SyncJobConnectorStatus.COMPLETED,
+                        ConnectorSyncStatus.WARNING: SyncJobConnectorStatus.WARNING,
+                        ConnectorSyncStatus.FAILED: SyncJobConnectorStatus.FAILED,
+                        ConnectorSyncStatus.SKIPPED: SyncJobConnectorStatus.SKIPPED,
+                        ConnectorSyncStatus.RUNNING: SyncJobConnectorStatus.COMPLETED,
+                        ConnectorSyncStatus.QUEUED: SyncJobConnectorStatus.SKIPPED,
+                    }
+                    db_connector_status = connector_status_map.get(cstatus.status, SyncJobConnectorStatus.COMPLETED)
+                    
+                    sync_job_repo.update_connector_run_status(
+                        run_id, 
+                        db_connector_status,
+                        started_at=cstatus.started_at,
+                        finished_at=cstatus.finished_at,
+                    )
+                    sync_job_repo.update_connector_run_metrics(
+                        run_id,
+                        processed=cstatus.processed,
+                        synced_count=cstatus.new_count,
+                        updated_count=cstatus.updated_count,
+                        skipped_count=cstatus.skipped_count,
+                        error_count=cstatus.error_count,
+                    )
+                    sync_job_repo.update_connector_run_outcomes(
+                        run_id,
+                        synced_ids=cstatus.synced_ids,
+                        updated_ids=cstatus.updated_ids,
+                        skipped_ids=cstatus.skipped_ids,
+                        error_details=cstatus.error_details,
+                        logs=[log.to_dict() for log in cstatus.logs],
+                    )
+            
+            # Update job status and recalculate totals
+            sync_job_repo.update_job_status(
+                db_job_id, 
+                db_status, 
+                error_message=self.progress.error_message
+            )
+            sync_job_repo.recalculate_job_totals(db_job_id)
+            session.commit()
+            
+            self.logger.info(f"📝 Finalized job record in database: job_id={db_job_id}, status={db_status.value}")
+            
+        except Exception as e:
+            self.logger.error(f"Error finalizing job record: {e}")
+            try:
+                session.rollback()
+            except:
+                pass
+
+    def _decrement_active_workers(self) -> bool:
+        """
+        Decrement active worker count and return True if this was the last worker.
+        Thread-safe.
+        """
+        with self._worker_lock:
+            self._active_worker_count -= 1
+            is_last = self._active_worker_count == 0
+            self.logger.debug(f"📊 Active workers remaining: {self._active_worker_count}")
+            return is_last
+
+    def retry_connector(self, connector_id: int) -> Dict[str, Any]:
+        """
+        Retry a failed or warning connector within its original job.
+        
+        Resets the connector's progress, creates a new SyncJobConnectorRun
+        under the same SyncJob, and runs the connector in a background thread.
+        Works whether the job is still running (other connectors active) or finished.
+        
+        Args:
+            connector_id: The AccountConnector ID to retry
+            
+        Returns:
+            Dict with status and job info
+            
+        Raises:
+            ValueError: If connector is not retryable (not found, wrong status)
+            RuntimeError: If a retry is already in progress for this connector
+        """
+        # Validate connector exists in current job
+        if connector_id not in self.progress.connector_statuses:
+            raise ValueError(f"Connector {connector_id} not found in current/last job")
+        
+        cstatus = self.progress.connector_statuses[connector_id]
+        
+        # Validate retryable status
+        if cstatus.status not in (ConnectorSyncStatus.FAILED, ConnectorSyncStatus.WARNING):
+            raise ValueError(
+                f"Connector {connector_id} is in '{cstatus.status.value}' state, "
+                f"only 'failed' or 'warning' connectors can be retried"
+            )
+        
+        # Check if retry already in progress for this connector
+        if connector_id in self._retry_threads:
+            thread = self._retry_threads[connector_id]
+            if thread.is_alive():
+                raise RuntimeError(f"A retry is already in progress for connector {connector_id}")
+            else:
+                # Thread finished, clean up
+                del self._retry_threads[connector_id]
+        
+        # Validate we have a job_id to attach to
+        job_id = self.progress.job_id
+        if not job_id:
+            raise ValueError("No job record found to attach retry to")
+        
+        self.logger.info(
+            f"🔄 Retrying connector {connector_id} ({cstatus.connector_type}) "
+            f"in job {job_id}"
+        )
+        
+        # Subtract old connector stats from job-level aggregates to prevent double-counting
+        self.progress.total_processed -= cstatus.processed
+        self.progress.new_entries_added -= cstatus.new_count
+        self.progress.entries_updated -= cstatus.updated_count
+        self.progress.duplicates_skipped -= cstatus.skipped_count
+        # Remove old errors from job-level error list (best effort)
+        self.progress.error_message = None
+        
+        # Reset connector progress (keep connector_id, type, account_name)
+        cstatus.status = ConnectorSyncStatus.QUEUED
+        cstatus.started_at = None
+        cstatus.finished_at = None
+        cstatus.processed = 0
+        cstatus.fetched_count = 0
+        cstatus.new_count = 0
+        cstatus.updated_count = 0
+        cstatus.skipped_count = 0
+        cstatus.error = None
+        cstatus.error_count = 0
+        cstatus.current_operation = None
+        cstatus.operation_progress = 0
+        cstatus.operation_total = 0
+        cstatus.pipeline_stage = None
+        cstatus.logs = []
+        cstatus.synced_ids = []
+        cstatus.updated_ids = []
+        cstatus.skipped_ids = []
+        cstatus.error_details = []
+        # Reset stage stats
+        cstatus.stage_stats = {stage.value: StageStats() for stage in PipelineStage}
+        
+        # Remove from connectors_completed if present
+        if cstatus.account_name in self.progress.connectors_completed:
+            self.progress.connectors_completed.remove(cstatus.account_name)
+        if cstatus.connector_type in self.progress.connectors_completed:
+            self.progress.connectors_completed.remove(cstatus.connector_type)
+        
+        # Set job status back to RUNNING (correct semantics — work is happening).
+        # The frontend distinguishes a full-job run from a single-connector retry
+        # by counting how many connectors are queued/running.
+        self.progress.status = JobStatus.RUNNING
+        self.progress.finished_at = None
+        
+        # Create new SyncJobConnectorRun under the same job
+        from backend.db.database import get_session
+        from backend.db.repositories.sync_job_repository import SyncJobRepository
+        from backend.db.models import SyncJobStatus
+        
+        with get_session() as session:
+            repo = SyncJobRepository(session)
+            db_run = repo.create_connector_run(
+                job_id=job_id,
+                connector_id=connector_id,
+                test_mode=cstatus.test_mode,
+            )
+            db_run.connector_type = cstatus.connector_type
+            db_run.account_name = cstatus.account_name
+            session.add(db_run)
+            
+            # Update job status back to RUNNING in DB
+            repo.update_job_status(job_id, SyncJobStatus.RUNNING)
+            session.commit()
+            
+            new_run_id = db_run.id
+        
+        # Update the connector runs map
+        if not hasattr(self, '_run_job_db_connector_runs'):
+            self._run_job_db_connector_runs = {}
+        self._run_job_db_connector_runs[connector_id] = new_run_id
+        cstatus.connector_run_id = new_run_id
+        
+        self.logger.info(f"📝 Created retry connector run: run_id={new_run_id} for connector {connector_id}")
+        
+        # Increment active worker count
+        with self._worker_lock:
+            self._active_worker_count += 1
+        
+        # Spawn retry thread
+        thread = threading.Thread(
+            target=self._run_single_connector,
+            args=(connector_id,),
+            daemon=True,
+        )
+        self._retry_threads[connector_id] = thread
+        thread.start()
+        
+        return {
+            "status": "retry_started",
+            "connector_id": connector_id,
+            "job_id": job_id,
+            "connector_run_id": new_run_id,
+        }
+
+    def _run_single_connector(self, connector_id: int) -> None:
+        """
+        Run a single connector in a background thread (used for retry).
+        
+        Uses the same progress tracking and DB persistence as _run_job(),
+        but scoped to one connector. Attaches to the existing job via
+        self.progress.job_id.
+        
+        Args:
+            connector_id: The AccountConnector ID to run
+        """
+        session = None
+        connector_hub = None
+        
+        try:
+            cstatus = self.progress.connector_statuses[connector_id]
+            job_id = self.progress.job_id
+            
+            self.logger.info(f"🔄 Starting single-connector retry: connector {connector_id}")
+            
+            # Open fresh DB session
+            engine = get_engine()
+            session = Session(engine)
+            
+            from backend.db.repositories.sync_job_repository import SyncJobRepository
+            from backend.db.repositories import AccountConnectorRepository, NormalizedTransactionRepository
+            from backend.connectors.connector_registry import get_connector_registry
+            from backend.connectors.hub.database_connector_hub import DatabaseConnectorHub
+            
+            sync_job_repo = SyncJobRepository(session)
+            acct_repo = AccountConnectorRepository(session)
+            tx_repo = NormalizedTransactionRepository(session)
+            registry = get_connector_registry()
+            
+            # Look up the connector and its account
+            account_connector = session.get(
+                __import__('backend.db.models', fromlist=['AccountConnector']).AccountConnector,
+                connector_id,
+            )
+            if not account_connector:
+                raise ValueError(f"AccountConnector {connector_id} not found in database")
+            
+            account = session.get(
+                __import__('backend.db.models', fromlist=['Account']).Account,
+                account_connector.account_id,
+            )
+            
+            # Compute since_datetime for incremental sync
+            connector_info = registry.get(account_connector.connector_type)
+            connector_since_map: Dict[int, Optional[datetime]] = {}
+            if connector_info and connector_info.supports_incremental_sync:
+                max_dt = tx_repo.get_max_datetime_by_connector(connector_id)
+                connector_since_map[connector_id] = max_dt
+                if max_dt:
+                    self.logger.info(f"📅 Retry connector {connector_id} since: {max_dt}")
+            
+            # Generate output path
+            sync_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            sync_output_path = os.path.join(get_connectors_output_path(), f"{sync_timestamp}_retry_{connector_id}")
+            
+            # Create progress callback 
+            connector_progress_callback = self._create_progress_callback()
+            
+            # Build a single-connector override to ensure only this connector runs
+            single_override = [ConnectorOverride(connector_id=connector_id, enabled=True)]
+            
+            # Create single-connector hub
+            connector_hub = DatabaseConnectorHub(
+                session,
+                parent_output_path=sync_output_path,
+                connector_since_map=connector_since_map,
+                connector_overrides=single_override,
+                progress_callback=connector_progress_callback,
+                renormalize_mode=False,
+            )
+            
+            # Build db_connector_runs for this retry
+            db_connector_runs = {connector_id: self._run_job_db_connector_runs[connector_id]}
+            
+            # Create processor
+            processor = self._create_processor(
+                session=session,
+                db_connector_runs=db_connector_runs,
+                connector_progress_callback=connector_progress_callback,
+                renormalize=False,
+            )
+            
+            # Mark as queued and persist
+            cstatus.status = ConnectorSyncStatus.QUEUED
+            self._persist_connector_status(connector_id, "pending")
+            
+            # Process yield loop (single connector - no connector-change detection needed)
+            current_connector_id = connector_id
+            
+            try:
+                for raw_item, normalized_item, error in connector_hub.yield_normalized():
+                    # Check for abort
+                    if self._abort_event.is_set():
+                        self.logger.info(f"⚠️ Abort requested during retry of connector {connector_id}")
+                        cstatus.status = ConnectorSyncStatus.SKIPPED
+                        cstatus.finished_at = datetime.now()
+                        break
+                    
+                    # QUEUED → RUNNING transition on first item
+                    if cstatus.status == ConnectorSyncStatus.QUEUED:
+                        cstatus.status = ConnectorSyncStatus.RUNNING
+                        cstatus.started_at = datetime.now()
+                        cstatus.current_operation = "Processing transactions"
+                        cstatus.pipeline_stage = PipelineStage.FETCH
+                        cstatus.add_log("INFO", f"Started retry sync for {cstatus.account_name}")
+                        self._persist_connector_status(connector_id, "running")
+                        
+                        from backend.db.models import SyncJobConnectorStatus as DBConnStatus
+                        run_id = db_connector_runs[connector_id]
+                        sync_job_repo.update_connector_run_status(
+                            run_id, DBConnStatus.RUNNING, started_at=cstatus.started_at
+                        )
+                        session.commit()
+                        
+                        # Register completion callback
+                        def on_complete(cid: int):
+                            self._handle_connector_completion(cid)
+                        processor.register_connector_completion_callback(connector_id, on_complete)
+                    
+                    # Handle errors
+                    if error:
+                        error_msg = f"[{cstatus.connector_type}] {error}"
+                        self.progress.errors.append(error_msg)
+                        cstatus.error = error
+                        cstatus.error_count += 1
+                        cstatus.add_log("ERROR", error_msg)
+                        continue
+                    
+                    # Process normalized item
+                    if normalized_item:
+                        self.progress.total_processed += 1
+                        cstatus.processed += 1
+                        
+                        actual_raw_item = raw_item.get("raw_item") if isinstance(raw_item, dict) and "raw_item" in raw_item else raw_item
+                        processor.submit(
+                            raw_item=actual_raw_item,
+                            normalized_item=normalized_item,
+                            connector_id=connector_id,
+                            connector_name=cstatus.connector_type,
+                        )
+                        
+            except ConnectorAPIError as e:
+                self.logger.error(f"❌ Retry connector API error: {e}")
+                cstatus.status = ConnectorSyncStatus.FAILED
+                cstatus.finished_at = datetime.now()
+                cstatus.error = str(e)
+                cstatus.add_log("ERROR", f"Connector failed: {e}")
+                self._persist_connector_status(connector_id, "failed", str(e))
+                
+                if connector_id in db_connector_runs:
+                    from backend.db.models import SyncJobConnectorStatus as DBConnStatus
+                    sync_job_repo.update_connector_run_status(
+                        db_connector_runs[connector_id],
+                        DBConnStatus.FAILED,
+                        error_message=str(e),
+                        finished_at=cstatus.finished_at,
+                    )
+                    session.commit()
+                    
+            except Exception as e:
+                self.logger.error(f"❌ Unexpected error during retry: {e}")
+                self.logger.error(traceback.format_exc())
+                cstatus.status = ConnectorSyncStatus.FAILED
+                cstatus.finished_at = datetime.now()
+                cstatus.error = str(e)
+                cstatus.add_log("ERROR", f"Unexpected error: {e}")
+                self._persist_connector_status(connector_id, "failed", str(e))
+            finally:
+                # Stop processor and wait for workers
+                processor.stop(timeout=60)
+            
+            # Finalize connector if still running (completion callback may have already handled it)
+            self._finalize_connector(connector_id, db_connector_runs, sync_job_repo)
+            
+            # Persist final connector run metrics
+            if connector_id in db_connector_runs:
+                run_id = db_connector_runs[connector_id]
+                sync_job_repo.update_connector_run_metrics(
+                    run_id,
+                    processed=cstatus.processed,
+                    synced_count=cstatus.new_count,
+                    updated_count=cstatus.updated_count,
+                    skipped_count=cstatus.skipped_count,
+                    error_count=cstatus.error_count,
+                )
+                sync_job_repo.update_connector_run_outcomes(
+                    run_id,
+                    synced_ids=cstatus.synced_ids,
+                    updated_ids=cstatus.updated_ids,
+                    skipped_ids=cstatus.skipped_ids,
+                    error_details=cstatus.error_details,
+                    logs=[log.to_dict() for log in cstatus.logs],
+                )
+                session.commit()
+            
+        except Exception as e:
+            self.logger.error(f"❌ Fatal error in retry thread for connector {connector_id}: {e}")
+            self.logger.error(traceback.format_exc())
+            if connector_id in self.progress.connector_statuses:
+                cstatus = self.progress.connector_statuses[connector_id]
+                cstatus.status = ConnectorSyncStatus.FAILED
+                cstatus.error = str(e)
+                cstatus.finished_at = datetime.now()
+        finally:
+            # Clean up retry thread tracking
+            if connector_id in self._retry_threads:
+                del self._retry_threads[connector_id]
+            
+            # Check if this is the last active worker
+            is_last = self._decrement_active_workers()
+            
+            if is_last:
+                self.logger.info("📊 Last worker finished — determining final job status")
+                # Recalculate job-level aggregates from all connector statuses
+                self.progress.total_processed = sum(
+                    cs.processed for cs in self.progress.connector_statuses.values()
+                )
+                self.progress.new_entries_added = sum(
+                    cs.new_count for cs in self.progress.connector_statuses.values()
+                )
+                self.progress.entries_updated = sum(
+                    cs.updated_count for cs in self.progress.connector_statuses.values()
+                )
+                self.progress.duplicates_skipped = sum(
+                    cs.skipped_count for cs in self.progress.connector_statuses.values()
+                )
+                
+                self._determine_and_set_job_status()
+                
+                # Persist final job record
+                if session and self.progress.job_id:
+                    try:
+                        from backend.db.repositories.sync_job_repository import SyncJobRepository
+                        repo = SyncJobRepository(session)
+                        self._persist_job_finalization(
+                            session, self.progress.job_id,
+                            self._run_job_db_connector_runs, repo
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Error persisting final job status: {e}")
+            
+            # Clean up resources
+            if connector_hub:
+                if hasattr(connector_hub, "cleanup"):
+                    try:
+                        connector_hub.cleanup()
+                    except Exception as e:
+                        self.logger.error(f"Error cleaning up connector hub: {e}")
+                if hasattr(connector_hub, "close"):
+                    try:
+                        connector_hub.close()
+                    except Exception as e:
+                        self.logger.error(f"Error closing connector hub: {e}")
+
     def _run_job(self):
         """
         Execute the sync job in background thread.
@@ -658,6 +1369,10 @@ class SyncJobService:
         """
         self.progress.status = JobStatus.RUNNING
         self.progress.started_at = datetime.now()
+
+        # Register this as an active worker
+        with self._worker_lock:
+            self._active_worker_count += 1
 
         connector_hub = None
         session = None
@@ -820,65 +1535,8 @@ class SyncJobService:
                         self.progress.connector_statuses[connector_id].connector_run_id = db_run.id
                         self.logger.debug(f"📝 Created connector run record: run_id={db_run.id} for connector {connector_id}")
 
-                # Create progress callback to update ConnectorProgress during fetching
-                def connector_progress_callback(
-                    connector_id: int,
-                    operation: str,
-                    current: int,
-                    total: int,
-                    log_message: Optional[str] = None,
-                    fetched_count: Optional[int] = None,
-                    new_count: Optional[int] = None,
-                    updated_count: Optional[int] = None,
-                    skipped_count: Optional[int] = None,
-                ):
-                    """Update connector progress from child connectors, including metrics if provided."""
-                    if connector_id in self.progress.connector_statuses:
-                        cstatus = self.progress.connector_statuses[connector_id]
-                        old_status = cstatus.status
-                        
-                        # Update in-memory progress
-                        cstatus.current_operation = operation
-                        cstatus.operation_progress = current
-                        cstatus.operation_total = total
-                        if fetched_count is not None:
-                            cstatus.fetched_count = fetched_count
-                        if new_count is not None:
-                            cstatus.new_count = new_count
-                        if updated_count is not None:
-                            cstatus.updated_count = updated_count
-                        if skipped_count is not None:
-                            cstatus.skipped_count = skipped_count
-                        if log_message:
-                            cstatus.add_log("INFO", log_message)
-                        
-                        # Handle initialization lifecycle events from worker threads
-                        # Persist status changes safely from main thread to avoid session conflicts
-                        if operation == "Initializing connector" and cstatus.status == ConnectorSyncStatus.QUEUED:
-                            # Connector started initializing
-                            cstatus.status = ConnectorSyncStatus.RUNNING
-                            cstatus.started_at = datetime.now()
-                            self._persist_connector_status(connector_id, "running")
-                            self.logger.debug(f"🔄 Connector {connector_id} started initialization")
-                        elif operation == "Initialization failed":
-                            # Connector failed during initialization
-                            cstatus.status = ConnectorSyncStatus.FAILED
-                            cstatus.finished_at = datetime.now()
-                            # Extract detailed error from log message (format: ERROR_DETAIL:...)
-                            if log_message and log_message.startswith("ERROR_DETAIL:"):
-                                error_msg = log_message.replace("ERROR_DETAIL:", "", 1)
-                                cstatus.error = error_msg
-                            elif log_message and "failed:" in log_message:
-                                error_msg = log_message.split("failed:", 1)[1].strip()
-                                cstatus.error = error_msg
-                            else:
-                                cstatus.error = "Connector initialization failed"
-                            self._persist_connector_status(connector_id, "failed", cstatus.error)
-                            self.logger.warning(f"❌ Connector {connector_id} initialization failed: {cstatus.error[:100]}")
-                        
-                        # Note: QUEUED → RUNNING transition for fetching is handled in main loop when first item yields
-                    else:
-                        self.logger.warning(f"⚠️ Progress callback: connector_id={connector_id} not found in statuses")
+                # Create progress callback using shared helper
+                connector_progress_callback = self._create_progress_callback()
 
                 connector_hub = DatabaseConnectorHub(
                     session,
@@ -892,9 +1550,6 @@ class SyncJobService:
                 self.logger.info("📁 Using file-configured connectors")
                 connector_hub = ConnectorHub(parent_output_path=sync_output_path)
 
-            # Create pipeline with default stages (split, transfer detection, asset enrichment, persistence)
-            pipeline = create_default_pipeline(session)
-
             enabled_connectors = connector_hub.get_enabled_connectors()
             self.progress.total_connectors = len(enabled_connectors)
 
@@ -907,7 +1562,12 @@ class SyncJobService:
             # instantiated in worker threads. Status updates will come via progress callback.
             # For eager initialization (ConnectorHub), connectors are already instantiated.
             # In both cases, start all as QUEUED and let them transition based on actual execution.
+            # Connectors already marked FAILED (e.g. missing file during hub loading) are preserved.
             for cid, cstatus in self.progress.connector_statuses.items():
+                if cstatus.status == ConnectorSyncStatus.FAILED:
+                    # Already failed during hub initialization (e.g. no file uploaded)
+                    self.logger.debug(f"❌ Connector {cid} already failed during load, skipping reset")
+                    continue
                 cstatus.status = ConnectorSyncStatus.QUEUED
                 self._persist_connector_status(cid, "pending")
                 self.logger.debug(f"⏭️ Connector {cid} queued for execution")
@@ -917,21 +1577,13 @@ class SyncJobService:
             item_count = 0
 
             # === Multi-threaded Pipeline Processing ===
-            # Create parallel processor
-            processor = ParallelPipelineProcessor(
+            # Create parallel processor using shared helper
+            processor = self._create_processor(
                 session=session,
-                pipeline=pipeline,
                 db_connector_runs=db_connector_runs,
-                progress_callback=lambda connector_id, result, context: self._handle_pipeline_result(
-                    connector_id, result, context, connector_progress_callback
-                ),
-                abort_event=self._abort_event,
-                num_workers=4,
-                queue_size=500,
-                renormalize_mode=renormalize,
+                connector_progress_callback=connector_progress_callback,
+                renormalize=renormalize,
             )
-            
-            processor.start()
             
             self.logger.info("🔄 Starting to iterate over connector_hub.yield_normalized()...")
             
@@ -1133,80 +1785,10 @@ class SyncJobService:
             
             # Mark job as complete (if not aborted)
             if self.progress.status == JobStatus.RUNNING:
-                # Now that processor has stopped, mark any remaining RUNNING connectors as COMPLETED or WARNING
-                # (most should have been handled by completion callbacks already)
-                for cid, cstatus in self.progress.connector_statuses.items():
-                    if cstatus.status == ConnectorSyncStatus.RUNNING:
-                        self.logger.info(f"ℹ️ Connector {cid} still in RUNNING state after processor stopped - finalizing now")
-                        # Set WARNING if connector has errors, otherwise COMPLETED
-                        if cstatus.error_count > 0:
-                            cstatus.status = ConnectorSyncStatus.WARNING
-                            cstatus.finished_at = datetime.now()
-                            cstatus.current_operation = None
-                            cstatus.add_log("WARNING", f"Completed with {cstatus.error_count} errors: {cstatus.new_count} new, {cstatus.updated_count} updated, {cstatus.skipped_count} skipped")
-                            self._persist_connector_status(cid, "warning")
-                            # Update database connector run status
-                            if cid in db_connector_runs:
-                                from backend.db.models import SyncJobConnectorStatus
-                                run_id = db_connector_runs[cid]
-                                sync_job_repo.update_connector_run_status(
-                                    run_id,
-                                    SyncJobConnectorStatus.WARNING,
-                                    finished_at=cstatus.finished_at
-                                )
-                            self.logger.warning(f"⚠️ Connector {cid} completed with {cstatus.error_count} errors")
-                        else:
-                            cstatus.status = ConnectorSyncStatus.COMPLETED
-                            cstatus.finished_at = datetime.now()
-                            cstatus.current_operation = None
-                            cstatus.add_log("INFO", f"Completed sync: {cstatus.new_count} new, {cstatus.updated_count} updated, {cstatus.skipped_count} skipped")
-                            self._persist_connector_status(cid, "success")
-                            # Update database connector run status in real-time
-                            if cid in db_connector_runs:
-                                from backend.db.models import SyncJobConnectorStatus
-                                run_id = db_connector_runs[cid]
-                                sync_job_repo.update_connector_run_status(
-                                    run_id,
-                                    SyncJobConnectorStatus.COMPLETED,
-                                    finished_at=cstatus.finished_at
-                                )
-                            self.logger.info(f"✅ Connector {cid} completed after processing queue")
-                        # Add to completed list
-                        connector_name = cstatus.connector_type
-                        if connector_name not in self.progress.connectors_completed:
-                            self.progress.connectors_completed.append(connector_name)
-                
-                # Mark any remaining queued connectors as completed (no data produced)
-                for cid, cstatus in self.progress.connector_statuses.items():
-                    if cstatus.status == ConnectorSyncStatus.QUEUED:
-                        cstatus.status = ConnectorSyncStatus.COMPLETED
-                        cstatus.finished_at = datetime.now()
-                        cstatus.add_log("INFO", "Completed (no items fetched)")
-                        # Don't persist for connectors that never ran
-                
-                # Determine job-level status based on connector outcomes
-                has_failures = any(
-                    cstatus.status == ConnectorSyncStatus.FAILED 
-                    for cstatus in self.progress.connector_statuses.values()
-                )
-                has_warnings = any(
-                    cstatus.status == ConnectorSyncStatus.WARNING or cstatus.error_count > 0
-                    for cstatus in self.progress.connector_statuses.values()
-                )
-                
-                if has_failures:
-                    self.progress.status = JobStatus.FAILED
-                    self.logger.warning(f"⚠️ Sync job completed with failures")
-                elif has_warnings:
-                    self.progress.status = JobStatus.WARNING
-                    self.logger.warning(f"⚠️ Sync job completed with warnings ({self.progress.error_count} errors)")
-                else:
-                    self.progress.status = JobStatus.COMPLETED
-                    self.logger.info(
-                        f"✅ Sync job completed. Added {self.progress.new_entries_added} new, "
-                        f"updated {self.progress.entries_updated}, "
-                        f"skipped {self.progress.duplicates_skipped} duplicates."
-                    )
+                # Finalize any connectors still in RUNNING state (skip actively retrying ones)
+                for cid in list(self.progress.connector_statuses.keys()):
+                    if cid not in self._retry_threads:
+                        self._finalize_connector(cid, db_connector_runs, sync_job_repo)
 
         except Exception as e:
             self.progress.status = JobStatus.FAILED
@@ -1215,89 +1797,18 @@ class SyncJobService:
             self.logger.error(traceback.format_exc())
 
         finally:
-            self.progress.finished_at = datetime.now()
-            self.progress.current_connector = None
-            
+            # Determine and set final job status, then persist
+            is_last_worker = self._decrement_active_workers()
+            if is_last_worker:
+                self._determine_and_set_job_status()
+            else:
+                # Not the last worker — just mark our own finished_at
+                self.progress.finished_at = datetime.now()
+                self.progress.current_connector = None
+
             # --- Finalize database job and connector run records ---
-            if db_job and session:
-                try:
-                    from backend.db.models import SyncJobStatus, SyncJobConnectorStatus, AccountConnector
-                    
-                    # Map internal status to database status
-                    status_map = {
-                        JobStatus.COMPLETED: SyncJobStatus.COMPLETED,
-                        JobStatus.WARNING: SyncJobStatus.WARNING,
-                        JobStatus.FAILED: SyncJobStatus.FAILED,
-                        JobStatus.ABORTED: SyncJobStatus.ABORTED,
-                    }
-                    db_status = status_map.get(self.progress.status, SyncJobStatus.FAILED)
-                    
-                    # Update each connector run with final metrics and outcomes
-                    for cid, cstatus in self.progress.connector_statuses.items():
-                        if cid in db_connector_runs:
-                            run_id = db_connector_runs[cid]
-                            # Map connector status
-                            connector_status_map = {
-                                ConnectorSyncStatus.COMPLETED: SyncJobConnectorStatus.COMPLETED,
-                                ConnectorSyncStatus.WARNING: SyncJobConnectorStatus.WARNING,
-                                ConnectorSyncStatus.FAILED: SyncJobConnectorStatus.FAILED,
-                                ConnectorSyncStatus.SKIPPED: SyncJobConnectorStatus.SKIPPED,
-                                ConnectorSyncStatus.RUNNING: SyncJobConnectorStatus.COMPLETED,  # Still running = completed
-                                ConnectorSyncStatus.QUEUED: SyncJobConnectorStatus.SKIPPED,  # Never started = skipped
-                            }
-                            db_connector_status = connector_status_map.get(cstatus.status, SyncJobConnectorStatus.COMPLETED)
-                            
-                            sync_job_repo.update_connector_run_status(
-                                run_id, 
-                                db_connector_status,
-                                started_at=cstatus.started_at,
-                                finished_at=cstatus.finished_at,
-                            )
-                            sync_job_repo.update_connector_run_metrics(
-                                run_id,
-                                processed=cstatus.processed,
-                                synced_count=cstatus.new_count,
-                                updated_count=cstatus.updated_count,
-                                skipped_count=cstatus.skipped_count,
-                                error_count=cstatus.error_count,
-                            )
-                            
-                            # Persist outcome tracking (synced_ids, updated_ids, etc.)
-                            sync_job_repo.update_connector_run_outcomes(
-                                run_id,
-                                synced_ids=cstatus.synced_ids,
-                                updated_ids=cstatus.updated_ids,
-                                skipped_ids=cstatus.skipped_ids,
-                                error_details=cstatus.error_details,
-                                logs=[log.to_dict() for log in cstatus.logs],
-                            )
-                            
-                            self.logger.debug(
-                                f"📝 Updated connector run {run_id}: processed={cstatus.processed}, "
-                                f"new={cstatus.new_count}, updated={cstatus.updated_count}, "
-                                f"synced_ids={len(cstatus.synced_ids)}, error_count={cstatus.error_count}"
-                            )
-                        
-                        # Note: AccountConnector.last_sync_status already persisted in real-time
-                        # via _persist_connector_status() calls during processing
-                    
-                    # Update job status and recalculate totals
-                    sync_job_repo.update_job_status(
-                        db_job.id, 
-                        db_status, 
-                        error_message=self.progress.error_message
-                    )
-                    sync_job_repo.recalculate_job_totals(db_job.id)
-                    session.commit()
-                    
-                    self.logger.info(f"📝 Finalized job record in database: job_id={db_job.id}, status={db_status.value}")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error finalizing job record: {e}")
-                    try:
-                        session.rollback()
-                    except:
-                        pass
+            if db_job and session and is_last_worker:
+                self._persist_job_finalization(session, db_job.id, db_connector_runs, sync_job_repo)
 
             # Clean up resources
             if connector_hub:

@@ -154,8 +154,7 @@ class MEXCTrxFileConnector(BaseConnector):
             return self._cached_data
         
         if not self._file_path:
-            log.error("❌ No file_path configured for MEXC file connector")
-            return []
+            raise ValueError("No file uploaded — upload a file before syncing")
         
         try:
             from backend.file_loaders.mexc_loader import load_mexc_file

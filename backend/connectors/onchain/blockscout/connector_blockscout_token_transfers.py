@@ -11,6 +11,7 @@ from backend.connectors.onchain.blockscout.base_blockscout_connector import (
 )
 from backend.config.loader import configure_logging
 from backend.core.network_normalizer import normalize_network
+from backend.core.spam_detection import detect_blockscout_phishing, apply_spam_markers
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("blockscout_token_transfers")
@@ -161,16 +162,20 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 "token_name": token_name,
             }
 
-            return NormalizedTransaction(
+            source_asset_symbol = f"{token_symbol}_{contract_address}"
+            source_transaction_id = f"{tx_hash}_{tx_log_index}"
+
+            normalized = NormalizedTransaction(
                 source=f"blockscout_token_transfers_{self.chain_name.lower()}",
                 account_id=self.account_id,
-                source_account=self.wallet_address,  # Raw account identifier for mapping
-                source_transaction_id=f"{tx_hash}_{tx_log_index}",
+                source_account=self.wallet_address,
+                source_transaction_id=source_transaction_id,
+                network_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
                 transaction_type="transfer",
                 source_transaction_type="token-transfer",
-                source_asset_symbol=f"{token_symbol}_{contract_address}",
+                source_asset_symbol=source_asset_symbol,
                 quantity=float(value),
                 fee=float(fee),
                 source_fee_quote_asset_symbol=self.native_token,
@@ -181,6 +186,18 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 token_contract_address=contract_address,
                 tags=tags,
             )
+
+            # Phishing / spam detection
+            spam_reasons = detect_blockscout_phishing(tx)
+            if spam_reasons:
+                apply_spam_markers(
+                    normalized,
+                    reasons=spam_reasons,
+                    tags=tags,
+                    tx_id=source_transaction_id,
+                )
+
+            return normalized
         except Exception as e:
             log.error(f"   ⚠️ Error mapping token transfer: {e}")
             raise

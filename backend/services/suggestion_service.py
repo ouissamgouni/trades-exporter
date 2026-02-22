@@ -57,7 +57,7 @@ class SuggestionService:
     def get_suggestions(
         self,
         transactions: Optional[List[NormalizedTransaction]] = None,
-        max_suggestions: int = 20,
+        max_suggestions: int = 50,
         include_unknown: bool = False,
     ) -> List[GroupingSuggestion]:
         """

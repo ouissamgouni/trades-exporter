@@ -128,7 +128,7 @@ export const SyncJobPanel: React.FC = () => {
         fetchConnectors();
     }, [fetchJobStatus, fetchConnectors]);
 
-    // Poll for status updates when job is running
+    // Poll for status updates when job is running (covers both full jobs and retries)
     useEffect(() => {
         if (jobStatus?.status === 'running') {
             const interval = setInterval(fetchJobStatus, 500);
@@ -306,6 +306,14 @@ export const SyncJobPanel: React.FC = () => {
     };
 
     const isRunning = jobStatus?.status === 'running';
+    // Count how many connectors are actively queued or running.
+    // During a full job many connectors are active; during a single-connector
+    // retry only 1 is active.  The panel chrome (progress bar, abort, config
+    // disable) should only appear for a full job, not for a single retry.
+    const activeConnectorCount = getSortedConnectorStatuses().filter(
+        (c) => c.status === 'running' || c.status === 'queued'
+    ).length;
+    const isFullJobRunning = isRunning && activeConnectorCount > 1;
     const canStart = !isRunning && !actionLoading;
     const hasFailedConnectors = getSortedConnectorStatuses().some(
         (c) => c.status === 'failed' || c.status === 'warning'
@@ -346,7 +354,7 @@ export const SyncJobPanel: React.FC = () => {
                     <Box mb={4}>
                         <SyncConfigPanel
                             onOverridesChange={setSyncOverrides}
-                            disabled={isRunning}
+                            disabled={isFullJobRunning}
                         />
                     </Box>
 
@@ -399,7 +407,7 @@ export const SyncJobPanel: React.FC = () => {
                                             </Button>
                                         </>
                                     )}
-                                    {isRunning && (
+                                    {isFullJobRunning && (
                                         <Button
                                             colorPalette="red"
                                             variant="outline"
@@ -429,7 +437,7 @@ export const SyncJobPanel: React.FC = () => {
                                             <Badge colorPalette="purple" size="sm">Re-Normalize</Badge>
                                         )}
                                     </Flex>
-                                    {hasFailedConnectors && !isRunning && (
+                                    {hasFailedConnectors && !isFullJobRunning && (
                                         <Text fontSize="sm" color="red.400">
                                             Some connectors failed. Expand cards to retry.
                                         </Text>
@@ -437,8 +445,8 @@ export const SyncJobPanel: React.FC = () => {
                                 </Flex>
                             </Card.Header>
                             <Card.Body>
-                                {/* Progress Bar (when running) */}
-                                {isRunning && (
+                                {/* Progress Bar (only during full job, not single-connector retry) */}
+                                {isFullJobRunning && (
                                     <Box mb={4}>
                                         <Flex justify="space-between" mb={1}>
                                             <Text fontSize="sm">

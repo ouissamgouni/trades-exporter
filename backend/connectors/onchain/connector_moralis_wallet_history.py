@@ -14,6 +14,7 @@ from typing import Dict, Any, Generator
 from backend.connectors.base.base_connector import BaseConnector
 from backend.config.loader import configure_logging
 from backend.core.network_normalizer import normalize_network
+from backend.core.spam_detection import detect_moralis_erc20_phishing, apply_spam_markers
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("moralis_wallet_history")
@@ -285,6 +286,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
                     transaction_fee=transaction_fee if idx == 0 else 0.0,  # Only first transfer gets fee
                     category=category,
                     base_tags=base_tags,
+                    tx=tx,
                 )
             
             # Process native transfers
@@ -341,6 +343,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         transaction_fee: float,
         category: str,
         base_tags: list,
+        tx: Dict = None,
     ) -> NormalizedTransaction:
         """Map an ERC20 transfer to NormalizedTransaction."""
         
@@ -383,7 +386,7 @@ class ConnectorMoralisWalletHistory(BaseConnector):
         # Build source transaction ID
         source_transaction_id = f"{tx_hash}_erc20_{log_index}"
         
-        return NormalizedTransaction(
+        normalized = NormalizedTransaction(
             source=f"moralis_wallet_history_{self.chain_name}",
             account_id=self.account_id,
             source_account=self.wallet_address,
@@ -404,6 +407,19 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             network=normalize_network(self.chain_name),
             tags=tags,
         )
+
+        # Phishing / spam detection
+        if tx:
+            spam_reasons = detect_moralis_erc20_phishing(tx, transfer, self.wallet_address)
+            if spam_reasons:
+                apply_spam_markers(
+                    normalized,
+                    reasons=spam_reasons,
+                    tags=tags,
+                    tx_id=source_transaction_id,
+                )
+
+        return normalized
 
     def _map_native_transfer(
         self,

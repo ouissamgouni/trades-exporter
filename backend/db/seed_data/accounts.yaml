@@ -221,7 +221,7 @@ accounts:
   #     asset_type: "crypto"
 
   # Arbitrum Wallet with Moralis Connector
-  - name: "Metamask Arbitrum"
+  - name: "Metamask EVM"
     account_type: "wallet"
     address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
     connectors:
@@ -231,6 +231,13 @@ accounts:
         sync_priority: 10
         config:
           chain: "arbitrum"
+      - connector_type: "blockscout"
+        enabled: true
+        sync_priority: 10
+        config:
+          chain: "ethereum"
+          include_internal_txs: true
+          include_token_transfers: true
 
   # XRP Ledger Wallet
   - name: "Tangem XRP"

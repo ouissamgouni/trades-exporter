@@ -775,6 +775,185 @@ class TestRule5BridgeDetection:
 
 
 # =============================================================================
+# Rule 5b: Same-Account Cross-Chain Bridge Tests
+# =============================================================================
+
+
+class TestRule5bSameAccountBridge:
+    """Tests for Rule 5b: Same-account cross-chain bridge (same account, different networks)."""
+
+    def test_same_account_cross_chain_bridge(self, engine):
+        """Should detect bridge when same asset on same account but different networks."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=133,
+            account_id=151,
+            to_account_id=None,
+            dt=now,
+            quantity=Decimal("0.004200000000000000"),
+            network="ethereum",
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=133,
+            account_id=151,  # Same account
+            dt=now + timedelta(seconds=3),
+            quantity=Decimal("0.004156374516806778"),  # Bridge fee deducted (~1%)
+            network="arbitrum",  # Different network
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        bridge_suggestions = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(bridge_suggestions) == 1
+        assert "Bridge" in bridge_suggestions[0].label
+        assert "ethereum" in bridge_suggestions[0].label.lower()
+        assert "arbitrum" in bridge_suggestions[0].label.lower()
+        assert bridge_suggestions[0].confidence >= 0.8
+        assert set(bridge_suggestions[0].transaction_ids) == {1, 2}
+
+    def test_same_account_same_network_not_bridge(self, engine):
+        """Should NOT detect bridge when same account AND same network."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now,
+            quantity=Decimal("1.0"),
+            network="ethereum",
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now + timedelta(seconds=10),
+            quantity=Decimal("1.0"),
+            network="ethereum",  # Same network
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        bridge_suggestions = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and "Bridge" in s.label
+        ]
+        assert len(bridge_suggestions) == 0
+
+    def test_same_account_bridge_no_network_not_matched(self, engine):
+        """Should NOT match when network info is missing."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now,
+            quantity=Decimal("1.0"),
+            network=None,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now + timedelta(seconds=10),
+            quantity=Decimal("1.0"),
+            network="arbitrum",
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        bridge_suggestions = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and "Bridge" in s.label
+        ]
+        assert len(bridge_suggestions) == 0
+
+    def test_same_account_bridge_quantity_outside_tolerance(self, engine):
+        """Should NOT match when quantity difference exceeds tolerance."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now,
+            quantity=Decimal("1.0"),
+            network="ethereum",
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now + timedelta(seconds=10),
+            quantity=Decimal("0.8"),  # 20% difference, exceeds 5% tolerance
+            network="arbitrum",
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        bridge_suggestions = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and "Bridge" in s.label
+        ]
+        assert len(bridge_suggestions) == 0
+
+    def test_same_account_bridge_outside_time_window(self, engine):
+        """Should NOT match when time difference exceeds bridge_time_window."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now,
+            quantity=Decimal("1.0"),
+            network="ethereum",
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=1,
+            dt=now + timedelta(minutes=10),  # 600s > 300s default
+            quantity=Decimal("0.99"),
+            network="arbitrum",
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        bridge_suggestions = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and "Bridge" in s.label
+        ]
+        assert len(bridge_suggestions) == 0
+
+
+# =============================================================================
 # Rule 6: Review Group Tests
 # =============================================================================
 

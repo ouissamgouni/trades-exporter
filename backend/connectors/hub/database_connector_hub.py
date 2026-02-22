@@ -201,13 +201,33 @@ class DatabaseConnectorHub(BaseHubConnector):
                     if connector_type == "mexc-transactions" and sync_mode == "file":
                         file_path = config.get("file_path")
                         if not file_path:
-                            log.warning(f"⚠️ Connector {connector_key} is in file mode but no file_path configured, skipping")
+                            _error_msg = "No file uploaded — upload a file before syncing"
+                            log.warning(f"⚠️ Connector {connector_key} is in file mode but no file_path configured")
+                            self.loader_service.update_sync_status(connector_id, "failed", _error_msg)
+                            if self._progress_callback:
+                                self._progress_callback(
+                                    connector_id=connector_id,
+                                    operation="Initialization failed",
+                                    current=0,
+                                    total=1,
+                                    log_message=f"ERROR_DETAIL:{_error_msg}",
+                                )
                             continue
                         actual_connector_type = "mexc-transactions-file"
                     elif connector_type == "mexc-deposits" and sync_mode == "file":
                         file_path = config.get("file_path")
                         if not file_path:
-                            log.warning(f"⚠️ Connector {connector_key} is in file mode but no file_path configured, skipping")
+                            _error_msg = "No file uploaded — upload a file before syncing"
+                            log.warning(f"⚠️ Connector {connector_key} is in file mode but no file_path configured")
+                            self.loader_service.update_sync_status(connector_id, "failed", _error_msg)
+                            if self._progress_callback:
+                                self._progress_callback(
+                                    connector_id=connector_id,
+                                    operation="Initialization failed",
+                                    current=0,
+                                    total=1,
+                                    log_message=f"ERROR_DETAIL:{_error_msg}",
+                                )
                             continue
                         actual_connector_type = "mexc-deposits-file"
                     
