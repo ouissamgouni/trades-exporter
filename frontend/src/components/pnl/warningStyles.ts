@@ -17,8 +17,8 @@ export interface WarningTypeConfig {
  * Get warning styling based on warning type
  */
 export function getWarningTypeConfig(warningType: string): WarningTypeConfig {
-    // Pending transfers are warnings that need user attention
-    if (warningType === 'pending_transfer') {
+    // Unmatched internal transfers are warnings that need user attention
+    if (warningType === 'unmatched_internal_transfer') {
         return {
             colorPalette: 'orange',
             icon: '⚠️',

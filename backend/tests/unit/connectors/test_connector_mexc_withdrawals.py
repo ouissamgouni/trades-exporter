@@ -260,12 +260,18 @@ class TestMEXCWithdrawalsConnector:
         
         assert result == []
 
-    def test_get_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test get_raws method with 7-day windowing."""
+    def test_yield_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
+        """Test yield_raws method with 7-day windowing."""
         connector = MEXCWithdrawalsConnector(account_id=1)
         
-        # Mock currencies
-        mock_ccxt_mexc.currencies = {"BTC": {}, "ETH": {}}
+        # Mock currencies - need to mock as dict-like with items() method and active flag
+        mock_ccxt_mexc.currencies = {
+            "BTC": {"active": True},
+            "ETH": {"active": True}
+        }
+        
+        # Mock balance fetch - returns empty balance so we use currencies from exchange
+        mock_ccxt_mexc.fetch_balance.return_value = {}
         
         mock_withdrawals_btc = [
             {"id": "w1", "currency": "BTC", "amount": 1.0, "status": "ok"},
@@ -279,7 +285,7 @@ class TestMEXCWithdrawalsConnector:
         
         mock_ccxt_mexc.fetch_withdrawals.side_effect = fetch_side_effect
         
-        result = connector.get_raws()
+        result = list(connector.yield_raws())
         
         # Should have results from BTC (multiple windows over 90 days)
         assert len(result) >= 1

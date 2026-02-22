@@ -27,6 +27,8 @@ import { AssetPnLRow, AccountBalanceBreakdown } from './types';
 import { Account } from '../../types';
 import { Tooltip } from '../ui/tooltip';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
+import { formatQuantity } from '../../utils/numberUtils';
+import { ValueDisplay } from '../ValueDisplay';
 import { getAccountColor } from '../../utils/accountColors';
 
 interface AssetPnLTableProps {
@@ -38,23 +40,9 @@ interface AssetPnLTableProps {
     accountBalances?: Map<number, AccountBalanceBreakdown[]>;
     /** All accounts for name lookup */
     accounts?: Account[];
+    /** Optional callback to load account balances on-demand when row is expanded */
+    onLoadAccountBalances?: () => void;
 }
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    if (Math.abs(value) < 0.00001) return '0';
-    if (Math.abs(value) < 1) return value.toFixed(8).replace(/\.?0+$/, '');
-    if (Math.abs(value) < 1000) return value.toFixed(4).replace(/\.?0+$/, '');
-    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-};
 
 const formatPct = (value: number): string => {
     const sign = value >= 0 ? '+' : '';
@@ -83,6 +71,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     loading = false,
     accountBalances,
     accounts = [],
+    onLoadAccountBalances,
 }) => {
     const [search, setSearch] = useState('');
     const [sortField, setSortField] = useState<SortField>('market_value');
@@ -99,6 +88,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 next.delete(assetId);
             } else {
                 next.add(assetId);
+                // Load account balances on-demand when first expanded
+                if (onLoadAccountBalances && !accountBalances?.has(assetId)) {
+                    onLoadAccountBalances();
+                }
             }
             return next;
         });
@@ -295,12 +288,12 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                     </Flex>
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    {formatQty(assetpnlrow.quantity)}
+                                                    <ValueDisplay value={assetpnlrow.quantity} />
                                                 </Table.Cell>
                                                 {/* Unit Cost (average cost basis per unit) */}
                                                 <Table.Cell>
                                                     {assetpnlrow.unit_cost != null
-                                                        ? formatCurrency(assetpnlrow.unit_cost, baseCurrency)
+                                                        ? <ValueDisplay value={assetpnlrow.unit_cost} currency={baseCurrency} />
                                                         : '—'}
                                                 </Table.Cell>
                                                 {/* Unit Value (current market price) with tooltip */}
@@ -347,7 +340,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                         textDecoration="underline dotted"
                                                                         color={stale ? 'orange.500' : undefined}
                                                                     >
-                                                                        {formatCurrency(assetpnlrow.unit_value!, baseCurrency)}
+                                                                        <ValueDisplay value={assetpnlrow.unit_value!} currency={baseCurrency} />
                                                                     </Text>
                                                                 ) : (
                                                                     <Text color="gray.400">
@@ -365,10 +358,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                     )}
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    {formatCurrency(assetpnlrow.market_value, baseCurrency)}
+                                                    <ValueDisplay value={assetpnlrow.market_value} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell>
-                                                    {formatCurrency(assetpnlrow.cost_basis, baseCurrency)}
+                                                    <ValueDisplay value={assetpnlrow.cost_basis} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <Flex direction="column">
@@ -376,7 +369,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                             fontWeight="medium"
                                                             color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}
                                                         >
-                                                            {formatCurrency(assetpnlrow.unrealized_pnl, baseCurrency)}
+                                                            <ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} />
                                                         </Text>
                                                         <Text fontSize="xs" color="gray.500">
                                                             {formatPct(assetpnlrow.unrealized_pnl_pct)}
@@ -388,12 +381,12 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                         fontWeight="medium"
                                                         color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}
                                                     >
-                                                        {formatCurrency(assetpnlrow.realized_pnl, baseCurrency)}
+                                                        <ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} />
                                                     </Text>
                                                 </Table.Cell>
                                                 <Table.Cell>
                                                     <Text fontSize="sm" color="gray.600">
-                                                        {formatCurrency(assetpnlrow.total_fees, baseCurrency)}
+                                                        <ValueDisplay value={assetpnlrow.total_fees} currency={baseCurrency} />
                                                     </Text>
                                                 </Table.Cell>
                                                 <Table.Cell textAlign="center">
@@ -463,11 +456,11 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                             </Flex>
                                                         </Table.Cell>
                                                         <Table.Cell>
-                                                            <Text color="gray.600">{formatQty(balance.qty)}</Text>
+                                                            <Text color="gray.600"><ValueDisplay value={balance.qty} /></Text>
                                                         </Table.Cell>
                                                         <Table.Cell>
                                                             <Text color="gray.600">
-                                                                {formatCurrency(balance.avg_unit_cost_in_base, baseCurrency)}
+                                                                <ValueDisplay value={balance.avg_unit_cost_in_base} currency={baseCurrency} />
                                                             </Text>
                                                         </Table.Cell>
                                                         <Table.Cell>
@@ -476,14 +469,14 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                         <Table.Cell>
                                                             <Text color="gray.600">
                                                                 {unitPrice != null
-                                                                    ? formatCurrency(marketValue, baseCurrency)
+                                                                    ? <ValueDisplay value={marketValue} currency={baseCurrency} />
                                                                     : '—'
                                                                 }
                                                             </Text>
                                                         </Table.Cell>
                                                         <Table.Cell>
                                                             <Text color="gray.600">
-                                                                {formatCurrency(balance.cost_basis_in_base, baseCurrency)}
+                                                                <ValueDisplay value={balance.cost_basis_in_base} currency={baseCurrency} />
                                                             </Text>
                                                         </Table.Cell>
                                                         <Table.Cell>
@@ -493,7 +486,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                         fontSize="sm"
                                                                         color={unrealizedPnl >= 0 ? 'green.600' : 'red.600'}
                                                                     >
-                                                                        {formatCurrency(unrealizedPnl, baseCurrency)}
+                                                                        <ValueDisplay value={unrealizedPnl} currency={baseCurrency} />
                                                                     </Text>
                                                                     <Text fontSize="xs" color="gray.500">
                                                                         {formatPct(unrealizedPnlPct)}

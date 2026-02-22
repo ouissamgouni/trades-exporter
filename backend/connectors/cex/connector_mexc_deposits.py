@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from backend.connectors.cex.connector_mexc_base import MEXCBaseConnector
 from backend.config.loader import configure_logging
 from backend.db.models import NormalizedTransaction
+from backend.core.network_normalizer import normalize_network
 
 log = configure_logging("mexc_deposits")
 
@@ -36,11 +37,6 @@ class MEXCDepositsConnector(MEXCBaseConnector):
         """Fetch deposits from MEXC API."""
         return self.exchange.fetch_deposits(code=code, since=since, limit=limit, params=params)
 
-    # Backward compatibility alias
-    def get_deposits(self, currency: str, since: int = None, limit: int = None) -> List[Dict[str, Any]]:
-        """Alias for fetch_with_7day_windows for backward compatibility."""
-        return self.fetch_with_7day_windows(currency, since, limit)
-
     def raw_to_normalized(self, raw_item: dict) -> "NormalizedTransaction":
         """
         Transform a raw deposit to NormalizedTransaction dataclass with status filtering.
@@ -53,9 +49,16 @@ class MEXCDepositsConnector(MEXCBaseConnector):
             raise ValueError(f"Deposit status is not 'ok': {status}")
 
         # Extract deposit data from CCXT format
-        deposit_id = str(raw_item.get("id", ""))
+        # MEXC doesn't provide a unique 'id' field, use txid (blockchain hash) as unique identifier
+        # Fall back to info.txId which includes an index for multiple deposits in same tx
+        txid = raw_item.get("txid") or ""
+        info = raw_item.get("info", {}) or {}
+        info_txid = info.get("txId") or ""
+        
+        # Use info.txId if available (has index for uniqueness), otherwise use txid
+        deposit_id = info_txid or txid
         if not deposit_id:
-            raise ValueError("Missing 'id' field")
+            raise ValueError("Missing 'txid' or 'info.txId' field - cannot create unique identifier")
 
         currency = str(raw_item.get("currency", "")).upper()
         if not currency:
@@ -67,7 +70,7 @@ class MEXCDepositsConnector(MEXCBaseConnector):
         amount = float(amount)
 
         txid = str(raw_item.get("txid", ""))
-        network = str(raw_item.get("network", "")).lower()
+        network = normalize_network(raw_item.get("network", ""))
         to_address = str(raw_item.get("addressTo"))
         from_address = str(raw_item.get("addressFrom"))
 
@@ -102,7 +105,8 @@ class MEXCDepositsConnector(MEXCBaseConnector):
             fee=fee,
             source_fee_quote_asset_symbol=fee_quote,
             source_from_account=from_address,
-            source_to_account=to_address,
+            source_to_account=to_address if to_address and to_address != "None" else self._get_account_identifier(),
+            to_account_id=self.account_id,  # Resolved account ID
             network=network,
             network_transaction_id=txid,
         )

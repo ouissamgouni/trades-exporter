@@ -25,7 +25,7 @@ log = configure_logging("grouping_engine")
 
 
 # Pattern constants (use UnitPattern values)
-PATTERN_TRANSFER = UnitPattern.TRANSFER.value
+PATTERN_INTERNAL_TRANSFER = UnitPattern.INTERNAL_TRANSFER.value
 PATTERN_SWAP = UnitPattern.SWAP.value
 PATTERN_UNKNOWN = UnitPattern.UNKNOWN.value
 
@@ -192,7 +192,7 @@ class GroupingEngine:
                     symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
                     suggestions.append(
                         GroupingSuggestion(
-                            pattern=PATTERN_TRANSFER,
+                            pattern=PATTERN_INTERNAL_TRANSFER,
                             label=f"{symbol} Transfer",
                             reason=f"Exact network TX hash match: outflow.network_tx_id == inflow.source_tx_id",
                             confidence=self.config.exact_match_confidence,
@@ -265,7 +265,7 @@ class GroupingEngine:
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_TRANSFER,
+                        pattern=PATTERN_INTERNAL_TRANSFER,
                         label=f"{symbol} Transfer",
                         reason=f"Same asset transfer between owned accounts (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
@@ -569,26 +569,28 @@ class GroupingEngine:
 
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
 
-                # Check if different networks
+                # Check if different networks (case-insensitive comparison)
                 networks = []
                 if outflow.network:
                     networks.append(outflow.network)
-                if inflow.network and inflow.network != outflow.network:
+                if inflow.network and (not outflow.network or inflow.network.lower() != outflow.network.lower()):
                     networks.append(inflow.network)
 
                 if len(networks) >= 2:
+                    # Cross-chain bridge detected
                     label = f"{symbol} Bridge ({' → '.join(networks)})"
                     reason = (
                         f"Same asset bridged across networks ({', '.join(networks)})"
                     )
                 else:
-                    label = f"{symbol} Bridge"
-                    reason = f"Same asset moved to different account (potential bridge)"
+                    # Same network or no network info - just a regular transfer
+                    label = f"{symbol} Transfer"
+                    reason = f"Same asset transfer between accounts (no explicit link)"
 
-                # Bridges are transfers (same asset, non-taxable)
+                # Bridges/transfers are internal transfers (same asset, non-taxable)
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_TRANSFER,
+                        pattern=PATTERN_INTERNAL_TRANSFER,
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,

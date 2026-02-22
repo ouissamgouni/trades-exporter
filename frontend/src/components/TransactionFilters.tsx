@@ -3,6 +3,7 @@ import {
     Box,
     Button,
     Flex,
+    GridItem,
     SimpleGrid,
     Tabs,
     Text,
@@ -10,6 +11,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import { LuCalendar, LuCheck, LuChevronDown, LuFilter, LuRotateCcw, LuSearch, LuX } from 'react-icons/lu';
 import { API_URL } from '../types';
+import type { AppliedFilters as BackendAppliedFilters, FilterMetadata, ValidationWarning } from '../types';
 import { toDateInputString, getDateRangePreset } from '../utils/dateUtils';
 
 // Filter option from backend
@@ -46,6 +48,9 @@ export interface FilterOptions {
     directions: FilterOption[];
     review_statuses: FilterOption[];
     taxability_statuses: FilterOption[];
+    connector_runs: FilterOption[];
+    tags: FilterOption[];
+    networks: FilterOption[];
 }
 
 // Current filter state
@@ -58,28 +63,48 @@ export interface TransactionFilterState {
     categoryIds: string[];
     transactionTypes: string[];
     directions: string[];
+    connectorRunIds: string[];
+    tagKeys: string[];
+    networks: string[];
     dateFrom: string;
     dateTo: string;
+    // P&L audit filters (hidden from UI, locked to version context)
+    versionId?: string;
+    inclusionStatus?: 'included' | 'excluded';
+    // Transaction ID filter (for issue-specific views)
+    transactionIds?: number[];
 }
 
-// Default empty filter state
+// Default filter state - excludes invalid transactions by default
 export const defaultFilterState: TransactionFilterState = {
-    reviewStatus: [],
+    reviewStatus: ['pending', 'valid'],  // Exclude invalid by default
     taxability: [],
+    pnlCalVersion: undefined,
+    pnlCalInclusionsStatus: undefined,
     sources: [],
     accountIds: [],
     assetIds: [],
     categoryIds: [],
     transactionTypes: [],
     directions: [],
+    connectorRunIds: [],
+    tagKeys: [],
+    networks: [],
     dateFrom: '',
     dateTo: '',
+    transactionIds: undefined,
 };
 
 interface TransactionFiltersProps {
     filters: TransactionFilterState;
     onChange: (filters: TransactionFilterState) => void;
     onClear: () => void;
+    expanded?: boolean;
+    onExpandedChange?: (expanded: boolean) => void;
+    appliedFilters?: BackendAppliedFilters | null;
+    filterMetadata?: FilterMetadata | null;
+    /** Custom reset state - if not provided, uses defaultFilterState */
+    resetFilters?: TransactionFilterState;
 }
 
 // Filter definitions - ordered: date, account, source, type, direction, taxability, status, assets, category
@@ -91,18 +116,32 @@ interface FilterDef {
     optionsKey?: keyof FilterOptions;
     color: string;
     isDropdown?: boolean;
+    searchable?: boolean;
 }
 
-// Order: account, source, type, direction, taxability, status (open) | assets, category (dropdown)
+// Filter chip data for summary display
+interface FilterChipData {
+    id: string;
+    label: string;
+    filterKey: keyof TransactionFilterState;
+    value: string;
+    category: string;
+    color: string;
+}
+
+// Order: account, source, type, direction, taxability, status (open) | assets, category, connector run (dropdown)
 const FILTER_DEFS: FilterDef[] = [
     { key: 'accountIds', label: 'Account', icon: '👤', type: 'multi', optionsKey: 'accounts', color: 'cyan' },
-    { key: 'sources', label: 'Source', icon: '🔌', type: 'multi', optionsKey: 'sources', color: 'blue' },
+    { key: 'sources', label: 'Source', icon: '🔌', type: 'multi', optionsKey: 'sources', color: 'blue', searchable: true },
     { key: 'transactionTypes', label: 'Type', icon: '🏷️', type: 'multi', optionsKey: 'transaction_types', color: 'teal' },
     { key: 'directions', label: 'Direction', icon: '↔️', type: 'multi', optionsKey: 'directions', color: 'yellow' },
     { key: 'taxability', label: 'Taxability', icon: '💰', type: 'multi', optionsKey: 'taxability_statuses', color: 'red' },
     { key: 'reviewStatus', label: 'Status', icon: '🔄', type: 'multi', optionsKey: 'review_statuses', color: 'green' },
     { key: 'assetIds', label: 'Asset', icon: '💎', type: 'multi', optionsKey: 'assets', color: 'orange', isDropdown: true },
-    { key: 'categoryIds', label: 'Category', icon: '📁', type: 'multi', color: 'pink', isDropdown: true },
+    { key: 'networks', label: 'Network', icon: '🌐', type: 'multi', optionsKey: 'networks', color: 'emerald', isDropdown: true },
+    { key: 'tagKeys', label: 'Tags', icon: '🏷️', type: 'multi', optionsKey: 'tags', color: 'purple', isDropdown: true },
+    { key: 'categoryIds', label: 'Category', icon: '📁', type: 'multi', optionsKey: 'categories_by_dimension', color: 'pink', isDropdown: true },
+    { key: 'connectorRunIds', label: 'Connector Run', icon: '🔄', type: 'multi', optionsKey: 'connector_runs', color: 'indigo', isDropdown: true },
 ];
 
 // Filter Card Component - shows all options as toggleable chips (OPEN)
@@ -113,6 +152,7 @@ interface FilterCardProps {
     selected: string[];
     onChange: (selected: string[]) => void;
     color: string;
+    searchable?: boolean;
 }
 
 const FilterCard: React.FC<FilterCardProps> = ({
@@ -122,7 +162,9 @@ const FilterCard: React.FC<FilterCardProps> = ({
     selected,
     onChange,
     color,
+    searchable,
 }) => {
+    const [search, setSearch] = useState('');
     const handleToggle = (value: string) => {
         const newSelected = selected.includes(value)
             ? selected.filter(v => v !== value)
@@ -131,7 +173,10 @@ const FilterCard: React.FC<FilterCardProps> = ({
     };
 
     const activeCount = selected.length;
-    const needsScroll = options.length > 4;
+    const displayOptions = searchable && search
+        ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
+        : options;
+    const needsScroll = displayOptions.length > 6;
 
     return (
         <Box
@@ -157,9 +202,26 @@ const FilterCard: React.FC<FilterCardProps> = ({
                 )}
             </Flex>
 
+            {/* Search box */}
+            {searchable && (
+                <Flex align="center" gap={1} mb={1.5} px={1} py={1} bg="gray.50" borderRadius="sm">
+                    <LuSearch size={10} color="#A0AEC0" />
+                    <input
+                        type="text"
+                        placeholder="Search..."
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        style={{
+                            border: 'none', outline: 'none', background: 'transparent',
+                            fontSize: '10px', width: '100%', color: '#4A5568',
+                        }}
+                    />
+                </Flex>
+            )}
+
             {/* Options as toggleable chips - with scroll if > 4 items */}
             <Box
-                maxH={needsScroll ? '72px' : 'auto'}
+                maxH={needsScroll ? '110px' : 'auto'}
                 overflowY={needsScroll ? 'auto' : 'visible'}
                 css={{
                     '&::-webkit-scrollbar': { width: '4px' },
@@ -167,7 +229,7 @@ const FilterCard: React.FC<FilterCardProps> = ({
                 }}
             >
                 <Flex flexWrap="wrap" gap={1}>
-                    {options.map((option) => {
+                    {displayOptions.map((option) => {
                         const isSelected = selected.includes(option.value);
                         return (
                             <Box
@@ -203,12 +265,56 @@ const FilterCard: React.FC<FilterCardProps> = ({
                             </Box>
                         );
                     })}
-                    {options.length === 0 && (
+                    {displayOptions.length === 0 && (
                         <Text fontSize="2xs" color="gray.400">No options</Text>
                     )}
                 </Flex>
             </Box>
         </Box>
+    );
+};
+
+// Removable Filter Chip Component
+interface FilterChipProps {
+    chip: FilterChipData;
+    onRemove: (chip: FilterChipData) => void;
+}
+
+const FilterChip: React.FC<FilterChipProps> = ({ chip, onRemove }) => {
+    return (
+        <Badge
+            size="sm"
+            colorPalette={chip.color}
+            display="inline-flex"
+            alignItems="center"
+            gap={1}
+            px={2}
+            py={0.5}
+            borderRadius="md"
+            cursor="pointer"
+            transition="all 0.15s"
+            _hover={{
+                transform: 'scale(0.95)',
+                opacity: 0.8,
+            }}
+            onClick={(e) => {
+                e.stopPropagation();
+                onRemove(chip);
+            }}
+        >
+            <Text fontSize="xs">{chip.label}</Text>
+            <Box
+                as="button"
+                display="flex"
+                alignItems="center"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(chip);
+                }}
+            >
+                <LuX size={12} />
+            </Box>
+        </Badge>
     );
 };
 
@@ -715,6 +821,7 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
                     position="absolute"
                     top="100%"
                     left={0}
+                    right={0}
                     mt={1}
                     bg="white"
                     border="1px solid"
@@ -798,6 +905,11 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     filters,
     onChange,
     onClear,
+    expanded = true,
+    onExpandedChange,
+    appliedFilters,
+    filterMetadata,
+    resetFilters,
 }) => {
     const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
     const [loading, setLoading] = useState(true);
@@ -808,28 +920,61 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     // Popover states for dropdown cards
     const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
-    // Sync local filters when applied filters change externally
+    // Chip container ref and visible chip count for dynamic truncation
+    const chipContainerRef = useRef<HTMLDivElement>(null);
+    const [visibleChipCount, setVisibleChipCount] = useState<number>(999);
+
+    // Sync local filters when applied (parent) filters change externally
+    // Use JSON comparison to avoid re-syncing when values are the same
+    const prevFilterJsonRef = useRef(JSON.stringify(filters));
     useEffect(() => {
-        setLocalFilters(filters);
+        const newJson = JSON.stringify(filters);
+        if (newJson !== prevFilterJsonRef.current) {
+            prevFilterJsonRef.current = newJson;
+            setLocalFilters(filters);
+        }
     }, [filters]);
 
-    // Fetch filter options from backend
+    // Fetch filter options from backend - ONLY once on mount to prevent cascade
+    // This prevents the infinite loop where applying filters triggers refetch of filter options
     useEffect(() => {
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 5000); // 5 second timeout
+
         const fetchFilterOptions = async () => {
             try {
-                const response = await fetch(`${API_URL}/transactions/filter-options`);
+                // Fetch all filter options without applying current filters
+                // This provides the full list of available options
+                const url = `${API_URL}/transactions/filter-options`;
+                const response = await fetch(url, { signal: abortController.signal });
+
                 if (response.ok) {
                     const data = await response.json();
                     setFilterOptions(data);
+                } else {
+                    console.error('Failed to fetch filter options: HTTP', response.status);
                 }
             } catch (err) {
-                console.error('Failed to fetch filter options:', err);
+                if (err instanceof Error && err.name === 'AbortError') {
+                    console.warn('Filter options fetch timed out after 5s');
+                } else {
+                    console.error('Failed to fetch filter options:', err);
+                }
+                // On error, keep existing filter options if available
             } finally {
+                clearTimeout(timeoutId);
                 setLoading(false);
             }
         };
+
         fetchFilterOptions();
-    }, []);
+
+        // Cleanup: abort fetch if component unmounts
+        return () => {
+            clearTimeout(timeoutId);
+            abortController.abort();
+        };
+    }, []); // Empty array - only fetch once on mount, never refetch
 
     // Check if there are unapplied changes
     const hasChanges = !filtersEqual(localFilters, filters);
@@ -865,8 +1010,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
     // Reset all filters
     const handleReset = () => {
-        setLocalFilters(defaultFilterState);
-        onChange(defaultFilterState);
+        const targetState = resetFilters || defaultFilterState;
+        setLocalFilters(targetState);
+        onChange(targetState);
     };
 
     // Get options for a filter
@@ -874,6 +1020,166 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if (!filterOptions || !def.optionsKey) return [];
         return (filterOptions[def.optionsKey] as FilterOption[]) || [];
     };
+
+    // Convert filter state to chip data
+    // Use appliedFilters from backend as source of truth if available
+    const getFilterChips = (): FilterChipData[] => {
+        if (!filterOptions) return [];
+        const chips: FilterChipData[] = [];
+
+        // Use backend applied filters if available, otherwise fall back to local filters
+        const sourceFilters = appliedFilters || {
+            review_status: localFilters.reviewStatus[0],
+            taxability: localFilters.taxability[0],
+            sources: localFilters.sources,
+            account_ids: localFilters.accountIds,
+            asset_ids: localFilters.assetIds,
+            category_ids: localFilters.categoryIds,
+            transaction_types: localFilters.transactionTypes,
+            directions: localFilters.directions,
+            connector_run_ids: localFilters.connectorRunIds,
+            tag_keys: localFilters.tagKeys,
+            networks: localFilters.networks,
+            date_from: localFilters.dateFrom,
+            date_to: localFilters.dateTo,
+        };
+
+        // P&L Calculation Version chip
+        if (sourceFilters.pnl_cal_version) {
+            chips.push({
+                id: 'pnl-version',
+                label: `P&L Version: #${sourceFilters.pnl_cal_version}`,
+                filterKey: 'pnlCalVersion',
+                value: String(sourceFilters.pnl_cal_version),
+                category: 'P&L Context',
+                color: 'purple',
+            });
+        }
+
+        // P&L Inclusion Status chip
+        if (sourceFilters.pnl_cal_inclusions_status) {
+            const statusLabel = sourceFilters.pnl_cal_inclusions_status === 'included' ? 'Included in P&L' : 'Excluded from P&L';
+            chips.push({
+                id: 'pnl-inclusion',
+                label: statusLabel,
+                filterKey: 'pnlCalInclusionsStatus',
+                value: sourceFilters.pnl_cal_inclusions_status,
+                category: 'P&L Context',
+                color: sourceFilters.pnl_cal_inclusions_status === 'included' ? 'green' : 'orange',
+            });
+        }
+
+        // Date range chip
+        if (sourceFilters.date_from || sourceFilters.date_to) {
+            const fromStr = sourceFilters.date_from ? new Date(sourceFilters.date_from).toLocaleDateString() : '';
+            const toStr = sourceFilters.date_to ? new Date(sourceFilters.date_to).toLocaleDateString() : '';
+            let label = 'Date: ';
+            if (fromStr && toStr) label += `${fromStr} - ${toStr}`;
+            else if (fromStr) label += `From ${fromStr}`;
+            else if (toStr) label += `Until ${toStr}`;
+
+            chips.push({
+                id: 'date-range',
+                label,
+                filterKey: 'dateFrom',
+                value: 'date',
+                category: 'Date',
+                color: 'purple',
+            });
+        }
+
+        // Array-based filters
+        FILTER_DEFS.forEach(def => {
+            let values: (string | number)[] = [];
+
+            // Map backend applied_filters to filter def keys
+            if (def.key === 'reviewStatus' && sourceFilters.review_status) {
+                values = [sourceFilters.review_status];
+            } else if (def.key === 'taxability' && sourceFilters.taxability) {
+                values = [sourceFilters.taxability];
+            } else if (def.key === 'sources') {
+                values = sourceFilters.sources || [];
+            } else if (def.key === 'accountIds') {
+                values = sourceFilters.account_ids || [];
+            } else if (def.key === 'assetIds') {
+                values = sourceFilters.asset_ids || [];
+            } else if (def.key === 'categoryIds') {
+                values = sourceFilters.category_ids || [];
+            } else if (def.key === 'transactionTypes') {
+                values = sourceFilters.transaction_types || [];
+            } else if (def.key === 'directions') {
+                values = sourceFilters.directions || [];
+            } else if (def.key === 'connectorRunIds') {
+                values = sourceFilters.connector_run_ids || [];
+            } else if (def.key === 'tagKeys') {
+                values = sourceFilters.tag_keys || [];
+            } else if (def.key === 'networks') {
+                values = sourceFilters.networks || [];
+            }
+
+            if (!Array.isArray(values) || values.length === 0) return;
+
+            const options = getOptionsForFilter(def);
+            values.forEach(value => {
+                const valueStr = String(value);
+                const option = options.find(o => o.value === valueStr);
+                if (option) {
+                    chips.push({
+                        id: `${def.key}-${value}`,
+                        label: `${def.label}: ${option.label}`,
+                        filterKey: def.key,
+                        value: valueStr,
+                        category: def.label,
+                        color: def.color,
+                    });
+                }
+            });
+        });
+
+        return chips;
+    };
+
+    // Handle removing a chip
+    const handleRemoveChip = (chip: FilterChipData) => {
+        if (chip.filterKey === 'pnlCalVersion' || chip.filterKey === 'pnlCalInclusionsStatus') {
+            // P&L context filters cannot be removed individually - they define the view context
+            // User should navigate away from P&L audit view instead
+            return;
+        }
+        if (chip.filterKey === 'dateFrom') {
+            // Clear date range
+            const newFilters = { ...localFilters, dateFrom: '', dateTo: '' };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        } else {
+            // Remove from array
+            const currentValues = localFilters[chip.filterKey] as string[];
+            const newValues = currentValues.filter(v => v !== chip.value);
+            const newFilters = { ...localFilters, [chip.filterKey]: newValues };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        }
+    };
+
+    // Measure chip container width and adjust visible count
+    useEffect(() => {
+        if (!chipContainerRef.current) return;
+
+        const observer = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const width = entry.contentRect.width;
+                // Estimate: each chip ~80px, leave space for "and X more"
+                const estimatedChipWidth = 90;
+                const moreButtonWidth = 80;
+                const availableWidth = width - moreButtonWidth;
+                const maxChips = Math.max(1, Math.floor(availableWidth / estimatedChipWidth));
+                setVisibleChipCount(maxChips);
+            }
+        });
+
+        observer.observe(chipContainerRef.current);
+        return () => observer.disconnect();
+    }, []);
 
     if (loading) {
         return (
@@ -886,26 +1192,43 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     const activeFilterCount = getActiveFilterCount();
     const openFilters = FILTER_DEFS.filter(d => !d.isDropdown);
     const dropdownFilters = FILTER_DEFS.filter(d => d.isDropdown);
+    const filterChips = getFilterChips();
+    const hasActiveFilters = filterChips.length > 0;
+    const visibleChips = filterChips.slice(0, visibleChipCount);
+    const hiddenChipCount = Math.max(0, filterChips.length - visibleChipCount);
 
     return (
         <Box mb={3}>
             <Box
-                p={3}
                 bg="gray.50"
                 borderRadius="md"
                 border="1px solid"
                 borderColor={hasChanges ? 'blue.300' : 'gray.200'}
+                overflow="visible"
             >
-                {/* Header */}
-                <Flex align="center" justify="space-between" mb={2}>
+                {/* Clickable Header */}
+                <Flex
+                    align="center"
+                    justify="space-between"
+                    p={3}
+                    pb={hasActiveFilters ? 2 : 3}
+                    cursor="pointer"
+                    transition="background 0.15s"
+                    _hover={{ bg: 'gray.100' }}
+                    onClick={() => onExpandedChange?.(!expanded)}
+                    borderRadius="md"
+                >
                     <Flex align="center" gap={1.5}>
+                        <Box transition="transform 0.2s" transform={expanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                            <LuChevronDown size={14} />
+                        </Box>
                         <LuFilter size={12} />
                         <Text fontWeight="semibold" fontSize="xs">Filters</Text>
                         {activeFilterCount > 0 && (
                             <Badge size="xs" colorPalette="blue">{activeFilterCount} active</Badge>
                         )}
                     </Flex>
-                    <Flex gap={1.5}>
+                    <Flex gap={1.5} onClick={(e) => e.stopPropagation()}>
                         {activeFilterCount > 0 && (
                             <Button
                                 size="xs"
@@ -931,59 +1254,164 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                     </Flex>
                 </Flex>
 
-                {/* Card Grid - Maximum columns */}
-                <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4, xl: 5 }} gap={2}>
-                    {/* Date Range Card - First */}
-                    <DateCard
-                        dateFrom={localFilters.dateFrom}
-                        dateTo={localFilters.dateTo}
-                        onChangeFrom={(v) => updateLocalFilter('dateFrom', v)}
-                        onChangeTo={(v) => updateLocalFilter('dateTo', v)}
-                        onClear={clearDateFilter}
-                    />
+                {/* Chip Summary Row */}
+                {hasActiveFilters && (
+                    <Box
+                        ref={chipContainerRef}
+                        px={3}
+                        pb={expanded ? 2 : 3}
+                        pt={0}
+                    >
+                        <Flex flexWrap="wrap" gap={1.5} align="center">
+                            {visibleChips.map(chip => (
+                                <FilterChip key={chip.id} chip={chip} onRemove={handleRemoveChip} />
+                            ))}
+                            {hiddenChipCount > 0 && (
+                                <Badge size="sm" colorPalette="gray" variant="outline">
+                                    and {hiddenChipCount} more
+                                </Badge>
+                            )}
+                        </Flex>
 
-                    {/* Open Filter Cards: Account, Source, Type, Direction, Taxability, Status */}
-                    {openFilters.map(def => {
-                        const values = localFilters[def.key] as string[];
-                        const options = getOptionsForFilter(def);
+                        {/* Filter Metadata - Show counts */}
+                        {filterMetadata && (
+                            <Text fontSize="2xs" color="gray.500" mt={1}>
+                                Showing {filterMetadata.filtered_count} of {filterMetadata.total_count} transactions
+                            </Text>
+                        )}
 
-                        return (
-                            <FilterCard
-                                key={def.key}
-                                label={def.label}
-                                icon={def.icon}
-                                options={options}
-                                selected={values || []}
-                                onChange={(v) => updateLocalFilter(def.key, v)}
-                                color={def.color}
+                        {/* Validation Warnings */}
+                        {filterMetadata?.validation_warnings && filterMetadata.validation_warnings.length > 0 && (
+                            <Box mt={2}>
+                                {filterMetadata.validation_warnings.map((warning, idx) => (
+                                    <Flex key={idx} gap={1} align="center" fontSize="2xs" color={warning.severity === 'error' ? 'red.600' : 'orange.600'}>
+                                        <Text fontWeight="semibold">⚠️</Text>
+                                        <Text>
+                                            <strong>{warning.filter_name}:</strong> {warning.reason} ({warning.provided_value})
+                                        </Text>
+                                    </Flex>
+                                ))}
+                            </Box>
+                        )}
+                    </Box>
+                )}
+
+                {!hasActiveFilters && !expanded && (
+                    <Box px={3} pb={3} pt={0}>
+                        <Text fontSize="xs" color="gray.500" fontStyle="italic">
+                            No filters applied
+                        </Text>
+                    </Box>
+                )}
+
+                {/* Filter Cards */}
+                {expanded && (
+                    <Box p={3} pt={hasActiveFilters ? 1 : 2} overflow="visible">
+
+                        {/* Card Grid - Maximum columns */}
+                        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4, xl: 5 }} gap={2}>
+                            {/* Date Range Card - First */}
+                            <DateCard
+                                dateFrom={localFilters.dateFrom}
+                                dateTo={localFilters.dateTo}
+                                onChangeFrom={(v) => updateLocalFilter('dateFrom', v)}
+                                onChangeTo={(v) => updateLocalFilter('dateTo', v)}
+                                onClear={clearDateFilter}
                             />
-                        );
-                    })}
 
-                    {/* Asset Dropdown Card */}
-                    <DropdownCard
-                        label="Asset"
-                        icon="💎"
-                        options={filterOptions?.assets || []}
-                        selected={localFilters.assetIds || []}
-                        onChange={(v) => updateLocalFilter('assetIds', v)}
-                        color="orange"
-                        isOpen={openDropdown === 'assetIds'}
-                        onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
-                        onClose={() => setOpenDropdown(null)}
-                    />
+                            {/* Open Filter Cards: Account, Source, Type, Direction, Taxability, Status */}
+                            {openFilters.map(def => {
+                                const values = localFilters[def.key] as string[];
+                                const options = getOptionsForFilter(def);
+                                const isWideCard = def.key === 'accountIds' || def.key === 'sources';
 
-                    {/* Category Dropdown Card */}
-                    <CategoryCard
-                        categoriesByDimension={filterOptions?.categories_by_dimension || []}
-                        allCategories={filterOptions?.categories || []}
-                        selected={localFilters.categoryIds || []}
-                        onChange={(v) => updateLocalFilter('categoryIds', v)}
-                        isOpen={openDropdown === 'categoryIds'}
-                        onToggle={() => setOpenDropdown(openDropdown === 'categoryIds' ? null : 'categoryIds')}
-                        onClose={() => setOpenDropdown(null)}
-                    />
-                </SimpleGrid>
+                                const filterCard = (
+                                    <FilterCard
+                                        key={def.key}
+                                        label={def.label}
+                                        icon={def.icon}
+                                        options={options}
+                                        selected={values || []}
+                                        onChange={(v) => updateLocalFilter(def.key, v)}
+                                        color={def.color}
+                                        searchable={def.searchable}
+                                    />
+                                );
+
+                                return isWideCard ? (
+                                    <GridItem key={def.key} colSpan={{ base: 1, md: 2 }}>
+                                        {filterCard}
+                                    </GridItem>
+                                ) : (
+                                    filterCard
+                                );
+                            })}
+
+                            {/* Asset Dropdown Card */}
+                            <DropdownCard
+                                label="Asset"
+                                icon="💎"
+                                options={filterOptions?.assets || []}
+                                selected={localFilters.assetIds || []}
+                                onChange={(v) => updateLocalFilter('assetIds', v)}
+                                color="orange"
+                                isOpen={openDropdown === 'assetIds'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* Network Dropdown Card */}
+                            <DropdownCard
+                                label="Network"
+                                icon="🌐"
+                                options={filterOptions?.networks || []}
+                                selected={localFilters.networks || []}
+                                onChange={(v) => updateLocalFilter('networks', v)}
+                                color="emerald"
+                                isOpen={openDropdown === 'networks'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'networks' ? null : 'networks')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* Category Dropdown Card */}
+                            <CategoryCard
+                                categoriesByDimension={filterOptions?.categories_by_dimension || []}
+                                allCategories={filterOptions?.categories || []}
+                                selected={localFilters.categoryIds || []}
+                                onChange={(v) => updateLocalFilter('categoryIds', v)}
+                                isOpen={openDropdown === 'categoryIds'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'categoryIds' ? null : 'categoryIds')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* Connector Run Dropdown Card */}
+                            <DropdownCard
+                                label="Connector Run"
+                                icon="🔄"
+                                options={filterOptions?.connector_runs || []}
+                                selected={localFilters.connectorRunIds || []}
+                                onChange={(v) => updateLocalFilter('connectorRunIds', v)}
+                                color="indigo"
+                                isOpen={openDropdown === 'connectorRunIds'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'connectorRunIds' ? null : 'connectorRunIds')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* Tags Dropdown Card (Searchable) */}
+                            <DropdownCard
+                                label="Tags"
+                                icon="🏷️"
+                                options={filterOptions?.tags || []}
+                                selected={localFilters.tagKeys || []}
+                                onChange={(v) => updateLocalFilter('tagKeys', v)}
+                                color="purple"
+                                isOpen={openDropdown === 'tagKeys'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'tagKeys' ? null : 'tagKeys')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+                        </SimpleGrid>
+                    </Box>
+                )}
             </Box>
         </Box>
     );

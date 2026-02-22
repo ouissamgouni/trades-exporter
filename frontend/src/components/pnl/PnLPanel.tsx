@@ -20,13 +20,15 @@
  * 11. Saves new version
  */
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Badge, Box, Button, Flex, Heading, Switch, Text } from '@chakra-ui/react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Badge, Box, Button, Dialog, Flex, Heading, Switch, Text } from '@chakra-ui/react';
 import { FiRefreshCw } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
+import { useDataHealth } from '../../contexts/DataHealthContext';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
 
 // P&L Components
@@ -61,10 +63,26 @@ import {
     AccountBalanceBreakdown,
 } from './types';
 
-export const PnLPanel: React.FC = () => {
+interface PnLPanelProps {
+    onOpenHealthCheck?: () => void;
+}
+
+export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
 
     // Base currency from settings
     const { baseCurrency, baseCurrencyId } = useBaseCurrency();
+
+    // Data health context for UI display only (not used for calculation gating)
+    // Calculation flow uses direct API calls to avoid race conditions with polling
+    const { refreshHealthData } = useDataHealth();
+
+    // Confirmation dialog state for data health issues
+    const [showHealthConfirm, setShowHealthConfirm] = useState(false);
+    const [healthCheckIssueCount, setHealthCheckIssueCount] = useState(0);
+    
+    // Refs to track state without causing closure issues
+    const isCalculatingRef = useRef(false);
+    const skipHealthCheckRef = useRef(false);  // Flag to skip health check after user confirms
 
     // Read account_ids from URL on init (for shareable links)
     const getInitialAccountIds = (): number[] => {
@@ -484,6 +502,9 @@ export const PnLPanel: React.FC = () => {
     // Reload balances when unsettled negative filter changes
     // Preserves price data and recalculates metrics
     useEffect(() => {
+        // Skip if calculation is in progress to prevent duplicate API calls
+        if (isCalculatingRef.current) return;
+        
         if (currentVersionId) {
             // Re-fetch balances with new filter setting
             loadBalances(currentVersionId, showUnsettledNegative).then(balances => {
@@ -545,7 +566,8 @@ export const PnLPanel: React.FC = () => {
                 });
             });
         }
-    }, [showUnsettledNegative, currentVersionId, loadBalances, transformBalances, prices, loadingPriceAssetIds]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showUnsettledNegative, currentVersionId]);
 
     // Fetch prices for all assets in balances (Individually with concurrency control)
     const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string) => {
@@ -768,6 +790,72 @@ export const PnLPanel: React.FC = () => {
     // 2. Fetch only summary + balances initially
     // 3. Load other data on-demand when user navigates to views
     const runCalculation = useCallback(async () => {
+        // Pre-calculation health check (direct API call to avoid race conditions with context polling)
+        // Skip if user already confirmed to continue despite issues
+        if (!skipHealthCheckRef.current) {
+            try {
+                // Direct health check API call (not using context state)
+                let healthUrl = `${API_URL}/transactions/data-health-check/status`;
+                if (config.account_ids && config.account_ids.length > 0) {
+                    healthUrl += `?account_ids=${config.account_ids.join(',')}`;
+                }
+                const healthResponse = await fetch(healthUrl);
+                
+                if (!healthResponse.ok) {
+                    // Health check API failed - show modal to let user decide
+                    toaster.create({
+                        title: 'Health Check Failed',
+                        description: 'Unable to verify data health. You can try calculating anyway.',
+                        type: 'warning',
+                        duration: 5000,
+                    });
+                    setHealthCheckIssueCount(0); // Unknown
+                    setShowHealthConfirm(true);
+                    return;
+                }
+                
+                const healthData = await healthResponse.json();
+                
+                // Check if there are data health issues
+                if (healthData && healthData.has_issues) {
+                    const issueCount = healthData.total_issues;
+                    
+                    // Store issue count for dialog display
+                    setHealthCheckIssueCount(issueCount);
+
+                    // Show warning toast
+                    toaster.create({
+                        title: 'Data Health Issues Detected',
+                        description: `Found ${issueCount} data issue${issueCount !== 1 ? 's' : ''}. P&L calculation may be incomplete or inaccurate.`,
+                        type: 'warning',
+                        duration: 5000,
+                    });
+
+                    // Show confirmation dialog
+                    setShowHealthConfirm(true);
+                    return; // Don't proceed yet
+                }
+            } catch (err) {
+                console.error('Health check failed:', err);
+                // Show modal to let user decide
+                toaster.create({
+                    title: 'Health Check Error',
+                    description: 'Error checking data health. You can try calculating anyway.',
+                    type: 'warning',
+                    duration: 5000,
+                });
+                setHealthCheckIssueCount(0); // Unknown
+                setShowHealthConfirm(true);
+                return;
+            }
+        }
+
+        // Reset skip flag for next calculation
+        skipHealthCheckRef.current = false;
+        
+        // Mark calculation as in progress
+        isCalculatingRef.current = true;
+
         setIsCalculating(true);
         setError(null);
         setStatus('calculating');
@@ -833,8 +921,7 @@ export const PnLPanel: React.FC = () => {
             const balances = await loadBalances(versionId, showUnsettledNegative);
             const assetRows = transformBalances(balances);
 
-            // Step 2b: Prefetch per-account balances for expandable rows
-            loadAccountBalances(versionId);
+            // Note: Per-account balances are loaded on-demand when user expands asset rows
 
             // Map response to summary data for transformResult
             const summaryData = mapToSummaryData(calcResult);
@@ -865,8 +952,10 @@ export const PnLPanel: React.FC = () => {
             setStatus('error');
         } finally {
             setIsCalculating(false);
+            // Mark calculation as complete
+            isCalculatingRef.current = false;
         }
-    }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
+    }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, showUnsettledNegative]);
 
     // Independent loader: Load calculation units with pagination
     // Handle audit tab changes - just update state, the useEffect will handle loading
@@ -894,6 +983,20 @@ export const PnLPanel: React.FC = () => {
     useEffect(() => {
         fetchAvailableVersions();
     }, [fetchAvailableVersions]);
+
+    // Handle continuing calculation despite health issues
+    const handleContinueAnyway = useCallback(() => {
+        skipHealthCheckRef.current = true;  // Skip health check on next call
+        setShowHealthConfirm(false);
+        // Call runCalculation directly (no setTimeout needed)
+        runCalculation();
+    }, [runCalculation]);
+
+    // Handle opening health check drawer to fix issues
+    const handleFixIssues = useCallback(() => {
+        setShowHealthConfirm(false);
+        onOpenHealthCheck?.();
+    }, [onOpenHealthCheck]);
 
     // Load a specific version by ID - resets all state and fetches fresh data
     const loadVersionById = useCallback(async (versionId: number) => {
@@ -1018,7 +1121,7 @@ export const PnLPanel: React.FC = () => {
         setSelectedAssetId(assetId ?? null);
         setSelectedAsset(asset);
         setCurrentView('asset-detail');
-    }, []);
+    }, [assets]);
 
     // Back to assets view
     const handleBackToAssets = useCallback(() => {
@@ -1401,6 +1504,7 @@ export const PnLPanel: React.FC = () => {
                             onAssetClick={handleAssetClick}
                             accountBalances={accountBalances}
                             accounts={accounts}
+                            onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
                         />
                     )}
 
@@ -1487,6 +1591,57 @@ export const PnLPanel: React.FC = () => {
                 onClose={handleCloseTransactionDrawer}
                 accounts={accounts}
             />
+
+            {/* Data Health Confirmation Dialog */}
+            <Dialog.Root
+                open={showHealthConfirm}
+                onOpenChange={(e) => { if (!e.open) setShowHealthConfirm(false); }}
+            >
+                <Dialog.Backdrop />
+                <Dialog.Positioner>
+                    <Dialog.Content>
+                        <Dialog.Header>
+                            <Dialog.Title>Data Health Issues Detected</Dialog.Title>
+                        </Dialog.Header>
+                        <Dialog.Body>
+                            <Text>
+                                Found <strong>{healthCheckIssueCount}</strong> data issue
+                                {healthCheckIssueCount !== 1 ? 's' : ''}
+                                (linkage, transfers, etc.). P&L calculation may be incomplete or inaccurate.
+                            </Text>
+                            <Text mt={3} fontSize="sm" color="gray.600">
+                                What would you like to do?
+                            </Text>
+                        </Dialog.Body>
+                        <Dialog.Footer>
+                            <Flex gap={2} width="100%">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setShowHealthConfirm(false)}
+                                    flex={1}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    colorPalette="orange"
+                                    variant="outline"
+                                    onClick={handleContinueAnyway}
+                                    flex={1}
+                                >
+                                    Continue Anyway
+                                </Button>
+                                <Button
+                                    colorPalette="blue"
+                                    onClick={handleFixIssues}
+                                    flex={1}
+                                >
+                                    Fix Issues
+                                </Button>
+                            </Flex>
+                        </Dialog.Footer>
+                    </Dialog.Content>
+                </Dialog.Positioner>
+            </Dialog.Root>
         </Box>
     );
 };

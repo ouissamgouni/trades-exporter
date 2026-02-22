@@ -24,7 +24,7 @@ taxability hints, using the same logic but adapted for bundle-level context
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from backend.db.models import TaxabilityStatus, LegType
+from backend.db.models import TaxabilityStatus, LegType, UnitPattern
 
 if TYPE_CHECKING:
     from backend.db.models import CalculationUnitLeg, CalculationUnit
@@ -71,22 +71,22 @@ def suggest_bundle_taxability(
     Returns:
         BundleTaxabilitySuggestion with taxability status and explanation
     """
-    # Rule 5: Cost basis transfers (transfer/split) → never taxable
-    if pattern in ("transfer", "split"):
+    # Rule 5: Cost basis transfers (internal_transfer/split) → never taxable
+    if pattern in (UnitPattern.INTERNAL_TRANSFER.value, UnitPattern.SPLIT.value):
         return BundleTaxabilitySuggestion(
             taxability=TaxabilityStatus.NON_TAXABLE,
             reason=f"Pattern '{pattern}' is a cost basis transfer (non-taxable by default)",
         )
     
-    # Rule 5b: Pending transfers → non-taxable
-    if pattern == "pending_transfer":
+    # Rule 5b: Unmatched internal transfers → non-taxable
+    if pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value:
         return BundleTaxabilitySuggestion(
             taxability=TaxabilityStatus.NON_TAXABLE,
-            reason="Pending transfer awaiting counterpart (non-taxable)",
+            reason="Unmatched internal transfer awaiting counterpart (non-taxable)",
         )
     
     # Rule 9: Swaps → use config
-    if pattern == "swap":
+    if pattern == UnitPattern.SWAP.value:
         if crypto_swap_taxable:
             return BundleTaxabilitySuggestion(
                 taxability=TaxabilityStatus.TAXABLE,
@@ -167,19 +167,20 @@ class TaxabilityCalculator:
         if self._is_inflow(leg):
             return False
         
-        # 5. Cost basis transfers never taxable
-        if self._is_cost_basis_transfer(unit):
-            return False
-        
-        # 5b. Pending transfers are non-taxable (P&L realization skipped anyway)
-        if self._is_pending_transfer(unit):
-            return False
-        
-        # 6. Fees use config
+        # 5. Fees use config (checked BEFORE transfer checks)
+        # Fees are separate disposal events even on non-taxable transfers
         if self._is_fee(leg):
             return self.config.fee_taxable_by_default
         
-        # 7. Outflow-only always taxable (but not pending transfers - handled above)
+        # 6. Cost basis transfers never taxable (but fees already handled above)
+        if self._is_cost_basis_transfer(unit):
+            return False
+        
+        # 6b. Unmatched internal transfers are non-taxable (P&L realization skipped anyway)
+        if self._is_unmatched_internal_transfer(unit):
+            return False
+        
+        # 7. Outflow-only always taxable (but not unmatched internal transfers - handled above)
         if self._is_outflow_only(unit):
             return True
         
@@ -231,13 +232,13 @@ class TaxabilityCalculator:
         return leg_type == "fee" or is_fee
     
     def _is_cost_basis_transfer(self, unit: Any) -> bool:
-        """Check if unit is a cost basis transfer (transfer/split)."""
+        """Check if unit is a cost basis transfer (internal_transfer/split)."""
         return getattr(unit, 'is_cost_basis_transfer', False)
     
-    def _is_pending_transfer(self, unit: Any) -> bool:
-        """Check if unit is a pending transfer (incomplete transfer awaiting counterpart)."""
+    def _is_unmatched_internal_transfer(self, unit: Any) -> bool:
+        """Check if unit is an unmatched internal transfer (incomplete internal transfer awaiting counterpart)."""
         pattern = getattr(unit, 'pattern', None)
-        return pattern == "pending_transfer"
+        return pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
     
     def _is_outflow_only(self, unit: Any) -> bool:
         """Check if unit has only outflows (payment, gift, etc.)."""

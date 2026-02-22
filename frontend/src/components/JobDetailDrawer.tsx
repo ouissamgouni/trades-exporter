@@ -20,6 +20,7 @@ import {
 } from 'react-icons/lu';
 import {
     API_URL,
+    Account,
     ConnectorProgress,
     ConnectorRunDetail,
     ConnectorRunSummary,
@@ -28,19 +29,26 @@ import {
     SyncJobProgress,
     SyncJobStatus,
 } from '../types';
+import { TransactionIdList } from './RawDataViewer';
+import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
+import { TransactionsTable } from './TransactionsTable';
+import { defaultFilterState } from './TransactionFilters';
+import TransactionDetailDrawer from './TransactionDetailDrawer';
 
 interface JobDetailDrawerProps {
     jobId: number | null;
     open: boolean;
     onClose: () => void;
+    connectorIdFilter?: number;  // Optional: filter to specific connector
 }
 
 const statusColorMap: Record<SyncJobStatus | ConnectorSyncStatus, string> = {
     idle: 'gray',
-    pending: 'gray',
+    pending: 'yellow',
     queued: 'gray',
     running: 'blue',
     completed: 'green',
+    warning: 'orange',
     aborted: 'orange',
     failed: 'red',
     skipped: 'yellow',
@@ -92,6 +100,28 @@ interface ConnectorRunCardProps {
 }
 
 const ConnectorRunCard: React.FC<ConnectorRunCardProps> = ({ run, onExpand }) => {
+    const [duplicateCount, setDuplicateCount] = useState<number | null>(null);
+
+    useEffect(() => {
+        const fetchDuplicateCount = async () => {
+            try {
+                const response = await fetch(
+                    `${API_URL}/data-health/duplicate-count?connector_run_id=${run.id}`
+                );
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.duplicate_group_count > 0) {
+                        setDuplicateCount(data.duplicate_group_count);
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch duplicate count:', err);
+            }
+        };
+
+        fetchDuplicateCount();
+    }, [run.id]);
+
     return (
         <Box
             p={3}
@@ -115,10 +145,18 @@ const ConnectorRunCard: React.FC<ConnectorRunCardProps> = ({ run, onExpand }) =>
                         <Text fontSize="xs" color="gray.500">
                             {run.account_name || '-'}
                         </Text>
+                        <Text fontSize="xs" color="gray.400">
+                            ID: {run.connector_id}
+                        </Text>
                     </VStack>
                     {run.test_mode && (
                         <Badge colorPalette="purple" size="sm">
                             Test
+                        </Badge>
+                    )}
+                    {duplicateCount !== null && duplicateCount > 0 && (
+                        <Badge colorPalette="orange" size="sm">
+                            ⚠ {duplicateCount} Duplicate{duplicateCount > 1 ? 's' : ''}
                         </Badge>
                     )}
                 </HStack>
@@ -157,15 +195,23 @@ const ConnectorRunCard: React.FC<ConnectorRunCardProps> = ({ run, onExpand }) =>
 interface ConnectorRunDetailViewProps {
     runId: number;
     onBack: () => void;
+    accounts: Account[];
 }
 
 const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
     runId,
     onBack,
+    accounts,
 }) => {
     const [detail, setDetail] = useState<ConnectorRunDetail | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [duplicateCount, setDuplicateCount] = useState<{
+        group_count: number;
+        transaction_count: number;
+    } | null>(null);
+    const [transactionDetailId, setTransactionDetailId] = useState<number | null>(null);
+    const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
 
     const fetchDetail = useCallback(async () => {
         setLoading(true);
@@ -184,9 +230,27 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
         }
     }, [runId]);
 
+    const fetchDuplicateCount = useCallback(async () => {
+        try {
+            const response = await fetch(
+                `${API_URL}/data-health/duplicate-count?connector_run_id=${runId}`
+            );
+            if (response.ok) {
+                const data = await response.json();
+                setDuplicateCount({
+                    group_count: data.duplicate_group_count,
+                    transaction_count: data.duplicate_transaction_count,
+                });
+            }
+        } catch (err) {
+            console.error('Failed to fetch duplicate count:', err);
+        }
+    }, [runId]);
+
     useEffect(() => {
         fetchDetail();
-    }, [fetchDetail]);
+        fetchDuplicateCount();
+    }, [fetchDetail, fetchDuplicateCount]);
 
     if (loading) {
         return (
@@ -267,6 +331,19 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                             {detail.error_count}
                         </Text>
                     </VStack>
+                    {duplicateCount && duplicateCount.group_count > 0 && (
+                        <VStack align="start" gap={0}>
+                            <Text fontSize="xs" color="gray.500">Duplicates</Text>
+                            <HStack gap={1}>
+                                <Text fontWeight="medium" color="orange.600">
+                                    ⚠ {duplicateCount.group_count}
+                                </Text>
+                                <Text fontSize="xs" color="gray.400">
+                                    ({duplicateCount.transaction_count} txs)
+                                </Text>
+                            </HStack>
+                        </VStack>
+                    )}
                 </Flex>
             </Box>
 
@@ -281,11 +358,17 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                     <Tabs.Trigger value="updated">
                         Updated ({detail.updated_ids.length})
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="skipped">
+                        Skipped ({detail.skipped_ids.length})
+                    </Tabs.Trigger>
                     {detail.error_details.length > 0 && (
                         <Tabs.Trigger value="errors">
                             Errors ({detail.error_details.length})
                         </Tabs.Trigger>
                     )}
+                    <Tabs.Trigger value="duplicates">
+                        Duplicates{duplicateCount && duplicateCount.group_count > 0 ? ` (${duplicateCount.group_count})` : ''}
+                    </Tabs.Trigger>
                 </Tabs.List>
 
                 <Tabs.Content value="logs">
@@ -318,45 +401,57 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                 </Tabs.Content>
 
                 <Tabs.Content value="synced">
-                    <Box maxH="300px" overflowY="auto">
-                        {detail.synced_ids.length === 0 ? (
-                            <Text color="gray.500" py={4}>No new transactions</Text>
-                        ) : (
-                            <VStack align="stretch" gap={1}>
-                                {detail.synced_ids.slice(0, 100).map((id, idx) => (
-                                    <Text key={idx} fontSize="xs" fontFamily="mono">
-                                        {id}
-                                    </Text>
-                                ))}
-                                {detail.synced_ids.length > 100 && (
-                                    <Text fontSize="xs" color="gray.500">
-                                        ...and {detail.synced_ids.length - 100} more
-                                    </Text>
-                                )}
-                            </VStack>
-                        )}
-                    </Box>
+                    <TransactionsTable
+                        tableId="jobDetail-synced"
+                        title=""
+                        subtitle=""
+                        showFilters={false}
+                        showBundles={false}
+                        showSuggestions={false}
+                        compact={true}
+                        emptyMessage="No new transactions"
+                        filters={{
+                            ...defaultFilterState,
+                            connectorRunIds: [String(detail.id)],
+                        }}
+                        onDataChange={fetchDetail}
+                    />
                 </Tabs.Content>
 
                 <Tabs.Content value="updated">
-                    <Box maxH="300px" overflowY="auto">
-                        {detail.updated_ids.length === 0 ? (
-                            <Text color="gray.500" py={4}>No updated transactions</Text>
-                        ) : (
-                            <VStack align="stretch" gap={1}>
-                                {detail.updated_ids.slice(0, 100).map((id, idx) => (
-                                    <Text key={idx} fontSize="xs" fontFamily="mono">
-                                        {id}
-                                    </Text>
-                                ))}
-                                {detail.updated_ids.length > 100 && (
-                                    <Text fontSize="xs" color="gray.500">
-                                        ...and {detail.updated_ids.length - 100} more
-                                    </Text>
-                                )}
-                            </VStack>
-                        )}
-                    </Box>
+                    <TransactionsTable
+                        tableId="jobDetail-updated"
+                        title=""
+                        subtitle=""
+                        showFilters={false}
+                        showBundles={false}
+                        showSuggestions={false}
+                        compact={true}
+                        emptyMessage="No updated transactions"
+                        filters={{
+                            ...defaultFilterState,
+                            connectorRunIds: [String(detail.id)],
+                        }}
+                        onDataChange={fetchDetail}
+                    />
+                </Tabs.Content>
+
+                <Tabs.Content value="skipped">
+                    <TransactionsTable
+                        tableId="jobDetail-skipped"
+                        title=""
+                        subtitle=""
+                        showFilters={false}
+                        showBundles={false}
+                        showSuggestions={false}
+                        compact={true}
+                        emptyMessage="No skipped transactions"
+                        filters={{
+                            ...defaultFilterState,
+                            connectorRunIds: [String(detail.id)],
+                        }}
+                        onDataChange={fetchDetail}
+                    />
                 </Tabs.Content>
 
                 <Tabs.Content value="errors">
@@ -380,7 +475,27 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         ))}
                     </Box>
                 </Tabs.Content>
+
+                <Tabs.Content value="duplicates">
+                    <Box maxH="500px" overflowY="auto">
+                        <DuplicateResolutionPanel
+                            connectorRunId={detail.id}
+                            compactMode={true}
+                        />
+                    </Box>
+                </Tabs.Content>
             </Tabs.Root>
+
+            {/* Transaction Detail Drawer */}
+            <TransactionDetailDrawer
+                transactionId={transactionDetailId}
+                isOpen={isTransactionDrawerOpen}
+                onClose={() => {
+                    setIsTransactionDrawerOpen(false);
+                    setTransactionDetailId(null);
+                }}
+                accounts={accounts}
+            />
         </Box>
     );
 };
@@ -395,16 +510,47 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
     const [realTimeStatus, setRealTimeStatus] = useState<SyncJobProgress | null>(null);
+    const [accounts, setAccounts] = useState<Account[]>([]);
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Resizable width state
+    const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+        const saved = localStorage.getItem('jobDetailDrawerWidth');
+        return saved ? parseInt(saved, 10) : 900;
+    });
+    const [isResizing, setIsResizing] = useState(false);
+    const resizeStartX = useRef<number>(0);
+    const resizeStartWidth = useRef<number>(0);
 
     // Fetch job details from database
     const fetchJob = useCallback(async () => {
-        if (!jobId) return;
         setLoading(true);
         setError(null);
         setSelectedRunId(null);
         try {
-            const response = await fetch(`${API_URL}/sync-job/jobs/${jobId}`);
+            let response;
+            if (jobId) {
+                // Fetch specific job
+                response = await fetch(`${API_URL}/sync-job/jobs/${jobId}`);
+            } else {
+                // Fetch latest job from history
+                const historyResponse = await fetch(`${API_URL}/sync-job/history?limit=1&offset=0`);
+                if (historyResponse.ok) {
+                    const historyData = await historyResponse.json();
+                    if (historyData.jobs && historyData.jobs.length > 0) {
+                        const latestJobId = historyData.jobs[0].id;
+                        response = await fetch(`${API_URL}/sync-job/jobs/${latestJobId}`);
+                    } else {
+                        setError('No jobs found');
+                        setLoading(false);
+                        return;
+                    }
+                } else {
+                    setError('Failed to fetch job history');
+                    setLoading(false);
+                    return;
+                }
+            }
             if (!response.ok) throw new Error('Failed to fetch job detail');
             const data: SyncJobDetail = await response.json();
             setJob(data);
@@ -432,12 +578,59 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
         }
     }, [jobId]);
 
+    // Fetch accounts
+    const fetchAccounts = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/accounts?limit=1000`);
+            if (response.ok) {
+                const data = await response.json();
+                setAccounts(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch accounts:', err);
+        }
+    }, []);
+
+    // Resize handlers
+    const handleResizeStart = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsResizing(true);
+        resizeStartX.current = e.clientX;
+        resizeStartWidth.current = drawerWidth;
+    }, [drawerWidth]);
+
+    const handleResizeMove = useCallback((e: MouseEvent) => {
+        if (!isResizing) return;
+        const deltaX = resizeStartX.current - e.clientX;
+        const newWidth = Math.max(600, Math.min(window.innerWidth * 0.95, resizeStartWidth.current + deltaX));
+        setDrawerWidth(newWidth);
+    }, [isResizing]);
+
+    const handleResizeEnd = useCallback(() => {
+        if (!isResizing) return;
+        setIsResizing(false);
+        localStorage.setItem('jobDetailDrawerWidth', drawerWidth.toString());
+    }, [isResizing, drawerWidth]);
+
+    // Add/remove resize event listeners
     useEffect(() => {
-        if (open && jobId) {
+        if (isResizing) {
+            document.addEventListener('mousemove', handleResizeMove);
+            document.addEventListener('mouseup', handleResizeEnd);
+            return () => {
+                document.removeEventListener('mousemove', handleResizeMove);
+                document.removeEventListener('mouseup', handleResizeEnd);
+            };
+        }
+    }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+    useEffect(() => {
+        if (open) {
             fetchJob();
             fetchRealTimeStatus();
+            fetchAccounts();
         }
-    }, [open, jobId, fetchJob, fetchRealTimeStatus]);
+    }, [open, jobId, fetchJob, fetchRealTimeStatus, fetchAccounts]);
 
     // Poll for real-time status updates when viewing a running job
     useEffect(() => {
@@ -507,8 +700,8 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                 top={0}
                 right={0}
                 bottom={0}
-                width="600px"
-                maxW="90vw"
+                width={`${drawerWidth}px`}
+                maxW="95vw"
                 bg="white"
                 _dark={{ bg: 'gray.900' }}
                 boxShadow="xl"
@@ -517,6 +710,34 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                 display="flex"
                 flexDirection="column"
             >
+                {/* Resize Handle */}
+                <Box
+                    position="absolute"
+                    left={0}
+                    top={0}
+                    bottom={0}
+                    width="4px"
+                    cursor="col-resize"
+                    bg={isResizing ? 'blue.400' : 'transparent'}
+                    _hover={{ bg: 'blue.200' }}
+                    transition="background-color 0.2s"
+                    onMouseDown={handleResizeStart}
+                    zIndex={1}
+                />
+                {/* Resize Handle */}
+                <Box
+                    position="absolute"
+                    left={0}
+                    top={0}
+                    bottom={0}
+                    width="4px"
+                    cursor="col-resize"
+                    bg={isResizing ? 'blue.400' : 'transparent'}
+                    _hover={{ bg: 'blue.200' }}
+                    transition="background-color 0.2s"
+                    onMouseDown={handleResizeStart}
+                    zIndex={1}
+                />
                 {/* Header */}
                 <Flex
                     px={4}
@@ -529,6 +750,11 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                         <Heading size="md">
                             {mergedJob ? `Job #${mergedJob.id}` : 'Job Details'}
                         </Heading>
+                        {mergedJob?.renormalize && (
+                            <Badge colorPalette="purple" size="sm">
+                                Re-Normalize
+                            </Badge>
+                        )}
                         {realTimeStatus && (
                             <Badge colorPalette="blue" size="sm">
                                 Live
@@ -568,6 +794,7 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                 <ConnectorRunDetailView
                                     runId={selectedRunId}
                                     onBack={() => setSelectedRunId(null)}
+                                    accounts={accounts}
                                 />
                             ) : (
                                 <>
@@ -581,6 +808,11 @@ export const JobDetailDrawer: React.FC<JobDetailDrawerProps> = ({
                                                 >
                                                     {mergedJob.status}
                                                 </Badge>
+                                                {mergedJob.renormalize && (
+                                                    <Badge colorPalette="purple" size="sm">
+                                                        Re-Normalize
+                                                    </Badge>
+                                                )}
                                                 {mergedJob.error_message && (
                                                     <Text fontSize="sm" color="red.600">
                                                         {mergedJob.error_message}

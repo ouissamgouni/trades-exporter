@@ -57,7 +57,10 @@ class TestMEXCDepositsConnector:
 
     def test_raw_to_normalized_successful_deposit(self, mock_ccxt_mexc, mock_mexc_credentials):
         """Test successful deposit normalization."""
-        connector = MEXCDepositsConnector(account_id=1)
+        connector = MEXCDepositsConnector(
+            account_id=1,
+            config={"_account_address_or_identifier": "mexc-main-account"}
+        )
         
         ccxt_deposit = {
             "id": "deposit123",
@@ -80,7 +83,8 @@ class TestMEXCDepositsConnector:
         assert isinstance(result, NormalizedTransaction)
         assert result.source == "mexc-deposits"
         assert result.source_account == "mexc_deposits"
-        assert result.source_transaction_id == "deposit123"
+        # MEXC deposits use txid as the unique identifier since id is not reliable
+        assert result.source_transaction_id == "0xabc123def456"
         assert result.direction == "inflow"
         assert result.transaction_type == "transfer"
         assert result.source_transaction_type == "deposit"
@@ -90,6 +94,10 @@ class TestMEXCDepositsConnector:
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
         assert result.network == "erc20"
+        # Verify account fields
+        assert result.source_to_account == "mexc-main-account"  # Connector account identifier
+        assert result.to_account_id == 1  # Resolved account ID
+        assert result.source_from_account == "0x123abc456def789"  # Blockchain address
 
     def test_raw_to_normalized_with_non_ok_status(self, mock_ccxt_mexc, mock_mexc_credentials):
         """Test that non-ok status deposits raise ValueError."""
@@ -107,8 +115,8 @@ class TestMEXCDepositsConnector:
         with pytest.raises(ValueError, match="Deposit status is not 'ok'"):
             connector.raw_to_normalized(ccxt_deposit)
 
-    def test_raw_to_normalized_missing_id(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test that missing id field raises ValueError."""
+    def test_raw_to_normalized_missing_txid(self, mock_ccxt_mexc, mock_mexc_credentials):
+        """Test that missing txid field raises ValueError."""
         connector = MEXCDepositsConnector(account_id=1)
         
         ccxt_deposit = {
@@ -119,7 +127,7 @@ class TestMEXCDepositsConnector:
             "addressTo": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
         }
         
-        with pytest.raises(ValueError, match="Missing 'id' field"):
+        with pytest.raises(ValueError, match="Missing 'txid' or 'info.txId' field"):
             connector.raw_to_normalized(ccxt_deposit)
 
     def test_raw_to_normalized_missing_currency(self, mock_ccxt_mexc, mock_mexc_credentials):
@@ -128,6 +136,7 @@ class TestMEXCDepositsConnector:
         
         ccxt_deposit = {
             "id": "deposit123",
+            "txid": "0xabc123",
             "timestamp": 1640995200000,
             "amount": 1.5,
             "status": "ok",
@@ -143,6 +152,7 @@ class TestMEXCDepositsConnector:
         
         ccxt_deposit = {
             "id": "deposit123",
+            "txid": "0xabc123",
             "timestamp": 1640995200000,
             "currency": "ETH",
             "amount": None,
@@ -159,6 +169,7 @@ class TestMEXCDepositsConnector:
         
         ccxt_deposit = {
             "id": "deposit123",
+            "txid": "0xabc123",
             "timestamp": 1640995200000,
             "currency": "BTC",
             "amount": 0.5,
@@ -178,6 +189,7 @@ class TestMEXCDepositsConnector:
         
         ccxt_deposit = {
             "id": "deposit123",
+            "txid": "0xabc123",
             "timestamp": 1640995200000,
             "currency": "USDT",
             "amount": 1000.0,
@@ -255,15 +267,21 @@ class TestMEXCDepositsConnector:
         
         assert result == []
 
-    def test_get_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test get_raws method with 7-day windowing."""
+    def test_yield_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
+        """Test yield_raws method with 7-day windowing."""
         connector = MEXCDepositsConnector(account_id=1)
         
-        # Mock currencies
-        mock_ccxt_mexc.currencies = {"BTC": {}, "ETH": {}}
+        # Mock currencies - need to mock as dict-like with items() method and active flag
+        mock_ccxt_mexc.currencies = {
+            "BTC": {"active": True},
+            "ETH": {"active": True}
+        }
+        
+        # Mock balance fetch - returns empty balance so we use currencies from exchange
+        mock_ccxt_mexc.fetch_balance.return_value = {}
         
         mock_deposits_btc = [
-            {"id": "d1", "currency": "BTC", "amount": 1.0, "status": "ok"},
+            {"id": "d1", "txid": "0xbtc123", "currency": "BTC", "amount": 1.0, "status": "ok"},
         ]
         mock_deposits_eth = []
         
@@ -274,11 +292,11 @@ class TestMEXCDepositsConnector:
         
         mock_ccxt_mexc.fetch_deposits.side_effect = fetch_side_effect
         
-        result = connector.get_raws()
+        result = list(connector.yield_raws())
         
         # Should have results from BTC (multiple windows over 90 days)
         assert len(result) >= 1
-        assert result[0]["id"] == "d1"
+        assert result[0]["txid"] == "0xbtc123"
         # Verify BTC was queried multiple times (7-day windows)
         assert mock_ccxt_mexc.fetch_deposits.call_count > 2
 
@@ -288,6 +306,7 @@ class TestMEXCDepositsConnector:
         
         ccxt_deposit = {
             "id": "deposit123",
+            "txid": "0xabc123",
             "timestamp": 1640995200000,
             "currency": "USDT",
             "amount": 100.0,

@@ -37,6 +37,8 @@ class BaseHubConnector(BaseConnector):
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
         config: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Any] = None,
+        abort_event: Optional[Any] = None,
     ):
         """
         Initialize the hub connector.
@@ -47,13 +49,21 @@ class BaseHubConnector(BaseConnector):
             account_id: The Account ID this connector belongs to
             connector_id: The AccountConnector ID for this specific connector
             config: Connector configuration dict (includes parent_output_path)
+            progress_callback: Optional callback for progress reporting
+            abort_event: Optional threading.Event for abort signaling
 
         Note: Test mode is determined by the TEST_MODE environment variable.
         """
         self.child_connectors = child_connectors
         self.parallel_strategy = parallel_strategy
 
-        super().__init__(account_id=account_id, connector_id=connector_id, config=config)
+        super().__init__(
+            account_id=account_id,
+            connector_id=connector_id,
+            config=config,
+            progress_callback=progress_callback,
+            abort_event=abort_event,
+        )
 
     def get_test_data_path(self) -> str:
         """
@@ -62,11 +72,13 @@ class BaseHubConnector(BaseConnector):
         """
         return None
 
-    def get_raws(self) -> Generator[Dict[str, Any], None, None]:
+    def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Fetch raw data from all child connectors in parallel.
+        Fetch raw data from all child connectors in parallel with streaming.
 
         Uses the configured parallel strategy (queue-based or futures-based).
+        Items are yielded immediately as they arrive from child connectors,
+        enabling incremental processing without waiting for all data.
 
         Yields:
             Wrapped raw items with connector metadata
@@ -105,6 +117,8 @@ class BaseHubConnector(BaseConnector):
                 for raw_item, normalized_item, error in connector.yield_normalized():
                     wrapped_raw = {
                         "connector_name": connector.connector_name,
+                        "_connector_id": connector.connector_id,
+                        "_master_source": connector.connector_name,
                         "raw_item": raw_item,
                         "normalized_item": normalized_item,
                         "error": error,
@@ -125,6 +139,8 @@ class BaseHubConnector(BaseConnector):
                 queue.put(
                     {
                         "connector_name": connector.connector_name,
+                        "_connector_id": connector.connector_id,
+                        "_master_source": connector.connector_name,
                         "raw_item": {"error_type": "connector_failure"},
                         "normalized_item": None,
                         "error": f"{connector.connector_name} error: {str(e)}",
@@ -150,8 +166,8 @@ class BaseHubConnector(BaseConnector):
 
         while completed_connectors < total_connectors:
             try:
-                # Use timeout to detect potential hangs
-                item = queue.get(timeout=60)
+                # Use timeout to detect potential hangs (5 minutes for slow API fetching)
+                item = queue.get(timeout=900)
                 if item is None:
                     completed_connectors += 1
                     log.info(
@@ -205,6 +221,8 @@ class BaseHubConnector(BaseConnector):
                 for raw_item, normalized_item, error in connector.yield_normalized():
                     wrapped_raw = {
                         "connector_name": connector.connector_name,
+                        "_connector_id": connector.connector_id,
+                        "_master_source": connector.connector_name,
                         "raw_item": raw_item,
                         "normalized_item": normalized_item,
                         "error": error,
@@ -226,6 +244,8 @@ class BaseHubConnector(BaseConnector):
                 results.append(
                     {
                         "connector_name": connector.connector_name,
+                        "_connector_id": connector.connector_id,
+                        "_master_source": connector.connector_name,
                         "raw_item": {"error_type": "connector_failure"},
                         "normalized_item": None,
                         "error": f"{connector.connector_name} failed: {str(e)}",
@@ -256,6 +276,8 @@ class BaseHubConnector(BaseConnector):
                     log.error(f"❌ Future failed for {connector_name}: {e}")
                     yield {
                         "connector_name": connector_name,
+                        "_connector_id": None,
+                        "_master_source": connector_name,
                         "raw_item": {"error_type": "future_failure"},
                         "normalized_item": None,
                         "error": f"Future failed for {connector_name}: {str(e)}",
@@ -290,3 +312,21 @@ class BaseHubConnector(BaseConnector):
 
         # This shouldn't happen, but handle gracefully
         raise ValueError(f"No normalized data available for {connector_name}")
+
+    def cleanup(self):
+        """
+        Cleanup hub resources and all child connectors.
+        
+        This calls cleanup() on each child connector, which allows
+        file-based connectors to delete their processed files.
+        """
+        # Cleanup all child connectors first
+        for connector_name, connector in self.child_connectors:
+            try:
+                connector.cleanup()
+                log.info(f"🧹 [{connector_name}] Cleaned up")
+            except Exception as e:
+                log.error(f"❌ [{connector_name}] Cleanup failed: {e}")
+        
+        # Call parent cleanup for hub's own resources
+        super().cleanup()

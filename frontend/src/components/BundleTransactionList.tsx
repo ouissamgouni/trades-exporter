@@ -16,6 +16,8 @@ import { Direction } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetBadge } from './AssetBadge';
 import { formatDateShort, formatTimeShort } from '../utils/dateUtils';
+import { formatQuantity } from '../utils/numberUtils';
+import { ValueDisplay } from './ValueDisplay';
 
 interface BundleTransactionListProps {
     transactions: TransactionSummary[];
@@ -40,22 +42,6 @@ const directionColor = (direction: string): string => {
         case 'internal': return 'gray.600';
         default: return 'gray.500';
     }
-};
-
-const formatQuantity = (qty: number): string => {
-    if (qty === 0) return '0';
-    if (Math.abs(qty) < 0.0001) return qty.toExponential(2);
-    if (Math.abs(qty) < 1) return qty.toFixed(6);
-    if (Math.abs(qty) < 1000) return qty.toFixed(4);
-    return qty.toLocaleString(undefined, { maximumFractionDigits: 2 });
-};
-
-const formatCurrency = (value: number | undefined | null): string => {
-    if (value == null) return '-';
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
 };
 
 export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
@@ -128,7 +114,7 @@ export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
                                         fontFamily="mono"
                                         whiteSpace="nowrap"
                                     >
-                                        {formatQuantity(tx.quantity)}
+                                        <ValueDisplay value={tx.quantity} />
                                     </Text>
                                     <AssetBadge
                                         asset={tx.asset}
@@ -142,7 +128,7 @@ export const BundleTransactionList: React.FC<BundleTransactionListProps> = ({
                             {/* Total */}
                             <Table.Cell px={0.5} py={0.5} width="45px" textAlign="right">
                                 <Text fontSize="8px" color="gray.600" fontFamily="mono" whiteSpace="nowrap">
-                                    {tx.total != null ? formatCurrency(tx.total) : '-'}
+                                    <ValueDisplay value={tx.total} />
                                 </Text>
                             </Table.Cell>
                             {/* Info icon with TransactionTooltip */}

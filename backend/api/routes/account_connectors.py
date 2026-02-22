@@ -6,7 +6,7 @@ import os
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend.db.models import Account, AccountConnector
 from backend.db.database import get_session_dependency
@@ -40,8 +40,7 @@ class ConnectorConfigBase(BaseModel):
     include_token_transfers: Optional[bool] = None
     token_filter: Optional[List[str]] = None
 
-    class Config:
-        extra = "allow"  # Allow additional fields
+    model_config = ConfigDict(extra="allow")  # Allow additional fields
 
 
 class AccountConnectorCreate(BaseModel):
@@ -79,8 +78,7 @@ class AccountConnectorResponse(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConnectorTypeInfo(BaseModel):
@@ -267,11 +265,21 @@ def create_account_connector(
 
     # Validate required config
     connector_info = available_connectors[connector_data.connector_type]
+    
+    # Get the account to check for address inheritance
+    account = session.get(Account, account_id)
+    
     missing_config = [
         field
         for field in connector_info.required_config
         if field not in connector_data.config or connector_data.config[field] is None
     ]
+    
+    # Allow missing 'address' for onchain connectors if account has address_or_identifier
+    if "address" in missing_config and connector_info.category == "onchain":
+        if account and account.address_or_identifier:
+            missing_config.remove("address")
+    
     if missing_config:
         raise HTTPException(
             status_code=400,

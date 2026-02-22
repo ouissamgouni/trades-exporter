@@ -23,10 +23,8 @@ import {
 } from '@chakra-ui/react';
 import { FiActivity, FiPlay, FiSave, FiRefreshCw, FiClock, FiTrash2, FiDownload, FiPlus, FiFolder } from 'react-icons/fi';
 import { CalculationConfig, CalculationStatus, VersionListItem } from './types';
-import { Account, Asset, API_URL, CostMethod, LotMode, ValidationSummary } from '../../types';
+import { Account, CostMethod, LotMode } from '../../types';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
-import { DataHealthCheckDrawer } from '../DataHealthCheckDrawer';
-import { Tooltip } from '../ui/tooltip';
 
 export type CalculationMode = 'load' | 'new';
 
@@ -76,74 +74,8 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
     error,
 }) => {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
-    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
-    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
-    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
-    const [assets, setAssets] = useState<Asset[]>([]);
-    const [healthCheckAccounts, setHealthCheckAccounts] = useState<Account[]>([]);
 
     const selectedVersion = availableVersions.find(v => v.version_id === selectedVersionId);
-
-    // Fetch assets for health check drawer
-    const fetchAssets = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-    }, []);
-
-    // Fetch accounts for health check drawer
-    const fetchHealthCheckAccounts = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                const data = await response.json();
-                setHealthCheckAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    }, []);
-
-    // Fetch assets and accounts when health check opens
-    useEffect(() => {
-        if (isHealthCheckOpen) {
-            fetchAssets();
-            fetchHealthCheckAccounts();
-        }
-    }, [isHealthCheckOpen, fetchAssets, fetchHealthCheckAccounts]);
-
-    // Fetch validation summary on mount and when account filter changes
-    const fetchValidationSummary = useCallback(async () => {
-        try {
-            const params = new URLSearchParams();
-            if (config.account_ids && config.account_ids.length > 0) {
-                params.set('account_ids', config.account_ids.join(','));
-            }
-            const url = `${API_URL}/transactions/data-health-check${params.toString() ? `?${params}` : ''}`;
-            const response = await fetch(url);
-            if (response.ok) {
-                const data: ValidationSummary = await response.json();
-                setValidationSummary(data);
-            } else {
-                // On error, show healthy state
-                setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-            }
-        } catch (err) {
-            console.error('Failed to fetch validation summary:', err);
-            // On error, show healthy state
-            setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-        }
-    }, [config.account_ids]);
-
-    useEffect(() => {
-        fetchValidationSummary();
-    }, [fetchValidationSummary]);
 
     const getStatusBadge = () => {
         switch (status) {
@@ -514,45 +446,7 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                     )}
                                 </Button>
                             )}
-
-                            {/* Data Health Check Indicator */}
-                            {validationSummary && (
-                                <Tooltip content={
-                                    validationSummary.has_issues
-                                        ? `${validationSummary.total_issues} data issue(s) may affect P&L accuracy. Click to review.`
-                                        : 'All transaction data is complete and ready for P&L calculation.'
-                                }>
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        colorPalette={validationSummary.has_issues ? 'orange' : 'green'}
-                                        onClick={() => setIsHealthCheckOpen(true)}
-                                    >
-                                        <FiActivity />
-                                        {validationSummary.has_issues ? (
-                                            <Badge colorPalette="orange" size="sm" ml={1}>
-                                                {validationSummary.total_issues}
-                                            </Badge>
-                                        ) : (
-                                            <Text ml={1} fontSize="xs">✓ Ready</Text>
-                                        )}
-                                    </Button>
-                                </Tooltip>
-                            )}
                         </Flex>
-
-                        {/* Data Health Check Drawer */}
-                        <DataHealthCheckDrawer
-                            isOpen={isHealthCheckOpen}
-                            onClose={() => setIsHealthCheckOpen(false)}
-                            accountIds={config.account_ids}
-                            refreshTrigger={healthCheckRefreshTrigger}
-                            assets={assets}
-                            accounts={healthCheckAccounts}
-                            onAssetsUpdated={fetchAssets}
-                            onAccountsUpdated={fetchHealthCheckAccounts}
-                            onIssueFixed={fetchValidationSummary}
-                        />
                     </>
                 )}
 

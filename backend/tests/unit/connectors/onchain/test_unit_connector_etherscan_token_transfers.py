@@ -102,4 +102,3 @@ class TestEtherscanTokenTransfersConnector:
             assert normalized_tx.source_from_account == "0xtest_wallet"
             assert normalized_tx.source_to_account == "0xRECEIVER_ADDRESS"
             assert normalized_tx.source_asset_symbol == "LINK_0xLINK_CONTRACT"
-            assert normalized_tx.tags.get("method_id") == "0xa9059cbb"

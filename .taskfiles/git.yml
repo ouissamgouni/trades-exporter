@@ -1,0 +1,97 @@
+version: "3"
+
+tasks:
+  # ════════════════════════════════════════════════════════════════
+  # Git Safety Utilities
+  # ════════════════════════════════════════════════════════════════
+
+  check:clean:
+    internal: true
+    desc: Check if working directory is clean (no uncommitted changes)
+    preconditions:
+      - sh: |
+          if [ -n "$(git status --porcelain)" ]; then
+            exit 1
+          fi
+        msg: |
+          ❌ Working directory has uncommitted changes:
+
+          {{`git status --short`}}
+
+          Please commit or stash your changes before proceeding.
+
+          Options:
+            git add . && git commit -m "Your message"
+            git stash save "Work in progress"
+
+  confirm:switch:
+    internal: true
+    desc: Confirm branch switch with warning
+    vars:
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+      TARGET_BRANCH: "{{.TARGET_BRANCH}}"
+    prompt: |
+      ⚠️  BRANCH SWITCH WARNING
+
+      This will switch from: {{.CURRENT_BRANCH}}
+                        to: {{.TARGET_BRANCH}}
+
+      Uncommitted changes may be lost.
+
+      Continue?
+    cmds:
+      - echo "Switching to {{.TARGET_BRANCH}}..."
+
+  resolve:ref:
+    internal: true
+    desc: Validate and resolve git ref to SHA
+    silent: true
+    vars:
+      REF: "{{.REF}}"
+    preconditions:
+      - sh: '[ -n "{{.REF}}" ]'
+        msg: |
+          ❌ REF parameter is required
+
+          Usage:
+            task <command> -- <branch|tag|commit>
+            task <command> REF=<branch|tag|commit>
+    cmds:
+      - |
+        REF="{{.REF}}"
+
+        # Check if ref exists
+        if ! git rev-parse --verify "$REF" >/dev/null 2>&1; then
+          echo "❌ Git ref '$REF' not found" >&2
+          echo "" >&2
+          echo "Available branches:" >&2
+          git branch -a --format="   %(refname:short)" | head -10 >&2
+          echo "" >&2
+          echo "Recent tags:" >&2
+          git tag --sort=-version:refname | head -5 >&2
+          exit 1
+        fi
+
+        # Resolve to SHA
+        SHA=$(git rev-parse --short=7 "$REF")
+        echo "$SHA"
+
+  current:branch:
+    internal: true
+    desc: Get current branch name
+    silent: true
+    cmds:
+      - git branch --show-current
+
+  has:uncommitted:
+    internal: true
+    desc: Check if there are uncommitted changes (exits 0 if dirty, 1 if clean)
+    silent: true
+    cmds:
+      - |
+        if [ -n "$(git status --porcelain)" ]; then
+          exit 0  # Has uncommitted changes
+        else
+          exit 1  # Clean
+        fi

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session, select, col
 from backend.db.models import Account
 from backend.db.database import get_session_dependency
+from typing import Any, Dict
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
 # ============================================================================
 
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AccountCreate(BaseModel):
@@ -25,7 +26,7 @@ class AccountCreate(BaseModel):
     name: str
     account_type: str
     address_or_identifier: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     owned: bool = True
     enabled: bool = True
 
@@ -36,7 +37,7 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = None
     account_type: Optional[str] = None
     address_or_identifier: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     owned: Optional[bool] = None
     enabled: Optional[bool] = None
 
@@ -48,13 +49,12 @@ class AccountResponse(BaseModel):
     name: str
     account_type: str
     address_or_identifier: Optional[str]
-    tags: Optional[List[str]]
+    tags: Optional[List[Dict[str, Any]]]
     owned: bool
     enabled: bool
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================

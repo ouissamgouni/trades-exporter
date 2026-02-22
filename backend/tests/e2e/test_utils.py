@@ -11,7 +11,6 @@ from contextlib import contextmanager
 
 from sqlmodel import Session
 
-from backend.config.loader import set_test_mode
 from backend.db.database import get_engine, init_db
 from backend.db.models import NormalizedTransaction, RawTransaction
 from backend.db.repositories import (
@@ -32,9 +31,6 @@ class E2EDatabaseManager:
         Setup test database with schema.
         Ensures TEST_MODE is set and initializes PostgreSQL tables.
         """
-        # Ensure test mode is active
-        os.environ["TEST_MODE"] = "true"
-        set_test_mode(True)
 
         # Initialize test database
         init_db()

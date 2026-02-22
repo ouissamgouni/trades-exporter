@@ -16,6 +16,54 @@ from backend.services.pipeline.context import PersistenceResult, PipelineContext
 
 log = configure_logging("persistence_stage")
 
+# Fields on NormalizedTransaction that link to cascade-deleted children
+# (cost_lots, pnl_warnings, calculation_legs, realized_pnl, lot_settlements, cost_lot_events)
+# ORM-level session.delete() triggers these cascades automatically.
+
+
+# Fields that should trigger an update when changed
+# Aligned with COMPARABLE_FIELDS from persistence_service_normalized.py
+UPDATABLE_FIELDS = [
+    # Source metadata
+    "source_transaction_type",
+    "source_asset_symbol",
+    "source_price_quote_asset_symbol",
+    "source_fee_quote_asset_symbol",
+    
+    # Asset resolution
+    "asset_id",
+    "price_quote_asset_id",
+    "fee_quote_asset_id",
+    
+    # Core transaction data
+    "date_time",
+    "direction",
+    "transaction_type",
+    "quantity",
+    "price",
+    "fee",
+    
+    # Account ownership and transfer fields
+    "source_account",
+    "source_from_account",
+    "source_to_account",
+    "from_account_id",
+    "to_account_id",
+    
+    # Blockchain fields
+    "network",
+    "network_transaction_id",
+    "token_contract_address",
+    
+    # Tax and review settings
+    "include_fee",
+    "disposal_taxable",
+    "review_status",
+]
+
+# Float/Decimal fields that need tolerance-based comparison
+FLOAT_FIELDS = {"quantity", "price", "fee"}
+
 
 class PersistenceStage(PipelineStage):
     """
@@ -59,7 +107,47 @@ class PersistenceStage(PipelineStage):
 
         for tx in transactions:
             try:
-                # Check for existing transaction
+                # --- Renormalize mode: atomically delete old + insert new ---
+                if context.renormalize_mode:
+                    # Look up the existing raw transaction record (it already exists in DB)
+                    existing_raw = raw_repo.get_by_source(
+                        source=tx.source,
+                        source_transaction_id=tx.source_transaction_id,
+                    )
+                    raw_id = existing_raw.id if existing_raw else None
+
+                    if existing_raw:
+                        # Delete all existing normalized transactions linked to this raw record
+                        # ORM cascade will clean up cost_lots, P&L, warnings, etc.
+                        existing_normalized = self._get_normalized_by_raw_id(context.session, existing_raw.id)
+                        for old_tx in existing_normalized:
+                            context.session.delete(old_tx)
+                        if existing_normalized:
+                            context.session.flush()  # Execute deletes within same transaction
+                            log.debug(
+                                f"renormalize_deleted",
+                                source=tx.source,
+                                tx_id=tx.source_transaction_id,
+                                deleted_count=len(existing_normalized),
+                            )
+
+                    # Insert fresh normalized transaction
+                    db_tx = self._pydantic_to_sqlmodel(tx, raw_id, context.sync_connector_run_id, context.session)
+                    norm_repo.create(db_tx)
+                    new_count += 1
+                    result.synced_ids.append(tx.source_transaction_id)
+
+                    log.info(
+                        "renormalize_saved",
+                        source=tx.source,
+                        tx_id=tx.source_transaction_id,
+                        amount=str(tx.quantity),
+                        asset=tx.source_asset_symbol,
+                    )
+                    continue
+
+                # --- Normal sync mode ---
+                # Check for existing transaction (same source + source_transaction_id)
                 existing = self._get_existing(context.session, tx)
 
                 if existing:
@@ -69,11 +157,33 @@ class PersistenceStage(PipelineStage):
                         context.session.add(existing)
                         updated_count += 1
                         result.updated_ids.append(tx.source_transaction_id)
-                        log.debug(f"Updated transaction {tx.source_transaction_id}")
+                        log.info(
+                            "transaction_updated",
+                            source=tx.source,
+                            tx_type=tx.transaction_type,
+                            tx_id=tx.source_transaction_id,
+                            amount=str(tx.quantity),
+                            asset=tx.source_asset_symbol,
+                            timestamp=tx.date_time.isoformat() if tx.date_time else None,
+                        )
                     else:
+                        # Still update sync_connector_run_id for tracking even if skipped
+                        if context.sync_connector_run_id and existing.sync_connector_run_id != context.sync_connector_run_id:
+                            existing.sync_connector_run_id = context.sync_connector_run_id
+                            context.session.add(existing)
+                        
                         skipped_count += 1
                         result.skipped_ids.append(tx.source_transaction_id)
-                        log.debug(f"Skipped duplicate {tx.source_transaction_id}")
+                        log.info(
+                            "transaction_skipped",
+                            reason="duplicate",
+                            source=tx.source,
+                            tx_type=tx.transaction_type,
+                            tx_id=tx.source_transaction_id,
+                            amount=str(tx.quantity),
+                            asset=tx.source_asset_symbol,
+                            timestamp=tx.date_time.isoformat() if tx.date_time else None,
+                        )
                     continue
 
                 # Insert raw transaction if we have raw_item
@@ -87,12 +197,20 @@ class PersistenceStage(PipelineStage):
                     )
 
                 # Create normalized transaction
-                db_tx = self._pydantic_to_sqlmodel(tx, raw_id, context.sync_connector_run_id)
+                db_tx = self._pydantic_to_sqlmodel(tx, raw_id, context.sync_connector_run_id, context.session)
                 norm_repo.create(db_tx)
                 new_count += 1
                 result.synced_ids.append(tx.source_transaction_id)
 
-                log.debug(f"Created transaction {tx.source_transaction_id}")
+                log.info(
+                    "transaction_saved",
+                    source=tx.source,
+                    tx_type=tx.transaction_type,
+                    tx_id=tx.source_transaction_id,
+                    amount=str(tx.quantity),
+                    asset=tx.source_asset_symbol,
+                    timestamp=tx.date_time.isoformat() if tx.date_time else None,
+                )
 
             except Exception as e:
                 error_msg = f"Failed to persist {tx.source_transaction_id}: {e}"
@@ -119,12 +237,17 @@ class PersistenceStage(PipelineStage):
         # Store persistence result on context for sync job tracking
         context.persistence_result = result
 
-        log.info(
-            f"Persistence complete: {new_count} new, "
-            f"{updated_count} updated, {skipped_count} skipped"
+        connector_name = getattr(context, 'connector_name', None) or 'unknown'
+        log.debug(
+            "persistence_complete",
+            connector=connector_name,
+            new_count=new_count,
+            updated_count=updated_count,
+            skipped_count=skipped_count,
         )
 
-        return transactions, True
+        # Return False if any individual transaction failed to persist
+        return transactions, len(result.error_details) == 0
 
     def _get_existing(
         self,
@@ -140,28 +263,31 @@ class PersistenceStage(PipelineStage):
         )
         return session.exec(statement).first()
 
+    def _get_normalized_by_raw_id(
+        self,
+        session,
+        raw_transaction_id: int,
+    ) -> List[NormalizedTransaction]:
+        """Get all normalized transactions linked to a raw transaction ID."""
+        from sqlmodel import select
+
+        statement = select(NormalizedTransaction).where(
+            NormalizedTransaction.raw_transaction_id == raw_transaction_id,
+        )
+        return list(session.exec(statement).all())
+
     def _needs_update(
         self,
         existing: NormalizedTransaction,
         new: NormalizedTransaction,
     ) -> bool:
-        """Check if existing transaction needs to be updated."""
-        # Compare key fields
-        fields_to_compare = [
-            "quantity",
-            "price",
-            "total",
-            "fee",
-            "direction",
-            "transaction_type",
-            "asset_id",
-            "price_quote_asset_id",
-            "fee_quote_asset_id",
-            "from_account_id",
-            "to_account_id",
-        ]
-
-        for field in fields_to_compare:
+        """
+        Check if existing transaction needs to be updated.
+        
+        Uses approximate comparison for float fields to avoid false positives
+        from floating point precision differences.
+        """
+        for field in UPDATABLE_FIELDS:
             old_val = getattr(existing, field, None)
             new_val = getattr(new, field, None)
 
@@ -169,10 +295,42 @@ class PersistenceStage(PipelineStage):
             if new_val is None:
                 continue
 
-            if old_val != new_val:
+            # Use tolerance for float/decimal comparisons
+            if field in FLOAT_FIELDS:
+                if not self._floats_equal(old_val, new_val):
+                    log.debug(f"Field {field} changed: {old_val} -> {new_val}")
+                    return True
+            elif old_val != new_val:
+                log.debug(f"Field {field} changed: {old_val} -> {new_val}")
                 return True
 
         return False
+
+    def _floats_equal(
+        self,
+        a: Optional[float],
+        b: Optional[float],
+        rel_tol: float = 1e-9,
+        abs_tol: float = 1e-12,
+    ) -> bool:
+        """
+        Compare two floats with tolerance.
+        
+        Uses relative tolerance for larger numbers and absolute tolerance
+        for numbers close to zero.
+        """
+        if a is None and b is None:
+            return True
+        if a is None or b is None:
+            return False
+        
+        # Handle exact equality (including both being 0)
+        if a == b:
+            return True
+        
+        # Use math.isclose for tolerance-based comparison
+        import math
+        return math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
 
     def _update_transaction(
         self,
@@ -181,28 +339,7 @@ class PersistenceStage(PipelineStage):
         sync_connector_run_id: Optional[int] = None,
     ) -> None:
         """Update existing transaction with new values."""
-        # Update fields that changed
-        updatable_fields = [
-            "source_transaction_type",
-            "source_asset_symbol",
-            "source_price_quote_asset_symbol",
-            "source_fee_quote_asset_symbol",
-            "asset_id",
-            "price_quote_asset_id",
-            "fee_quote_asset_id",
-            "direction",
-            "transaction_type",
-            "quantity",
-            "price",
-            "total",
-            "fee",
-            "from_account_id",
-            "to_account_id",
-            "group_id",
-            "disposal_taxable",
-        ]
-
-        for field in updatable_fields:
+        for field in UPDATABLE_FIELDS:
             new_val = getattr(new, field, None)
             if new_val is not None:
                 setattr(existing, field, new_val)
@@ -218,10 +355,34 @@ class PersistenceStage(PipelineStage):
         tx: NormalizedTransaction,
         raw_id: Optional[int],
         sync_connector_run_id: Optional[int] = None,
+        session = None,
     ) -> NormalizedTransaction:
         """Convert Pydantic model to SQLModel."""
+        # Import here to avoid circular dependency
+        from backend.services.duplicate_detection_service import compute_transaction_hash
+        
         # Handle tags
-        tags = tx.tags if isinstance(tx.tags, dict) else {}
+        tags = tx.tags if isinstance(tx.tags, list) else []
+        
+        # Compute transaction hash for duplicate detection
+        transaction_hash = None
+        if (tx.account_id and tx.date_time and 
+            tx.source_asset_symbol and tx.direction):
+            try:
+                transaction_hash = compute_transaction_hash(
+                    account_id=tx.account_id,
+                    datetime_obj=tx.date_time,
+                    source_asset_symbol=tx.source_asset_symbol,
+                    source_price_quote_asset_symbol=tx.source_price_quote_asset_symbol or "",
+                    direction=tx.direction,
+                    quantity=tx.quantity,
+                    price=tx.price,
+                    session=session,
+                    asset_id=tx.asset_id,
+                    price_quote_asset_id=tx.price_quote_asset_id,
+                )
+            except Exception as e:
+                log.warning(f"Failed to compute transaction hash: {e}")
 
         return NormalizedTransaction(
             source=tx.source,
@@ -256,4 +417,7 @@ class PersistenceStage(PipelineStage):
             review_notes=tx.review_notes,
             synced_at=datetime.now(timezone.utc),
             tags=tags,
+            content_hash=tx.content_hash,  # Include content_hash for cross-source deduplication
+            transaction_hash=transaction_hash,  # Hash for efficient duplicate detection
         )
+

@@ -77,6 +77,18 @@ class ConnectorLoaderService:
         """
         return self.repo.get_enabled()
 
+    def get_all_connectors_with_accounts(self) -> List[Tuple[AccountConnector, Account]]:
+        """
+        Get ALL connectors from the database (enabled and disabled).
+
+        Use this when you need to apply runtime overrides that may enable
+        disabled connectors.
+
+        Returns:
+            List of (AccountConnector, Account) tuples ordered by sync_priority
+        """
+        return self.repo.get_all()
+
     def get_connectors_for_account(self, account_id: int) -> List[AccountConnector]:
         """
         Get all connectors for a specific account.
@@ -177,6 +189,7 @@ class ConnectorLoaderService:
         # Add account context
         config["_account_id"] = account.id
         config["_account_name"] = account.name
+        config["_account_address_or_identifier"] = account.address_or_identifier
         config["_connector_id"] = account_connector.id
 
         # Resolve credentials
@@ -186,6 +199,15 @@ class ConnectorLoaderService:
 
         # For on-chain connectors, add chain-specific config
         if self._registry.is_onchain(connector_type):
+            # Inherit address from account if not explicitly set in config
+            if "address" not in config or not config.get("address"):
+                if account.address_or_identifier:
+                    config["address"] = account.address_or_identifier
+                    log.debug(
+                        f"Inherited address '{account.address_or_identifier}' from account '{account.name}' "
+                        f"for connector '{connector_type}'"
+                    )
+            
             chain = db_config.get("chain")
             chain_config_obj = self._registry.get_chain_config(connector_type, chain)
             if chain_config_obj:
@@ -274,22 +296,6 @@ class ConnectorLoaderService:
         except Exception as e:
             log.error(f"❌ Failed to instantiate {connector_type}: {e}")
             return None
-
-    def get_all_connectors(self) -> List[Tuple[Any, AccountConnector, Account]]:
-        """
-        Get all enabled connectors as instantiated objects.
-
-        Returns:
-            List of (connector_instance, account_connector, account) tuples
-        """
-        connectors = []
-
-        for account_connector, account in self.get_enabled_connectors():
-            connector = self.instantiate_connector(account_connector, account)
-            if connector:
-                connectors.append((connector, account_connector, account))
-
-        return connectors
 
     def get_onchain_addresses(self) -> List[Dict[str, Any]]:
         """

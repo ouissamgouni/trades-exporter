@@ -25,6 +25,8 @@ from backend.api.routes import (
     connectors,
     categories,
     fixtures,
+    data_health,
+    timeline,
 )
 from backend.config.loader import get_database_url
 from backend.db import init_db
@@ -87,6 +89,8 @@ app.include_router(account_connectors.router)
 app.include_router(connectors.router)
 app.include_router(categories.router)
 app.include_router(fixtures.router)
+app.include_router(data_health.router)
+app.include_router(timeline.router)
 
 
 @app.get("/")

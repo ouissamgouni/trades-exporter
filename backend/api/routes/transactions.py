@@ -3,21 +3,30 @@ Transaction endpoints for the Trade Exporter API.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from backend.api.schemas import TransactionResponse, TransactionUpdate, AssetRef
+from backend.api.schemas import (
+    TransactionResponse, 
+    TransactionUpdate, 
+    AssetRef,
+    TransactionListResponse,
+    FilterMetadata,
+    AppliedFilters,
+    ValidationWarning,
+)
 from backend.db.database import get_db
 from backend.db.models import (
     NormalizedTransaction,
     Asset,
     CalculationUnit,
     Account,
+    RawAccount,
     ReviewStatus,
     TaxabilityStatus,
     Direction,
@@ -28,6 +37,7 @@ from backend.db.models import (
     RealizedPnl,
     LotSettlement,
     CostLotEvent,
+    SyncJobConnectorRun,
 )
 from backend.services.pipeline import (
     create_default_pipeline,
@@ -154,14 +164,16 @@ class TransactionCreate(BaseModel):
         description="Review status",
     )
     review_notes: Optional[str] = Field(None, description="Notes")
-    tags: Optional[List[Dict[str, str]]] = Field(
+    tags: Optional[List[Dict[str, Any]]] = Field(
         None, description="Tags as list of {key: value} pairs"
     )
 
 
 def _serialize_datetime(value):
-    """Convert datetime to ISO string if needed."""
+    """Convert datetime to ISO string with UTC timezone marker if needed."""
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     return value
 
@@ -204,9 +216,49 @@ def _build_transaction_response(
     account_name = tx.account_rel.name if tx.account_rel else None
     from_account_name = tx.from_account.name if tx.from_account else None
     to_account_name = tx.to_account.name if tx.to_account else None
+    
+    # Extract connector run metadata
+    connector_name = None
+    run_datetime = None
+    if tx.sync_connector_run:
+        connector_name = tx.sync_connector_run.connector_type
+        run_datetime = tx.sync_connector_run.started_at
 
+    # Normalize tags field - get directly from model without model_dump() to avoid list->dict conversion
+    tags = tx.tags
+    normalized_tags = []
+    if tags is None:
+        normalized_tags = []
+    elif isinstance(tags, dict):
+        # Convert multi-key dict to separate single-key dicts
+        # E.g., {'goal': 'test', 'expanded': True} -> [{'goal': 'test'}, {'expanded': True}]
+        for key, value in tags.items():
+            normalized_tags.append({key: value})
+    elif isinstance(tags, list):
+        # Ensure all items are dicts and split multi-key dicts into separate single-key dicts
+        for tag in tags:
+            if isinstance(tag, dict):
+                # If tag has multiple keys, split it into separate single-key dicts
+                if len(tag) > 1:
+                    for key, value in tag.items():
+                        normalized_tags.append({key: value})
+                else:
+                    # Already a single-key dict, keep as-is
+                    normalized_tags.append(tag)
+            elif isinstance(tag, str):
+                # Legacy string format - convert to dict
+                normalized_tags.append({"tag": tag})
+    else:
+        # Unknown format, set to empty list
+        normalized_tags = []
+
+    # Build response using model_dump() but override specific fields
     tx_dict = tx.model_dump()
     tx_dict["total"] = tx.total  # Computed property: price * quantity
+    tx_dict["connector_name"] = connector_name
+    tx_dict["run_datetime"] = _serialize_datetime(run_datetime)
+    tx_dict["tags"] = normalized_tags  # Use pre-normalized tags
+    tx_dict["synced_at"] = _serialize_datetime(tx_dict.get("synced_at"))
     
     # Nested asset references
     tx_dict["linked_asset"] = linked_asset
@@ -221,7 +273,6 @@ def _build_transaction_response(
     tx_dict["account_name"] = account_name
     tx_dict["from_account_name"] = from_account_name
     tx_dict["to_account_name"] = to_account_name
-    tx_dict["synced_at"] = _serialize_datetime(tx_dict.get("synced_at"))
 
     return TransactionResponse(**tx_dict)
 
@@ -260,26 +311,152 @@ class FilterOptionsResponse(BaseModel):
     directions: List[FilterOption]
     review_statuses: List[FilterOption]
     taxability_statuses: List[FilterOption]
+    connector_runs: List[FilterOption]
+    tags: List[FilterOption]
+    networks: List[FilterOption]
 
 
 @router.get("/filter-options", response_model=FilterOptionsResponse)
-def get_filter_options(session: Session = Depends(get_db)):
+def get_filter_options(
+    # Accept filter parameters for context-aware counting
+    review_status: Optional[str] = Query(None),
+    taxability: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    account_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    category_id: Optional[str] = Query(None),
+    transaction_type: Optional[str] = Query(None),
+    direction: Optional[str] = Query(None),
+    connector_run_id: Optional[str] = Query(None),
+    tag_key: Optional[str] = Query(None),
+    network: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    session: Session = Depends(get_db)
+):
     """
     Get all available filter options for the transactions table.
     
+    Applies current filters to show contextual counts based on active filter state.
     Returns distinct values from the database for dynamic filter dropdowns.
     This ensures filters always show values that actually exist in the data.
     """
     from backend.db.models import Category, Dimension, AssetCategory
     from sqlalchemy import func, distinct
+    from datetime import datetime
+    
+    def build_base_query():
+        """Build base query with all active filters applied."""
+        query = select(NormalizedTransaction.id)
+        
+        # Review status filter
+        if review_status:
+            query = query.where(NormalizedTransaction.review_status == review_status)
+        
+        # Taxability filter
+        if taxability:
+            query = query.where(NormalizedTransaction.taxability_status == taxability)
+        
+        # Source filter
+        if source:
+            sources_list = [s.strip() for s in source.split(',')]
+            query = query.where(NormalizedTransaction.source.in_(sources_list))
+        
+        # Account filter
+        if account_id:
+            account_ids_list = [int(a.strip()) for a in account_id.split(',')]
+            query = query.where(NormalizedTransaction.account_id.in_(account_ids_list))
+        
+        # Asset filter
+        if asset_id:
+            asset_ids_list = [int(a.strip()) for a in asset_id.split(',')]
+            query = query.where(NormalizedTransaction.asset_id.in_(asset_ids_list))
+        
+        # Category filter
+        if category_id:
+            category_ids_list = [int(c.strip()) for c in category_id.split(',')]
+            query = query.where(NormalizedTransaction.category_id.in_(category_ids_list))
+        
+        # Transaction type filter
+        if transaction_type:
+            types_list = [t.strip() for t in transaction_type.split(',')]
+            query = query.where(NormalizedTransaction.transaction_type.in_(types_list))
+        
+        # Direction filter
+        if direction:
+            directions_list = [d.strip() for d in direction.split(',')]
+            query = query.where(NormalizedTransaction.direction.in_(directions_list))
+        
+        # Connector run filter
+        if connector_run_id:
+            run_ids_list = [int(r.strip()) for r in connector_run_id.split(',')]
+            query = query.where(NormalizedTransaction.sync_connector_run_id.in_(run_ids_list))
+        
+        # Date range filter (using centralized helpers)
+        if date_from:
+            try:
+                from backend.core.utils import parse_date_from
+                from_dt = parse_date_from(date_from)
+                query = query.where(NormalizedTransaction.date_time >= from_dt)
+            except ValueError:
+                pass
+        
+        if date_to:
+            try:
+                from backend.core.utils import parse_date_to
+                to_dt = parse_date_to(date_to)
+                query = query.where(NormalizedTransaction.date_time <= to_dt)
+            except ValueError:
+                pass
+        
+        # Tag filter using JSONB operators for performance
+        if tag_key:
+            from sqlalchemy import cast, String
+            from sqlalchemy.dialects.postgresql import JSONB
+            
+            tag_filters = [k.strip() for k in tag_key.split(',') if k.strip()]
+            
+            # Build JSONB query conditions
+            tag_conditions = []
+            for tag_filter in tag_filters:
+                if ':' in tag_filter:
+                    # Exact key:value match - check if tags contains {"key": "value"}
+                    key, value = tag_filter.split(':', 1)
+                    # Check if any element in tags array has this key:value pair
+                    tag_conditions.append(
+                        NormalizedTransaction.tags.op('@>')([{key: value}])
+                    )
+                else:
+                    # Just key - check if any tag has this key (any value)
+                    # This requires checking if any array element contains the key
+                    tag_conditions.append(
+                        cast(NormalizedTransaction.tags, String).like(f'%"{tag_filter}"%')
+                    )
+            
+            # OR all tag conditions together
+            if tag_conditions:
+                from sqlalchemy import or_
+                query = query.where(or_(*tag_conditions))
+        
+        # Network filter
+        if network:
+            networks_list = [n.strip() for n in network.split(',')]
+            query = query.where(NormalizedTransaction.network.in_(networks_list))
+        
+        return query
     
     try:
-        # Get distinct sources with counts
+        # Build base CTE for filtered transactions (now includes tag filtering via JSONB)
+        base_query = build_base_query()
+        base_cte = base_query.cte("filtered_txs")
+        
+        # Get distinct sources with counts (filtered)
         source_query = (
             select(
                 NormalizedTransaction.source,
-                func.count(NormalizedTransaction.id).label('count')
+                func.count(base_cte.c.id).label('count')
             )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
             .group_by(NormalizedTransaction.source)
             .order_by(NormalizedTransaction.source)
         )
@@ -289,14 +466,15 @@ def get_filter_options(session: Session = Depends(get_db)):
             for s in sources if s[0]
         ]
         
-        # Get accounts with counts
+        # Get accounts with counts (filtered)
         account_query = (
             select(
                 Account.id,
                 Account.name,
-                func.count(NormalizedTransaction.id).label('count')
+                func.count(base_cte.c.id).label('count')
             )
             .outerjoin(NormalizedTransaction, NormalizedTransaction.account_id == Account.id)
+            .outerjoin(base_cte, NormalizedTransaction.id == base_cte.c.id)
             .group_by(Account.id, Account.name)
             .order_by(Account.name)
         )
@@ -306,15 +484,16 @@ def get_filter_options(session: Session = Depends(get_db)):
             for a in accounts
         ]
         
-        # Get assets that have transactions
+        # Get assets that have transactions (filtered)
         asset_query = (
             select(
                 Asset.asset_id,
                 Asset.symbol,
                 Asset.label,
-                func.count(NormalizedTransaction.id).label('count')
+                func.count(base_cte.c.id).label('count')
             )
             .join(NormalizedTransaction, NormalizedTransaction.asset_id == Asset.asset_id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
             .group_by(Asset.asset_id, Asset.symbol, Asset.label)
             .order_by(Asset.symbol)
         )
@@ -369,12 +548,13 @@ def get_filter_options(session: Session = Depends(get_db)):
             for d in dimensions
         ]
         
-        # Get transaction types with counts
+        # Get transaction types with counts (filtered)
         type_query = (
             select(
                 NormalizedTransaction.transaction_type,
-                func.count(NormalizedTransaction.id).label('count')
+                func.count(base_cte.c.id).label('count')
             )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
             .group_by(NormalizedTransaction.transaction_type)
             .order_by(NormalizedTransaction.transaction_type)
         )
@@ -384,12 +564,13 @@ def get_filter_options(session: Session = Depends(get_db)):
             for t in types if t[0]
         ]
         
-        # Get directions with counts
+        # Get directions with counts (filtered)
         direction_query = (
             select(
                 NormalizedTransaction.direction,
-                func.count(NormalizedTransaction.id).label('count')
+                func.count(base_cte.c.id).label('count')
             )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
             .group_by(NormalizedTransaction.direction)
             .order_by(NormalizedTransaction.direction)
         )
@@ -399,18 +580,125 @@ def get_filter_options(session: Session = Depends(get_db)):
             for d in directions if d[0]
         ]
         
-        # Static review statuses
+        # Get review statuses with counts (filtered)
+        review_status_query = (
+            select(
+                NormalizedTransaction.review_status,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(NormalizedTransaction.review_status)
+        )
+        review_results = session.exec(review_status_query).all()
+        review_status_counts = {r[0]: r[1] for r in review_results}
+        
         review_status_options = [
-            FilterOption(value='pending', label='Pending'),
-            FilterOption(value='valid', label='Valid'),
-            FilterOption(value='invalid', label='Invalid'),
+            FilterOption(value='pending', label='Pending', count=review_status_counts.get('pending', 0)),
+            FilterOption(value='valid', label='Valid', count=review_status_counts.get('valid', 0)),
+            FilterOption(value='invalid', label='Invalid', count=review_status_counts.get('invalid', 0)),
         ]
         
-        # Static taxability statuses
+        # Get taxability statuses with counts (filtered)
+        taxability_query = (
+            select(
+                NormalizedTransaction.taxability_status,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(NormalizedTransaction.taxability_status)
+        )
+        taxability_results = session.exec(taxability_query).all()
+        taxability_counts = {t[0]: t[1] for t in taxability_results}
+        
         taxability_options = [
-            FilterOption(value='taxable', label='Taxable'),
-            FilterOption(value='non_taxable', label='Non-Taxable'),
-            FilterOption(value='unknown', label='Unknown'),
+            FilterOption(value='taxable', label='Taxable', count=taxability_counts.get('taxable', 0)),
+            FilterOption(value='non_taxable', label='Non-Taxable', count=taxability_counts.get('non_taxable', 0)),
+            FilterOption(value='unknown', label='Unknown', count=taxability_counts.get('unknown', 0)),
+        ]
+        
+        # Get connector runs with counts (most recent first, filtered)
+        connector_run_query = (
+            select(
+                SyncJobConnectorRun.id,
+                SyncJobConnectorRun.connector_type,
+                SyncJobConnectorRun.account_name,
+                SyncJobConnectorRun.started_at,
+                func.count(base_cte.c.id).label('count')
+            )
+            .outerjoin(NormalizedTransaction, NormalizedTransaction.sync_connector_run_id == SyncJobConnectorRun.id)
+            .outerjoin(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(
+                SyncJobConnectorRun.id,
+                SyncJobConnectorRun.connector_type,
+                SyncJobConnectorRun.account_name,
+                SyncJobConnectorRun.started_at
+            )
+            .having(func.count(base_cte.c.id) > 0)
+            .order_by(SyncJobConnectorRun.started_at.desc())
+            .limit(50)
+        )
+        connector_runs = session.exec(connector_run_query).all()
+        connector_run_options = [
+            FilterOption(
+                value=str(cr[0]),
+                label=f"{cr[2] or 'Unknown'} {cr[1]} #{cr[0]} - ({cr[3].strftime('%m/%d %H:%M') if cr[3] else 'N/A'})",
+                count=cr[4]
+            )
+            for cr in connector_runs
+        ]
+        
+        # Get unique tag key:value pairs from filtered transactions
+        try:
+            tag_statement = (
+                select(NormalizedTransaction.tags)
+                .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+                .where(NormalizedTransaction.tags.isnot(None))
+            )
+            tag_results = session.exec(tag_statement).all()
+            
+            # Collect unique tag key:value pairs
+            # Tags are stored as list of single-key dicts: [{key: value}, {key: value}]
+            unique_tags = set()
+            for tags in tag_results:
+                if tags and isinstance(tags, list):
+                    for tag in tags:
+                        if isinstance(tag, dict):
+                            for key, value in tag.items():
+                                tag_str = f"{key}:{value}"
+                                unique_tags.add(tag_str)
+            
+            tag_options = [
+                FilterOption(
+                    value=tag_str,
+                    label=tag_str.replace('_', ' ').replace(':', ': ')
+                )
+                for tag_str in sorted(unique_tags) if tag_str
+            ]
+        except Exception as e:
+            print(f"Error fetching tags: {e}")
+            tag_options = []
+        
+        # Get distinct networks with counts (filtered)
+        from backend.core.network_normalizer import get_network_display_name
+        network_query = (
+            select(
+                NormalizedTransaction.network,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.network.isnot(None))
+            .where(NormalizedTransaction.network != '')
+            .group_by(NormalizedTransaction.network)
+            .order_by(NormalizedTransaction.network)
+        )
+        networks = session.exec(network_query).all()
+        network_options = [
+            FilterOption(
+                value=n[0],
+                label=get_network_display_name(n[0]),
+                count=n[1]
+            )
+            for n in networks if n[0]
         ]
         
         return FilterOptionsResponse(
@@ -424,6 +712,9 @@ def get_filter_options(session: Session = Depends(get_db)):
             directions=direction_options,
             review_statuses=review_status_options,
             taxability_statuses=taxability_options,
+            connector_runs=connector_run_options,
+            tags=tag_options,
+            networks=network_options,
         )
         
     except Exception as e:
@@ -452,48 +743,48 @@ from backend.services.similarity_service import (
 from backend.db.models import RawAsset, RawAccount, Asset, Account
 
 
-@router.get("/data-health-check", response_model=DataHealthCheckResponse)
-def get_data_health_check(
+# =============================================================================
+# DEPRECATED: Legacy unified endpoint - Use split endpoints instead
+# - GET /transactions/data-health-check/status for counts
+# - GET /transactions/data-health-check/linkage-issues for linkage issues
+# - GET /transactions/data-health-check/transfer-issues for transfer issues
+# =============================================================================
+
+# @router.get("/data-health-check", response_model=DataHealthCheckResponse)
+# def get_data_health_check(...):
+#     # Legacy endpoint removed - use split endpoints above
+#     pass
+
+
+# =============================================================================
+# New Data Health Check Endpoints (Split by Resource Type)
+# =============================================================================
+
+from backend.api.schemas import (
+    TransactionStatusResponse,
+    MissingDataIssuesResponse,
+    LinkageIssuesResponse,
+    TransferIssuesResponse,
+    PaginationMetadata,
+)
+
+
+@router.get("/data-health-check/status", response_model=TransactionStatusResponse)
+def get_transaction_status(
     account_ids: Optional[str] = Query(
         None,
-        description="Optional comma-separated account IDs to filter scope (matches P&L calculation filter)"
-    ),
-    include_details: bool = Query(
-        False,
-        description="Include detailed raw values needing mapping (for inline fixes)"
-    ),
-    detail_limit: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Maximum number of detail items per category"
-    ),
-    issues_page: int = Query(
-        1,
-        ge=1,
-        description="Page number for transaction issues list"
-    ),
-    issues_per_page: int = Query(
-        50,
-        ge=1,
-        le=200,
-        description="Number of issues per page"
+        description="Optional comma-separated account IDs to filter scope"
     ),
     session: Session = Depends(get_db),
 ):
     """
-    Get data health check for transactions.
+    Get transaction status counts and data health metrics.
     
-    Returns aggregated counts of data completeness issues:
-    - Transaction counts by review status (valid, pending, invalid)
-    - Missing required data (asset, account, price_quote_asset, fee_quote_asset)
-    - Unhandled bundle suggestions count
-    
-    When include_details=true, also returns detailed lists of raw assets and raw accounts
-    needing mapping, with fuzzy match suggestions for inline fixing.
-    
-    Use optional account_ids filter to match P&L calculation scope.
-    Always returns fresh data (no caching).
+    Returns:
+    - Transaction counts by review status (valid, pending, invalid, total)
+    - Data quality issue counts (linkage, transfer, duplicates)
+    - Bundle suggestions count
+    - Aggregated total_issues and has_issues flags
     """
     try:
         # Parse account IDs filter if provided
@@ -510,8 +801,11 @@ def get_data_health_check(
                 return query.where(NormalizedTransaction.account_id.in_(account_id_list))
             return query
         
-        # Total count
-        total_query = base_filter(select(func.count(NormalizedTransaction.id)))
+        # Total count (excluding invalid transactions)
+        total_query = base_filter(
+            select(func.count(NormalizedTransaction.id))
+            .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+        )
         total_count = session.exec(total_query).one()
         
         # Count by review status
@@ -533,352 +827,445 @@ def get_data_health_check(
         )
         invalid_count = session.exec(invalid_query).one()
         
-        # Missing asset_id
-        missing_asset_query = base_filter(
-            select(func.count(NormalizedTransaction.id))
-            .where(NormalizedTransaction.asset_id.is_(None))
-        )
-        missing_asset_count = session.exec(missing_asset_query).one()
+        # Get all data quality issue counts from IssueService
+        from backend.services.data_health import IssueService
+        issue_service = IssueService(session)
+        counts = issue_service.get_counts(account_ids=account_id_list, include_dismissed=False)
         
-        # Missing account_id (for trades - check account_id)
-        missing_account_query = base_filter(
-            select(func.count(NormalizedTransaction.id))
-            .where(NormalizedTransaction.account_id.is_(None))
-        )
-        missing_account_count = session.exec(missing_account_query).one()
-        
-        # Missing price_quote_asset_id
-        missing_price_quote_query = base_filter(
-            select(func.count(NormalizedTransaction.id))
-            .where(NormalizedTransaction.source_price_quote_asset_symbol.isnot(None),
-                NormalizedTransaction.price_quote_asset_id.is_(None))
-        )
-        missing_price_quote_count = session.exec(missing_price_quote_query).one()
-        
-        # Missing fee_quote_asset_id when fee > 0
-        missing_fee_quote_query = base_filter(
-            select(func.count(NormalizedTransaction.id))
-            .where(
-                NormalizedTransaction.source_fee_quote_asset_symbol.isnot(None),
-                NormalizedTransaction.fee_quote_asset_id.is_(None)
+        # Count transactions with unmapped raw accounts (not dismissed)
+        from backend.db.models import RawAccount
+        unmapped_accounts_tx_count = 0
+        try:
+            # Get all unmapped, non-dismissed raw accounts
+            unmapped_raw_accounts_stmt = select(RawAccount).where(
+                RawAccount.account_id == None,
+                RawAccount.dismissed == False
             )
-        )
-        missing_fee_quote_count = session.exec(missing_fee_quote_query).one()
-        
-        # Bundle suggestions count (unhandled)
-        suggestion_service = SuggestionService(session)
-        suggestions = suggestion_service.get_suggestions(max_suggestions=100)
-        
-        # If account filter, only count suggestions that include transactions from those accounts
-        if account_id_list:
-            filtered_suggestions = []
-            for s in suggestions:
-                if any(
-                    t.get("account_id") in account_id_list 
-                    for t in (s.transactions or [])
-                ):
-                    filtered_suggestions.append(s)
-            bundle_suggestions_count = len(filtered_suggestions)
-        else:
-            bundle_suggestions_count = len(suggestions)
-        
-        # Compute aggregate flags
-        total_issues = (
-            missing_asset_count + 
-            missing_account_count + 
-            missing_price_quote_count + 
-            missing_fee_quote_count +
-            pending_count
-        )
-        has_issues = total_issues > 0 or bundle_suggestions_count > 0
-        
-        # Build response
-        response_data = {
-            "total_count": total_count,
-            "valid_count": valid_count,
-            "pending_count": pending_count,
-            "invalid_count": invalid_count,
-            "missing_asset_count": missing_asset_count,
-            "missing_account_count": missing_account_count,
-            "missing_price_quote_count": missing_price_quote_count,
-            "missing_fee_quote_count": missing_fee_quote_count,
-            "bundle_suggestions_count": bundle_suggestions_count,
-            "has_issues": has_issues,
-            "total_issues": total_issues,
-        }
-        
-        # Include detailed raw values if requested
-        if include_details:
-            # Fetch all assets and accounts for fuzzy matching
-            all_assets = session.exec(select(Asset)).all()
-            all_accounts = session.exec(select(Account)).all()
+            unmapped_raw_accounts = session.exec(unmapped_raw_accounts_stmt).all()
             
-            # Get unique raw assets missing asset_id mapping
-            if missing_asset_count > 0:
-                missing_assets_query = (
-                    select(
-                        NormalizedTransaction.source_asset_symbol,
-                        NormalizedTransaction.source,
-                        func.count(NormalizedTransaction.id).label('count')
-                    )
-                    .where(
-                        NormalizedTransaction.asset_id.is_(None),
-                        NormalizedTransaction.source_asset_symbol.isnot(None)
-                    )
-                    .group_by(
-                        NormalizedTransaction.source_asset_symbol,
-                        NormalizedTransaction.source
-                    )
-                    .order_by(func.count(NormalizedTransaction.id).desc())
-                    .limit(detail_limit)
-                )
-                missing_assets_rows = session.exec(missing_assets_query).all()
-                response_data["missing_assets_detail"] = [
-                    RawAssetIssue(
-                        symbol=row[0],
-                        source=row[1],
-                        affected_count=row[2],
-                        suggestion=get_best_asset_suggestion(row[0], all_assets)
-                    )
-                    for row in missing_assets_rows
-                ]
-            
-            # Get unique raw accounts missing account_id mapping
-            if missing_account_count > 0:
-                missing_accounts_query = (
-                    select(
-                        RawAccount.id,
-                        RawAccount.label,
-                        RawAccount.source,
-                    )
-                    .where(RawAccount.account_id.is_(None))
-                    .limit(detail_limit)
-                )
-                missing_accounts_rows = session.exec(missing_accounts_query).all()
+            # Count distinct transactions using any of these unmapped raw accounts
+            if unmapped_raw_accounts:
+                from sqlalchemy import or_
+                conditions = []
+                for ra in unmapped_raw_accounts:
+                    conditions.extend([
+                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_account == ra.label),
+                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_from_account == ra.label),
+                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_to_account == ra.label),
+                    ])
                 
-                # For each raw account, count affected transactions
-                missing_accounts_detail = []
-                for row in missing_accounts_rows:
-                    raw_id, label, source = row
-                    # Count transactions using this raw account
-                    count_query = select(func.count(NormalizedTransaction.id)).where(
-                        NormalizedTransaction.source == source,
-                        NormalizedTransaction.source_account == label,
-                        NormalizedTransaction.account_id.is_(None)
+                if conditions:
+                    unmapped_tx_query = base_filter(
+                        select(func.count(func.distinct(NormalizedTransaction.id)))
+                        .where(or_(*conditions))
                     )
-                    affected_count = session.exec(count_query).one()
-                    if affected_count > 0:
-                        missing_accounts_detail.append(
-                            RawAccountIssue(
-                                id=raw_id,
-                                label=label,
-                                source=source,
-                                affected_count=affected_count,
-                                suggestion=get_best_account_suggestion(label, all_accounts)
-                            )
-                        )
-                response_data["missing_accounts_detail"] = missing_accounts_detail[:detail_limit]
-            
-            # Get unique raw assets missing price_quote_asset_id
-            if missing_price_quote_count > 0:
-                missing_price_quotes_query = (
-                    select(
-                        NormalizedTransaction.source_price_quote_asset_symbol,
-                        NormalizedTransaction.source,
-                        func.count(NormalizedTransaction.id).label('count')
-                    )
-                    .where(
-                        NormalizedTransaction.price_quote_asset_id.is_(None),
-                        NormalizedTransaction.source_price_quote_asset_symbol.isnot(None)
-                    )
-                    .group_by(
-                        NormalizedTransaction.source_price_quote_asset_symbol,
-                        NormalizedTransaction.source
-                    )
-                    .order_by(func.count(NormalizedTransaction.id).desc())
-                    .limit(detail_limit)
-                )
-                missing_price_quotes_rows = session.exec(missing_price_quotes_query).all()
-                response_data["missing_price_quotes_detail"] = [
-                    RawAssetIssue(
-                        symbol=row[0],
-                        source=row[1],
-                        affected_count=row[2],
-                        suggestion=get_best_asset_suggestion(row[0], all_assets)
-                    )
-                    for row in missing_price_quotes_rows
-                ]
-            
-            # Get unique raw assets missing fee_quote_asset_id
-            if missing_fee_quote_count > 0:
-                missing_fee_quotes_query = (
-                    select(
-                        NormalizedTransaction.source_fee_quote_asset_symbol,
-                        NormalizedTransaction.source,
-                        func.count(NormalizedTransaction.id).label('count')
-                    )
-                    .where(
-                        NormalizedTransaction.fee > 0,
-                        NormalizedTransaction.fee_quote_asset_id.is_(None),
-                        NormalizedTransaction.source_fee_quote_asset_symbol.isnot(None)
-                    )
-                    .group_by(
-                        NormalizedTransaction.source_fee_quote_asset_symbol,
-                        NormalizedTransaction.source
-                    )
-                    .order_by(func.count(NormalizedTransaction.id).desc())
-                    .limit(detail_limit)
-                )
-                missing_fee_quotes_rows = session.exec(missing_fee_quotes_query).all()
-                response_data["missing_fee_quotes_detail"] = [
-                    RawAssetIssue(
-                        symbol=row[0],
-                        source=row[1],
-                        affected_count=row[2],
-                        suggestion=get_best_asset_suggestion(row[0], all_assets)
-                    )
-                    for row in missing_fee_quotes_rows
-                ]
-            
-            # Build transaction-centric issues list
-            # Query all transactions with any missing mapping, sorted by date desc
-            issues_list = []
-            
-            # Build union of all transactions with issues
-            from sqlalchemy import union_all, literal
-            
-            # Subquery for missing asset
-            missing_asset_subq = (
-                select(
-                    NormalizedTransaction.id.label('tx_id'),
-                    literal(IssueType.ASSET.value).label('issue_type'),
-                    NormalizedTransaction.source_asset_symbol.label('raw_value'),
-                )
-                .where(NormalizedTransaction.asset_id.is_(None))
-                .where(NormalizedTransaction.source_asset_symbol.isnot(None))
-            )
-            if account_id_list:
-                missing_asset_subq = missing_asset_subq.where(
-                    NormalizedTransaction.account_id.in_(account_id_list)
-                )
-            
-            # Subquery for missing account
-            missing_account_subq = (
-                select(
-                    NormalizedTransaction.id.label('tx_id'),
-                    literal(IssueType.ACCOUNT.value).label('issue_type'),
-                    NormalizedTransaction.source_account.label('raw_value'),
-                )
-                .where(NormalizedTransaction.account_id.is_(None))
-                .where(NormalizedTransaction.source_account.isnot(None))
-            )
-            if account_id_list:
-                # Account filter doesn't apply when account is missing
-                pass
-            
-            # Subquery for missing price quote (only when price > 0)
-            missing_price_quote_subq = (
-                select(
-                    NormalizedTransaction.id.label('tx_id'),
-                    literal(IssueType.PRICE_QUOTE.value).label('issue_type'),
-                    NormalizedTransaction.source_price_quote_asset_symbol.label('raw_value'),
-                )
-                .where(NormalizedTransaction.price.isnot(None))
-                .where(NormalizedTransaction.price > 0)
-                .where(NormalizedTransaction.price_quote_asset_id.is_(None))
-                .where(NormalizedTransaction.source_price_quote_asset_symbol.isnot(None))
-            )
-            if account_id_list:
-                missing_price_quote_subq = missing_price_quote_subq.where(
-                    NormalizedTransaction.account_id.in_(account_id_list)
-                )
-            
-            # Subquery for missing fee quote (only when fee > 0)
-            missing_fee_quote_subq = (
-                select(
-                    NormalizedTransaction.id.label('tx_id'),
-                    literal(IssueType.FEE_QUOTE.value).label('issue_type'),
-                    NormalizedTransaction.source_fee_quote_asset_symbol.label('raw_value'),
-                )
-                .where(NormalizedTransaction.fee.isnot(None))
-                .where(NormalizedTransaction.fee > 0)
-                .where(NormalizedTransaction.fee_quote_asset_id.is_(None))
-                .where(NormalizedTransaction.source_fee_quote_asset_symbol.isnot(None))
-            )
-            if account_id_list:
-                missing_fee_quote_subq = missing_fee_quote_subq.where(
-                    NormalizedTransaction.account_id.in_(account_id_list)
-                )
-            
-            # Union all issues
-            issues_union = union_all(
-                missing_asset_subq,
-                missing_account_subq,
-                missing_price_quote_subq,
-                missing_fee_quote_subq,
-            ).subquery()
-            
-            # Count total issues for pagination
-            total_issues_query = select(func.count()).select_from(issues_union)
-            issues_total_count = session.exec(total_issues_query).one()
-            
-            # Get paginated issues with transaction details
-            offset = (issues_page - 1) * issues_per_page
-            issues_query = (
-                select(
-                    NormalizedTransaction.id,
-                    NormalizedTransaction.date_time,
-                    NormalizedTransaction.direction,
-                    NormalizedTransaction.quantity,
-                    NormalizedTransaction.source_asset_symbol,
-                    NormalizedTransaction.source,
-                    issues_union.c.issue_type,
-                    issues_union.c.raw_value,
-                )
-                .join(issues_union, NormalizedTransaction.id == issues_union.c.tx_id)
-                .order_by(NormalizedTransaction.date_time.desc())
-                .offset(offset)
-                .limit(issues_per_page)
-            )
-            issues_rows = session.exec(issues_query).all()
-            
-            # Build TransactionIssue objects with suggestions
-            for row in issues_rows:
-                tx_id, date_time, direction, quantity, source_asset_symbol, source, issue_type, raw_value = row
-                
-                # Get suggestion based on issue type
-                suggestion = None
-                if raw_value:
-                    if issue_type in (IssueType.ASSET.value, IssueType.PRICE_QUOTE.value, IssueType.FEE_QUOTE.value):
-                        suggestion = get_best_asset_suggestion(raw_value, all_assets)
-                    elif issue_type == IssueType.ACCOUNT.value:
-                        suggestion = get_best_account_suggestion(raw_value, all_accounts)
-                
-                issues_list.append(TransactionIssue(
-                    transaction_id=tx_id,
-                    date_time=date_time.isoformat() if date_time else "",
-                    direction=direction or "unknown",
-                    quantity=float(quantity) if quantity else 0.0,
-                    source_asset_symbol=source_asset_symbol or "",
-                    source=source or "",
-                    issue_type=IssueType(issue_type),
-                    raw_value=raw_value or "",
-                    suggestion=suggestion,
-                ))
-            
-            response_data["issues_list"] = issues_list
-            response_data["issues_total_count"] = issues_total_count
-            response_data["issues_page"] = issues_page
-            response_data["issues_per_page"] = issues_per_page
+                    unmapped_accounts_tx_count = session.exec(unmapped_tx_query).one()
+        except Exception as e:
+            print(f"Warning: Could not count unmapped accounts transactions: {e}")
+            unmapped_accounts_tx_count = 0
         
-        return DataHealthCheckResponse(**response_data)
+        # Calculate aggregated totals
+        total_issues = counts.total_issues
+        has_issues = total_issues > 0 or counts.bundle_suggestions > 0
+        
+        return TransactionStatusResponse(
+            total_count=total_count,
+            valid_count=valid_count,
+            pending_count=pending_count,
+            invalid_count=invalid_count,
+            bundle_suggestions_count=counts.bundle_suggestions,
+            missing_data_issues_count=counts.missing_data_issues,
+            linkage_issues_count=counts.linkage_issues,
+            transfer_issues_count=counts.transfer_issues,
+            duplicate_count=counts.duplicates,
+            unmapped_accounts_transaction_count=unmapped_accounts_tx_count,
+            total_issues=total_issues,
+            has_issues=has_issues,
+        )
         
     except Exception as e:
-        print(f"Error fetching data health check: {e}")
+        print(f"Error fetching transaction status: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@router.get("", response_model=List[TransactionResponse])
+@router.get("/data-health-check/missing-data-issues", response_model=MissingDataIssuesResponse)
+def get_missing_data_issues(
+    account_ids: Optional[str] = Query(
+        None,
+        description="Optional comma-separated account IDs to filter scope"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=1, le=200, description="Items per page"),
+    session: Session = Depends(get_db),
+):
+    """
+    Get paginated missing data issues (missing required source fields).
+    
+    Returns transactions with missing required source data that prevent proper processing.
+    These are blocker issues that cannot be resolved through mappings alone.
+    
+    Issue types included:
+    - missing_source: Transaction has no source field
+    - missing_source_asset: No asset_id AND no source_asset_symbol
+    - missing_source_account: No account_id AND no source_account
+    """
+    try:
+        # Parse account IDs filter
+        account_id_list: Optional[List[int]] = None
+        if account_ids:
+            account_id_list = [
+                int(a.strip()) for a in account_ids.split(',') 
+                if a.strip().isdigit()
+            ]
+        
+        # Use IssueService to fetch missing data issues
+        from backend.services.data_health import IssueService
+        issue_service = IssueService(session)
+        issues_list, total_count = issue_service.get_missing_data_issues(
+            page=page,
+            per_page=per_page,
+            account_ids=account_id_list,
+        )
+        
+        return MissingDataIssuesResponse(
+            issues=issues_list,
+            pagination=PaginationMetadata(
+                page=page,
+                per_page=per_page,
+                total_count=total_count,
+            ),
+        )
+        
+    except Exception as e:
+        print(f"Error fetching missing data issues: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/data-health-check/linkage-issues", response_model=LinkageIssuesResponse)
+def get_linkage_issues(
+    account_ids: Optional[str] = Query(
+        None,
+        description="Optional comma-separated account IDs to filter scope"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=1, le=200, description="Items per page"),
+    session: Session = Depends(get_db),
+):
+    """
+    Get paginated linkage issues (missing asset/account/price_quote/fee_quote mappings).
+    
+    Returns transactions missing required data mappings with fuzzy match suggestions
+    for inline fixing.
+    
+    Issue types included:
+    - asset: Missing asset_id mapping
+    - account: Missing account_id mapping  
+    - price_quote: Missing price_quote_asset_id mapping
+    - fee_quote: Missing fee_quote_asset_id mapping
+    """
+    try:
+        # Parse account IDs filter
+        account_id_list: Optional[List[int]] = None
+        if account_ids:
+            account_id_list = [
+                int(a.strip()) for a in account_ids.split(',') 
+                if a.strip().isdigit()
+            ]
+        
+        # Use IssueService to fetch linkage issues
+        from backend.services.data_health import IssueService
+        issue_service = IssueService(session)
+        issues_list, total_count = issue_service.get_linkage_issues(
+            page=page,
+            per_page=per_page,
+            account_ids=account_id_list,
+        )
+        
+        return LinkageIssuesResponse(
+            issues=issues_list,
+            pagination=PaginationMetadata(
+                page=page,
+                per_page=per_page,
+                total_count=total_count,
+            ),
+        )
+        
+    except Exception as e:
+        print(f"Error fetching linkage issues: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/data-health-check/transfer-issues", response_model=TransferIssuesResponse)
+def get_transfer_issues(
+    account_ids: Optional[str] = Query(
+        None,
+        description="Optional comma-separated account IDs to filter scope"
+    ),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=1, le=200, description="Items per page"),
+    include_dismissed: bool = Query(
+        False,
+        description="Include dismissed transfer issues"
+    ),
+    session: Session = Depends(get_db),
+):
+    """
+    Get paginated transfer issues (missing from/to account mappings).
+    
+    Returns transfer transactions missing source_from_account (inflows) or
+    source_to_account (outflows).
+    
+    Issue types included:
+    - missing_transfer_from_account: Inflow transfers missing source_from_account
+    - missing_transfer_to_account: Outflow transfers missing source_to_account  
+    - unlinked_transfer_from_account: Inflow transfers with source_from_account but no from_account_id
+    - unlinked_transfer_to_account: Outflow transfers with source_to_account but no to_account_id
+    
+    By default, dismissed issues are excluded. Use include_dismissed=true to show them.
+    """
+    try:
+        # Parse account IDs filter
+        account_id_list: Optional[List[int]] = None
+        if account_ids:
+            account_id_list = [
+                int(a.strip()) for a in account_ids.split(',') 
+                if a.strip().isdigit()
+            ]
+        
+        # Use IssueService to fetch transfer issues
+        from backend.services.data_health import IssueService
+        issue_service = IssueService(session)
+        issues_list, total_count = issue_service.get_transfer_issues(
+            page=page,
+            per_page=per_page,
+            account_ids=account_id_list,
+            include_dismissed=include_dismissed,
+        )
+        
+        return TransferIssuesResponse(
+            issues=issues_list,
+            pagination=PaginationMetadata(
+                page=page,
+                per_page=per_page,
+                total_count=total_count,
+            ),
+        )
+        
+    except Exception as e:
+        print(f"Error fetching transfer issues: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        
+
+
+# =============================================================================
+# Transfer Issue Dismissal Endpoints
+# =============================================================================
+
+
+class DismissTransferIssueRequest(BaseModel):
+    """Request model for dismissing a transfer issue."""
+    field: str = Field(..., description="Field name: 'source_from_account' or 'source_to_account'")
+    reason: Optional[str] = Field(None, description="Optional reason for dismissal")
+
+
+class BulkDismissTransferIssuesRequest(BaseModel):
+    """Request model for bulk dismissing transfer issues."""
+    transaction_ids: List[int] = Field(..., description="Transaction IDs to dismiss")
+    field: str = Field(..., description="Field name: 'source_from_account' or 'source_to_account'")
+    reason: Optional[str] = Field(None, description="Optional reason for dismissal")
+
+
+@router.post("/{transaction_id}/dismiss-transfer-issue")
+def dismiss_transfer_issue(
+    transaction_id: int,
+    request: DismissTransferIssueRequest = Body(...),
+    session: Session = Depends(get_db),
+):
+    """
+    Dismiss a transfer issue for a specific transaction.
+    
+    Adds system tags to mark the issue as dismissed:
+    - sys_transfer_dismissed: "true"
+    - sys_dismissed_field: field name
+    - sys_dismissed_reason: reason (if provided)
+    - sys_dismissed_at: timestamp
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    
+    # Validate field name
+    if request.field not in ['source_from_account', 'source_to_account']:
+        raise HTTPException(status_code=400, detail="Field must be 'source_from_account' or 'source_to_account'")
+    
+    # Get transaction
+    tx = session.get(NormalizedTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found")
+    
+    # Validate transaction type
+    if tx.transaction_type != 'transfer':
+        raise HTTPException(status_code=400, detail="Transaction is not a transfer")
+    
+    # Remove any existing dismissal tags for this field
+    tags = list(tx.tags or [])
+    tags = [
+        tag for tag in tags
+        if not (tag.get("sys_transfer_dismissed") == "true" and 
+                any(t.get("sys_dismissed_field") == request.field for t in tags))
+    ]
+    
+    # Add new dismissal tags
+    dismissal_tags = [
+        {"sys_transfer_dismissed": "true"},
+        {"sys_dismissed_field": request.field},
+        {"sys_dismissed_at": datetime.now().isoformat()},
+    ]
+    if request.reason:
+        dismissal_tags.append({"sys_dismissed_reason": request.reason})
+    
+    tags.extend(dismissal_tags)
+    
+    tx.tags = tags if tags else None
+    flag_modified(tx, "tags")
+    session.add(tx)
+    session.commit()
+    
+    return {
+        "success": True,
+        "transaction_id": transaction_id,
+        "field": request.field,
+        "dismissed": True,
+    }
+
+
+@router.delete("/{transaction_id}/dismiss-transfer-issue/{field}")
+def undismiss_transfer_issue(
+    transaction_id: int,
+    field: str,
+    session: Session = Depends(get_db),
+):
+    """
+    Un-dismiss a transfer issue for a specific transaction.
+    
+    Removes system dismissal tags for the specified field.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    
+    # Validate field name
+    if field not in ['source_from_account', 'source_to_account']:
+        raise HTTPException(status_code=400, detail="Field must be 'source_from_account' or 'source_to_account'")
+    
+    # Get transaction
+    tx = session.get(NormalizedTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail=f"Transaction {transaction_id} not found")
+    
+    # Remove dismissal tags for this field
+    tags = list(tx.tags or [])
+    
+    # First, find if this field is dismissed
+    is_dismissed = any(
+        tag.get("sys_transfer_dismissed") == "true" 
+        for tag in tags
+    ) and any(
+        tag.get("sys_dismissed_field") == field
+        for tag in tags
+    )
+    
+    if not is_dismissed:
+        raise HTTPException(status_code=404, detail=f"No dismissal found for field '{field}'")
+    
+    # Remove all sys_transfer_dismissed, sys_dismissed_field, sys_dismissed_reason, sys_dismissed_at tags
+    # that are associated with this field
+    tags = [
+        tag for tag in tags
+        if not (tag.get("sys_transfer_dismissed") or 
+                tag.get("sys_dismissed_field") == field or
+                (tag.get("sys_dismissed_reason") and any(t.get("sys_dismissed_field") == field for t in tags)) or
+                (tag.get("sys_dismissed_at") and any(t.get("sys_dismissed_field") == field for t in tags)))
+    ]
+    
+    tx.tags = tags if tags else None
+    flag_modified(tx, "tags")
+    session.add(tx)
+    session.commit()
+    
+    return {
+        "success": True,
+        "transaction_id": transaction_id,
+        "field": field,
+        "dismissed": False,
+    }
+
+
+@router.post("/bulk-dismiss-transfer-issues")
+def bulk_dismiss_transfer_issues(
+    request: BulkDismissTransferIssuesRequest = Body(...),
+    session: Session = Depends(get_db),
+):
+    """
+    Bulk dismiss transfer issues for multiple transactions.
+    
+    Adds system dismissal tags to all specified transactions.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    
+    # Validate field name
+    if request.field not in ['source_from_account', 'source_to_account']:
+        raise HTTPException(status_code=400, detail="Field must be 'source_from_account' or 'source_to_account'")
+    
+    dismissed_count = 0
+    errors = []
+    
+    for tx_id in request.transaction_ids:
+        try:
+            tx = session.get(NormalizedTransaction, tx_id)
+            if not tx:
+                errors.append(f"Transaction {tx_id} not found")
+                continue
+            
+            if tx.transaction_type != 'transfer':
+                errors.append(f"Transaction {tx_id} is not a transfer")
+                continue
+            
+            # Remove any existing dismissal tags for this field
+            tags = list(tx.tags or [])
+            tags = [
+                tag for tag in tags
+                if not (tag.get("sys_transfer_dismissed") == "true" and 
+                        any(t.get("sys_dismissed_field") == request.field for t in tags))
+            ]
+            
+            # Add new dismissal tags
+            dismissal_tags = [
+                {"sys_transfer_dismissed": "true"},
+                {"sys_dismissed_field": request.field},
+                {"sys_dismissed_at": datetime.now().isoformat()},
+            ]
+            if request.reason:
+                dismissal_tags.append({"sys_dismissed_reason": request.reason})
+            
+            tags.extend(dismissal_tags)
+            
+            tx.tags = tags if tags else None
+            flag_modified(tx, "tags")
+            session.add(tx)
+            dismissed_count += 1
+            
+        except Exception as e:
+            errors.append(f"Error processing transaction {tx_id}: {str(e)}")
+    
+    session.commit()
+    
+    return {
+        "success": True,
+        "dismissed_count": dismissed_count,
+        "total_requested": len(request.transaction_ids),
+        "errors": errors,
+    }
+
+
+@router.get("", response_model=TransactionListResponse)
 def list_transactions(
     review_status: Optional[str] = Query(
         None, description="Filter by review status (valid/pending/invalid)"
@@ -889,6 +1276,7 @@ def list_transactions(
     source: Optional[str] = Query(None, description="Filter by source (comma-separated for multiple)"),
     account_id: Optional[str] = Query(None, description="Filter by account IDs (comma-separated for multiple)"),
     unit_id: Optional[int] = Query(None, description="Filter by unit ID"),
+    ids: Optional[str] = Query(None, description="Filter by transaction IDs (comma-separated for multiple)"),
     # New filter parameters
     date_from: Optional[str] = Query(None, description="Filter transactions from this date (ISO format)"),
     date_to: Optional[str] = Query(None, description="Filter transactions until this date (ISO format)"),
@@ -896,12 +1284,26 @@ def list_transactions(
     category_id: Optional[str] = Query(None, description="Filter by category IDs (comma-separated for multiple)"),
     transaction_type: Optional[str] = Query(None, description="Filter by transaction type (comma-separated for multiple)"),
     direction: Optional[str] = Query(None, description="Filter by direction (comma-separated for multiple)"),
+    connector_run_id: Optional[str] = Query(None, description="Filter by connector run IDs (comma-separated for multiple)"),
+    source_transaction_id: Optional[str] = Query(None, description="Filter by source transaction IDs (comma-separated for multiple)"),
+    tag_key: Optional[str] = Query(None, description="Filter by tag keys (comma-separated for multiple)"),
+    network: Optional[str] = Query(None, description="Filter by network/chain (comma-separated for multiple)"),
+    # P&L audit filters
+    pnl_cal_version: Optional[int] = Query(None, description="Filter by P&L calculation version ID"),
+    pnl_cal_inclusions_status: Optional[str] = Query(None, description="Filter by inclusion status in P&L version (included/excluded)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     session: Session = Depends(get_db),
 ):
     """
     List all normalized transactions with optional filtering.
+
+    Returns a wrapped response with transaction results and metadata including:
+    - Applied filters (after validation)
+    - Validation warnings for invalid/skipped filters
+    - Total count (without filters)
+    - Filtered count (with filters applied)
+    - Pagination info
 
     - **review_status**: Filter by review status (valid, pending, invalid)
     - **taxability**: Filter by taxability_status (taxable, non_taxable, unknown)
@@ -918,7 +1320,41 @@ def list_transactions(
     - **offset**: Number of results to skip for pagination
     """
     try:
-        # Build query with filters
+        from backend.api.routes.filter_validator import validate_transaction_filters
+        
+        # Validate filters
+        applied_filters, warnings = validate_transaction_filters(
+            session=session,
+            review_status=review_status,
+            taxability=taxability,
+            source=source,
+            account_id=account_id,
+            asset_id=asset_id,
+            category_id=category_id,
+            transaction_type=transaction_type,
+            direction=direction,
+            connector_run_id=connector_run_id,
+            tag_key=tag_key,
+            network=network,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        
+        # Add P&L audit filters to applied_filters
+        if pnl_cal_version is not None:
+            applied_filters.pnl_cal_version = pnl_cal_version
+        if pnl_cal_inclusions_status:
+            applied_filters.pnl_cal_inclusions_status = pnl_cal_inclusions_status
+        
+        # Get total count (without filters, except unit_id if provided)
+        count_statement = select(func.count(NormalizedTransaction.id))
+        if unit_id is not None:
+            count_statement = count_statement.where(
+                NormalizedTransaction.user_calculation_unit_id == unit_id
+            )
+        total_count = session.exec(count_statement).one()
+        
+        # Build query with validated filters
         statement = select(NormalizedTransaction).options(
             joinedload(NormalizedTransaction.asset),
             joinedload(NormalizedTransaction.price_quote_asset),
@@ -926,83 +1362,197 @@ def list_transactions(
             joinedload(NormalizedTransaction.account_rel),
             joinedload(NormalizedTransaction.from_account),
             joinedload(NormalizedTransaction.to_account),
+            joinedload(NormalizedTransaction.sync_connector_run),
         )
 
-        if review_status:
-            statement = statement.where(NormalizedTransaction.review_status == review_status)
-
-        if taxability:
+        if applied_filters.review_status:
             statement = statement.where(
-                NormalizedTransaction.taxability_status == taxability
+                NormalizedTransaction.review_status == applied_filters.review_status
             )
 
-        if source:
-            source_list = [s.strip() for s in source.split(',') if s.strip()]
-            if len(source_list) == 1:
-                statement = statement.where(NormalizedTransaction.source == source_list[0])
-            elif len(source_list) > 1:
-                statement = statement.where(NormalizedTransaction.source.in_(source_list))
+        if applied_filters.taxability:
+            statement = statement.where(
+                NormalizedTransaction.taxability_status == applied_filters.taxability
+            )
 
-        if account_id:
-            account_ids = [int(a.strip()) for a in account_id.split(',') if a.strip().isdigit()]
-            if len(account_ids) == 1:
-                statement = statement.where(NormalizedTransaction.account_id == account_ids[0])
-            elif len(account_ids) > 1:
-                statement = statement.where(NormalizedTransaction.account_id.in_(account_ids))
+        if applied_filters.sources:
+            if len(applied_filters.sources) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.source == applied_filters.sources[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.source.in_(applied_filters.sources)
+                )
+
+        if applied_filters.account_ids:
+            if len(applied_filters.account_ids) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.account_id == applied_filters.account_ids[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.account_id.in_(applied_filters.account_ids)
+                )
 
         if unit_id is not None:
-            statement = statement.where(NormalizedTransaction.user_calculation_unit_id == unit_id)
+            statement = statement.where(
+                NormalizedTransaction.user_calculation_unit_id == unit_id
+            )
 
-        # Date range filters
-        if date_from:
+        # Filter by specific transaction IDs
+        if ids:
+            id_list = [int(i.strip()) for i in ids.split(',') if i.strip().isdigit()]
+            if id_list:
+                if len(id_list) == 1:
+                    statement = statement.where(NormalizedTransaction.id == id_list[0])
+                else:
+                    statement = statement.where(NormalizedTransaction.id.in_(id_list))
+
+        # P&L version inclusion/exclusion filter
+        if pnl_cal_version is not None and pnl_cal_inclusions_status:
+            from sqlalchemy import exists
+            
+            # Subquery to get transaction IDs in this version
+            version_tx_subquery = (
+                select(CalculationUnitLeg.transaction_id)
+                .join(CalculationUnit, CalculationUnit.id == CalculationUnitLeg.unit_id)
+                .where(CalculationUnit.version_id == pnl_cal_version)
+                .distinct()
+            )
+            
+            if pnl_cal_inclusions_status == "included":
+                # Only transactions IN this version
+                statement = statement.where(
+                    NormalizedTransaction.id.in_(version_tx_subquery)
+                )
+            elif pnl_cal_inclusions_status == "excluded":
+                # Transactions NOT IN this version
+                statement = statement.where(
+                    ~NormalizedTransaction.id.in_(version_tx_subquery)
+                )
+
+        # Date range filters (using centralized helpers for date-only support)
+        if applied_filters.date_from:
             try:
-                from_dt = datetime.fromisoformat(date_from.replace('Z', '+00:00'))
+                from backend.core.utils import parse_date_from
+                from_dt = parse_date_from(applied_filters.date_from)
                 statement = statement.where(NormalizedTransaction.date_time >= from_dt)
             except ValueError:
-                pass  # Invalid date format, skip filter
+                pass
 
-        if date_to:
+        if applied_filters.date_to:
             try:
-                to_dt = datetime.fromisoformat(date_to.replace('Z', '+00:00'))
+                from backend.core.utils import parse_date_to
+                to_dt = parse_date_to(applied_filters.date_to)
                 statement = statement.where(NormalizedTransaction.date_time <= to_dt)
             except ValueError:
-                pass  # Invalid date format, skip filter
+                pass
 
-        # Asset filter (multi-select)
-        if asset_id:
-            asset_ids = [int(a.strip()) for a in asset_id.split(',') if a.strip().isdigit()]
-            if len(asset_ids) == 1:
-                statement = statement.where(NormalizedTransaction.asset_id == asset_ids[0])
-            elif len(asset_ids) > 1:
-                statement = statement.where(NormalizedTransaction.asset_id.in_(asset_ids))
+        # Asset filter
+        if applied_filters.asset_ids:
+            if len(applied_filters.asset_ids) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.asset_id == applied_filters.asset_ids[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.asset_id.in_(applied_filters.asset_ids)
+                )
 
-        # Category filter (multi-select) - filter by assets that belong to the category
-        if category_id:
+        # Category filter - filter by assets that belong to the category
+        if applied_filters.category_ids:
             from backend.db.models import AssetCategory
-            category_ids = [int(c.strip()) for c in category_id.split(',') if c.strip().isdigit()]
-            if category_ids:
-                # Subquery to get asset IDs that belong to any of the selected categories
-                asset_subquery = select(AssetCategory.asset_id).where(
-                    AssetCategory.category_id.in_(category_ids)
-                ).distinct()
-                statement = statement.where(NormalizedTransaction.asset_id.in_(asset_subquery))
+            asset_subquery = select(AssetCategory.asset_id).where(
+                AssetCategory.category_id.in_(applied_filters.category_ids)
+            ).distinct()
+            statement = statement.where(
+                NormalizedTransaction.asset_id.in_(asset_subquery)
+            )
 
-        # Transaction type filter (multi-select)
-        if transaction_type:
-            types = [t.strip() for t in transaction_type.split(',') if t.strip()]
-            if len(types) == 1:
-                statement = statement.where(NormalizedTransaction.transaction_type == types[0])
-            elif len(types) > 1:
-                statement = statement.where(NormalizedTransaction.transaction_type.in_(types))
+        # Transaction type filter
+        if applied_filters.transaction_types:
+            if len(applied_filters.transaction_types) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.transaction_type == applied_filters.transaction_types[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.transaction_type.in_(applied_filters.transaction_types)
+                )
 
-        # Direction filter (multi-select)
-        if direction:
-            directions = [d.strip() for d in direction.split(',') if d.strip()]
-            if len(directions) == 1:
-                statement = statement.where(NormalizedTransaction.direction == directions[0])
-            elif len(directions) > 1:
-                statement = statement.where(NormalizedTransaction.direction.in_(directions))
+        # Direction filter
+        if applied_filters.directions:
+            if len(applied_filters.directions) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.direction == applied_filters.directions[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.direction.in_(applied_filters.directions)
+                )
+        
+        # Connector run filter
+        if applied_filters.connector_run_ids:
+            if len(applied_filters.connector_run_ids) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.sync_connector_run_id == applied_filters.connector_run_ids[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.sync_connector_run_id.in_(applied_filters.connector_run_ids)
+                )
+        
+        # Source transaction ID filter (for synced/updated/skipped transactions)
+        if source_transaction_id:
+            source_ids = [sid.strip() for sid in source_transaction_id.split(',') if sid.strip()]
+            if source_ids:
+                if len(source_ids) == 1:
+                    statement = statement.where(
+                        NormalizedTransaction.source_transaction_id == source_ids[0]
+                    )
+                else:
+                    statement = statement.where(
+                        NormalizedTransaction.source_transaction_id.in_(source_ids)
+                    )
+        
+        # Tag filter using JSONB operators
+        if applied_filters.tag_keys:
+            from sqlalchemy import cast, String, or_
+            
+            tag_conditions = []
+            for tag_filter in applied_filters.tag_keys:
+                if ':' in tag_filter:
+                    # Exact key:value match
+                    key, value = tag_filter.split(':', 1)
+                    tag_conditions.append(
+                        NormalizedTransaction.tags.op('@>')([{key: value}])
+                    )
+                else:
+                    # Just key - check if any tag has this key
+                    tag_conditions.append(
+                        cast(NormalizedTransaction.tags, String).like(f'%"{tag_filter}"%')
+                    )
+            
+            if tag_conditions:
+                statement = statement.where(or_(*tag_conditions))
 
+        # Network filter
+        if applied_filters.networks:
+            if len(applied_filters.networks) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.network == applied_filters.networks[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.network.in_(applied_filters.networks)
+                )
+
+        # Get filtered count (before pagination)
+        filtered_count_statement = select(func.count()).select_from(statement.subquery())
+        filtered_count = session.exec(filtered_count_statement).one()
+
+        # Apply pagination
         statement = (
             statement.order_by(NormalizedTransaction.date_time.desc())
             .offset(offset)
@@ -1011,8 +1561,18 @@ def list_transactions(
 
         transactions = session.exec(statement).all()
 
-        # Build response with linked asset symbols
-        return [_build_transaction_response(tx, session) for tx in transactions]
+        # Build response with metadata
+        return TransactionListResponse(
+            results=[_build_transaction_response(tx, session) for tx in transactions],
+            metadata=FilterMetadata(
+                applied_filters=applied_filters,
+                validation_warnings=warnings,
+                total_count=total_count,
+                filtered_count=filtered_count,
+                limit=limit,
+                offset=offset,
+            )
+        )
 
     except Exception as e:
         print(e)
@@ -1043,6 +1603,7 @@ def get_inbox(
                 joinedload(NormalizedTransaction.account_rel),
                 joinedload(NormalizedTransaction.from_account),
                 joinedload(NormalizedTransaction.to_account),
+                joinedload(NormalizedTransaction.sync_connector_run),
             )
             .where(NormalizedTransaction.review_status == ReviewStatus.PENDING.value)
             .order_by(NormalizedTransaction.date_time.desc())
@@ -1111,7 +1672,7 @@ def get_reviewed_transactions(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@router.get("/tags", response_model=List[Dict[str, str]])
+@router.get("/tags", response_model=List[Dict[str, Any]])
 def list_tags(
     session: Session = Depends(get_db),
 ):
@@ -1290,6 +1851,54 @@ def get_transaction(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+def _upsert_raw_account_mappings(
+    session: Session,
+    tx: NormalizedTransaction,
+    update_data: dict,
+):
+    """
+    Auto-create or update RawAccount mappings when account FKs are set on a transaction.
+    
+    Maps: (source, source_from_account) → from_account_id
+          (source, source_to_account)   → to_account_id
+          (source, source_account)      → account_id
+    """
+    mapping_pairs = [
+        ("from_account_id", "source_from_account"),
+        ("to_account_id", "source_to_account"),
+        ("account_id", "source_account"),
+    ]
+    source = tx.source
+    if not source:
+        return
+
+    for fk_field, source_field in mapping_pairs:
+        if fk_field not in update_data:
+            continue
+        new_account_id = update_data[fk_field]
+        source_label = getattr(tx, source_field, None)
+        if not source_label or not new_account_id:
+            continue
+
+        # Try to find existing raw_account
+        existing = session.exec(
+            select(RawAccount).where(
+                RawAccount.source == source,
+                RawAccount.label == source_label,
+            )
+        ).first()
+
+        if existing:
+            existing.account_id = new_account_id
+            session.add(existing)
+        else:
+            session.add(RawAccount(
+                source=source,
+                label=source_label,
+                account_id=new_account_id,
+            ))
+
+
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(
     transaction_id: int,
@@ -1326,6 +1935,9 @@ def update_transaction(
         
         for key, value in update_data.items():
             setattr(tx, key, value)
+
+        # Auto-create/update raw_account mappings when account FKs are set
+        _upsert_raw_account_mappings(session, tx, update_data)
 
         session.add(tx)
         session.commit()
@@ -1737,7 +2349,7 @@ async def preview_trades_csv_import(
             "warnings": load_result.warnings,
             "transactions": [
                 {
-                    "date_time": t.date_time.isoformat() if t.date_time else None,
+                    "date_time": t.date_time.replace(tzinfo=timezone.utc).isoformat() if t.date_time else None,
                     "transaction_type": t.transaction_type,
                     "asset_ticker": t.asset_ticker,
                     "asset_label": t.asset_label,

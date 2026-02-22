@@ -153,9 +153,14 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     const transactionToFormData = (tx: import('../types').Transaction): FormData => {
         const simplifiedType = deriveSimplifiedType(tx.transaction_type);
 
-        // Convert tags object to array format
-        const tagsArray: Tag[] = tx.tags
-            ? Object.entries(tx.tags).map(([key, value]) => ({ key, value: String(value) }))
+        // Convert tags from backend format [{key: value}] to frontend format {key, value}
+        const tagsArray: Tag[] = tx.tags && Array.isArray(tx.tags)
+            ? tx.tags.flatMap(tagObj => 
+                Object.entries(tagObj).map(([key, value]) => ({ 
+                    key, 
+                    value: String(value) 
+                }))
+              )
             : [];
 
         return {
@@ -428,7 +433,11 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             if (formData.review_notes) payload.review_notes = formData.review_notes;
             if (formData.from_account_id) payload.from_account_id = formData.from_account_id;
             if (formData.to_account_id) payload.to_account_id = formData.to_account_id;
-            if (formData.tags.length > 0) payload.tags = formData.tags;
+            
+            // Convert tags from {key, value} format to [{key: value}] format
+            if (formData.tags.length > 0) {
+                payload.tags = formData.tags.map(tag => ({ [tag.key]: tag.value }));
+            }
 
             // Different API call for create vs edit mode
             const url = isEditMode

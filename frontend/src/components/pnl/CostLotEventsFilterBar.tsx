@@ -64,8 +64,9 @@ const EVENT_PILLS: { key: LotEventType; label: string; defaultOn: boolean }[] = 
 // Unit pattern pills configuration
 const UNIT_PILLS: { key: string; label: string; defaultOn: boolean }[] = [
     { key: 'swap', label: 'Swap', defaultOn: true },
-    { key: 'transfer', label: 'Transfer', defaultOn: true },
-    { key: 'pending_transfer', label: 'Pending', defaultOn: true },
+    { key: 'internal_transfer', label: 'Transfer', defaultOn: true },
+    { key: 'unmatched_internal_transfer', label: 'Unmatched', defaultOn: true },
+    { key: 'flow', label: 'Flow', defaultOn: true },
 ];
 
 // Date presets

@@ -164,7 +164,7 @@ def _process_disposals(
     """
     all_consumed_slices: List[ConsumedLotSlice] = []
     taxability_calculator = TaxabilityCalculator(config)
-    is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
+    is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
     is_cost_basis_transfer = unit.is_cost_basis_transfer
 
     for disposal in disposals:
@@ -190,7 +190,7 @@ def _process_disposals(
             account_id=account_id,
             disposal_taxable=disposal.disposal_taxable,
             is_fee=is_fee,
-            is_pending_transfer=is_pending_transfer,
+            is_unmatched_internal_transfer=is_unmatched_internal_transfer,
         )
 
         # Consume lots
@@ -208,20 +208,47 @@ def _process_disposals(
             if negative_lot not in unit.cost_lots:
                 unit.cost_lots.append(negative_lot)
 
-        # For pending transfers: skip P&L realization, emit warning instead
-        if is_pending_transfer and slices:
-            _create_pending_transfer_warning(
-                unit=unit,
-                direction="outflow",
-                legs=[disposal],
+        if not slices:
+            continue
+
+        # ═══════════════════════════════════════════════════════════════
+        # UNIFIED FEE HANDLING - Process fees BEFORE pattern checks
+        # Fees are always processed regardless of unit pattern (transfer,
+        # pending transfer, etc.) since they represent separate disposal
+        # events even when the main transaction is non-taxable.
+        # ═══════════════════════════════════════════════════════════════
+        if disposal.is_fee:
+            _proceeds_and_pnl_entry(
+                disposal=disposal,
                 slices=slices,
+                inflows=inflows,
+                non_fee_outflows=[d for d in disposals if not d.is_fee],
+                fmv_service=fmv_service,
+                config=config,
+                unit=unit,
             )
-        # For cost-basis transfers (transfer/split): skip P&L realization
-        # Cost basis will be preserved and transferred to new lots in _handle_cost_basis_transfer
-        elif is_cost_basis_transfer and slices:
-            pass  # No P&L realization for transfers/splits
-        # Compute P&L for taxable disposals (not transfers/splits)
-        elif slices:
+            continue  # Skip pattern checks for fees
+
+        # ═══════════════════════════════════════════════════════════════
+        # PATTERN-BASED HANDLING - Only for non-fee disposals
+        # ═══════════════════════════════════════════════════════════════
+        
+        # For unmatched internal transfers: skip P&L realization, emit warning instead
+        if slices:
+            if is_unmatched_internal_transfer :
+                _create_unmatched_internal_transfer_warning(
+                    unit=unit,
+                    direction="outflow",
+                    legs=[disposal],
+                    slices=slices,
+                )
+                continue  # Skip P&L realization
+            # For cost-basis transfers (internal_transfer/split): skip P&L realization
+            # Cost basis will be preserved and transferred to new lots in _handle_cost_basis_transfer
+            if is_cost_basis_transfer :
+                continue  # No P&L realization for transfers/splits
+            
+            # Compute P&L for taxable disposals (not transfers/splits)
             _proceeds_and_pnl_entry(
                 disposal=disposal,
                 slices=slices,
@@ -236,14 +263,14 @@ def _process_disposals(
     return all_consumed_slices
 
 
-def _create_pending_transfer_warning(
+def _create_unmatched_internal_transfer_warning(
     unit: CalculationUnit,
     direction: str,
     legs: List[CalculationUnitLeg],
     slices: Optional[List[ConsumedLotSlice]] = None,
 ) -> None:
     """
-    Create warning for pending transfer (outflow or inflow).
+    Create warning for unmatched internal transfer (outflow or inflow).
     
     Args:
         unit: The calculation unit
@@ -316,7 +343,7 @@ def _create_pending_transfer_warning(
         log_extra = {"account_id": account_id}
     
     warning = PnlWarning(
-        warning_type=WarningType.PENDING_TRANSFER.value,
+        warning_type=WarningType.UNMATCHED_INTERNAL_TRANSFER.value,
         message=message,
         transaction_id=leg.origin_transaction_id,
         asset_id=asset_id,
@@ -329,7 +356,7 @@ def _create_pending_transfer_warning(
     unit.warnings.append(warning)
     
     log.info(
-        "pending_transfer_warning_created",
+        "unmatched_internal_transfer_warning_created",
         direction=direction,
         asset_symbol=asset_symbol,
         qty=float(total_qty),
@@ -550,7 +577,7 @@ def _process_inflows(
     """
     Handle inflows based on the unit pattern.
     
-    For pending transfers (inflow-only with transfer tx_type):
+    For unmatched internal transfers (inflow-only with internal_transfer tx_type):
     - Provisional lot IS created using FMV as temporary cost basis
     - Warning is emitted with FMV details for user visibility
     - Provisional lots prevent negative lot errors when assets are later disposed
@@ -567,6 +594,18 @@ def _process_inflows(
     inflows = unit.inflow_legs
     if not inflows:
         return
+    
+    # Check if this is an unmatched internal transfer (inflow-only)
+    is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+    
+    if is_unmatched_internal_transfer:
+        # Create warning for user visibility (was missing for inflows)
+        _create_unmatched_internal_transfer_warning(
+            unit=unit,
+            direction="inflow",
+            legs=inflows,
+            slices=None,
+        )
         
     # Use unified is_cost_basis_transfer for non-taxable transfers
     if unit.is_cost_basis_transfer:
@@ -1009,11 +1048,11 @@ def _handle_acquisition(
 
         # Create the settling lot first (with full qty_remaining)
         # It will be updated after settlement to reflect remaining quantity
-        # For pending transfers, mark as provisional with FMV cost basis
-        is_pending_transfer = unit.pattern == UnitPattern.PENDING_TRANSFER.value
+        # For unmatched internal transfers, mark as provisional with FMV cost basis
+        is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
         notes = None
-        if is_pending_transfer and cost_source == "fmv_at_acquisition":
-            notes = "Pending transfer (provisional FMV cost basis)"
+        if is_unmatched_internal_transfer and cost_source == "fmv_at_acquisition":
+            notes = "Unmatched internal transfer (provisional FMV cost basis)"
         
         settling_lot = CostLot(
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,

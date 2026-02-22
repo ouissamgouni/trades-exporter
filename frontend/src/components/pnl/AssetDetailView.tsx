@@ -29,6 +29,8 @@ import { AssetPnLRow, CostLot, CalculationUnit, CostLotEventEntry, mapProcessedU
 import { UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 import { BalanceTimelineChart } from './BalanceTimelineChart';
 import { API_URL } from '../../types';
+import { formatQuantity, formatQuantityWithCurrency } from '../../utils/numberUtils';
+import { ValueDisplay } from '../ValueDisplay';
 
 interface AssetDetailViewProps {
     asset: AssetPnLRow;
@@ -37,20 +39,6 @@ interface AssetDetailViewProps {
     onBack: () => void;
     onTransactionClick?: (txId: number) => void;
 }
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    if (Math.abs(value) < 0.00001) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 /** Metric Card for sidebar */
 const MetricCard: React.FC<{
@@ -261,17 +249,17 @@ function AssetDetailView({
                             <Flex direction="column" gap={2}>
                                 <MetricCard
                                     label="Quantity"
-                                    value={formatQty(assetPnlRow.quantity)}
+                                    value={formatQuantity(assetPnlRow.quantity)}
                                     color="blue.600"
                                 />
                                 <MetricCard
                                     label="Market Value"
-                                    value={formatCurrency(assetPnlRow.market_value, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.market_value, baseCurrency)}
                                     color="blue.600"
                                 />
                                 <MetricCard
                                     label="Cost Basis"
-                                    value={formatCurrency(assetPnlRow.cost_basis, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.cost_basis, baseCurrency)}
                                 />
                             </Flex>
 
@@ -281,7 +269,7 @@ function AssetDetailView({
                             <Flex direction="column" gap={2}>
                                 <MetricCard
                                     label="Unrealized P&L"
-                                    value={formatCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
                                     subValue={unrealizedPct}
                                     color={unrealizedColor}
                                     icon={assetPnlRow.unrealized_pnl >= 0 ?
@@ -291,7 +279,7 @@ function AssetDetailView({
                                 />
                                 <MetricCard
                                     label="Realized P&L"
-                                    value={formatCurrency(assetPnlRow.realized_pnl, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.realized_pnl, baseCurrency)}
                                     color={realizedColor}
                                     icon={assetPnlRow.realized_pnl >= 0 ?
                                         <FiTrendingUp color="green" size={14} /> :
@@ -300,7 +288,7 @@ function AssetDetailView({
                                 />
                                 <MetricCard
                                     label="Total Fees"
-                                    value={formatCurrency(assetPnlRow.total_fees, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.total_fees, baseCurrency)}
                                     color="orange.600"
                                 />
                             </Flex>

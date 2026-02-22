@@ -12,13 +12,13 @@ import {
     Switch,
 } from '@chakra-ui/react';
 
-import { AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
+import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
 import FileDropzone from './FileDropzone';
 
 interface ConnectorFormDialogProps {
     isOpen: boolean;
     onClose: () => void;
-    accountId: number;
+    account: Account;
     connector?: AccountConnector | null;
     connectorTypes: ConnectorTypeInfo[];
     existingConnectorTypes: string[];
@@ -27,7 +27,7 @@ interface ConnectorFormDialogProps {
 const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     isOpen,
     onClose,
-    accountId,
+    account,
     connector,
     connectorTypes,
     existingConnectorTypes,
@@ -46,6 +46,9 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     const [uploadingFixture, setUploadingFixture] = useState(false);
     const [currentFixtureName, setCurrentFixtureName] = useState<string | null>(null);
 
+    // Track previous isOpen state to detect when dialog opens
+    const prevIsOpenRef = React.useRef(isOpen);
+
     // Get available types for new connectors (not already configured)
     const availableTypes = connector
         ? connectorTypes // If editing, show all types
@@ -54,6 +57,14 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     const selectedTypeInfo = connectorTypes.find(t => t.type === formData.connector_type);
 
     useEffect(() => {
+        // Only reset form when dialog opens (not on every render)
+        const dialogJustOpened = isOpen && !prevIsOpenRef.current;
+        prevIsOpenRef.current = isOpen;
+
+        if (!dialogJustOpened) {
+            return;
+        }
+
         if (connector) {
             setFormData({
                 connector_type: connector.connector_type,
@@ -78,12 +89,23 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                     .catch(() => setCurrentFixtureName(null));
             }
         } else {
-            // Only reset form when dialog opens, not on every availableTypes change
+            // Reset form for creating new connector
             const firstAvailable = connectorTypes.find(t => !existingConnectorTypes.includes(t.type));
+            
+            // Auto-detect chain from account address for wallet accounts
+            const isWalletAccount = account.account_type === 'wallet';
+            const accountAddress = account.address_or_identifier;
+            const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
+            
+            const initialConfig: Record<string, any> = {};
+            if (detectedChain && firstAvailable?.supported_chains?.includes(detectedChain)) {
+                initialConfig.chain = detectedChain;
+            }
+            
             setFormData({
                 connector_type: firstAvailable?.type || '',
                 enabled: true,
-                config: {},
+                config: initialConfig,
                 credentials_ref: '',
                 sync_priority: 100,
             });
@@ -92,7 +114,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             setFixtureFile(null);
         }
         setError('');
-    }, [connector, isOpen, connectorTypes, existingConnectorTypes]);
+    }, [isOpen, connector, connectorTypes, existingConnectorTypes, account]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -108,6 +130,14 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 delete configToSave.test_mode;
                 delete configToSave.test_file_path;
             }
+            
+            // Remove address from config if it's inherited from account
+            // (Backend will auto-inherit it)
+            const isWalletAccount = account.account_type === 'wallet';
+            const shouldInheritAddress = isWalletAccount && account.address_or_identifier;
+            if (shouldInheritAddress && configToSave.address === account.address_or_identifier) {
+                delete configToSave.address;
+            }
 
             const payload = {
                 connector_type: formData.connector_type,
@@ -118,8 +148,8 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             };
 
             const url = connector
-                ? `${API_URL}/accounts/${accountId}/connectors/${connector.connector_type}`
-                : `${API_URL}/accounts/${accountId}/connectors/`;
+                ? `${API_URL}/accounts/${account.id}/connectors/${connector.connector_type}`
+                : `${API_URL}/accounts/${account.id}/connectors/`;
 
             const method = connector ? 'PUT' : 'POST';
 
@@ -189,21 +219,55 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         }));
     };
 
+    // Detect blockchain chain from address format
+    const detectChainFromAddress = (address?: string): string | null => {
+        if (!address) return null;
+        
+        // EVM chains (Ethereum, Base, etc.) start with 0x
+        if (address.startsWith('0x')) {
+            // Default to ethereum for EVM addresses
+            // Could be any EVM chain, but we'll let user choose if needed
+            return 'ethereum';
+        }
+        
+        // XRP addresses start with 'r'
+        if (address.startsWith('r') && address.length >= 25 && address.length <= 35) {
+            return 'xrp';
+        }
+        
+        // Solana addresses are base58 encoded, typically 32-44 characters
+        if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+            return 'solana';
+        }
+        
+        return null;
+    };
+
     const renderConfigFields = () => {
         if (!selectedTypeInfo) return null;
 
         const fields = [];
+        
+        // Check if this is a wallet account with an address
+        const isWalletAccount = account.account_type === 'wallet';
+        const accountAddress = account.address_or_identifier;
+        const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
+        const shouldInheritAddress = isWalletAccount && accountAddress;
 
         // Chain selector for on-chain connectors
         if (selectedTypeInfo.supported_chains?.length) {
+            // For wallet accounts, auto-select detected chain
+            const chainValue = detectedChain || formData.config.chain || '';
+            const isChainInherited = isWalletAccount && detectedChain;
+            
             fields.push(
                 <Box key="chain">
                     <Text fontWeight="medium" mb={1}>
                         Chain <Text as="span" color="red.500">*</Text>
                     </Text>
-                    <NativeSelect.Root>
+                    <NativeSelect.Root disabled={isChainInherited}>
                         <NativeSelect.Field
-                            value={formData.config.chain || ''}
+                            value={chainValue}
                             onChange={(e) => updateConfig('chain', e.target.value)}
                         >
                             <option value="">Select chain...</option>
@@ -214,6 +278,11 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                             ))}
                         </NativeSelect.Field>
                     </NativeSelect.Root>
+                    {isChainInherited && (
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                            Detected from account address
+                        </Text>
+                    )}
                 </Box>
             );
         }
@@ -222,17 +291,25 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         if (selectedTypeInfo.required_config.includes('address') ||
             selectedTypeInfo.optional_config.includes('address')) {
             const isRequired = selectedTypeInfo.required_config.includes('address');
+            const addressValue = shouldInheritAddress ? accountAddress : (formData.config.address || '');
+            
             fields.push(
                 <Box key="address">
                     <Text fontWeight="medium" mb={1}>
                         Wallet Address {isRequired && <Text as="span" color="red.500">*</Text>}
                     </Text>
                     <Input
-                        value={formData.config.address || ''}
+                        value={addressValue}
                         onChange={(e) => updateConfig('address', e.target.value)}
                         placeholder="0x..."
                         required={isRequired}
+                        disabled={shouldInheritAddress}
                     />
+                    {shouldInheritAddress && (
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                            Inherited from account
+                        </Text>
+                    )}
                 </Box>
             );
         }

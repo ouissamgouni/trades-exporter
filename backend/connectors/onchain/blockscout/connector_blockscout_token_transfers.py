@@ -4,12 +4,13 @@ Uses Blockscout API v2. Supports multiple networks.
 """
 
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import Dict, Any, Generator
 
 from backend.connectors.onchain.blockscout.base_blockscout_connector import (
     BlockscoutConnectorBase,
 )
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("blockscout_token_transfers")
@@ -50,8 +51,8 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
             config=config,
         )
 
-    def get_raws(self) -> List[Dict[str, Any]]:
-        """Get raw token transfers without mapping (for JSON logging)."""
+    def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
+        """Fetch and yield raw token transfers with pagination support."""
         try:
             self.update_progress(
                 operation="Fetching token transfers",
@@ -60,27 +61,44 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 log_message=f"Fetching token transfers for {self.wallet_address[:10]}..."
             )
             
-            # Blockscout API v2 token transfers endpoint
-            result = self.safe_request(
-                f"/addresses/{self.wallet_address}/token-transfers"
-            )
+            # Blockscout API v2 token transfers endpoint with pagination
+            next_page_params = None
+            total_items = 0
+            page = 0
+            
+            while True:
+                page += 1
+                endpoint = f"/addresses/{self.wallet_address}/token-transfers"
+                params = next_page_params if next_page_params else {}
+                
+                result = self.safe_request(endpoint, params)
 
-            # Blockscout returns {"items": [...], "next_page_params": ...}
-            items = result.get("items", [])
-            if not isinstance(items, list):
-                log.warning(f"Unexpected token transfers format: {type(items)}")
-                return []
+                # Blockscout returns {"items": [...], "next_page_params": ...}
+                items = result.get("items", [])
+                if not isinstance(items, list):
+                    log.warning(f"Unexpected token transfers format: {type(items)}")
+                    break
+                
+                # Yield items from this page immediately
+                for item in items:
+                    total_items += 1
+                    yield item
+                
+                log.info(f"   Page {page}: yielded {len(items)} token transfers")
+                
+                # Check for more pages
+                next_page_params = result.get("next_page_params")
+                if not next_page_params:
+                    break
 
-            log.info(f"   ✅ Found {len(items)} token transfers on {self.chain_name}")
+            log.info(f"   ✅ Found {total_items} token transfers on {self.chain_name}")
             
             self.update_progress(
                 operation="Completed",
                 current=1,
                 total=1,
-                log_message=f"✅ Found {len(items)} token transfers on {self.chain_name}"
+                log_message=f"✅ Found {total_items} token transfers on {self.chain_name}"
             )
-            
-            return items
         except Exception as e:
             log.error(f"   ⚠️ Error fetching token transfers: {e}")
             self.update_progress(
@@ -108,19 +126,22 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
 
             # Token transfer structure
             token_info = tx.get("token")
-            token_symbol = token_info.get("symbol").upper()
-            token_name = token_info.get("name")
-            contract_address = token_info.get("address_hash")
-            token_decimal = int(token_info.get("decimals", 18))
+            if not token_info:
+                raise ValueError("Missing token info in transaction")
+            
+            token_symbol = (token_info.get("symbol") or "UNKNOWN").upper()
+            token_name = token_info.get("name") or "Unknown Token"
+            contract_address = token_info.get("address_hash") or ""
+            token_decimal = int(token_info.get("decimals") or 18)
 
             # Transfer details
             tx_from = tx.get("from", {}).get("hash", "")
             tx_to = tx.get("to", {}).get("hash", "")
-            value_raw = int(tx.get("total", {}).get("value", 0))
+            value_raw = int(tx.get("total", {}).get("value") or 0)
 
             # Fee calculation
-            gas_used = int(tx.get("gas_used", 0))
-            gas_price = int(tx.get("gas_price", 0))
+            gas_used = int(tx.get("gas_used") or 0)
+            gas_price = int(tx.get("gas_price") or 0)
 
             # Calculate amounts
             value = Decimal(value_raw) / Decimal(10**token_decimal)
@@ -156,7 +177,7 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 include_fee=True if direction == "outflow" else False,
                 source_from_account=tx_from,
                 source_to_account=to_addr,
-                network=self.chain_name.lower(),
+                network=normalize_network(self.chain_name),
                 token_contract_address=contract_address,
                 tags=tags,
             )

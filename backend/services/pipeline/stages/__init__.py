@@ -5,12 +5,14 @@ Note: LegExpansionStage and SplitStage are deprecated.
 Leg expansion is now done at P&L time via leg_expander.py.
 """
 
-from backend.services.pipeline.stages.transfer import TransferDetectionStage
+from backend.services.pipeline.stages.onchain_enrichment import OnChainAddressEnrichmentStage
+from backend.services.pipeline.stages.transfer import AccountResolutionStage
 from backend.services.pipeline.stages.enrichment import AssetEnrichmentStage
 from backend.services.pipeline.stages.persistence import PersistenceStage
 
 __all__ = [
-    "TransferDetectionStage",
+    "OnChainAddressEnrichmentStage",
+    "AccountResolutionStage",
     "AssetEnrichmentStage",
     "PersistenceStage",
 ]

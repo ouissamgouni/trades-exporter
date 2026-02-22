@@ -29,7 +29,7 @@ from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning
+from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     PnLResult,
@@ -133,13 +133,17 @@ class PnLEngine:
             unit = CalculationUnit(**unit_data)
             if version:
                 unit.version = version
+                # Explicitly add unit to version's collection for proper cascade
+                if version.calculation_units is None:
+                    version.calculation_units = []
+                version.calculation_units.append(unit)
             
             # Create CalculationUnitLeg records from members (for persistence)
             unit.legs = members
             
             # Recompute pattern and label now that legs are assigned
             # (pattern computation in __init__ ran with empty legs)
-            if unit.pattern is None or unit.pattern == 'unknown':
+            if unit.pattern is None or unit.pattern == UnitPattern.UNKNOWN.value:
                 computed_pattern, reason = unit._compute_pattern_from_legs()
                 unit.pattern = computed_pattern
                 log.debug(f"Unit {unit.id}: Pattern recomputed after legs: {computed_pattern} ({reason})")
@@ -314,12 +318,19 @@ class PnLEngine:
             status="draft",  # Will be updated on persist
         )
         
+        # Add version to session immediately so cascade relationships work during processing
+        self.session.add(version)
+        self.session.flush()  # Flush to get version_id without committing
+        
         # Build calculation units from valid transactions (with optional account filter)
         units = self.build_runtime_units(version=version, account_ids=account_ids)
         
         if not units:
             log.info("no_calculation_units", account_ids=account_ids)
             return PnLResult(config=self.config, version=version)
+        
+        # Flush units to session before processing so cascade relationships work
+        self.session.flush()
         
         log.info("calculation_units_built", unit_count=len(units), account_ids=account_ids)
         

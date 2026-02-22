@@ -24,10 +24,10 @@ import sys
 import argparse
 from pathlib import Path
 
-from backend.config.loader import set_test_mode, configure_logging
-from backend.db.database import get_session
-from backend.file_loaders.trades_csv_loader import TradesCSVLoader
-from backend.services.trade_import_service import TradeImportService
+from ..config.loader import configure_logging
+from ..db.database import get_session
+from ..file_loaders.trades_csv_loader import TradesCSVLoader
+from ..services.trade_import_service import TradeImportService
 
 log = configure_logging("import_trades_csv")
 
@@ -64,18 +64,8 @@ def main():
         action="store_true",
         help="Preview changes without committing to database"
     )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Use test database"
-    )
     
     args = parser.parse_args()
-    
-    # Set test mode if requested
-    if args.test:
-        set_test_mode(True)
-        print("🧪 Using TEST database")
     
     # Validate file
     csv_path = args.csv_file

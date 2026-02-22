@@ -104,6 +104,8 @@ def get_best_account_suggestion(
     """
     Get best fuzzy match for a raw account label.
     
+    Prioritizes address_or_identifier match over name match when both exist.
+    
     Args:
         label: Raw account label to match
         accounts: List of Account objects with id, name, address_or_identifier
@@ -118,7 +120,12 @@ def get_best_account_suggestion(
     for account in accounts:
         name_sim = calculate_similarity(label, account.name)
         addr_sim = calculate_similarity(label, account.address_or_identifier) if account.address_or_identifier else 0
-        confidence = max(name_sim, addr_sim)
+        
+        # Prioritize address_or_identifier over name
+        if addr_sim > 0:
+            confidence = addr_sim
+        else:
+            confidence = name_sim
         
         if confidence > best_confidence:
             best_confidence = confidence

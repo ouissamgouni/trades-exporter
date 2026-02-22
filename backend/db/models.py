@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, List, Any, Dict
 from sqlmodel import SQLModel, Field, Relationship, Column, JSON
-from sqlalchemy import UniqueConstraint, Text, ARRAY, Numeric, case, Integer
+from sqlalchemy import UniqueConstraint, Text, ARRAY, Numeric, case, Integer, Enum as SAEnum
+from sqlalchemy.dialects.postgresql import JSONB
 from enum import Enum
 from sqlalchemy.ext.hybrid import hybrid_property
 from pydantic import field_validator
@@ -55,8 +56,10 @@ class SyncJobStatus(str, Enum):
     """Status enum for sync jobs."""
 
     IDLE = "idle"
+    PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
+    WARNING = "warning"
     ABORTED = "aborted"
     FAILED = "failed"
 
@@ -67,9 +70,19 @@ class SyncJobConnectorStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
+    WARNING = "warning"
     FAILED = "failed"
     SKIPPED = "skipped"
     ABORTED = "aborted"
+
+
+class FileImportStatus(str, Enum):
+    """Status enum for file imports."""
+
+    PENDING = "pending"  # Uploaded, waiting to be processed
+    PROCESSING = "processing"  # Currently being processed by sync job
+    COMPLETED = "completed"  # Successfully processed
+    FAILED = "failed"  # Processing failed, file kept for retry
 
 
 class PriceType(str, Enum):
@@ -94,18 +107,20 @@ AssetType = PriceType
 class UnitPattern(str, Enum):
     """Pattern types for calculation units.
     
-    Simplified to fundamental operations:
-    - TRANSFER: Same asset moves between owned accounts (non-taxable)
-    - SWAP: Exchange of value (taxability depends on asset types)
-    - SPLIT: Same asset, quantity changes (stock split - non-taxable)
-    - PENDING_TRANSFER: Transfer with missing counterpart leg (awaiting reconciliation)
+    Patterns:
+    - SWAP: Exchange of different assets (taxable)
+    - INTERNAL_TRANSFER: Complete transfer between owned accounts (non-taxable)
+    - UNMATCHED_INTERNAL_TRANSFER: Incomplete internal transfer awaiting counterpart (no P&L)
+    - FLOW: External single-leg movement (airdrop, payment, external deposit/withdrawal)
+    - SPLIT: Stock split - same asset, qty changes (non-taxable)
     - UNKNOWN: Needs user review
     """
 
-    TRANSFER = "transfer"  # Self-transfer between owned accounts (non-taxable)
     SWAP = "swap"  # Exchange of value (taxable/non-taxable based on config)
+    INTERNAL_TRANSFER = "internal_transfer"  # Complete transfer between owned accounts (non-taxable)
+    UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Incomplete internal transfer (no P&L)
+    FLOW = "flow"  # External single-leg movement (airdrop, payment, external deposit/withdrawal)
     SPLIT = "split"  # Stock split - same asset, qty changes (non-taxable)
-    PENDING_TRANSFER = "pending_transfer"  # Transfer missing inflow or outflow leg
     UNKNOWN = "unknown"  # Needs review
 
 
@@ -129,15 +144,16 @@ class LotEventType(str, Enum):
 class TransactionType(str, Enum):
     """Transaction type for P&L calculation and leg expansion.
     
-    Simplified 3-value enum:
-    - TRADE: Buy/sell exchange of assets (expand to inflow + outflow legs)
-    - TRANSFER: Movement of assets between accounts (deposits, withdrawals, internal transfers)
-    - TECHNICAL: Zero-value transactions (approvals, failed txs, contract interactions)
+    2-value enum:
+    - TRADE: Bilateral exchange (buy/sell) - expands to inflow + outflow legs
+    - TRANSFER: Movement (deposits, withdrawals, airdrops, internal transfers) - single leg
+    
+    Note: Internal transfers are detected at P&L calculation time using from_account_id/to_account_id,
+    not through transaction_type.
     """
     
     TRADE = "trade"  # Buy/sell - will be expanded to inflow + outflow legs
-    TRANSFER = "transfer"  # Deposits, withdrawals, internal transfers
-    TECHNICAL = "technical"  # Zero-value: approvals, failed txs, contract calls
+    TRANSFER = "transfer"  # All transfers (external and internal)
 
 
 class TaxabilityStatus(str, Enum):
@@ -265,7 +281,7 @@ class Account(SQLModel, table=True):
     name: str = Field(nullable=False, index=True)
     account_type: str = Field(nullable=False, index=True)  # 'cex', 'broker', 'wallet'
     address_or_identifier: Optional[str] = Field(default=None, index=True)
-    tags: Optional[List[str]] = Field(default=None, sa_column=Column(ARRAY(Text)))
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     owned: bool = Field(default=True)  # Whether this account is owned by the user
     enabled: bool = Field(default=True, index=True)  # Whether this account is enabled for sync
     created_at: datetime = Field(default_factory=utc_now)
@@ -284,6 +300,11 @@ class AccountConnector(SQLModel, table=True):
     """
     Account connector configuration.
     Links an account to a specific connector type with its configuration.
+
+    Uniqueness: (account_id, connector_type, config->>'chain') via DB index
+    ``uq_connector_account_type_chain``.  Multi-chain connector types
+    (blockscout, moralis) may appear multiple times per account with
+    different ``chain`` values in their config.
     """
 
     __tablename__ = "account_connectors"
@@ -304,6 +325,7 @@ class AccountConnector(SQLModel, table=True):
     # Relationships
     account: Optional[Account] = Relationship(back_populates="connectors")
     connector_runs: List["SyncJobConnectorRun"] = Relationship(back_populates="connector")
+    file_imports: List["FileImport"] = Relationship(back_populates="connector")
 
 
 # ============================================================================
@@ -388,7 +410,7 @@ class SyncJobConnectorRun(SQLModel, table=True):
     synced_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     updated_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     skipped_ids: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))  # Sample only
-    error_details: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
+    error_details: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
     
     # Logs (JSON array of {timestamp, level, message})
     logs: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSON))
@@ -402,6 +424,63 @@ class SyncJobConnectorRun(SQLModel, table=True):
     job: Optional[SyncJob] = Relationship(back_populates="connector_runs")
     connector: Optional[AccountConnector] = Relationship(back_populates="connector_runs")
     transactions: List["NormalizedTransaction"] = Relationship(back_populates="sync_connector_run")
+
+
+class FileImport(SQLModel, table=True):
+    """
+    File import tracking for file-based connectors.
+    
+    Tracks the lifecycle of uploaded files from upload through processing:
+    - pending: File uploaded, waiting to be processed
+    - processing: Currently being processed by a sync job
+    - completed: Successfully processed (file and record retained for history)
+    - failed: Processing failed (file kept for retry)
+    
+    File Retention: Files are kept for the full retention period (default 90 days)
+    to allow preview of completed imports for audit/debugging purposes.
+    Both files and records are cleaned up after retention_expires_at.
+    Default retention is 90 days (configurable via FILE_IMPORT_RETENTION_DAYS env var).
+    """
+
+    __tablename__ = "file_imports"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    connector_id: int = Field(foreign_key="account_connectors.id", nullable=False, index=True)
+    
+    # File info
+    filename: str = Field(nullable=False)  # Saved filename (with timestamp prefix)
+    original_filename: str = Field(nullable=False)  # Original uploaded filename
+    file_path: str = Field(nullable=False)  # Full path to file (for pending/failed)
+    file_size: int = Field(default=0)  # File size in bytes
+    
+    # Status tracking
+    status: str = Field(default="pending", index=True)  # FileImportStatus enum values
+    
+    # Timestamps
+    uploaded_at: datetime = Field(default_factory=utc_now, index=True)
+    processed_at: Optional[datetime] = Field(default=None)
+    
+    # Metrics (populated after processing)
+    row_count: int = Field(default=0)  # Total rows in file
+    new_count: int = Field(default=0)  # New transactions created
+    updated_count: int = Field(default=0)  # Existing transactions updated
+    skipped_count: int = Field(default=0)  # Duplicates skipped
+    
+    # Processing info
+    sync_job_connector_run_id: Optional[int] = Field(
+        default=None, foreign_key="sync_job_connector_runs.id", index=True
+    )
+    error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
+    
+    # Retention
+    retention_expires_at: Optional[datetime] = Field(default=None, index=True)
+    
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    connector: Optional[AccountConnector] = Relationship(back_populates="file_imports")
+    sync_connector_run: Optional[SyncJobConnectorRun] = Relationship()
 
 
 # ============================================================================
@@ -422,7 +501,7 @@ class Asset(SQLModel, table=True):
     price_type: Optional[str] = Field(
         default=None, index=True
     )  # 'crypto', 'stock', 'fiat' - for price getter selection
-    tags: Optional[List[str]] = Field(default=None, sa_column=Column(ARRAY(Text)))
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     created_at: Optional[datetime] = Field(default_factory=utc_now)
     status: int = Field(default=0)
 
@@ -718,9 +797,11 @@ class NormalizedTransaction(SQLModel, table=True):
     token_contract_address: Optional[str] = Field(default=None)
 
     # Metadata
-    # Note: Empty dict {} in DB will be coerced to None to avoid Pydantic serialization warnings
-    tags: Optional[List[Dict[str, str]]] = Field(default=None, sa_column=Column(JSON))
+    tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     synced_at: Optional[datetime] = Field(default=None)
+    
+    # Duplicate detection - hash of transaction identity for efficient duplicate detection
+    transaction_hash: Optional[str] = Field(default=None, index=True, max_length=64)
     
     # Sync job tracking - links to the connector run that last synced this transaction
     sync_connector_run_id: Optional[int] = Field(
@@ -729,10 +810,13 @@ class NormalizedTransaction(SQLModel, table=True):
 
     @field_validator("tags", mode="before")
     @classmethod
-    def coerce_empty_dict_to_none(cls, v):
-        """Coerce empty dict to None (DB may have {} instead of [] or null)."""
-        if v == {} or v == []:
-            return None
+    def coerce_empty_dict_to_list(cls, v):
+        """Coerce empty dict or None to empty list for consistent API responses."""
+        if v is None or v == {} or v == []:
+            return []
+        if isinstance(v, dict):
+            # If it's a dict (legacy format), convert to list
+            return [v]
         return v
 
     # Review status and taxability
@@ -748,6 +832,10 @@ class NormalizedTransaction(SQLModel, table=True):
 
     # Review notes
     review_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # Content hash for cross-source deduplication (MD5 of normalized trade content)
+    # Formula: MD5({datetime_iso}_{BASE}_{QUOTE}_{qty:.8f}_{price:.8f}_{side})
+    content_hash: Optional[str] = Field(default=None, index=True)
 
     # Timestamps
     created_at: datetime = Field(default_factory=utc_now)
@@ -880,6 +968,11 @@ class RawAccount(SQLModel, table=True):
         default=None, foreign_key="accounts.id", index=True
     )
     created_at: datetime = Field(default_factory=utc_now)
+    
+    # Dismiss functionality
+    dismissed: bool = Field(default=False, index=True)
+    dismissed_at: Optional[datetime] = Field(default=None)
+    dismissed_reason: Optional[str] = Field(default=None)
 
     # Relationships
     account: Optional[Account] = Relationship(back_populates="raw_accounts")
@@ -906,7 +999,7 @@ class UserCalculationBundle(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     label: Optional[str] = Field(default=None)
-    pattern: Optional[str] = Field(default=None)  # transfer, swap, split, unknown
+    pattern: Optional[str] = Field(default=None)  # internal_transfer, swap, flow, split, unknown
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     taxability_override: Optional[str] = Field(
         default=None
@@ -1376,7 +1469,13 @@ class CalculationUnitLeg(SQLModel, table=True):
     unit_id: int = Field(foreign_key="calculation_units.id", nullable=False, index=True)
     transaction_id: int = Field(foreign_key="normalized_transactions.id", nullable=False, index=True)
     asset_id: int = Field(foreign_key="assets.asset_id", nullable=False, index=True)
-    leg_type: LegType = Field(nullable=False, index=True)
+    leg_type: LegType = Field(
+        sa_column=Column(
+            SAEnum("inflow", "outflow", "fee", name="legtype", create_type=False),
+            nullable=False,
+            index=True
+        )
+    )
     quantity: Decimal = Field(sa_column=Column(Numeric(36, 18), nullable=False))
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -1484,7 +1583,7 @@ class CalculationUnit(SQLModel, table=True):
     
     # Unit metadata
     unit_label: Optional[str] = Field(default=None)  # Human-readable label
-    pattern: Optional[str] = Field(default=None)  # User-confirmed pattern: transfer, swap, split, unknown
+    pattern: Optional[str] = Field(default=None)  # User-confirmed pattern: internal_transfer, swap, flow, split, unknown
     timestamp: datetime = Field(default_factory=utc_now, index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -1671,10 +1770,11 @@ class CalculationUnit(SQLModel, table=True):
             Tuple of (pattern, reason) for logging.
             
         Pattern detection priority:
-        1. Same single asset in/out = transfer (complete)
-        2. Different assets with both in/out = swap
-        3. Single-leg transfer (outflow-only or inflow-only with transfer tx_type) = pending_transfer
-        4. Unknown
+        1. Same single asset in/out = INTERNAL_TRANSFER (complete)
+        2. Different assets with both in/out = SWAP
+        3. Single-leg with transaction_type="internal_transfer" = UNMATCHED_INTERNAL_TRANSFER
+        4. Single-leg with transaction_type="transfer" (external) = FLOW
+        5. Unknown
         """
         if not self.legs:
             return (UnitPattern.UNKNOWN.value, "no legs")
@@ -1682,58 +1782,51 @@ class CalculationUnit(SQLModel, table=True):
         outflow_assets = self._outflow_asset_ids
         inflow_assets = self._inflow_asset_ids
         
-        # Same single asset in/out = transfer (complete)
+        # Same single asset in/out = INTERNAL_TRANSFER (complete)
         if outflow_assets == inflow_assets and len(outflow_assets) == 1:
             asset_id = next(iter(outflow_assets))
-            return (UnitPattern.TRANSFER.value, f"same asset #{asset_id} in/out")
+            return (UnitPattern.INTERNAL_TRANSFER.value, f"same asset #{asset_id} in/out")
         
-        # Different assets = swap
+        # Different assets = SWAP
         if outflow_assets and inflow_assets:
             return (UnitPattern.SWAP.value, "different assets")
         
-        # Check for incomplete transfer: single-leg with transfer transaction_type
-        # This detects withdrawal/deposit without matching counterpart
+        # Single leg + transaction_type="internal_transfer" = UNMATCHED_INTERNAL_TRANSFER
         if self._is_incomplete_transfer():
             if outflow_assets:
-                return (UnitPattern.PENDING_TRANSFER.value, "outflow-only transfer awaiting inflow")
+                return (UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value, "outflow-only internal transfer")
             else:
-                return (UnitPattern.PENDING_TRANSFER.value, "inflow-only transfer awaiting outflow")
+                return (UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value, "inflow-only internal transfer")
+        
+        # Single leg + transaction_type="transfer" (external) = FLOW
+        # This catches airdrops, external deposits/withdrawals, payments
+        if self.is_outflow_only or self.is_inflow_only:
+            return (UnitPattern.FLOW.value, "external single-leg transaction")
         
         # Default to unknown
         return (UnitPattern.UNKNOWN.value, "unable to determine pattern")
     
     def _is_incomplete_transfer(self) -> bool:
-        """Check if this unit is an incomplete transfer (single leg with transfer tx_type).
+        """Check if this is an incomplete INTERNAL transfer (single leg with internal_transfer tx_type).
         
         Returns:
-            True if legs indicate a transfer but missing counterpart (inflow or outflow).
+            True if this is an internal transfer missing its counterpart (inflow or outflow).
         """
         # Must be single-direction (outflow-only or inflow-only)
         if not (self.is_outflow_only or self.is_inflow_only):
             return False
         
-        # Check if any leg's source transaction has transfer-related type
-        transfer_types = {"transfer", "withdrawal", "deposit", "internal_transfer"}
-        
+        # Only check for internal_transfer type (not external "transfer")
         for leg in self.legs:
-            if leg.transaction and leg.transaction.transaction_type:
-                tx_type = leg.transaction.transaction_type.lower()
-                if tx_type in transfer_types:
-                    return True
+            if leg.transaction and leg.transaction.transaction_type == TransactionType.INTERNAL_TRANSFER.value:
+                return True
         
         return False
     
     @property
     def is_cost_basis_transfer(self) -> bool:
-        """True if cost basis transfers (user pattern or same asset in/out)."""
-        # If pattern is explicitly set, use it
-        if self.pattern is not None:
-            if self.pattern in (UnitPattern.TRANSFER.value, UnitPattern.SPLIT.value):
-                return True
-            if self.pattern == UnitPattern.SWAP.value:
-                return False
-        # Fallback to intrinsic detection (same single asset in/out)
-        return self._outflow_asset_ids == self._inflow_asset_ids and len(self._outflow_asset_ids) == 1
+        """True if cost basis transfers (internal transfers or splits)."""
+        return self.pattern in (UnitPattern.INTERNAL_TRANSFER.value, UnitPattern.SPLIT.value)
     
     @property
     def is_inflow_only(self) -> bool:

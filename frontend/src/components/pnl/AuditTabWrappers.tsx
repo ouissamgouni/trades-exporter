@@ -469,3 +469,41 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
         </Box>
     );
 };
+
+// ============================================================================
+// Transactions Tab Wrapper
+// ============================================================================
+
+interface TransactionsTabWrapperProps extends BaseTabWrapperProps {
+    renderTab: (props: {
+        versionId: number;
+        baseCurrency: string;
+        onTransactionClick?: (txId: number) => void;
+    }) => React.ReactNode;
+}
+
+export const TransactionsTabWrapper: React.FC<TransactionsTabWrapperProps> = ({
+    versionId,
+    baseCurrency,
+    onTransactionClick,
+    lazy: lazyProp = false,
+    enabled = true,
+    renderTab,
+}) => {
+    // TransactionsTable handles its own data fetching
+    // We just control when it's rendered based on enabled prop
+    
+    if (!enabled && lazyProp) {
+        return null;
+    }
+
+    return (
+        <Box>
+            {renderTab({
+                versionId,
+                baseCurrency,
+                onTransactionClick,
+            })}
+        </Box>
+    );
+};

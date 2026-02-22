@@ -22,6 +22,8 @@ export interface AccountBadgeProps {
     accountName?: string | null;
     /** Fallback source account label when not linked (shows warning state) */
     sourceAccount?: string | null;
+    /** Original source label to display on hover when account is linked */
+    sourceLabel?: string | null;
     /** Badge size */
     size?: 'xs' | 'sm' | 'md';
     /** Color palette for the badge */
@@ -44,6 +46,7 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
     accountId,
     accountName,
     sourceAccount,
+    sourceLabel,
     size = 'xs',
     colorPalette = 'purple',
     maxLength = 20,
@@ -114,6 +117,14 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
                 <Text color="gray.400">Name</Text>
                 <Text color="white" fontWeight="medium">{resolvedName}</Text>
             </Flex>
+            {sourceLabel && sourceLabel !== resolvedName && (
+                <Flex justify="space-between" mb={1} gap={4}>
+                    <Text color="gray.400">Source</Text>
+                    <Text color="gray.300" fontFamily="mono" fontSize="2xs" maxW="180px" truncate>
+                        {sourceLabel}
+                    </Text>
+                </Flex>
+            )}
             {account?.account_type && (
                 <Flex justify="space-between" mb={1} gap={4}>
                     <Text color="gray.400">Type</Text>

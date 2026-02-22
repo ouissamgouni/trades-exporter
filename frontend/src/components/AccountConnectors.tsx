@@ -152,6 +152,12 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
         t => !connectors.some(c => c.connector_type === t.type)
     );
 
+    // Memoize to prevent unnecessary re-renders of ConnectorFormDialog
+    const existingConnectorTypes = React.useMemo(
+        () => connectors.map(c => c.connector_type),
+        [connectors]
+    );
+
     return (
         <Box>
             <VStack align="stretch" gap={4}>
@@ -300,10 +306,10 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
             <ConnectorFormDialog
                 isOpen={isDialogOpen}
                 onClose={handleDialogClose}
-                accountId={account.id}
+                account={account}
                 connector={editingConnector}
                 connectorTypes={connectorTypes}
-                existingConnectorTypes={connectors.map(c => c.connector_type)}
+                existingConnectorTypes={existingConnectorTypes}
             />
 
             {/* Delete Confirmation Dialog */}

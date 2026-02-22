@@ -22,7 +22,7 @@ import {
     Tabs,
     Text,
 } from '@chakra-ui/react';
-import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus } from 'react-icons/fi';
+import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus, FiFileText } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { CalculationUnit, CostLot, RealizedPnLRow, PnLWarningItem, OriginTransactionDetail, Settlement, ConsumedSliceDetail, CostLotEventEntry, FeeEntry } from './types';
 import { API_URL, AssetRef } from '../../types';
@@ -30,8 +30,12 @@ import { Tooltip } from '../ui/tooltip';
 import { AssetBadge } from '../AssetBadge';
 import { CompactTransactionBadgeRow } from '../CompactTransactionBadgeRow';
 import { TransactionRow } from '../TransactionRow';
+import { TransactionsTable } from '../TransactionsTable';
+import { defaultFilterState } from '../TransactionFilters';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
+import { formatQuantity } from '../../utils/numberUtils';
+import { ValueDisplay } from '../ValueDisplay';
 import { TablePagination } from '../TablePagination';
 import { usePagination } from '../../hooks/usePagination';
 import { getWarningTypeConfig } from './warningStyles';
@@ -42,23 +46,10 @@ import {
     RealizedTabWrapper,
     FeesTabWrapper,
     WarningsTabWrapper,
+    TransactionsTabWrapper,
 } from './AuditTabWrappers';
 // Re-export for backwards compatibility
 export { getPersistedPageSize } from '../../hooks/usePagination';
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 // Using formatDateLocale from utils/dateUtils for consistent date formatting
 
@@ -173,15 +164,17 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Quantity</Text>
-                        <Text color="white" fontFamily="mono">{formatQty(txData.quantity || 0)}</Text>
+                        <Text color="white" fontFamily="mono"><ValueDisplay value={txData.quantity} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Unit Price</Text>
-                        <Text color="white">{txData.price ? formatCurrency(txData.price, baseCurrency) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.price} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Total</Text>
-                        <Text color="white">{txData.total ? formatCurrency(txData.total, baseCurrency) : '-'}</Text>
+                        <Text color="white">
+                            {txData.total ? <ValueDisplay value={txData.total} currency={baseCurrency} /> : '-'}
+                        </Text>
                     </Flex>
                     <Flex justify="space-between" mb={1} align="center">
                         <Text color="gray.400">Quote Asset</Text>
@@ -195,7 +188,7 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Fee</Text>
-                        <Text color="white">{txData.fee ? formatQty(txData.fee) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.fee} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1} align="center">
                         <Text color="gray.400">Fee Quote</Text>
@@ -211,8 +204,12 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                         <Text color="gray.400">From/To Account</Text>
                         <Text color="white">
                             {txData.direction === 'inflow'
-                                ? (txData.from_account_name || txData.source_from_account || '-')
-                                : (txData.to_account_name || txData.source_to_account || '-')}
+                                ? (txData.from_account_name
+                                    ? `${txData.from_account_name}${txData.source_from_account && txData.source_from_account !== txData.from_account_name ? ` (${txData.source_from_account})` : ''}`
+                                    : (txData.source_from_account || '-'))
+                                : (txData.to_account_name
+                                    ? `${txData.to_account_name}${txData.source_to_account && txData.source_to_account !== txData.to_account_name ? ` (${txData.source_to_account})` : ''}`
+                                    : (txData.source_to_account || '-'))}
                         </Text>
                     </Flex>
                 </Box>
@@ -403,7 +400,7 @@ const CompactTxInfo: React.FC<CompactTxInfoProps> = ({
                     <Text>• {txData.account_name}</Text>
                 )}
                 {txData.total != null && txData.total > 0 && (
-                    <Text>• {formatCurrency(txData.total, baseCurrency)}</Text>
+                    <Text>• <ValueDisplay value={txData.total} currency={baseCurrency} /></Text>
                 )}
             </Flex>
         </Flex>
@@ -427,10 +424,6 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
     const [originTxs, setOriginTxs] = useState<OriginTransactionDetail[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    // Fetch lot events on-demand for this unit
-    const [unitEvents, setUnitEvents] = useState<CostLotEventEntry[]>([]);
-    const [loadingEvents, setLoadingEvents] = useState(false);
 
     // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
@@ -509,28 +502,6 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
         return map;
     }, [costLots]);
 
-    // Fetch lot events on-demand when row expands
-    useEffect(() => {
-        const fetchUnitEvents = async () => {
-            if (!versionId || !unit.unit_id) return;
-            setLoadingEvents(true);
-            try {
-                const response = await fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?unit_id=${unit.unit_id}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    // Handle both paginated response (with items array) and legacy array response
-                    const eventsData = Array.isArray(data) ? data : data.items || [];
-                    setUnitEvents(eventsData);
-                }
-            } catch (err) {
-                console.error('Failed to fetch unit events:', err);
-            } finally {
-                setLoadingEvents(false);
-            }
-        };
-        fetchUnitEvents();
-    }, [versionId, unit.unit_id]);
-
     return (
         <Box bg="gray.50" p={4} borderRadius="md">
             <Flex direction="column" gap={4}>
@@ -571,6 +542,10 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                         const toAccount = tx.to_account_name || tx.source_to_account;
                                         // From/To Account: show from_account if inflow, to_account if outflow
                                         const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
+                                        // Build source tooltip: show source address when linked account name is displayed
+                                        const fromToSource = tx.direction === 'inflow'
+                                            ? (tx.from_account_name && tx.source_from_account && tx.source_from_account !== tx.from_account_name ? `Source: ${tx.source_from_account}` : undefined)
+                                            : (tx.to_account_name && tx.source_to_account && tx.source_to_account !== tx.to_account_name ? `Source: ${tx.source_to_account}` : undefined);
 
                                         return (
                                             <Table.Row key={tx.transaction_id}>
@@ -606,10 +581,10 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     {formatQty(tx.quantity || 0)}
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
+                                                    {tx.price ? <ValueDisplay value={tx.price} currency={baseCurrency} /> : '-'}
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
+                                                    {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '-'}
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
                                                     {tx.fee ? (
@@ -631,7 +606,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                         {txType}
                                                     </Badge>
                                                 </Table.Cell>
-                                                <Table.Cell fontSize="xs" color="gray.600">
+                                                <Table.Cell fontSize="xs" color="gray.600" title={fromToSource}>
                                                     {fromToAccount || '-'}
                                                 </Table.Cell>
                                             </Table.Row>
@@ -732,10 +707,10 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     <Badge size="xs">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {formatCurrency(entry.proceeds_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell
                                                     fontSize="xs"
@@ -743,7 +718,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
                                                     fontWeight="bold"
                                                 >
-                                                    {formatCurrency(entry.pnl_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="center">
                                                     {entry.is_fee ? (
@@ -1083,13 +1058,13 @@ export const UnitsTab: React.FC<{
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
                                             <Text fontSize="sm" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
-                                                {formatCurrency(unit.realized_pnl_in_base || 0, baseCurrency)}
+                                                <ValueDisplay value={unit.realized_pnl_in_base || 0} currency={baseCurrency} />
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
                                             {unit.has_fees && unit.total_fees_in_base ? (
                                                 <Text fontSize="sm" color="orange.600">
-                                                    {formatCurrency(unit.total_fees_in_base, baseCurrency)}
+                                                    <ValueDisplay value={unit.total_fees_in_base} currency={baseCurrency} />
                                                 </Text>
                                             ) : (
                                                 <Text fontSize="xs" color="gray.400">-</Text>
@@ -1286,7 +1261,7 @@ const CostLotsTab: React.FC<{
             <Flex gap={4} mb={3} fontSize="sm" color="gray.600">
                 <Text>
                     <Badge size="sm" colorPalette="green" mr={1}>Open</Badge>
-                    {formatCurrency(stats.totalCostBasis, baseCurrency)} total cost basis
+                    <ValueDisplay value={stats.totalCostBasis} currency={baseCurrency} /> total cost basis
                 </Text>
             </Flex>
 
@@ -1335,11 +1310,11 @@ const CostLotsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell fontSize="xs">{formatDateLocale(lot.acquired_at)}</Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
-                                        {formatQty(lot.qty_original)}
+                                        <ValueDisplay value={lot.qty_original} />
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
                                         <Text color={isExhausted ? 'gray.400' : undefined}>
-                                            {formatQty(lot.qty_remaining)}
+                                            <ValueDisplay value={lot.qty_remaining} />
                                         </Text>
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
@@ -1347,7 +1322,7 @@ const CostLotsTab: React.FC<{
                                             <Badge size="xs" colorPalette="purple">Zero</Badge>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
-                                                {formatCurrency(lot.unit_cost_in_base, baseCurrency)}
+                                                <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
                                             </Text>
                                         )}
                                     </Table.Cell>
@@ -1356,7 +1331,7 @@ const CostLotsTab: React.FC<{
                                             <Badge size="xs" colorPalette="purple">Zero</Badge>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
-                                                {formatCurrency(lot.total_cost_in_base, baseCurrency)}
+                                                <ValueDisplay value={lot.total_cost_in_base} currency={baseCurrency} />
                                             </Text>
                                         )}
                                     </Table.Cell>
@@ -1502,10 +1477,14 @@ const RealizedPnLTab: React.FC<{
                 </Flex>
                 <Flex gap={4} ml="auto">
                     <Text fontSize="sm" color="gray.500">
-                        Total P&L: <strong style={{ color: stats.totalPnL >= 0 ? 'green' : 'red' }}>{formatCurrency(stats.totalPnL, baseCurrency)}</strong>
+                        Total P&L: <strong style={{ color: stats.totalPnL >= 0 ? 'green' : 'red' }}>
+                            <ValueDisplay value={stats.totalPnL} currency={baseCurrency} />
+                        </strong>
                     </Text>
                     <Text fontSize="sm" color="gray.500">
-                        Taxable: <strong style={{ color: stats.taxablePnL >= 0 ? 'green' : 'red' }}>{formatCurrency(stats.taxablePnL, baseCurrency)}</strong>
+                        Taxable: <strong style={{ color: stats.taxablePnL >= 0 ? 'green' : 'red' }}>
+                            <ValueDisplay value={stats.taxablePnL} currency={baseCurrency} />
+                        </strong>
                     </Text>
                 </Flex>
             </Flex>
@@ -1566,7 +1545,9 @@ const RealizedPnLTab: React.FC<{
                                     {/* Combined FMV Price & Source column */}
                                     <Table.Cell textAlign="right" fontSize="sm">
                                         <Flex direction="column" align="flex-end" gap={0}>
-                                            <Text>{fmvPrice != null ? formatCurrency(fmvPrice, baseCurrency) : '-'}</Text>
+                                            <Text>
+                                                {fmvPrice != null ? <ValueDisplay value={fmvPrice} currency={baseCurrency} /> : '-'}
+                                            </Text>
                                             {sourceLabel && (
                                                 <Badge size="xs" colorPalette={sourceColor} variant="subtle">
                                                     {sourceLabel}
@@ -1575,17 +1556,17 @@ const RealizedPnLTab: React.FC<{
                                         </Flex>
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="sm">
-                                        {formatCurrency(entry.proceeds_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="sm">
-                                        {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell
                                         textAlign="right"
                                         fontWeight="bold"
                                         color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
                                     >
-                                        {formatCurrency(entry.pnl_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell>
                                         <Badge colorPalette={entry.disposal_taxable ? 'red' : 'green'} size="sm">
@@ -1702,7 +1683,7 @@ const FeesTab: React.FC<{
                     <Card.Body py={2}>
                         <Text fontSize="xs" color="gray.500">Total Fees</Text>
                         <Text fontSize="lg" fontWeight="bold">
-                            {formatCurrency(totalFees, baseCurrency)}
+                            <ValueDisplay value={totalFees} currency={baseCurrency} />
                         </Text>
                     </Card.Body>
                 </Card.Root>
@@ -1786,13 +1767,13 @@ const FeesTab: React.FC<{
                                 </Table.Cell>
                                 <Table.Cell textAlign="right">
                                     <Text fontSize="xs">
-                                        {formatCurrency(fee.fee_in_base, baseCurrency)}
+                                        <ValueDisplay value={fee.fee_in_base} currency={baseCurrency} />
                                     </Text>
                                 </Table.Cell>
                                 <Table.Cell textAlign="right">
                                     <Text fontSize="xs" color="gray.600">
                                         {fee.cost_basis_consumed != null
-                                            ? formatCurrency(fee.cost_basis_consumed, baseCurrency)
+                                            ? <ValueDisplay value={fee.cost_basis_consumed} currency={baseCurrency} />
                                             : '-'}
                                     </Text>
                                 </Table.Cell>
@@ -1802,7 +1783,7 @@ const FeesTab: React.FC<{
                                             fontSize="xs"
                                             color={fee.realized_pnl >= 0 ? 'green.600' : 'red.600'}
                                         >
-                                            {formatCurrency(fee.realized_pnl, baseCurrency)}
+                                            <ValueDisplay value={fee.realized_pnl} currency={baseCurrency} />
                                         </Text>
                                     ) : (
                                         <Text fontSize="xs" color="gray.400">-</Text>
@@ -2138,7 +2119,7 @@ const SettlementsTab: React.FC<{
                 {stats.totalCostApplied > 0 && (
                     <Text>
                         <Badge size="sm" colorPalette="purple" mr={1}>
-                            {formatCurrency(stats.totalCostApplied, baseCurrency)}
+                            <ValueDisplay value={stats.totalCostApplied} currency={baseCurrency} />
                         </Badge>
                         Cost basis applied
                     </Text>
@@ -2245,7 +2226,7 @@ const SettlementsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {settlement.cost_basis_applied != null ? (
-                                            formatCurrency(settlement.cost_basis_applied, baseCurrency)
+                                            <ValueDisplay value={settlement.cost_basis_applied} currency={baseCurrency} />
                                         ) : (
                                             <Text fontSize="xs" color="gray.400">-</Text>
                                         )}
@@ -2294,6 +2275,131 @@ const LotEventsTab: React.FC<{
             onTransactionClick={onTransactionClick}
             storageKey="pnl_audit_lot_events"
         />
+    );
+};
+
+// ============================================================================
+// Transactions Tab - Shows included/excluded transactions with toggle
+// ============================================================================
+
+const TransactionsTab: React.FC<{
+    versionId: number;
+    baseCurrency: string;
+    onTransactionClick?: (txId: number) => void;
+}> = ({ versionId, baseCurrency, onTransactionClick }) => {
+    const [view, setView] = useState<'included' | 'excluded'>('included');
+    const [includedCount, setIncludedCount] = useState<number | null>(null);
+    const [excludedCount, setExcludedCount] = useState<number | null>(null);
+
+    // Controlled filter state
+    const [filters, setFilters] = useState<TransactionFilterState>({
+        reviewStatus: [],
+        taxability: [],
+        sources: [],
+        accountIds: [],
+        assetIds: [],
+        categoryIds: [],
+        transactionTypes: [],
+        directions: [],
+        connectorRunIds: [],
+        tagKeys: [],
+        dateFrom: '',
+        dateTo: '',
+        pnlCalVersion: String(versionId),
+        pnlCalInclusionsStatus: 'included',
+    });
+
+    // Update filters when view changes
+    useEffect(() => {
+        setFilters(prev => ({
+            ...prev,
+            pnlCalInclusionsStatus: view,
+        }));
+    }, [view]);
+
+    // Fetch counts on mount
+    useEffect(() => {
+        const fetchCounts = async () => {
+            try {
+                // Fetch included count
+                const includedRes = await fetch(
+                    `${API_URL}/transactions?pnl_cal_version=${versionId}&pnl_cal_inclusions_status=included&limit=1`
+                );
+                if (includedRes.ok) {
+                    const includedData = await includedRes.json();
+                    setIncludedCount(includedData.metadata?.filtered_count ?? 0);
+                }
+
+                // Fetch excluded count
+                const excludedRes = await fetch(
+                    `${API_URL}/transactions?pnl_cal_version=${versionId}&pnl_cal_inclusions_status=excluded&limit=1`
+                );
+                if (excludedRes.ok) {
+                    const excludedData = await excludedRes.json();
+                    setExcludedCount(excludedData.metadata?.filtered_count ?? 0);
+                }
+            } catch (error) {
+                console.error('Failed to fetch transaction counts:', error);
+            }
+        };
+
+        fetchCounts();
+    }, [versionId]);
+
+    // Base filters for reset
+    const baseFilters = useMemo(() => ({
+        reviewStatus: [],
+        taxability: [],
+        sources: [],
+        accountIds: [],
+        assetIds: [],
+        categoryIds: [],
+        transactionTypes: [],
+        directions: [],
+        connectorRunIds: [],
+        tagKeys: [],
+        dateFrom: '',
+        dateTo: '',
+        pnlCalVersion: String(versionId),
+        pnlCalInclusionsStatus: view,
+    }), [versionId, view]);
+
+    return (
+        <Box>
+            {/* Toggle between included/excluded */}
+            <Flex mb={4} justify="center" gap={2}>
+                <Button
+                    size="sm"
+                    variant={view === 'included' ? 'solid' : 'outline'}
+                    colorPalette={view === 'included' ? 'blue' : 'gray'}
+                    onClick={() => setView('included')}
+                >
+                    Included {includedCount !== null && `(${includedCount})`}
+                </Button>
+                <Button
+                    size="sm"
+                    variant={view === 'excluded' ? 'solid' : 'outline'}
+                    colorPalette={view === 'excluded' ? 'blue' : 'gray'}
+                    onClick={() => setView('excluded')}
+                >
+                    Excluded {excludedCount !== null && `(${excludedCount})`}
+                </Button>
+            </Flex>
+
+            {/* Controlled transactions table */}
+            <TransactionsTable
+                tableId="pnl-explorer"
+                title=""
+                subtitle=""
+                filters={filters}
+                onFiltersChange={setFilters}
+                resetFilters={baseFilters}
+                showFilters={true}
+                showBundles={false}
+                showSuggestions={false}
+                compact={true}
+            />
+        </Box>
     );
 };
 
@@ -2447,6 +2553,10 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                         <FiActivity style={{ marginRight: 4 }} />
                         Cost Lot Events ({eventsCount})
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="transactions">
+                        <FiFileText style={{ marginRight: 4 }} />
+                        Transactions
+                    </Tabs.Trigger>
                     <Tabs.Trigger value="warnings">
                         <FiAlertTriangle style={{ marginRight: 4 }} />
                         Warnings ({warningsCount})
@@ -2556,6 +2666,29 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             versionId={versionId}
                             baseCurrency={baseCurrency}
                             onTransactionClick={onTransactionClick}
+                        />
+                    ) : (
+                        <Box p={4} textAlign="center" color="gray.500">
+                            No version ID available
+                        </Box>
+                    )}
+                </Tabs.Content>
+
+                <Tabs.Content value="transactions">
+                    {versionId ? (
+                        <TransactionsTabWrapper
+                            versionId={versionId}
+                            baseCurrency={baseCurrency}
+                            onTransactionClick={onTransactionClick}
+                            lazy={true}
+                            enabled={activeTab === 'transactions'}
+                            renderTab={({ versionId, baseCurrency, onTransactionClick }) => (
+                                <TransactionsTab
+                                    versionId={versionId}
+                                    baseCurrency={baseCurrency}
+                                    onTransactionClick={onTransactionClick}
+                                />
+                            )}
                         />
                     ) : (
                         <Box p={4} textAlign="center" color="gray.500">

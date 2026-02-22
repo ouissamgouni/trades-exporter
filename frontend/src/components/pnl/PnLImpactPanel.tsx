@@ -25,6 +25,8 @@ import { FiExternalLink, FiInfo, FiArrowRight } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { PnLImpactEvent, ConsumedLotDetail, EventTransaction } from './types';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
+import { formatQuantity } from '../../utils/numberUtils';
+import { ValueDisplay } from '../ValueDisplay';
 
 interface PnLImpactPanelProps {
     event: PnLImpactEvent;
@@ -33,19 +35,6 @@ interface PnLImpactPanelProps {
     onTransactionClick?: (txId: number) => void;
     onUnitClick?: (unitId: number) => void;
 }
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 // Using formatDateLocale and formatDateTimeLocale from utils/dateUtils
 
@@ -96,7 +85,7 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                 fontWeight="bold"
                                 color={event.total_pnl >= 0 ? 'green.600' : 'red.600'}
                             >
-                                {formatCurrency(event.total_pnl, baseCurrency)}
+                                <ValueDisplay value={event.total_pnl} currency={baseCurrency} />
                             </Text>
                         </Box>
                     </Flex>
@@ -106,20 +95,20 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                         <Flex justify="space-between" mb={2}>
                             <Text fontSize="sm">Proceeds</Text>
                             <Text fontSize="sm" fontWeight="medium">
-                                {formatCurrency(event.total_proceeds, baseCurrency)}
+                                <ValueDisplay value={event.total_proceeds} currency={baseCurrency} />
                             </Text>
                         </Flex>
                         <Flex justify="space-between" mb={2}>
                             <Text fontSize="sm">Cost Basis</Text>
                             <Text fontSize="sm" fontWeight="medium">
-                                - {formatCurrency(event.total_cost_basis, baseCurrency)}
+                                - <ValueDisplay value={event.total_cost_basis} currency={baseCurrency} />
                             </Text>
                         </Flex>
                         {event.total_fees > 0 && (
                             <Flex justify="space-between" mb={2}>
                                 <Text fontSize="sm">Fees</Text>
                                 <Text fontSize="sm" fontWeight="medium">
-                                    - {formatCurrency(event.total_fees, baseCurrency)}
+                                    - <ValueDisplay value={event.total_fees} currency={baseCurrency} />
                                 </Text>
                             </Flex>
                         )}
@@ -130,7 +119,7 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                     fontWeight="bold"
                                     color={event.total_pnl >= 0 ? 'green.600' : 'red.600'}
                                 >
-                                    {formatCurrency(event.total_pnl, baseCurrency)}
+                                    <ValueDisplay value={event.total_pnl} currency={baseCurrency} />
                                 </Text>
                             </Flex>
                         </Box>
@@ -196,14 +185,14 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Text fontFamily="mono" fontSize="sm">
-                                                {formatQty(lot.qty_consumed)}
+                                                <ValueDisplay value={lot.qty_consumed} />
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {formatCurrency(lot.unit_cost, baseCurrency)}
+                                            <ValueDisplay value={lot.unit_cost} />
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {formatCurrency(lot.cost_basis, baseCurrency)}
+                                            <ValueDisplay value={lot.cost_basis} currency={baseCurrency} />
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Flex align="center" gap={1}>
@@ -267,11 +256,11 @@ export const PnLImpactPanel: React.FC<PnLImpactPanelProps> = ({
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Text fontFamily="mono" fontSize="sm">
-                                                {formatQty(tx.quantity)}
+                                                <ValueDisplay value={tx.quantity} />
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell>
-                                            {tx.total ? formatCurrency(tx.total, baseCurrency) : '—'}
+                                            {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '—'}
                                         </Table.Cell>
                                         <Table.Cell>
                                             {onTransactionClick && (

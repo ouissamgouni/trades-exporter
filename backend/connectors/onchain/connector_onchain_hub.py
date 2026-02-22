@@ -26,13 +26,15 @@ class ConnectorOnchainHub(BaseHubConnector):
     def connector_name(self) -> str:
         return "onchain_hub"
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, account_id: int = None, connector_id: int = None, config: Optional[Dict[str, Any]] = None):
         """
         Initialize Onchain Hub connector.
         Reads wallet addresses and scanner configuration from settings.yaml.
         In test mode, creates child connectors so they return test data.
         
         Args:
+            account_id: Optional account ID for database linking
+            connector_id: Optional connector ID for database linking
             config: Configuration dict (may include parent_output_path)
         """
         # Load wallet configuration from settings (used in both test and live mode)
@@ -47,6 +49,8 @@ class ConnectorOnchainHub(BaseHubConnector):
         super().__init__(
             child_connectors=[],  # Will populate after creating children
             parallel_strategy="queue",
+            account_id=account_id,
+            connector_id=connector_id,
             config=config,
         )
 
@@ -60,7 +64,7 @@ class ConnectorOnchainHub(BaseHubConnector):
             )
 
             try:
-                scanner_connector = self._create_scanner_connector(wallet_config)
+                scanner_connector = self._create_scanner_connector(wallet_config, account_id, connector_id)
                 child_connectors.append((connector_name, scanner_connector))
             except Exception as e:
                 log.error(f"Failed to create connector for {connector_name}: {e}")
@@ -84,12 +88,14 @@ class ConnectorOnchainHub(BaseHubConnector):
                     f"   [{idx}] {config.get('wallet_address', 'N/A')[:10]}... on {config.get('chain_name', 'Unknown')} ({config.get('scanner', 'Unknown')})"
                 )
 
-    def _create_scanner_connector(self, wallet_config: Dict) -> Any:
+    def _create_scanner_connector(self, wallet_config: Dict, account_id: int = None, connector_id: int = None) -> Any:
         """
         Create appropriate scanner connector based on wallet configuration.
 
         Args:
             wallet_config: Wallet configuration from settings.yaml
+            account_id: Optional account ID for database linking
+            connector_id: Optional connector ID for database linking
 
         Returns:
             Scanner connector instance (Etherscan or Blockscout hub)
@@ -108,6 +114,8 @@ class ConnectorOnchainHub(BaseHubConnector):
             return ConnectorEtherscanHub(
                 wallet_address=wallet_address,
                 chain_name=chain_name,
+                account_id=account_id,
+                connector_id=connector_id,
                 config=child_config,
             )
         elif "blockscout" in scanner_type:
@@ -117,6 +125,8 @@ class ConnectorOnchainHub(BaseHubConnector):
             return ConnectorBlockscoutHub(
                 wallet_address=wallet_address,
                 chain_name=chain_name,
+                account_id=account_id,
+                connector_id=connector_id,
                 config=child_config,
             )
         else:

@@ -1,0 +1,186 @@
+"""
+Test for the connector completion callback race condition fix.
+
+Verifies that completion callbacks are registered even when a connector's
+status is already RUNNING (from lazy initialization in DatabaseConnectorHub)
+before the main loop processes its first item.
+"""
+import threading
+import time
+import pytest
+from datetime import datetime
+from unittest.mock import Mock, MagicMock, patch
+
+from backend.services.parallel_pipeline_processor import ParallelPipelineProcessor, PipelineStage
+from backend.services.sync_job_service import (
+    SyncJobService,
+    ConnectorProgress,
+    ConnectorSyncStatus,
+    JobProgress,
+    JobStatus,
+)
+
+
+class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
+    """
+    Regression test: completion callback must be registered even when
+    DatabaseConnectorHub's lazy initialization has already transitioned
+    the connector from QUEUED -> RUNNING before the main loop sees items.
+    """
+
+    def test_callback_fires_when_connector_already_running(self):
+        """
+        Simulate the race:
+        1. Connector status set to RUNNING (by progress callback from hub init)
+        2. Main loop detects connector change, sees status is already RUNNING
+        3. Callback should STILL be registered (the fix)
+        4. When pending count reaches 0, completion callback fires
+        """
+        mock_session = MagicMock()
+        mock_pipeline = MagicMock()
+
+        # Pipeline returns a successful result
+        result = MagicMock()
+        result.success = True
+        result.new_count = 1
+        result.updated_count = 0
+        result.skipped_count = 0
+        result.split_count = 0
+        result.transfer_count = 0
+        result.warnings = []
+        result.errors = []
+        mock_pipeline.process.return_value = result
+
+        processor = ParallelPipelineProcessor(
+            session=mock_session,
+            pipeline=mock_pipeline,
+            db_connector_runs={42: 100},
+            num_workers=1,
+            queue_size=10,
+        )
+        processor.start()
+
+        # Track whether completion callback was invoked
+        completion_called = threading.Event()
+        completed_connector_id = []
+
+        def on_complete(connector_id: int):
+            completed_connector_id.append(connector_id)
+            completion_called.set()
+
+        # Register callback THEN submit items (mirrors the fix)
+        processor.register_connector_completion_callback(42, on_complete)
+
+        # Submit a single item for connector 42
+        mock_normalized = MagicMock()
+        mock_normalized.source = "test"
+        processor.submit(
+            raw_item={"id": "tx1"},
+            normalized_item=mock_normalized,
+            connector_id=42,
+            connector_name="test-connector",
+        )
+
+        # Wait for the callback to fire (worker processes item, pending -> 0)
+        fired = completion_called.wait(timeout=5)
+        processor.stop(timeout=5)
+
+        assert fired, "Completion callback was never invoked"
+        assert completed_connector_id == [42]
+
+    def test_no_callback_means_connector_stays_running(self):
+        """
+        Without the fix: if no callback is registered, the connector stays
+        RUNNING until the post-processor cleanup loop.
+        """
+        mock_session = MagicMock()
+        mock_pipeline = MagicMock()
+        result = MagicMock()
+        result.success = True
+        result.new_count = 0
+        result.updated_count = 0
+        result.skipped_count = 0
+        result.split_count = 0
+        result.transfer_count = 0
+        result.warnings = []
+        result.errors = []
+        mock_pipeline.process.return_value = result
+
+        processor = ParallelPipelineProcessor(
+            session=mock_session,
+            pipeline=mock_pipeline,
+            db_connector_runs={42: 100},
+            num_workers=1,
+            queue_size=10,
+        )
+        processor.start()
+
+        # Do NOT register callback (simulates the old bug)
+        mock_normalized = MagicMock()
+        mock_normalized.source = "test"
+        processor.submit(
+            raw_item={"id": "tx1"},
+            normalized_item=mock_normalized,
+            connector_id=42,
+            connector_name="test-connector",
+        )
+
+        # Wait for processing
+        time.sleep(1)
+        processor.stop(timeout=5)
+
+        # Pending count should be 0 (item processed), but no callback was fired
+        assert processor.get_connector_pending_count(42) == 0
+
+    def test_multiple_connectors_complete_independently_via_callbacks(self):
+        """
+        Two connectors submit items; each should get its own completion callback
+        fired independently as soon as its last item is processed.
+        """
+        mock_session = MagicMock()
+        mock_pipeline = MagicMock()
+        result = MagicMock()
+        result.success = True
+        result.new_count = 1
+        result.updated_count = 0
+        result.skipped_count = 0
+        result.split_count = 0
+        result.transfer_count = 0
+        result.warnings = []
+        result.errors = []
+        mock_pipeline.process.return_value = result
+
+        processor = ParallelPipelineProcessor(
+            session=mock_session,
+            pipeline=mock_pipeline,
+            db_connector_runs={1: 100, 2: 200},
+            num_workers=2,
+            queue_size=10,
+        )
+        processor.start()
+
+        completed_ids = []
+        lock = threading.Lock()
+
+        def on_complete(connector_id: int):
+            with lock:
+                completed_ids.append(connector_id)
+
+        processor.register_connector_completion_callback(1, on_complete)
+        processor.register_connector_completion_callback(2, on_complete)
+
+        mock_norm = MagicMock()
+        mock_norm.source = "test"
+
+        # Submit 2 items for connector 1, 1 item for connector 2
+        processor.submit({"id": "a"}, mock_norm, connector_id=1, connector_name="c1")
+        processor.submit({"id": "b"}, mock_norm, connector_id=1, connector_name="c1")
+        processor.submit({"id": "c"}, mock_norm, connector_id=2, connector_name="c2")
+
+        # Wait and stop
+        time.sleep(2)
+        processor.stop(timeout=5)
+
+        assert sorted(completed_ids) == [1, 2], (
+            f"Expected both connectors to complete via callbacks, got: {completed_ids}"
+        )

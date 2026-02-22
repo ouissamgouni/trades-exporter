@@ -172,6 +172,8 @@ const ConnectorsManager: React.FC = () => {
         switch (status) {
             case 'success':
                 return <Badge colorPalette="green">Success</Badge>;
+            case 'warning':
+                return <Badge colorPalette="orange">Warning</Badge>;
             case 'failed':
                 return <Badge colorPalette="red">Failed</Badge>;
             case 'running':

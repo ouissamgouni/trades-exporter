@@ -133,8 +133,10 @@ class LotManager:
             timestamp=event_timestamp,
         )
         
-        # Note: Setting lot=lot in constructor auto-populates lot.events via SQLAlchemy back_populates
-        # No need to manually append - the ORM handles the bidirectional relationship
+        # Explicitly add event to lot's events collection for cascade persistence
+        if lot.events is None:
+            lot.events = []
+        lot.events.append(event)
         
         log.debug(
             "lot_event_emitted",
@@ -594,6 +596,13 @@ class LotManager:
                 settled_at=datetime.utcnow(),
                 cost_basis_applied=cost_applied,
             )
+            
+            # Add settlement to settling_lot's collection for cascade persistence
+            # (settlements are owned by settling_lot, not by the transaction)
+            if settling_lot:
+                if settling_lot.outgoing_settlements is None:
+                    settling_lot.outgoing_settlements = []
+                settling_lot.outgoing_settlements.append(settlement)
 
             settlement_records.append(settlement)
             

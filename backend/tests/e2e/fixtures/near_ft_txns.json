@@ -1,0 +1,110 @@
+[
+  {
+    "event_index": "17604717909784375970000000101000001",
+    "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+    "involved_account_id": "alice.near",
+    "delta_amount": "5000000000000000000",
+    "cause": "TRANSFER",
+    "transaction_hash": "FtTxHash1ABCDEFabcdef123456789abcdef1234567",
+    "included_in_block_hash": "H8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700010000000000000",
+    "block": {
+      "block_height": 168306000
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 258965265717000000000
+    },
+    "ft": {
+      "contract": "usdt.tether-token.near",
+      "name": "Tether USD",
+      "symbol": "USDT",
+      "decimals": 6,
+      "icon": null,
+      "reference": null
+    }
+  },
+  {
+    "event_index": "17604717909784375970000000102000002",
+    "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+    "involved_account_id": "bob.near",
+    "delta_amount": "-2000000000000000000",
+    "cause": "TRANSFER",
+    "transaction_hash": "FtTxHash2ABCDEFabcdef123456789abcdef1234567",
+    "included_in_block_hash": "I8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700011000000000000",
+    "block": {
+      "block_height": 168306010
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 300000000000000000000
+    },
+    "ft": {
+      "contract": "usdt.tether-token.near",
+      "name": "Tether USD",
+      "symbol": "USDT",
+      "decimals": 6,
+      "icon": null,
+      "reference": null
+    }
+  },
+  {
+    "event_index": "17604717909784375970000000103000003",
+    "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+    "involved_account_id": "wrap.near",
+    "delta_amount": "1000000000000000000000000",
+    "cause": "TRANSFER",
+    "transaction_hash": "FtTxHash3ABCDEFabcdef123456789abcdef1234567",
+    "included_in_block_hash": "J8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700012000000000000",
+    "block": {
+      "block_height": 168306020
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 150000000000000000000
+    },
+    "ft": {
+      "contract": "wrap.near",
+      "name": "Wrapped NEAR",
+      "symbol": "wNEAR",
+      "decimals": 24,
+      "icon": null,
+      "reference": null
+    }
+  },
+  {
+    "event_index": "17604717909784375970000000104000004",
+    "affected_account_id": "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f",
+    "involved_account_id": "carol.near",
+    "delta_amount": "0",
+    "cause": "TRANSFER",
+    "transaction_hash": "FtTxHash4ABCDEFabcdef123456789abcdef1234567",
+    "included_in_block_hash": "K8Ch7g8R8oYqRdZqajMLkNmjshCFdnyAuk1Kstzqwtuf",
+    "block_timestamp": "1700013000000000000",
+    "block": {
+      "block_height": 168306030
+    },
+    "outcomes": {
+      "status": true
+    },
+    "outcomes_agg": {
+      "transaction_fee": 100000000000000000000
+    },
+    "ft": {
+      "contract": "usdc.near",
+      "name": "USD Coin",
+      "symbol": "USDC",
+      "decimals": 6,
+      "icon": null,
+      "reference": null
+    }
+  }
+]

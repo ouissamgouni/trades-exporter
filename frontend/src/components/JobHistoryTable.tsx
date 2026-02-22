@@ -26,8 +26,10 @@ interface JobHistoryTableProps {
 
 const statusColorMap: Record<SyncJobStatus, string> = {
     idle: 'gray',
+    pending: 'yellow',
     running: 'blue',
     completed: 'green',
+    warning: 'orange',
     aborted: 'orange',
     failed: 'red',
 };
@@ -144,6 +146,7 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                 <Table.Header>
                     <Table.Row>
                         <Table.ColumnHeader>ID</Table.ColumnHeader>
+                        <Table.ColumnHeader>Config</Table.ColumnHeader>
                         <Table.ColumnHeader>Status</Table.ColumnHeader>
                         <Table.ColumnHeader>Started</Table.ColumnHeader>
                         <Table.ColumnHeader>Duration</Table.ColumnHeader>
@@ -162,6 +165,16 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                                 #{job.id}
                             </Table.Cell>
                             <Table.Cell>
+                                <Flex gap={1} wrap="wrap">
+                                    <Badge colorPalette={job.renormalize ? 'purple' : 'blue'} size="xs">
+                                        {job.renormalize ? 'Re-Normalize' : 'Sync'}
+                                    </Badge>
+                                    {job.connector_runs?.some(r => r.test_mode) && (
+                                        <Badge colorPalette="orange" size="xs">Test</Badge>
+                                    )}
+                                </Flex>
+                            </Table.Cell>
+                            <Table.Cell>
                                 <Badge colorPalette={statusColorMap[job.status]}>
                                     {job.status}
                                 </Badge>
@@ -173,7 +186,36 @@ export const JobHistoryTable: React.FC<JobHistoryTableProps> = ({
                                 {formatDuration(job.started_at, job.finished_at)}
                             </Table.Cell>
                             <Table.Cell textAlign="right">
-                                {job.total_connectors}
+                                {job.connector_runs && job.connector_runs.length > 0 ? (
+                                    <Flex gap={1} justify="flex-end" wrap="wrap">
+                                        {job.connector_runs.map((run) => (
+                                            <Badge
+                                                key={run.id}
+                                                colorPalette={
+                                                    run.status === 'completed' ? 'green' :
+                                                        run.status === 'failed' ? 'red' :
+                                                            run.status === 'running' ? 'blue' :
+                                                                run.status === 'queued' || run.status === 'pending' ? 'gray' :
+                                                                    'orange'
+                                                }
+                                                size="xs"
+                                                title={`${run.connector_type || `ID:${run.connector_id}`} - ${run.status}${run.synced_count > 0 ? ` (+${run.synced_count})` : ''}`}
+                                            >
+                                                {run.connector_type || `ID:${run.connector_id}`}
+                                                {run.synced_count > 0 && ` +${run.synced_count}`}
+                                                {run.updated_count > 0 && run.synced_count === 0 && ` ↻${run.updated_count}`}
+                                                {run.error_count > 0 && ` ✗${run.error_count}`}
+                                                {run.synced_count === 0 && run.updated_count === 0 && run.error_count === 0 && (
+                                                    run.status === 'queued' || run.status === 'pending' ? ' ⏳' :
+                                                        run.status === 'running' ? ' 🔄' :
+                                                            run.status === 'skipped' ? ' ⏭' : ''
+                                                )}
+                                            </Badge>
+                                        ))}
+                                    </Flex>
+                                ) : (
+                                    job.total_connectors
+                                )}
                             </Table.Cell>
                             <Table.Cell textAlign="right">
                                 {job.total_processed.toLocaleString()}

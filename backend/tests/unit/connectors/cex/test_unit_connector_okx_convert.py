@@ -67,7 +67,7 @@ class TestOKXConvertConnector:
         assert result.total == 1000.0
         assert result.fee == 5.0
         assert result.source_fee_quote_asset_symbol == "EUR"
-        assert result.tags == {"type": "convert"}
+        assert result.tags == [{"type": "convert"}]
         assert result.date_time == datetime(2022, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     @patch("backend.connectors.cex.connector_okx_convert.load_credentials")

@@ -94,8 +94,9 @@ class TestBaseConnectorSinceDatetime:
             def connector_name(self) -> str:
                 return "test-connector"
             
-            def get_raws(self):
-                return []
+            def yield_raws(self):
+                return
+                yield  # Makes this a generator
             
             def raw_to_normalized(self, raw):
                 return None
@@ -117,8 +118,9 @@ class TestBaseConnectorSinceDatetime:
             def connector_name(self) -> str:
                 return "test-connector"
             
-            def get_raws(self):
-                return []
+            def yield_raws(self):
+                return
+                yield  # Makes this a generator
             
             def raw_to_normalized(self, raw):
                 return None
@@ -144,8 +146,9 @@ class TestBaseConnectorSinceDatetime:
             def connector_name(self) -> str:
                 return "test-connector"
             
-            def get_raws(self):
-                return []
+            def yield_raws(self):
+                return
+                yield  # Makes this a generator
             
             def raw_to_normalized(self, raw):
                 return None
@@ -167,8 +170,9 @@ class TestBaseConnectorSinceDatetime:
             def connector_name(self) -> str:
                 return "test-connector"
             
-            def get_raws(self):
-                return []
+            def yield_raws(self):
+                return
+                yield  # Makes this a generator
             
             def raw_to_normalized(self, raw):
                 return None

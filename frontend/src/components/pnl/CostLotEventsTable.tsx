@@ -128,10 +128,11 @@ const formatSmartNumber = (value: number): string => {
 
 const getPatternColor = (pattern: string): string => {
     const colorMap: Record<string, string> = {
-        'transfer': 'blue',
-        'pending_transfer': 'orange',
+        'internal_transfer': 'blue',
+        'unmatched_internal_transfer': 'orange',
         'swap': 'purple',
         'split': 'teal',
+        'flow': 'green',
         'unknown': 'gray',
     };
     return colorMap[pattern] || 'gray';
@@ -185,12 +186,12 @@ const QUICK_PRESETS: Record<string, QuickPreset> = {
     transfers: {
         label: 'Transfers',
         icon: '🔄',
-        unitPatterns: ['transfer'],
+        unitPatterns: ['internal_transfer'],
     },
-    pendingTransfers: {
-        label: 'Pending Transfers',
+    unmatchedTransfers: {
+        label: 'Unmatched Transfers',
         icon: '⏳',
-        unitPatterns: ['pending_transfer'],
+        unitPatterns: ['unmatched_internal_transfer'],
     },
 };
 

@@ -34,7 +34,7 @@ class WarningType(str, Enum):
     FEE_CONSUMPTION_FAILED = "fee_consumption_failed"
     UNMATCHED_GROUP = "unmatched_group"
     FMV_FETCH_FAILED = "fmv_fetch_failed"
-    PENDING_TRANSFER = "pending_transfer"  # Transfer with missing counterpart leg
+    UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Internal transfer with missing counterpart leg
 
 
 @dataclass

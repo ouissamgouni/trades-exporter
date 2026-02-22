@@ -408,7 +408,7 @@ def create_transfer_group(
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=inflow_qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=inflow_qty, transaction=inflow_tx),
     ]
 
     # Add fee leg if specified

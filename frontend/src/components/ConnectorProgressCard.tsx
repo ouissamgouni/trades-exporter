@@ -10,13 +10,14 @@ import {
 import React, { useState } from 'react';
 import { ConnectorProgress, ConnectorSyncStatus } from '../types';
 import { ConnectorLogViewer } from './ConnectorLogViewer';
-import { PipelineStageIndicator } from './PipelineStageIndicator';
+import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
 
 interface ConnectorProgressCardProps {
     progress: ConnectorProgress;
     isExpanded?: boolean;
     onRetry?: (connectorId: number) => void;
     retryLoading?: boolean;
+    renormalize?: boolean;
 }
 
 const getStatusIcon = (status: ConnectorSyncStatus): string => {
@@ -28,6 +29,8 @@ const getStatusIcon = (status: ConnectorSyncStatus): string => {
             return '🔄';
         case 'completed':
             return '✅';
+        case 'warning':
+            return '⚠️';
         case 'failed':
             return '❌';
         case 'skipped':
@@ -46,6 +49,8 @@ const getStatusColor = (status: ConnectorSyncStatus): string => {
             return 'blue';
         case 'completed':
             return 'green';
+        case 'warning':
+            return 'orange';
         case 'failed':
             return 'red';
         case 'skipped':
@@ -57,7 +62,19 @@ const getStatusColor = (status: ConnectorSyncStatus): string => {
 
 const getOperationProgress = (progress: ConnectorProgress): number => {
     if (!progress.operation_total || progress.operation_total === 0) return 0;
-    return Math.round((progress.operation_progress / progress.operation_total) * 100);
+    const percentage = Math.round((progress.operation_progress / progress.operation_total) * 100);
+    // Clamp to 0-100 range to prevent invalid values
+    return Math.min(100, Math.max(0, percentage));
+};
+
+const getProgressBarColor = (status: ConnectorSyncStatus, errorCount: number): string => {
+    if (status === 'failed') return 'red';
+    if (status === 'running' && errorCount > 0) return 'orange';
+    if (status === 'running') return 'blue';
+    if (status === 'completed' && errorCount > 0) return 'yellow';
+    if (status === 'completed') return 'green';
+    if (status === 'warning') return 'orange';
+    return 'gray';
 };
 
 const formatDuration = (startedAt?: string, finishedAt?: string): string => {
@@ -76,11 +93,15 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
     isExpanded: initialExpanded = false,
     onRetry,
     retryLoading = false,
+    renormalize = false,
 }) => {
     const [expanded, setExpanded] = useState(initialExpanded);
+    const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
     const isRunning = progress.status === 'running';
     const isFailed = progress.status === 'failed';
-    const canRetry = isFailed && onRetry;
+    const hasWarning = progress.status === 'warning';
+    const canRetry = (isFailed || hasWarning) && onRetry;
+    const hasConnectorRunId = progress.connector_run_id != null;
 
     // Get counts - handle both new and legacy field names
     const newCount = progress.new_count ?? progress.new_entries ?? 0;
@@ -98,18 +119,24 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                     ? 'blue.300'
                     : isFailed
                         ? 'red.300'
-                        : progress.status === 'completed'
-                            ? 'green.300'
-                            : 'gray.200'
+                        : hasWarning
+                            ? 'orange.300'
+                            : progress.status === 'completed'
+                                ? 'green.300'
+                                : 'gray.200'
             }
             bg={
                 isRunning
                     ? 'blue.50'
                     : isFailed
                         ? 'red.50'
-                        : progress.test_mode
+                        : hasWarning
                             ? 'orange.50'
-                            : 'white'
+                            : progress.test_mode
+                                ? 'orange.50'
+                                : renormalize
+                                    ? 'purple.50'
+                                    : 'white'
             }
             overflow="hidden"
         >
@@ -131,6 +158,11 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                                 🧪 Test
                             </Badge>
                         )}
+                        {renormalize && (
+                            <Badge colorPalette="purple" size="sm">
+                                🔄 Re-Normalize
+                            </Badge>
+                        )}
                     </Flex>
                     <Flex align="center" gap={2}>
                         {(progress.status === 'completed' || progress.status === 'running') && (
@@ -147,15 +179,18 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                     </Flex>
                 </Flex>
 
-                <Text fontSize="xs" color="gray.500" mb={2}>
+                <Text fontSize="xs" color="gray.500">
                     {progress.account_name}
+                </Text>
+                <Text fontSize="xs" color="gray.400" mb={2}>
+                    ID: {progress.connector_id}
                 </Text>
 
                 {/* Progress bar for running connector */}
                 {isRunning && progress.operation_total > 0 && (
                     <Box mb={2}>
                         <Flex justify="space-between" mb={1}>
-                            <Text fontSize="xs" color="blue.600">
+                            <Text fontSize="xs" color={errorCount > 0 ? "orange.600" : "blue.600"}>
                                 {progress.current_operation || 'Processing...'}
                             </Text>
                             <Text fontSize="xs" color="gray.400">
@@ -166,18 +201,26 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                             value={getOperationProgress(progress)}
                             max={100}
                             size="sm"
-                            colorPalette="blue"
+                            colorPalette={getProgressBarColor(progress.status, errorCount)}
                         >
                             <Progress.Track>
                                 <Progress.Range />
                             </Progress.Track>
                         </Progress.Root>
+                        {errorCount > 0 && (
+                            <Text fontSize="xs" color="orange.600" mt={1}>
+                                ⚠️ {errorCount} error{errorCount !== 1 ? 's' : ''} encountered
+                            </Text>
+                        )}
                     </Box>
                 )}
 
                 {/* Stats summary */}
-                {(progress.status === 'completed' || progress.status === 'running' || progress.processed > 0) && (
+                {(progress.status === 'completed' || progress.status === 'running' || progress.processed > 0 || progress.fetched_count > 0) && (
                     <Flex gap={3} fontSize="xs" wrap="wrap">
+                        {progress.status === 'running' && progress.fetched_count > 0 && (
+                            <Text color="purple.500">📥 {progress.fetched_count} fetched</Text>
+                        )}
                         <Text color="green.400">+{newCount} new</Text>
                         <Text color="blue.400">{updatedCount} updated</Text>
                         <Text color="gray.500">{skippedCount} dups</Text>
@@ -191,8 +234,8 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
 
                 {/* Error message preview */}
                 {isFailed && progress.error && (
-                    <Text fontSize="xs" color="red.400" mt={2} lineClamp={1}>
-                        {progress.error}
+                    <Text fontSize="xs" color="red.400" mt={2} lineClamp={2}>
+                        {progress.error.split('\n')[0]}
                     </Text>
                 )}
             </Box>
@@ -201,18 +244,18 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
             <Collapsible.Root open={expanded}>
                 <Collapsible.Content>
                     <Box p={3} pt={0} borderTopWidth="1px" borderColor="gray.200">
-                        {/* Pipeline stages */}
-                        {(isRunning || progress.status === 'completed') && (
-                            <Box mb={4}>
-                                <PipelineStageIndicator
-                                    currentStage={progress.pipeline_stage}
-                                    stageStats={progress.stage_stats}
-                                />
-                            </Box>
-                        )}
-
                         {/* Detailed stats */}
                         <Flex gap={4} mb={4} wrap="wrap">
+                            {progress.status === 'running' && (
+                                <Box>
+                                    <Text fontSize="xs" color="gray.500">
+                                        Fetched
+                                    </Text>
+                                    <Text fontSize="lg" fontWeight="bold" color="purple.500">
+                                        {progress.fetched_count ?? 0}
+                                    </Text>
+                                </Box>
+                            )}
                             <Box>
                                 <Text fontSize="xs" color="gray.500">
                                     Processed
@@ -257,12 +300,26 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                                 borderRadius="md"
                                 mb={4}
                             >
-                                <Text fontWeight="bold" color="red.700" mb={1}>
-                                    Error:
+                                <Text fontWeight="bold" color="red.700" mb={2}>
+                                    Error Details:
                                 </Text>
-                                <Text color="red.600" fontSize="sm">
+                                <Box
+                                    as="pre"
+                                    fontSize="xs"
+                                    color="red.600"
+                                    whiteSpace="pre-wrap"
+                                    wordBreak="break-word"
+                                    fontFamily="monospace"
+                                    maxH="300px"
+                                    overflowY="auto"
+                                    bg="white"
+                                    p={2}
+                                    borderRadius="sm"
+                                    borderWidth={1}
+                                    borderColor="red.100"
+                                >
                                     {progress.error}
-                                </Text>
+                                </Box>
                             </Box>
                         )}
 
@@ -283,6 +340,23 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                             </Box>
                         )}
 
+                        {/* View Details button */}
+                        {hasConnectorRunId && (
+                            <Box mb={4}>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    colorPalette="blue"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDetailDrawerOpen(true);
+                                    }}
+                                >
+                                    📊 View Details
+                                </Button>
+                            </Box>
+                        )}
+
                         {/* Logs */}
                         {progress.logs && progress.logs.length > 0 && (
                             <Box>
@@ -295,6 +369,16 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                     </Box>
                 </Collapsible.Content>
             </Collapsible.Root>
+
+            {/* Connector Run Detail Drawer - Use custom resizable drawer */}
+            {hasConnectorRunId && detailDrawerOpen && (
+                <ConnectorRunDetailDrawer
+                    runId={progress.connector_run_id!}
+                    open={detailDrawerOpen}
+                    onClose={() => setDetailDrawerOpen(false)}
+                    enablePolling={isRunning}
+                />
+            )}
         </Box>
     );
 };

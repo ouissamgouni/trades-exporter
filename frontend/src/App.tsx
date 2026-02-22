@@ -1,9 +1,13 @@
 
-import React, { Suspense, useEffect, useState } from 'react';
-import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner, Flex } from '@chakra-ui/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React, { Suspense, useEffect, useState, useCallback } from 'react';
+import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner, Flex, Button } from '@chakra-ui/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { TestModeBanner } from './components/TestModeBanner';
-import { API_URL, ValidationSummary, SyncJobProgress, ConnectorProgress } from './types';
+import { API_URL, SyncJobProgress, ConnectorProgress, Account, Asset, BundleSuggestion } from './types';
+import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext';
+import { defaultFilterState } from './components/TransactionFilters';
+import { FiActivity, FiCheckCircle } from 'react-icons/fi';
+import { DataHealthCheckDrawer } from './components/DataHealthCheckDrawer';
 
 // Setup status interface
 interface SetupStatus {
@@ -35,7 +39,9 @@ const UnifiedSetupView = React.lazy(() => import('./components/UnifiedSetupView'
 const SyncJobPanel = React.lazy(() => import('./components/SyncJobPanel').then(m => ({ default: m.SyncJobPanel })));
 const AddImportPanel = React.lazy(() => import('./components/AddImportPanel').then(m => ({ default: m.AddImportPanel })));
 const InboxView = React.lazy(() => import('./components/InboxView').then(m => ({ default: m.InboxView })));
+const AllTransactionsView = React.lazy(() => import('./components/AllTransactionsView').then(m => ({ default: m.AllTransactionsView })));
 const TransactionsTable = React.lazy(() => import('./components/TransactionsTable').then(m => ({ default: m.TransactionsTable })));
+const TimelineSection = React.lazy(() => import('./components/TimelineSection'));
 const PnLPanel = React.lazy(() => import('./components/PnLPanel').then(m => ({ default: m.PnLPanel })));
 const PricesViewer = React.lazy(() => import('./components/PricesViewer').then(m => ({ default: m.PricesViewer })));
 
@@ -46,37 +52,28 @@ const TabLoadingFallback = () => (
     </Center>
 );
 
-const App = () => {
-    // Validation summary state for tab badges
-    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+const AppContent = () => {
+    // Use global data health context
+    const { validationSummary, refreshHealthData } = useDataHealth();
     // Setup status for Setup tab badge
     const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
     // Sync job status for Sync tab badge
     const [syncStatus, setSyncStatus] = useState<SyncJobProgress | null>(null);
-    
-    // Fetch validation summary for tab badges
-    useEffect(() => {
-        const fetchValidationSummary = async () => {
-            try {
-                const response = await fetch(`${API_URL}/transactions/data-health-check`);
-                if (response.ok) {
-                    const data: ValidationSummary = await response.json();
-                    setValidationSummary(data);
-                } else {
-                    // On error, show healthy state (green badge)
-                    setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-                }
-            } catch (err) {
-                console.error('Failed to fetch validation summary:', err);
-                // On error, show healthy state (green badge)
-                setValidationSummary({ total_count: 0, valid_count: 0, pending_count: 0, invalid_count: 0, missing_asset_count: 0, missing_account_count: 0, missing_price_quote_count: 0, missing_fee_quote_count: 0, bundle_suggestions_count: 0, has_issues: false, total_issues: 0 });
-            }
-        };
-        fetchValidationSummary();
-        // Refresh every 30 seconds
-        const interval = setInterval(fetchValidationSummary, 30000);
-        return () => clearInterval(interval);
-    }, []);
+    // Data health drawer state
+    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
+    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
+    const [assets, setAssets] = useState<Asset[]>([]);
+    const [accounts, setAccounts] = useState<Account[]>([]);
+
+    // Fetch bundle suggestions count for Inbox tab badge
+    const { data: bundleSuggestions = [] } = useQuery({
+        queryKey: ['bundleSuggestions'],
+        queryFn: async () => {
+            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=10`);
+            if (!response.ok) return [];
+            return response.json() as Promise<BundleSuggestion[]>;
+        },
+    });
 
     // Fetch setup status for Setup tab badge
     useEffect(() => {
@@ -96,6 +93,40 @@ const App = () => {
         const interval = setInterval(fetchSetupStatus, 30000);
         return () => clearInterval(interval);
     }, []);
+
+    // Fetch assets for health check drawer
+    const fetchAssets = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/assets?limit=10000`);
+            if (response.ok) {
+                const data = await response.json();
+                setAssets(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch assets:', err);
+        }
+    }, []);
+
+    // Fetch accounts for health check drawer
+    const fetchAccounts = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_URL}/accounts/`);
+            if (response.ok) {
+                const data = await response.json();
+                setAccounts(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch accounts:', err);
+        }
+    }, []);
+
+    // Fetch assets and accounts when health check opens
+    useEffect(() => {
+        if (isHealthCheckOpen) {
+            fetchAssets();
+            fetchAccounts();
+        }
+    }, [isHealthCheckOpen, fetchAssets, fetchAccounts]);
 
     // Fetch sync job status for Sync tab badge
     useEffect(() => {
@@ -128,14 +159,13 @@ const App = () => {
     const failedConnectorsCount = syncStatus?.connector_statuses
         ? Object.values(syncStatus.connector_statuses).filter(
             (c: ConnectorProgress) => c.status === 'failed'
-          ).length
+        ).length
         : 0;
     const hasSyncFailures = syncStatus?.status === 'failed' || failedConnectorsCount > 0;
 
     return (
-        <QueryClientProvider client={queryClient}>
-            <Box minH="100vh" bg="gray.50">
-                <TestModeBanner />
+        <Box minH="100vh" bg="gray.50">
+            <TestModeBanner />
             <Container maxW="6xl" py={8}>
                 <Heading as="h1" size="xl" mb={4} textAlign="center" color="blue.700">
                     Trades Exporter
@@ -154,58 +184,92 @@ const App = () => {
 
                 <Tabs.Root defaultValue="setup">
                     <Tabs.List>
-                        {/* Step 1: Configuration */}
-                        <Tabs.Trigger value="setup">
-                            <Flex align="center" gap={1}>
-                                ⚙️ Setup
-                                {hasSetupIssues && (
-                                    <Badge colorPalette="orange" size="sm" variant="solid" ml={1}>
-                                        ⚠
-                                    </Badge>
-                                )}
-                            </Flex>
-                        </Tabs.Trigger>
+                        <Box flex="1" display="flex" alignItems="center">
+                            {/* Step 1: Configuration */}
+                            <Tabs.Trigger value="setup">
+                                <Flex align="center" gap={1}>
+                                    ⚙️ Setup
+                                    {hasSetupIssues && (
+                                        <Badge colorPalette="orange" size="sm" variant="solid" ml={1}>
+                                            ⚠
+                                        </Badge>
+                                    )}
+                                </Flex>
+                            </Tabs.Trigger>
 
-                        {/* Step 2: Data Import */}
-                        <Tabs.Trigger value="sync">
-                            <Flex align="center" gap={1}>
-                                🔄 Sync
-                                {hasSyncFailures && (
-                                    <Badge colorPalette="red" size="sm" variant="solid" ml={1}>
-                                        {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
-                                    </Badge>
-                                )}
-                            </Flex>
-                        </Tabs.Trigger>
-                        <Tabs.Trigger value="add-transaction">➕ Add / Import</Tabs.Trigger>
+                            {/* Step 2: Data Import */}
+                            <Tabs.Trigger value="sync">
+                                <Flex align="center" gap={1}>
+                                    🔄 Sync
+                                    {hasSyncFailures && (
+                                        <Badge colorPalette="red" size="sm" variant="solid" ml={1}>
+                                            {failedConnectorsCount > 0 ? `${failedConnectorsCount} failed` : '⚠'}
+                                        </Badge>
+                                    )}
+                                </Flex>
+                            </Tabs.Trigger>
+                            <Tabs.Trigger value="add-transaction">➕ Add / Import</Tabs.Trigger>
 
-                        {/* Step 3: Review */}
-                        <Tabs.Trigger value="inbox">
-                            <Flex align="center" gap={1}>
-                                📥 Inbox
-                                {validationSummary && validationSummary.pending_count > 0 && (
-                                    <Badge colorPalette="blue" size="sm" ml={1}>
-                                        {validationSummary.pending_count}
-                                    </Badge>
-                                )}
-                            </Flex>
-                        </Tabs.Trigger>
-                        <Tabs.Trigger value="all-transactions">
-                            <Flex align="center" gap={1}>
+                            {/* Step 3: Review */}
+                            <Tabs.Trigger value="inbox">
+                                <Flex align="center" gap={1}>
+                                    📥 Inbox
+                                    {validationSummary && validationSummary.pending_count > 0 && (
+                                        <Badge colorPalette="blue" size="sm" ml={1}>
+                                            {validationSummary.pending_count}
+                                        </Badge>
+                                    )}
+                                    {bundleSuggestions.length > 0 && (
+                                        <Badge colorPalette="teal" size="sm" ml={1}>
+                                            {bundleSuggestions.length} 💡
+                                        </Badge>
+                                    )}
+                                </Flex>
+                            </Tabs.Trigger>
+                            <Tabs.Trigger value="all-transactions">
                                 📋 All
-                                {validationSummary && validationSummary.has_issues && (
-                                    <Badge colorPalette="orange" size="sm" variant="solid" ml={1}>
-                                        ⚠
-                                    </Badge>
-                                )}
-                            </Flex>
-                        </Tabs.Trigger>
+                            </Tabs.Trigger>
+                            <Tabs.Trigger value="timeline">📅 Timeline</Tabs.Trigger>
 
-                        {/* Step 4: Analysis */}
-                        <Tabs.Trigger value="pnl">📊 P&L</Tabs.Trigger>
+                            {/* Step 4: Analysis */}
+                            <Tabs.Trigger value="pnl">📊 P&L</Tabs.Trigger>
 
-                        {/* Reference */}
-                        <Tabs.Trigger value="prices">📈 Prices</Tabs.Trigger>
+                            {/* Reference */}
+                            <Tabs.Trigger value="prices">📈 Prices</Tabs.Trigger>
+                        </Box>
+
+                        {/* Global Data Health Badge */}
+                        <Box ml="auto" display="flex" alignItems="center" gap={2}>
+                            {validationSummary && (
+                                <Button
+                                    variant="ghost"
+                                    p={0}
+                                    onClick={() => {
+                                        refreshHealthData();
+                                        setIsHealthCheckOpen(true);
+                                    }}
+                                    cursor="pointer"
+                                    _hover={{ transform: 'scale(1.05)' }}
+                                    transition="all 0.2s"
+                                >
+                                    {validationSummary.has_issues ? (
+                                        <Badge colorPalette="orange" size="lg" variant="solid" px={3} py={1}>
+                                            <Flex align="center" gap={1}>
+                                                <FiActivity />
+                                                <Text>Data Issues: {validationSummary.total_issues}</Text>
+                                            </Flex>
+                                        </Badge>
+                                    ) : (
+                                        <Badge colorPalette="green" size="lg" variant="subtle" px={3} py={1}>
+                                            <Flex align="center" gap={1}>
+                                                <FiCheckCircle />
+                                                <Text>Data Healthy</Text>
+                                            </Flex>
+                                        </Badge>
+                                    )}
+                                </Button>
+                            )}
+                        </Box>
                     </Tabs.List>
 
                     {/* Step 1: Configuration */}
@@ -235,14 +299,24 @@ const App = () => {
                     </Tabs.Content>
                     <Tabs.Content value="all-transactions">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <TransactionsTable />
+                            <AllTransactionsView />
+                        </Suspense>
+                    </Tabs.Content>
+                    <Tabs.Content value="timeline">
+                        <Suspense fallback={<TabLoadingFallback />}>
+                            <TimelineSection />
                         </Suspense>
                     </Tabs.Content>
 
                     {/* Step 4: Analysis */}
                     <Tabs.Content value="pnl">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <PnLPanel />
+                            <PnLPanel
+                                onOpenHealthCheck={() => {
+                                    refreshHealthData();
+                                    setIsHealthCheckOpen(true);
+                                }}
+                            />
                         </Suspense>
                     </Tabs.Content>
 
@@ -253,8 +327,30 @@ const App = () => {
                         </Suspense>
                     </Tabs.Content>
                 </Tabs.Root>
-            </Container>
+                {/* Global Data Health Check Drawer */}
+                <DataHealthCheckDrawer
+                    isOpen={isHealthCheckOpen}
+                    onClose={() => setIsHealthCheckOpen(false)}
+                    refreshTrigger={healthCheckRefreshTrigger}
+                    assets={assets}
+                    accounts={accounts}
+                    onAssetsUpdated={fetchAssets}
+                    onAccountsUpdated={fetchAccounts}
+                    onIssueFixed={() => {
+                        refreshHealthData();
+                        setHealthCheckRefreshTrigger(prev => prev + 1);
+                    }}
+                />            </Container>
         </Box>
+    );
+};
+
+const App = () => {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <DataHealthProvider>
+                <AppContent />
+            </DataHealthProvider>
         </QueryClientProvider>
     );
 };

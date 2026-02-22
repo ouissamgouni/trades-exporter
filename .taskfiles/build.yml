@@ -1,35 +1,42 @@
 version: "3"
 
+includes:
+  worktree: worktree.yml
+
 tasks:
   test:
     desc: Build both backend and frontend images from develop branch
     dotenv: [.env, .env.test]
-    deps: [test:backend, test:frontend]
+    deps: [worktree:setup, test:backend, test:frontend]
     cmds:
       - echo "✅ All test images built (:develop)"
 
   test:backend:
     desc: Build backend image from develop branch
     dotenv: [.env, .env.test]
+    deps: [worktree:setup]
     cmds:
-      - git checkout develop
-      - git pull origin develop
+      - |
+        echo "Updating develop worktree..."
+        cd {{.WORKTREE_DEVELOP}} && git pull origin develop
       - |
         echo "Building backend from develop..."
-        docker build -t trades-exporter-backend:develop -f backend/Dockerfile .
+        docker build -t trades-exporter-backend:develop -f {{.WORKTREE_DEVELOP}}/backend/Dockerfile {{.WORKTREE_DEVELOP}}
         echo "✅ Backend image built: :develop"
 
   test:frontend:
     desc: Build frontend image from develop branch
     dotenv: [.env, .env.test]
+    deps: [worktree:setup]
     cmds:
-      - git checkout develop
-      - git pull origin develop
+      - |
+        echo "Updating develop worktree..."
+        cd {{.WORKTREE_DEVELOP}} && git pull origin develop
       - |
         echo "Building frontend from develop..."
         docker build -t trades-exporter-frontend:develop \
           --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
-          ./frontend
+          {{.WORKTREE_DEVELOP}}/frontend
         echo "✅ Frontend image built: :develop"
 
   prod:
@@ -45,6 +52,7 @@ tasks:
   prod:backend:
     desc: Build backend image from main branch (e.g., task build:prod:backend v1.2.0)
     dotenv: [.env, .env.prod]
+    deps: [worktree:setup]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -52,16 +60,21 @@ tasks:
           echo "❌ Usage: task build:prod:backend v1.2.0"
           exit 1
         fi
-        git checkout main
-        git pull origin main
+      - |
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
+        echo "Updating main worktree..."
+        cd {{.WORKTREE_MAIN}} && git pull origin main
+      - |
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
         echo "Building backend from main as $VERSION..."
-        docker build -t trades-exporter-backend:$VERSION -f backend/Dockerfile .
+        docker build -t trades-exporter-backend:$VERSION -f {{.WORKTREE_MAIN}}/backend/Dockerfile {{.WORKTREE_MAIN}}
         docker tag trades-exporter-backend:$VERSION trades-exporter-backend:latest
         echo "✅ Backend image built: :$VERSION and :latest"
 
   prod:frontend:
     desc: Build frontend image from main branch (e.g., task build:prod:frontend v1.2.0)
     dotenv: [.env, .env.prod]
+    deps: [worktree:setup]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -69,14 +82,111 @@ tasks:
           echo "❌ Usage: task build:prod:frontend v1.2.0"
           exit 1
         fi
-        git checkout main
-        git pull origin main
+      - |
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
+        echo "Updating main worktree..."
+        cd {{.WORKTREE_MAIN}} && git pull origin main
+      - |
+        VERSION={{.VERSION}}{{.CLI_ARGS}}
         echo "Building frontend from main as $VERSION..."
         docker build -t trades-exporter-frontend:$VERSION \
           --build-arg VITE_API_URL=http://localhost:$BACKEND_PORT \
-          ./frontend
+          {{.WORKTREE_MAIN}}/frontend
         docker tag trades-exporter-frontend:$VERSION trades-exporter-frontend:latest
         echo "✅ Frontend image built: :$VERSION and :latest"
+
+  ref:
+    desc: Build images from any git ref (e.g., task build:ref -- feature/my-branch)
+    dotenv: [.env, .env.test]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    prompt: |
+      Build Docker images from git ref: {{.REF}}
+
+      This will:
+        • Create temporary worktree
+        • Build backend and frontend images
+        • Tag images as :ref-{sha}
+
+      Continue?
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task build:ref -- feature/my-branch"
+          echo "   task build:ref REF=feature/my-branch"
+          exit 1
+        fi
+      - task: worktree:setup:ref
+        vars: { REF: "{{.REF}}" }
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        WORKTREE_PATH="{{.WORKTREE_DIR}}/ref-$SHA"
+        TAG="ref-$SHA"
+
+        echo ""
+        echo "Building from $REF ($SHA)..."
+        echo "Image tag: :$TAG"
+        echo ""
+
+        # Build backend
+        echo "Building backend..."
+        docker build -t trades-exporter-backend:$TAG -f $WORKTREE_PATH/backend/Dockerfile $WORKTREE_PATH
+
+        # Build frontend
+        echo "Building frontend..."
+        docker build -t trades-exporter-frontend:$TAG \
+          --build-arg VITE_API_URL=http://localhost:${BACKEND_PORT:-8000} \
+          $WORKTREE_PATH/frontend
+
+        echo ""
+        echo "✅ Images built from $REF"
+        echo "   Backend:  trades-exporter-backend:$TAG"
+        echo "   Frontend: trades-exporter-frontend:$TAG"
+        echo ""
+        echo "Deploy with: task deploy:test:tag -- $TAG"
+
+  current:
+    desc: Build images from current working directory (uncommitted changes)
+    dotenv: [.env, .env.test]
+    prompt: |
+      ⚠️  BUILD FROM WORKING DIRECTORY
+
+      This will build Docker images from your CURRENT working directory,
+      including any uncommitted changes.
+
+      These images are NOT traceable to any git commit.
+      Use only for quick local testing.
+
+      Continue?
+    cmds:
+      - |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        TAG="current-$TIMESTAMP"
+
+        echo ""
+        echo "Building from current working directory..."
+        echo "Image tag: :$TAG"
+        echo ""
+
+        # Build backend
+        echo "Building backend..."
+        docker build -t trades-exporter-backend:$TAG -f backend/Dockerfile .
+
+        # Build frontend
+        echo "Building frontend..."
+        docker build -t trades-exporter-frontend:$TAG \
+          --build-arg VITE_API_URL=http://localhost:${BACKEND_PORT:-8000} \
+          ./frontend
+
+        echo ""
+        echo "✅ Images built from working directory"
+        echo "   Backend:  trades-exporter-backend:$TAG"
+        echo "   Frontend: trades-exporter-frontend:$TAG"
+        echo ""
+        echo "Deploy with: task deploy:test:tag -- $TAG"
 
   list:
     desc: List all trades-exporter Docker images

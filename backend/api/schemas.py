@@ -10,9 +10,9 @@ for validation and serialization without separate Pydantic duplicates.
 """
 
 from decimal import Decimal
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
 from typing import Optional, List, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Re-export SQLModel classes for convenience (these ARE Pydantic models)
 from backend.db.models import (
@@ -42,18 +42,15 @@ class AssetRef(BaseModel):
 
 
 class ConnectorOverrideRequest(BaseModel):
-    """Per-sync override for a single connector (enable/disable, test mode)."""
+    """Per-sync override for a single connector (enable/disable, test mode, since datetime, symbols/currencies)."""
     
     connector_id: int = Field(..., description="ID of the connector to override")
     enabled: Optional[bool] = Field(None, description="Override enabled status for this sync")
     test_mode: Optional[bool] = Field(None, description="Override test mode for this sync")
     test_file_path: Optional[str] = Field(None, description="Override test file path for this sync")
-
-
-class SinceOverrideRequest(BaseModel):
-    """Per-connector since datetime override for incremental sync."""
-    
-    since_datetime: Optional[str] = Field(None, description="ISO datetime string for incremental sync, null for full sync")
+    since_datetime: Optional[str] = Field(None, description="ISO datetime for incremental sync, null for full sync")
+    symbols: Optional[List[str]] = Field(None, description="Override symbols list for trade connectors")
+    currencies: Optional[List[str]] = Field(None, description="Override currencies list for deposit/withdrawal connectors")
 
 
 class SyncJobStartRequest(BaseModel):
@@ -61,11 +58,11 @@ class SyncJobStartRequest(BaseModel):
     
     connector_overrides: Optional[List[ConnectorOverrideRequest]] = Field(
         None,
-        description="List of per-connector overrides (enable/disable, test mode) for this sync only"
+        description="List of per-connector overrides (enable/disable, test mode, since datetime) for this sync only"
     )
-    since_overrides: Optional[Dict[int, SinceOverrideRequest]] = Field(
-        None,
-        description="Dict mapping connector_id to since datetime for incremental sync"
+    renormalize: Optional[bool] = Field(
+        False,
+        description="If true, re-normalize from stored raw data instead of fetching from APIs"
     )
 
 
@@ -81,6 +78,67 @@ def _serialize_decimal(v: Any) -> Optional[float]:
     if isinstance(v, Decimal):
         return float(v)
     return v
+
+
+# =============================================================================
+# Filter Response Wrapper Models
+# =============================================================================
+
+
+class ValidationWarning(BaseModel):
+    """Warning about a filter parameter that was skipped or invalid."""
+    
+    filter_name: str = Field(..., description="Name of the filter field")
+    provided_value: str = Field(..., description="Value that was provided")
+    reason: str = Field(..., description="Why it was invalid/skipped")
+    severity: str = Field("warning", pattern="^(warning|error)$", description="Severity level")
+
+
+class AppliedFilters(BaseModel):
+    """Filters that were actually applied to the query."""
+    
+    review_status: Optional[str] = None
+    taxability: Optional[str] = None
+    sources: List[str] = Field(default_factory=list)
+    account_ids: List[int] = Field(default_factory=list)
+    asset_ids: List[int] = Field(default_factory=list)
+    category_ids: List[int] = Field(default_factory=list)
+    transaction_types: List[str] = Field(default_factory=list)
+    directions: List[str] = Field(default_factory=list)
+    connector_run_ids: List[int] = Field(default_factory=list)
+    tag_keys: List[str] = Field(default_factory=list)
+    networks: List[str] = Field(default_factory=list)
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    pnl_cal_version: Optional[int] = None
+    pnl_cal_inclusions_status: Optional[str] = None
+
+
+class FilterMetadata(BaseModel):
+    """Metadata about applied filters and result counts."""
+    
+    applied_filters: AppliedFilters = Field(
+        default_factory=AppliedFilters,
+        description="Filters that were actually applied after validation"
+    )
+    validation_warnings: List[ValidationWarning] = Field(
+        default_factory=list,
+        description="Warnings about invalid or skipped filters"
+    )
+    total_count: int = Field(..., description="Total records without filters")
+    filtered_count: int = Field(..., description="Records after applying filters")
+    limit: int = Field(..., description="Max results returned")
+    offset: int = Field(0, description="Pagination offset")
+
+
+class TransactionListResponse(BaseModel):
+    """Wrapped response for transaction list with metadata."""
+    
+    results: List["TransactionResponse"] = Field(
+        default_factory=list,
+        description="Transaction records"
+    )
+    metadata: FilterMetadata = Field(..., description="Filter and pagination metadata")
 
 
 # =============================================================================
@@ -142,6 +200,11 @@ class TransactionUpdate(BaseModel):
     
     # Date/time
     date_time: Optional[datetime] = None
+    
+    # Tags
+    tags: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Tags as list of {key: value} pairs"
+    )
 
 
 class TransactionResponse(BaseModel):
@@ -165,6 +228,37 @@ class TransactionResponse(BaseModel):
     )
     def serialize_decimal(self, v: Any) -> Optional[float]:
         return _serialize_decimal(v)
+
+    @field_serializer("date_time", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        """Ensure all datetime fields are serialized with explicit UTC timezone marker."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, v: Any) -> List[Dict[str, Any]]:
+        """Normalize tags to always be a list, converting dicts with numeric keys."""
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, dict):
+            # Empty dict should return empty list
+            if not v:
+                return []
+            # If it's a dict with numeric keys, convert to list
+            if all(str(k).isdigit() for k in v.keys()):
+                sorted_keys = sorted(v.keys(), key=lambda x: int(str(x)))
+                return [v[k] for k in sorted_keys]
+            # Otherwise wrap in list
+            return [v]
+        return []
 
     # Primary key
     id: Optional[int] = None
@@ -222,9 +316,12 @@ class TransactionResponse(BaseModel):
 
     # Sync metadata
     synced_at: Optional[str] = None
+    sync_connector_run_id: Optional[int] = None
+    connector_name: Optional[str] = None
+    run_datetime: Optional[str] = None
 
     # Metadata
-    tags: Optional[Dict[str, Any]] = None
+    tags: List[Dict[str, Any]] = Field(default_factory=list)
 
     # Nested asset references (replaces flat linked_*_symbol fields)
     linked_asset: Optional[AssetRef] = None
@@ -299,6 +396,17 @@ class CostLotResponse(BaseModel):
     def serialize_decimal(self, v: Any) -> Optional[float]:
         return _serialize_decimal(v)
 
+    @field_serializer("acquired_at", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        """Ensure datetime fields are serialized with explicit UTC timezone marker."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
+
     cost_lot_id: int
     asset_id: int
     asset_symbol: Optional[str] = None
@@ -340,6 +448,17 @@ class RealizedPnLResponse(BaseModel):
     )
     def serialize_decimal(self, v: Any) -> Optional[float]:
         return _serialize_decimal(v)
+
+    @field_serializer("realized_at", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        """Ensure datetime fields are serialized with explicit UTC timezone marker."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
 
     pnl_id: int
     asset_id: int
@@ -394,6 +513,17 @@ class CalculationVersionResponse(BaseModel):
     def serialize_decimal(self, v: Any) -> Optional[float]:
         return _serialize_decimal(v)
 
+    @field_serializer("created_at", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        """Ensure datetime fields are serialized with explicit UTC timezone marker."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
+
     version_id: int
     description: Optional[str] = None
     created_at: datetime
@@ -443,6 +573,17 @@ class PnLCalculationResponse(BaseModel):
     def serialize_decimal(self, v: Any) -> Optional[float]:
         return _serialize_decimal(v)
 
+    @field_serializer("created_at", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        """Ensure datetime fields are serialized with explicit UTC timezone marker."""
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
+
     version_id: int
     method: str
     status: str
@@ -490,10 +631,23 @@ from enum import Enum
 
 class IssueType(str, Enum):
     """Types of data issues in transactions."""
-    ASSET = "asset"
-    ACCOUNT = "account"
-    PRICE_QUOTE = "price_quote"
-    FEE_QUOTE = "fee_quote"
+    # Missing data issues - required source data not provided by connector
+    MISSING_SOURCE = "missing_source"
+    MISSING_SOURCE_ASSET = "missing_source_asset"
+    MISSING_SOURCE_ACCOUNT = "missing_source_account"
+    # Linkage issues - source data exists but not linked to master data
+    UNLINKED_ASSET = "unlinked_asset"
+    UNLINKED_ACCOUNT = "unlinked_account"
+    UNLINKED_PRICE_QUOTE = "unlinked_price_quote"
+    UNLINKED_FEE_QUOTE = "unlinked_fee_quote"
+    # Transfer issues - missing source data from connector
+    MISSING_TRANSFER_FROM_ACCOUNT = "missing_transfer_from_account"
+    MISSING_TRANSFER_TO_ACCOUNT = "missing_transfer_to_account"
+    # Transfer issues - source data exists but not linked to account
+    UNLINKED_TRANSFER_FROM_ACCOUNT = "unlinked_transfer_from_account"
+    UNLINKED_TRANSFER_TO_ACCOUNT = "unlinked_transfer_to_account"
+    # Workflow status
+    PENDING_REVIEW = "pending_review"
 
 
 class SuggestionInfo(BaseModel):
@@ -522,67 +676,101 @@ class RawAccountIssue(BaseModel):
 
 class DataHealthCheckResponse(BaseModel):
     """
-    Response model for data health check endpoint.
+    Comprehensive data health check response (legacy unified endpoint).
     
-    Provides aggregated counts of data completeness issues
-    plus optional detailed raw values for inline fixing.
+    Aggregates transaction status, missing data counts, and optionally
+    detailed lists of unmapped raw values with suggestions.
     """
-    
     model_config = ConfigDict(from_attributes=True)
     
-    # Transaction counts by review status
-    total_count: int = Field(0, description="Total number of transactions")
+    # Transaction counts by status
+    total_count: int = Field(0, description="Total number of transactions (excluding invalid)")
     valid_count: int = Field(0, description="Transactions with review_status='valid'")
     pending_count: int = Field(0, description="Transactions with review_status='pending'")
     invalid_count: int = Field(0, description="Transactions with review_status='invalid'")
     
-    # Missing required data counts
+    # Missing data counts
     missing_asset_count: int = Field(0, description="Transactions missing asset_id")
     missing_account_count: int = Field(0, description="Transactions missing account_id")
-    missing_price_quote_count: int = Field(
-        0, description="Transactions missing price_quote_asset_id"
-    )
-    missing_fee_quote_count: int = Field(
-        0, description="Transactions with fee > 0 but missing fee_quote_asset_id"
-    )
+    missing_price_quote_count: int = Field(0, description="Transactions missing price_quote_asset_id when price exists")
+    missing_fee_quote_count: int = Field(0, description="Transactions missing fee_quote_asset_id when fee > 0")
     
     # Bundle suggestions
-    bundle_suggestions_count: int = Field(
-        0, description="Number of unhandled bundle suggestions"
-    )
+    bundle_suggestions_count: int = Field(0, description="Number of unhandled bundle suggestions")
     
-    # Computed properties
-    has_issues: bool = Field(
-        False, description="True if any validation issues exist"
-    )
-    total_issues: int = Field(
-        0, description="Sum of all issues (missing + pending)"
-    )
+    # Aggregate flags
+    has_issues: bool = Field(False, description="True if any issues exist")
+    total_issues: int = Field(0, description="Total number of issues (sum of all missing data + pending)")
     
-    # Optional detailed issue lists (when include_details=true) - DEPRECATED
-    # Use issues_list instead for transaction-centric view
-    missing_assets_detail: Optional[List[RawAssetIssue]] = Field(
-        None, description="[DEPRECATED] Raw assets needing mapping (asset_id missing)"
-    )
-    missing_accounts_detail: Optional[List[RawAccountIssue]] = Field(
-        None, description="[DEPRECATED] Raw accounts needing mapping (account_id missing)"
-    )
-    missing_price_quotes_detail: Optional[List[RawAssetIssue]] = Field(
-        None, description="[DEPRECATED] Raw assets needing mapping (price_quote_asset_id missing)"
-    )
-    missing_fee_quotes_detail: Optional[List[RawAssetIssue]] = Field(
-        None, description="[DEPRECATED] Raw assets needing mapping (fee_quote_asset_id missing)"
-    )
+    # Optional detail lists (when include_details=true)
+    missing_assets_detail: Optional[List[RawAssetIssue]] = Field(None, description="Detailed list of raw assets needing mapping")
+    missing_accounts_detail: Optional[List[RawAccountIssue]] = Field(None, description="Detailed list of raw accounts needing mapping")
+    missing_price_quotes_detail: Optional[List[RawAssetIssue]] = Field(None, description="Detailed list of raw price quote assets needing mapping")
+    missing_fee_quotes_detail: Optional[List[RawAssetIssue]] = Field(None, description="Detailed list of raw fee quote assets needing mapping")
     
-    # Transaction-centric issue list (preferred over grouped details)
-    issues_list: Optional[List["TransactionIssue"]] = Field(
-        None, description="Flat list of transaction issues for inline fixing"
-    )
-    issues_total_count: int = Field(
-        0, description="Total number of transaction issues (for pagination)"
-    )
-    issues_page: int = Field(1, description="Current page number")
-    issues_per_page: int = Field(50, description="Items per page")
+    # Transaction-centric issues list with pagination
+    issues_list: Optional[List["TransactionIssue"]] = Field(None, description="Paginated list of transaction issues")
+    issues_total_count: Optional[int] = Field(None, description="Total count of transaction issues")
+    issues_page: Optional[int] = Field(None, description="Current page number")
+    issues_per_page: Optional[int] = Field(None, description="Issues per page")
+
+
+# =============================================================================
+# Data Health Check - New Split Endpoints
+# =============================================================================
+
+class TransactionStatusResponse(BaseModel):
+    """Response model for /transactions/data-health-check/status endpoint."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    total_count: int = Field(0, description="Total number of transactions (excluding invalid)")
+    valid_count: int = Field(0, description="Transactions with review_status='valid'")
+    pending_count: int = Field(0, description="Transactions with review_status='pending'")
+    invalid_count: int = Field(0, description="Transactions with review_status='invalid'")
+    bundle_suggestions_count: int = Field(0, description="Number of unhandled bundle suggestions")
+    
+    # Data completeness issue counts
+    missing_data_issues_count: int = Field(0, description="Count of missing data issues (missing source/asset/account)")
+    linkage_issues_count: int = Field(0, description="Count of linkage issues (missing asset/account/price_quote/fee_quote)")
+    transfer_issues_count: int = Field(0, description="Count of transfer issues (missing from/to accounts)")
+    duplicate_count: int = Field(0, description="Count of unresolved duplicate transactions")
+    unmapped_accounts_transaction_count: int = Field(0, description="Count of transactions with unmapped raw accounts")
+    
+    # Aggregated totals
+    total_issues: int = Field(0, description="Total data issues: missing data + linkage + transfer + duplicates + pending")
+    has_issues: bool = Field(False, description="True if any data issues exist")
+
+
+class PaginationMetadata(BaseModel):
+    """Pagination metadata for list endpoints."""
+    page: int = Field(..., description="Current page number")
+    per_page: int = Field(..., description="Items per page")
+    total_count: int = Field(..., description="Total number of items")
+
+
+class LinkageIssuesResponse(BaseModel):
+    """Response model for /transactions/data-health-check/linkage-issues endpoint."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    issues: List["TransactionIssue"] = Field([], description="List of linkage issues")
+    pagination: PaginationMetadata = Field(..., description="Pagination metadata")
+
+
+class TransferIssuesResponse(BaseModel):
+    """Response model for /transactions/data-health-check/transfer-issues endpoint."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    issues: List["TransactionIssue"] = Field([], description="List of transfer issues")
+    pagination: PaginationMetadata = Field(..., description="Pagination metadata")
+
+
+class MissingDataIssuesResponse(BaseModel):
+    """Response model for /transactions/data-health-check/missing-data-issues endpoint."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    issues: List["TransactionIssue"] = Field([], description="List of missing data issues")
+    pagination: PaginationMetadata = Field(..., description="Pagination metadata")
+
 
 
 class TransactionIssue(BaseModel):
@@ -598,6 +786,7 @@ class TransactionIssue(BaseModel):
     quantity: float = Field(..., description="Transaction quantity")
     source_asset_symbol: str = Field(..., description="Raw asset symbol from source")
     source: str = Field(..., description="Source platform/exchange")
+    network: Optional[str] = Field(None, description="Blockchain network (e.g., ethereum, polygon)")
     
     # Issue details
     issue_type: IssueType = Field(..., description="Type of issue")
@@ -605,10 +794,22 @@ class TransactionIssue(BaseModel):
     
     # Fix suggestion
     suggestion: Optional[SuggestionInfo] = Field(None, description="Best match suggestion")
+    
+    # Account info (for source info column)
+    account_id: Optional[int] = Field(None, description="Account ID if linked")
+    account_name: Optional[str] = Field(None, description="Account name if resolved")
+    source_account: Optional[str] = Field(None, description="Raw source account")
+    
+    # Connector info (for source info column)
+    connector_name: Optional[str] = Field(None, description="Connector name if synced")
+    sync_connector_run_id: Optional[int] = Field(None, description="Sync run ID")
+    run_datetime: Optional[str] = Field(None, description="Sync run datetime")
 
 
-# Update DataHealthCheckResponse to reference TransactionIssue
+# Update model references to TransactionIssue
 DataHealthCheckResponse.model_rebuild()
+LinkageIssuesResponse.model_rebuild()
+TransferIssuesResponse.model_rebuild()
 
 
 # =============================================================================
@@ -619,6 +820,11 @@ __all__ = [
     # SQLModel re-exports
     "NormalizedTransaction",
     "Asset",
+    # Filter response wrappers
+    "TransactionListResponse",
+    "FilterMetadata",
+    "AppliedFilters",
+    "ValidationWarning",
     # Transaction models
     "TransactionUpdate",
     "TransactionResponse",
@@ -636,7 +842,12 @@ __all__ = [
     "PnLCalculationRequest",
     "PnLCalculationResponse",
     "PnLSummaryResponse",
-    # Data Health Check models
+    # Data Health Check models (new split endpoints)
+    "TransactionStatusResponse",
+    "PaginationMetadata",
+    "LinkageIssuesResponse",
+    "TransferIssuesResponse",
+    # Data Health Check models (legacy)
     "DataHealthCheckResponse",
     "SuggestionInfo",
     "RawAssetIssue",

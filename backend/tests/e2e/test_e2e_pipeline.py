@@ -7,7 +7,6 @@ import os
 import pytest
 import time
 
-from backend.config.loader import set_test_mode
 from backend.db.database import init_db, get_engine
 from backend.db.repositories import (
     NormalizedTransactionRepository,
@@ -16,22 +15,6 @@ from backend.db.repositories import (
 from backend.services.sync_job_service import SyncJobService, get_sync_job_service
 from sqlmodel import Session
 
-
-@pytest.fixture(autouse=True)
-def setup_test_mode():
-    """Ensure test mode is set for all tests."""
-    # Set test mode via environment
-    os.environ["TEST_MODE"] = "true"
-    set_test_mode(True)
-
-    # Initialize test database
-    init_db()
-
-    yield
-
-    # Reset after test
-    os.environ["TEST_MODE"] = "false"
-    set_test_mode(False)
 
 
 @pytest.fixture
@@ -45,7 +28,7 @@ def sync_service():
 @pytest.fixture
 def test_session():
     """Get a database session for verification."""
-    engine = get_engine(test_mode=True)
+    engine = get_engine()
     with Session(engine) as session:
         yield session
 

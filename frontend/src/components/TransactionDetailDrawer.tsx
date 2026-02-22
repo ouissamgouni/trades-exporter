@@ -99,7 +99,7 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                 position="fixed"
                 inset={0}
                 bg="blackAlpha.400"
-                zIndex={99}
+                zIndex={2000}
                 onClick={onClose}
                 cursor="pointer"
             />
@@ -114,7 +114,7 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                 maxW="90vw"
                 bg="white"
                 boxShadow="xl"
-                zIndex={100}
+                zIndex={2001}
                 overflowY="auto"
                 borderLeft="1px solid"
                 borderColor="gray.200"

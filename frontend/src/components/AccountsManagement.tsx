@@ -292,11 +292,14 @@ const AccountsManagement: React.FC = () => {
                                                             </Switch.Control>
                                                         </Switch.Root>
                                                     </HStack>
-                                                    {account.tags?.slice(0, 2).map((tag, idx) => (
-                                                        <Badge key={idx} size="sm" variant="subtle">
-                                                            {tag}
-                                                        </Badge>
-                                                    ))}
+                                                    {account.tags?.slice(0, 2).map((tagObj, idx) => {
+                                                        const tagKey = Object.keys(tagObj)[0];
+                                                        return tagKey ? (
+                                                            <Badge key={idx} size="sm" variant="subtle">
+                                                                {tagKey}
+                                                            </Badge>
+                                                        ) : null;
+                                                    })}
                                                     <IconButton
                                                         aria-label="Edit account"
                                                         size="sm"

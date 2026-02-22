@@ -20,3 +20,14 @@ export {
     type UseLazyPaginatedQueryParams,
     type UseLazyPaginatedQueryResult,
 } from './useLazyPaginatedQuery';
+
+export {
+    useBundleSuggestionMap,
+    type SuggestionEntry,
+    type UseBundleSuggestionMapReturn,
+} from './useBundleSuggestionMap';
+
+export {
+    useBundleColorMap,
+    type UseBundleColorMapReturn,
+} from './useBundleColorMap';

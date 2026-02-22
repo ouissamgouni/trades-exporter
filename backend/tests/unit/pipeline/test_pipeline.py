@@ -193,10 +193,11 @@ class TestCreateDefaultPipeline:
         """
         pipeline = create_default_pipeline(mock_session)
 
-        assert len(pipeline.stages) == 3
+        assert len(pipeline.stages) == 4
 
         stage_names = [s.name for s in pipeline.stages]
-        assert "transfer_detection" in stage_names
+        assert "onchain_address_enrichment" in stage_names
+        assert "account_resolution" in stage_names
         assert "asset_enrichment" in stage_names
         assert "persistence" in stage_names
 
@@ -206,7 +207,8 @@ class TestCreateDefaultPipeline:
 
         stage_names = [s.name for s in pipeline.stages]
         assert stage_names == [
-            "transfer_detection",
+            "onchain_address_enrichment",
+            "account_resolution",
             "asset_enrichment",
             "persistence",
         ]
@@ -215,4 +217,4 @@ class TestCreateDefaultPipeline:
         """Test that the default pipeline can be constructed."""
         pipeline = create_default_pipeline(mock_session)
         assert pipeline is not None
-        assert len(pipeline.stages) == 3
+        assert len(pipeline.stages) == 4

@@ -33,9 +33,11 @@ log = configure_logging("suggestion_service")
 
 # Taxability defaults for patterns
 _PATTERN_TAXABILITY = {
-    UnitPattern.TRANSFER.value: "non_taxable",
+    UnitPattern.INTERNAL_TRANSFER.value: "non_taxable",
     UnitPattern.SWAP.value: "taxable",  # Default, but depends on config
+    UnitPattern.FLOW.value: "taxable",  # External single-leg, same as SWAP
     UnitPattern.SPLIT.value: "non_taxable",
+    UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value: "non_taxable",
     UnitPattern.UNKNOWN.value: "unknown",
 }
 
@@ -120,12 +122,23 @@ class SuggestionService:
         self.session.add(bundle)
         self.session.flush()  # Get the ID
 
-        # Link transactions to the bundle
+        # Link transactions to the bundle (validate none are already bundled)
+        conflicts = []
         for tx_id in suggestion.transaction_ids:
             tx = self.session.get(NormalizedTransaction, tx_id)
             if tx:
-                tx.user_calculation_unit_id = bundle.id
-                self.session.add(tx)
+                if tx.user_calculation_unit_id is not None:
+                    conflicts.append(
+                        f"Transaction {tx_id} is already in bundle {tx.user_calculation_unit_id}"
+                    )
+                else:
+                    tx.user_calculation_unit_id = bundle.id
+                    self.session.add(tx)
+        if conflicts:
+            self.session.rollback()
+            raise ValueError(
+                "Cannot accept suggestion: " + "; ".join(conflicts)
+            )
 
         self.session.commit()
         log.info(

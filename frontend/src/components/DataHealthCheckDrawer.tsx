@@ -14,6 +14,7 @@ import {
     Heading,
     HStack,
     Spinner,
+    Tabs,
     Text,
     VStack,
 } from '@chakra-ui/react';
@@ -33,7 +34,7 @@ import {
 } from 'react-icons/fi';
 import {
     API_URL,
-    DataHealthCheckResponse,
+    TransactionStatusResponse,
     TransactionIssue,
     IssueType,
     Asset,
@@ -42,7 +43,15 @@ import {
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetSelector } from './AssetSelector';
 import { AccountSelector } from './AccountSelector';
+import { SourceInfoCell } from './SourceInfoCell';
 import { toaster } from './ui/toaster';
+import { TransactionDetailDrawer } from './TransactionDetailDrawer';
+import { TransactionsTable } from './TransactionsTable';
+import { AssetLinkageTable } from './tables/wrappers/AssetLinkageTable';
+import { defaultFilterState } from './TransactionFilters';
+import { formatQuantity } from '../utils/numberUtils';
+import { AccountMappingPanel } from './AccountMappingPanel';
+import { useDataHealth } from '../contexts/DataHealthContext';
 
 // =============================================================================
 // Constants & Configuration
@@ -54,18 +63,26 @@ const ITEMS_PER_PAGE = 50;
 const COLS = {
     ID: '55px',
     DATE: '80px',
+    SOURCE: '200px',
     TX: '110px',
-    TYPE: '135px',
-    VALUE: '85px',
-    ACTION: '140px',
+    TYPE: '120px',
+    VALUE: '95px',
+    ACTION: '155px',
 } as const;
 
 // Issue type configuration
 const ISSUE_CONFIG: Record<IssueType, { color: string; label: string }> = {
-    asset: { color: 'red', label: 'Unlinked Base Asset' },
-    account: { color: 'orange', label: 'Unlinked Account' },
-    price_quote: { color: 'purple', label: 'Unlinked Price Asset' },
-    fee_quote: { color: 'yellow', label: 'Unlinked Fee Asset' },
+    missing_source: { color: 'gray', label: 'Missing Source' },
+    missing_source_asset: { color: 'red', label: 'Missing Source Asset' },
+    missing_source_account: { color: 'orange', label: 'Missing Source Account' },
+    unlinked_asset: { color: 'red', label: 'Unlinked Base Asset' },
+    unlinked_account: { color: 'orange', label: 'Unlinked Account' },
+    unlinked_price_quote: { color: 'purple', label: 'Unlinked Price Asset' },
+    unlinked_fee_quote: { color: 'yellow', label: 'Unlinked Fee Asset' },
+    missing_transfer_from_account: { color: 'blue', label: 'Missing From Account' },
+    missing_transfer_to_account: { color: 'blue', label: 'Missing To Account' },
+    unlinked_transfer_from_account: { color: 'cyan', label: 'Unlinked From Account' },
+    unlinked_transfer_to_account: { color: 'cyan', label: 'Unlinked To Account' },
 };
 
 // =============================================================================
@@ -82,15 +99,7 @@ const formatDate = (dateStr: string): string => {
     }
 };
 
-
-
-const formatQty = (qty: number): string => {
-    if (qty >= 1_000_000) return `${(qty / 1_000_000).toFixed(1)}M`;
-    if (qty >= 1_000) return `${(qty / 1_000).toFixed(1)}K`;
-    if (qty >= 1) return qty.toFixed(2);
-    if (qty >= 0.01) return qty.toFixed(4);
-    return qty.toExponential(2);
-};
+// Using formatQuantity from utils/numberUtils for consistent quantity formatting with K/M/B suffixes
 
 // =============================================================================
 // Sub-Components
@@ -118,6 +127,7 @@ const TableHeader: React.FC = () => (
     >
         <Box w={COLS.ID}>ID</Box>
         <Box w={COLS.DATE}>Date</Box>
+        <Box w={COLS.SOURCE}>Source</Box>
         <Box w={COLS.TX}>Transaction</Box>
         <Box w={COLS.TYPE}>Issue</Box>
         <Box w={COLS.VALUE}>Value</Box>
@@ -136,16 +146,22 @@ interface IssueRowProps {
     onFixed: () => void;
     onAssetsUpdated?: () => void;
     onAccountsUpdated?: () => void;
+    onTransactionClick: (txId: number) => void;
 }
 
 const IssueRow: React.FC<IssueRowProps> = ({
-    issue, assets, accounts, onFixed, onAssetsUpdated, onAccountsUpdated
+    issue, assets, accounts, onFixed, onAssetsUpdated, onAccountsUpdated, onTransactionClick
 }) => {
     const [isFixed, setIsFixed] = useState(false);
     const [isApplying, setIsApplying] = useState(false);
 
     const config = ISSUE_CONFIG[issue.issue_type];
-    const isAccountIssue = issue.issue_type === 'account';
+    const isAccountIssue = issue.issue_type === 'unlinked_account'
+        || issue.issue_type === 'missing_source_account'
+        || issue.issue_type === 'missing_transfer_from_account'
+        || issue.issue_type === 'missing_transfer_to_account'
+        || issue.issue_type === 'unlinked_transfer_from_account'
+        || issue.issue_type === 'unlinked_transfer_to_account';
 
     // API call to map raw asset/account
     const mapRawItem = async (id: number) => {
@@ -230,8 +246,9 @@ const IssueRow: React.FC<IssueRowProps> = ({
                     <Text
                         color="blue.500"
                         fontFamily="mono"
-                        cursor="help"
+                        cursor="pointer"
                         _hover={{ textDecoration: 'underline' }}
+                        onClick={() => onTransactionClick(issue.transaction_id)}
                     >
                         #{issue.transaction_id}
                     </Text>
@@ -243,26 +260,58 @@ const IssueRow: React.FC<IssueRowProps> = ({
                 <Text color="gray.500">{formatDate(issue.date_time)}</Text>
             </Box>
 
+            {/* Source Info */}
+            <Box w={COLS.SOURCE}>
+                <SourceInfoCell
+                    sourceAccount={issue.source_account ?? undefined}
+                    accountId={issue.account_id}
+                    resolvedAccountName={issue.account_name ?? undefined}
+                    resolvedAccount={accounts.find(a => a.id === issue.account_id)}
+                    source={issue.source}
+                    sourceSymbol={issue.source_asset_symbol}
+                    connectorName={issue.connector_name ?? undefined}
+                    runDatetime={issue.run_datetime ?? undefined}
+                    syncConnectorRunId={issue.sync_connector_run_id ?? undefined}
+                    network={issue.network ?? undefined}
+                />
+            </Box>
+
             {/* Transaction */}
             <Box w={COLS.TX}>
                 <Flex align="center" gap={1}>
-                    <DirectionIcon direction={issue.direction} />
+                    <Box flexShrink={0}>
+                        <DirectionIcon direction={issue.direction} />
+                    </Box>
                     <Text truncate title={`${issue.quantity} ${issue.source_asset_symbol}`}>
-                        {formatQty(issue.quantity)} {issue.source_asset_symbol}
+                        {formatQuantity(issue.quantity)} {issue.source_asset_symbol}
                     </Text>
                 </Flex>
             </Box>
 
             {/* Issue Type */}
             <Box w={COLS.TYPE}>
-                <Badge size="xs" colorPalette={config.color} variant="subtle">
+                <Badge
+                    size="xs"
+                    colorPalette={config.color}
+                    variant="subtle"
+                    maxW="100%"
+                    whiteSpace="normal"
+                    wordBreak="break-word"
+                    lineClamp={2}
+                >
                     {config.label}
                 </Badge>
             </Box>
 
             {/* Raw Value */}
             <Box w={COLS.VALUE}>
-                <Text color="gray.600" truncate title={issue.raw_value}>
+                <Text
+                    color="gray.600"
+                    truncate
+                    title={issue.raw_value}
+                    wordBreak="break-all"
+                    maxW="100%"
+                >
                     {issue.raw_value || '—'}
                 </Text>
             </Box>
@@ -274,48 +323,54 @@ const IssueRow: React.FC<IssueRowProps> = ({
                         <FiCheckCircle size={10} />
                         <Text ml={1}>Done</Text>
                     </Badge>
-                ) : issue.suggestion && issue.raw_value ? (
-                    <Button
-                        size="xs"
-                        colorPalette={suggestionColor}
-                        variant={suggestionConfidence >= 0.9 ? 'solid' : 'outline'}
-                        onClick={handleAcceptSuggestion}
-                        disabled={isApplying}
-                        title={`${Math.round(suggestionConfidence * 100)}% match`}
-                        h="22px"
-                        w="full"
-                    >
-                        {isApplying ? <Spinner size="xs" /> : <FiCheck size={10} />}
-                        <Text ml={1} truncate>{issue.suggestion.name}</Text>
-                    </Button>
                 ) : (
-                    <Box>
-                        {isAccountIssue ? (
-                            <AccountSelector
-                                accounts={accounts}
-                                value={null}
-                                onChange={handleSelect}
-                                onAccountCreated={onAccountsUpdated}
-                                size="sm"
-                                placeholder="+ Add"
-                                defaultName={issue.raw_value}
-                                rawAccountLabel={issue.raw_value}
-                                rawAccountSource={issue.source}
-                            />
-                        ) : (
-                            <AssetSelector
-                                assets={assets}
-                                value={null}
-                                onChange={handleSelect}
-                                onAssetCreated={onAssetsUpdated}
-                                size="sm"
-                                placeholder="+ Add"
-                                defaultSymbol={issue.raw_value}
-                                rawAssetSymbol={issue.raw_value}
-                                rawAssetSource={issue.source}
-                            />
+                    <Flex gap={1} align="center" w="full">
+                        {/* Show suggestion chip only if confidence >= 70% */}
+                        {issue.suggestion && issue.raw_value && suggestionConfidence >= 0.7 && (
+                            <Button
+                                size="xs"
+                                colorPalette={suggestionColor}
+                                variant="outline"
+                                onClick={handleAcceptSuggestion}
+                                disabled={isApplying}
+                                title={`${Math.round(suggestionConfidence * 100)}% match - ${issue.suggestion.name}`}
+                                h="22px"
+                                minW="45px"
+                                px={1}
+                                flexShrink={0}
+                            >
+                                {isApplying ? <Spinner size="xs" /> : <FiCheck size={11} />}
+                            </Button>
                         )}
-                    </Box>
+                        {/* Always show manual selector */}
+                        <Box flex={1} minW={0}>
+                            {isAccountIssue ? (
+                                <AccountSelector
+                                    accounts={accounts}
+                                    value={null}
+                                    onChange={handleSelect}
+                                    onAccountCreated={onAccountsUpdated}
+                                    size="sm"
+                                    placeholder="+ Add"
+                                    defaultName={issue.raw_value}
+                                    rawAccountLabel={issue.raw_value}
+                                    rawAccountSource={issue.source}
+                                />
+                            ) : (
+                                <AssetSelector
+                                    assets={assets}
+                                    value={null}
+                                    onChange={handleSelect}
+                                    onAssetCreated={onAssetsUpdated}
+                                    size="sm"
+                                    placeholder="+ Add"
+                                    defaultSymbol={issue.raw_value}
+                                    rawAssetSymbol={issue.raw_value}
+                                    rawAssetSource={issue.source}
+                                />
+                            )}
+                        </Box>
+                    </Flex>
                 )}
             </Box>
         </Flex>
@@ -353,30 +408,114 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     onAccountsUpdated,
     onIssueFixed,
 }) => {
-    const [data, setData] = useState<DataHealthCheckResponse | null>(null);
+    const [data, setData] = useState<TransactionStatusResponse | null>(null);
+    const [issues, setIssues] = useState<TransactionIssue[]>([]);
+    const [issuesTotal, setIssuesTotal] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const [isApplyingAll, setIsApplyingAll] = useState(false);
+    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'pending'>('missing-data');
+    
+    // Get dismiss state from context
+    const { showDismissedMappings, setShowDismissedMappings } = useDataHealth();
 
-    // Fetch health check data
-    const fetchData = useCallback(async (pageNum: number = 1) => {
+    // Transaction detail drawer state
+    const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
+    const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
+
+    // Resizable drawer state
+    const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+        const saved = localStorage.getItem('dataHealthDrawerWidth');
+        return saved ? parseInt(saved, 10) : Math.min(window.innerWidth * 0.75, 1400);
+    });
+    const [isResizing, setIsResizing] = useState(false);
+    const resizeStartX = React.useRef<number>(0);
+    const resizeStartWidth = React.useRef<number>(0);
+
+    // Resize handlers
+    const handleResizeStart = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsResizing(true);
+        resizeStartX.current = e.clientX;
+        resizeStartWidth.current = drawerWidth;
+    }, [drawerWidth]);
+
+    const handleResizeMove = useCallback((e: MouseEvent) => {
+        if (!isResizing) return;
+        const deltaX = resizeStartX.current - e.clientX;
+        const newWidth = Math.max(600, Math.min(window.innerWidth * 0.95, resizeStartWidth.current + deltaX));
+        setDrawerWidth(newWidth);
+    }, [isResizing]);
+
+    const handleResizeEnd = useCallback(() => {
+        if (!isResizing) return;
+        setIsResizing(false);
+        localStorage.setItem('dataHealthDrawerWidth', drawerWidth.toString());
+    }, [isResizing, drawerWidth]);
+
+    // Add/remove resize event listeners
+    useEffect(() => {
+        if (isResizing) {
+            document.addEventListener('mousemove', handleResizeMove);
+            document.addEventListener('mouseup', handleResizeEnd);
+            return () => {
+                document.removeEventListener('mousemove', handleResizeMove);
+                document.removeEventListener('mouseup', handleResizeEnd);
+            };
+        }
+    }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+    // Fetch status data
+    const fetchStatus = useCallback(async () => {
+        try {
+            const params = new URLSearchParams();
+            if (accountIds?.length) {
+                params.set('account_ids', accountIds.join(','));
+            }
+
+            const response = await fetch(`${API_URL}/transactions/data-health-check/status?${params}`);
+            if (!response.ok) throw new Error('Failed to fetch status');
+
+            setData(await response.json());
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Unknown error');
+        }
+    }, [accountIds]);
+
+    // Fetch issues based on active tab
+    const fetchIssues = useCallback(async (tab: typeof activeTab, pageNum: number = 1) => {
         setIsLoading(true);
         setError(null);
         try {
             const params = new URLSearchParams({
-                include_details: 'true',
-                issues_page: pageNum.toString(),
-                issues_per_page: ITEMS_PER_PAGE.toString(),
+                page: pageNum.toString(),
+                per_page: ITEMS_PER_PAGE.toString(),
             });
             if (accountIds?.length) {
                 params.set('account_ids', accountIds.join(','));
             }
 
-            const response = await fetch(`${API_URL}/transactions/data-health-check?${params}`);
-            if (!response.ok) throw new Error('Failed to fetch data health check');
+            let endpoint = '';
+            if (tab === 'missing-data') {
+                endpoint = '/transactions/data-health-check/missing-data-issues';
+            } else if (tab === 'assets-linkage') {
+                endpoint = '/transactions/data-health-check/linkage-issues';
+                // Filter to only show asset-related linkage issues
+                params.set('issue_types', 'unlinked_asset,unlinked_price_quote,unlinked_fee_quote');
+            } else if (tab === 'accounts-linkage') {
+                // Account linkage is handled by AccountMappingPanel component
+                return;
+            } else {
+                return; // pending tab doesn't use this
+            }
 
-            setData(await response.json());
+            const response = await fetch(`${API_URL}${endpoint}?${params}`);
+            if (!response.ok) throw new Error(`Failed to fetch ${tab} issues`);
+
+            const result = await response.json();
+            setIssues(result.issues);
+            setIssuesTotal(result.pagination.total_count);
             setPage(pageNum);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
@@ -385,24 +524,37 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
         }
     }, [accountIds]);
 
-    // Fetch on open/refresh
+    // Fetch on open/refresh/tab change
     useEffect(() => {
-        if (isOpen) fetchData(1);
-    }, [isOpen, fetchData, refreshTrigger]);
+        if (isOpen) {
+            fetchStatus();
+            // Skip fetching issues for tabs that manage their own data:
+            // - 'pending' uses TransactionsTable with its own query
+            // - 'assets-linkage' uses AssetLinkageTable with its own query
+            // - 'accounts-linkage' uses AccountMappingPanel with its own query
+            if (activeTab === 'missing-data') {
+                fetchIssues(activeTab, 1);
+            }
+        }
+    }, [isOpen, activeTab, fetchStatus, fetchIssues, refreshTrigger]);
 
     // Refresh after fix
     const handleFixComplete = useCallback(() => {
         setTimeout(() => {
-            fetchData(page);
+            fetchStatus();
+            // Only fetch issues for tabs that use the drawer's issues state
+            if (activeTab === 'missing-data') {
+                fetchIssues(activeTab, page);
+            }
             onAssetsUpdated?.();
             onAccountsUpdated?.();
             onIssueFixed?.();
         }, 500);
-    }, [page, fetchData, onAssetsUpdated, onAccountsUpdated, onIssueFixed]);
+    }, [activeTab, page, fetchStatus, fetchIssues, onAssetsUpdated, onAccountsUpdated, onIssueFixed]);
 
-    // High confidence suggestions for bulk apply
-    const highConfidenceIssues = (data?.issues_list ?? []).filter(
-        i => i.suggestion && i.suggestion.confidence >= 0.9 && i.raw_value
+    // High confidence suggestions for bulk apply (70%+ threshold)
+    const highConfidenceIssues = (issues ?? []).filter(
+        i => i.suggestion && i.suggestion.confidence >= 0.7 && i.raw_value
     );
 
     // Apply all high-confidence suggestions
@@ -412,8 +564,9 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
         setIsApplyingAll(true);
         try {
             // Group by type
-            const assetIssues = highConfidenceIssues.filter(i => i.issue_type !== 'account');
-            const accountIssues = highConfidenceIssues.filter(i => i.issue_type === 'account');
+            const accountTypes = new Set(['unlinked_account', 'missing_source_account', 'missing_transfer_from_account', 'missing_transfer_to_account', 'unlinked_transfer_from_account', 'unlinked_transfer_to_account']);
+            const assetIssues = highConfidenceIssues.filter(i => !accountTypes.has(i.issue_type));
+            const accountIssues = highConfidenceIssues.filter(i => accountTypes.has(i.issue_type));
 
             // Bulk map assets (deduplicated)
             if (assetIssues.length) {
@@ -463,8 +616,20 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
 
     if (!isOpen) return null;
 
-    const totalPages = data ? Math.ceil(data.issues_total_count / ITEMS_PER_PAGE) : 0;
-    const hasIssues = (data?.issues_list?.length ?? 0) > 0;
+    const totalPages = Math.ceil(issuesTotal / ITEMS_PER_PAGE);
+
+    // Check if current tab has issues - check BOTH status count AND actual fetched data
+    const statusHasIssues = activeTab === 'missing-data'
+        ? (data?.missing_data_issues_count ?? 0) > 0
+        : activeTab === 'linkage'
+            ? (data?.linkage_issues_count ?? 0) > 0
+            : activeTab === 'transfer'
+                ? (data?.transfer_issues_count ?? 0) > 0
+                : false;
+
+    // Use fetched data if available, otherwise fall back to status count
+    const hasIssues = issuesTotal > 0 || (statusHasIssues && issues.length === 0);
+
     const allClear = data && !data.has_issues && data.bundle_suggestions_count === 0;
 
     return (
@@ -484,7 +649,7 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                 right={0}
                 top={0}
                 bottom={0}
-                width="640px"
+                width={`${drawerWidth}px`}
                 maxW="95vw"
                 bg="white"
                 boxShadow="xl"
@@ -494,6 +659,21 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                 borderColor="gray.200"
                 onClick={(e) => e.stopPropagation()}
             >
+                {/* Resize Handle */}
+                <Box
+                    position="absolute"
+                    left={0}
+                    top={0}
+                    bottom={0}
+                    width="4px"
+                    cursor="col-resize"
+                    bg={isResizing ? 'blue.400' : 'transparent'}
+                    _hover={{ bg: 'blue.200' }}
+                    transition="background-color 0.2s"
+                    onMouseDown={handleResizeStart}
+                    zIndex={1}
+                />
+
                 {/* Header */}
                 <Flex
                     justify="space-between"
@@ -526,9 +706,19 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                         <Button
                             variant="ghost"
                             size="xs"
-                            onClick={() => fetchData(page)}
+                            onClick={() => {
+                                // Clear all cached issues and refresh status
+                                setIssues([]);
+                                setIssuesTotal(0);
+                                setPage(1);
+                                fetchStatus();
+                                // Refresh current tab if not pending
+                                if (activeTab !== 'pending') {
+                                    fetchIssues(activeTab, 1);
+                                }
+                            }}
                             disabled={isLoading}
-                            title="Refresh"
+                            title="Refresh all tabs"
                         >
                             <FiRefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
                         </Button>
@@ -581,6 +771,44 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                 </HStack>
                             </Flex>
 
+                            {/* Tabs for different issue types */}
+                            <Tabs.Root value={activeTab} onValueChange={(e) => setActiveTab(e.value as typeof activeTab)}>
+                                <Tabs.List>
+                                    <Tabs.Trigger value="missing-data">
+                                        Missing Data
+                                        {data.missing_data_issues_count > 0 && (
+                                            <Badge ml={1} size="xs" colorPalette="red">
+                                                {data.missing_data_issues_count}
+                                            </Badge>
+                                        )}
+                                    </Tabs.Trigger>
+                                    <Tabs.Trigger value="assets-linkage">
+                                        Assets Linkage
+                                        {((data.linkage_issues_count || 0) > 0) && (
+                                            <Badge ml={1} size="xs" colorPalette="purple">
+                                                {data.linkage_issues_count}
+                                            </Badge>
+                                        )}
+                                    </Tabs.Trigger>
+                                    <Tabs.Trigger value="accounts-linkage">
+                                        Accounts Linkage
+                                        {(data.unmapped_accounts_transaction_count || 0) > 0 && (
+                                            <Badge ml={1} size="xs" colorPalette="orange">
+                                                {data.unmapped_accounts_transaction_count}
+                                            </Badge>
+                                        )}
+                                    </Tabs.Trigger>
+                                    <Tabs.Trigger value="pending">
+                                        Pending
+                                        {data.pending_count > 0 && (
+                                            <Badge ml={1} size="xs" colorPalette="yellow">
+                                                {data.pending_count}
+                                            </Badge>
+                                        )}
+                                    </Tabs.Trigger>
+                                </Tabs.List>
+                            </Tabs.Root>
+
                             {/* All Clear */}
                             {allClear && (
                                 <Box p={4} bg="green.50" borderRadius="md" borderWidth={1} borderColor="green.200" textAlign="center">
@@ -608,21 +836,21 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                 </Flex>
                             )}
 
-                            {/* Issues Table */}
-                            {hasIssues && (
+                            {/* Issues Table - shown only for missing-data tab */}
+                            {activeTab === 'missing-data' && hasIssues && (
                                 <>
                                     {/* Header with pagination */}
                                     <Flex justify="space-between" align="center">
                                         <Text fontSize="xs" fontWeight="medium" color="gray.600">
-                                            Data Issues ({data.issues_total_count})
+                                            Data Issues ({issuesTotal})
                                         </Text>
                                         {totalPages > 1 && (
                                             <HStack gap={1}>
-                                                <Button size="xs" variant="ghost" onClick={() => fetchData(page - 1)} disabled={page === 1 || isLoading}>
+                                                <Button size="xs" variant="ghost" onClick={() => fetchIssues(activeTab, page - 1)} disabled={page === 1 || isLoading}>
                                                     <FiChevronLeft size={14} />
                                                 </Button>
                                                 <Text fontSize="xs" color="gray.500">{page} / {totalPages}</Text>
-                                                <Button size="xs" variant="ghost" onClick={() => fetchData(page + 1)} disabled={page === totalPages || isLoading}>
+                                                <Button size="xs" variant="ghost" onClick={() => fetchIssues(activeTab, page + 1)} disabled={page === totalPages || isLoading}>
                                                     <FiChevronRight size={14} />
                                                 </Button>
                                             </HStack>
@@ -632,7 +860,7 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                     {/* Table */}
                                     <Box borderWidth={1} borderColor="gray.200" borderRadius="md" overflow="hidden">
                                         <TableHeader />
-                                        {data.issues_list!.map((issue, idx) => (
+                                        {issues.map((issue, idx) => (
                                             <IssueRow
                                                 key={`${issue.transaction_id}-${issue.issue_type}-${idx}`}
                                                 issue={issue}
@@ -641,6 +869,10 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                                 onFixed={handleFixComplete}
                                                 onAssetsUpdated={onAssetsUpdated}
                                                 onAccountsUpdated={onAccountsUpdated}
+                                                onTransactionClick={(txId) => {
+                                                    setSelectedTransactionId(txId);
+                                                    setIsTransactionDrawerOpen(true);
+                                                }}
                                             />
                                         ))}
                                     </Box>
@@ -649,11 +881,11 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                     {totalPages > 1 && (
                                         <Flex justify="center" pt={2}>
                                             <HStack gap={2}>
-                                                <Button size="xs" variant="outline" onClick={() => fetchData(page - 1)} disabled={page === 1 || isLoading}>
+                                                <Button size="xs" variant="outline" onClick={() => fetchIssues(activeTab, page - 1)} disabled={page === 1 || isLoading}>
                                                     <FiChevronLeft size={12} /> Prev
                                                 </Button>
                                                 <Text fontSize="xs" color="gray.500">Page {page} of {totalPages}</Text>
-                                                <Button size="xs" variant="outline" onClick={() => fetchData(page + 1)} disabled={page === totalPages || isLoading}>
+                                                <Button size="xs" variant="outline" onClick={() => fetchIssues(activeTab, page + 1)} disabled={page === totalPages || isLoading}>
                                                     Next <FiChevronRight size={12} />
                                                 </Button>
                                             </HStack>
@@ -662,18 +894,69 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                 </>
                             )}
 
-                            {/* No issues but not all clear */}
-                            {!hasIssues && !allClear && data.issues_total_count === 0 && (
+                            {/* No issues message for missing-data tab */}
+                            {activeTab === 'missing-data' && !hasIssues && !allClear && issuesTotal === 0 && (
                                 <Box p={3} bg="gray.50" borderRadius="md" textAlign="center">
                                     <Text fontSize="xs" color="gray.600">
                                         No data mapping issues. Review pending transactions or bundle suggestions above.
                                     </Text>
                                 </Box>
                             )}
+
+                            {/* Assets Linkage tab content */}
+                            {activeTab === 'assets-linkage' && (
+                                <AssetLinkageTable
+                                    assets={assets}
+                                    onFixed={handleFixComplete}
+                                    onAssetsUpdated={onAssetsUpdated}
+                                />
+                            )}
+
+                            {/* Accounts Linkage tab content */}
+                            {activeTab === 'accounts-linkage' && (
+                                <Box>
+                                    <AccountMappingPanel
+                                        mode="issues-only"
+                                        includeDismissed={showDismissedMappings}
+                                        onDismissedChange={setShowDismissedMappings}
+                                    />
+                                </Box>
+                            )}
+
+                            {/* Pending tab content */}
+                            {activeTab === 'pending' && (
+                                <Box>
+                                    {data.pending_count > 0 ? (
+                                        <TransactionsTable
+                                            tableId="dataHealth-pending"
+                                            filters={{ ...defaultFilterState, reviewStatus: ['pending'] }}
+                                            showFilters={false}
+                                            compact={true}
+                                        />
+                                    ) : (
+                                        <Box p={3} bg="green.50" borderRadius="md" textAlign="center">
+                                            <Text fontSize="sm" color="green.700">
+                                                All transactions reviewed! ✓
+                                            </Text>
+                                        </Box>
+                                    )}
+                                </Box>
+                            )}
                         </VStack>
                     )}
                 </Box>
             </Box>
+
+            {/* Transaction Detail Drawer */}
+            <TransactionDetailDrawer
+                transactionId={selectedTransactionId}
+                isOpen={isTransactionDrawerOpen}
+                onClose={() => {
+                    setIsTransactionDrawerOpen(false);
+                    setSelectedTransactionId(null);
+                }}
+                accounts={accounts}
+            />
         </>
     );
 };

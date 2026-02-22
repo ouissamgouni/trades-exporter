@@ -17,7 +17,7 @@ from decimal import Decimal
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
-    PATTERN_TRANSFER,
+    PATTERN_INTERNAL_TRANSFER,
     PATTERN_SWAP,
     PATTERN_UNKNOWN,
 )
@@ -119,7 +119,7 @@ class TestRule1NetworkTxMatch:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         assert len(suggestions) == 1
-        assert suggestions[0].pattern == PATTERN_TRANSFER
+        assert suggestions[0].pattern == PATTERN_INTERNAL_TRANSFER
         assert suggestions[0].confidence == 1.0
         assert set(suggestions[0].transaction_ids) == {1, 2}
         assert "network tx hash match" in suggestions[0].reason.lower()
@@ -143,7 +143,7 @@ class TestRule1NetworkTxMatch:
 
         # Should fall through to review group
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 0
 
@@ -183,7 +183,7 @@ class TestRule2SameAssetTransfer:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 1
         assert transfer_suggestions[0].confidence >= 0.8
@@ -212,7 +212,7 @@ class TestRule2SameAssetTransfer:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 1
 
@@ -227,7 +227,7 @@ class TestRule2SameAssetTransfer:
 
         # Should be swap or review, not transfer
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 0
 
@@ -254,7 +254,7 @@ class TestRule2SameAssetTransfer:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 0
 
@@ -279,7 +279,7 @@ class TestRule2SameAssetTransfer:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 0
 
@@ -737,7 +737,7 @@ class TestRule5BridgeDetection:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         bridge_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(bridge_suggestions) == 1
         assert "Bridge" in bridge_suggestions[0].label
@@ -767,7 +767,7 @@ class TestRule5BridgeDetection:
         suggestions = engine.suggest_groups([outflow, inflow])
 
         bridge_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(bridge_suggestions) == 1
         assert "ethereum" in bridge_suggestions[0].label.lower()
@@ -854,7 +854,7 @@ class TestPriorityAndEdgeCases:
 
         # Should only have one suggestion (Rule 1 wins)
         transfer_suggestions = [
-            s for s in suggestions if s.pattern == PATTERN_TRANSFER
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
         ]
         assert len(transfer_suggestions) == 1
         assert transfer_suggestions[0].confidence == 1.0  # Rule 1's confidence

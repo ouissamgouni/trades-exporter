@@ -45,7 +45,7 @@ class AssetCreate(BaseModel):
     symbol: str
     label: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = 0
 
 
@@ -55,7 +55,7 @@ class AssetUpdate(BaseModel):
     symbol: Optional[str] = None
     label: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = None
 
 
@@ -90,7 +90,7 @@ class AssetResponse(BaseModel):
     symbol: str
     label: Optional[str] = None
     price_type: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[Dict[str, Any]]] = None
     created_at: Optional[str] = None
     status: Optional[int] = 0
     price_getters: Optional[List[AssetPriceGetterResponse]] = None

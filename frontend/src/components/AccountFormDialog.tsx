@@ -35,7 +35,8 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         name: '',
         account_type: 'cex' as 'cex' | 'broker' | 'wallet',
         address_or_identifier: '',
-        tags: [] as string[],
+        tags: [] as Record<string, any>[],
+        owned: true,
     });
     const [tagsInput, setTagsInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -68,8 +69,11 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 account_type: account.account_type,
                 address_or_identifier: account.address_or_identifier || '',
                 tags: account.tags || [],
+                owned: account.owned,
             });
-            setTagsInput((account.tags || []).join(', '));
+            // Convert [{key: val}, ...] to "key, key2, ..."
+            const tagStrings = (account.tags || []).map(tagObj => Object.keys(tagObj)[0]).filter(Boolean);
+            setTagsInput(tagStrings.join(', '));
         } else if (prefill) {
             // Use prefill data when creating from raw account
             setFormData({
@@ -77,6 +81,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 account_type: prefill.account_type || 'cex',
                 address_or_identifier: prefill.address_or_identifier || '',
                 tags: [],
+                owned: true,
             });
             setTagsInput('');
         } else {
@@ -85,6 +90,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 account_type: 'cex',
                 address_or_identifier: '',
                 tags: [],
+                owned: true,
             });
             setTagsInput('');
         }
@@ -114,11 +120,13 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         setError('');
 
         try {
-            // Parse tags from comma-separated input
-            const tags = tagsInput
+            // Parse tags from comma-separated input and convert to [{key: true}, ...]
+            const tagStrings = tagsInput
                 .split(',')
                 .map(tag => tag.trim())
                 .filter(tag => tag.length > 0);
+
+            const tags = tagStrings.map(tag => ({ [tag]: true }));
 
             const payload = {
                 ...formData,
@@ -228,6 +236,27 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                             }
                                             placeholder="0x1234... or account ID"
                                         />
+                                    </Box>
+
+                                    <Box>
+                                        <Text fontWeight="medium" mb={1}>Owned <Text as="span" color="red.500">*</Text></Text>
+                                        <NativeSelect.Root>
+                                            <NativeSelect.Field
+                                                value={formData.owned ? 'true' : 'false'}
+                                                onChange={(e) =>
+                                                    setFormData({
+                                                        ...formData,
+                                                        owned: e.target.value === 'true',
+                                                    })
+                                                }
+                                            >
+                                                <option value="true">Yes (my account)</option>
+                                                <option value="false">No (external/counterparty)</option>
+                                            </NativeSelect.Field>
+                                        </NativeSelect.Root>
+                                        <Text fontSize="sm" color="gray.500" mt={1}>
+                                            Mark as owned if this account belongs to you. External accounts are used for tracking counterparties.
+                                        </Text>
                                     </Box>
 
                                     <Box>

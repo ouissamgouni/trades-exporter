@@ -1,4 +1,5 @@
 import {
+    Badge,
     Box,
     Button, Dialog, Flex, Input, NativeSelect, Portal, Text
 } from '@chakra-ui/react';
@@ -14,6 +15,7 @@ interface AccountSelectorProps {
     placeholder?: string;
     defaultName?: string; // Pre-fill new account name
     size?: 'sm' | 'md';
+    showOwnershipBadge?: boolean; // Display 'Owned' badge for owned accounts
     // For linking raw_account when creating new account from mapping context
     rawAccountSource?: string;
     rawAccountLabel?: string;
@@ -27,6 +29,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
     placeholder = 'Search or select account...',
     defaultName = '',
     size = 'sm',
+    showOwnershipBadge = false,
     rawAccountSource,
     rawAccountLabel,
 }) => {
@@ -222,7 +225,14 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                             onClick={() => handleSelect(account.id)}
                             fontSize="sm"
                         >
-                            <Text fontWeight="medium">{account.name}</Text>
+                            <Flex align="center" gap={2}>
+                                <Text fontWeight="medium" flex="1">{account.name}</Text>
+                                {showOwnershipBadge && account.owned && (
+                                    <Badge size="xs" colorPalette="green" variant="subtle">
+                                        Owned
+                                    </Badge>
+                                )}
+                            </Flex>
                             <Text fontSize="xs" color="gray.500">
                                 {account.account_type}
                                 {account.address_or_identifier && ` • ${account.address_or_identifier.slice(0, 12)}...`}
@@ -297,8 +307,12 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                                         <Text fontWeight="medium" mb={1}>Tags</Text>
                                         <Input
                                             placeholder="e.g., trading, personal (comma-separated)"
-                                            value={(newAccount.tags || []).join(', ')}
-                                            onChange={e => setNewAccount({ ...newAccount, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                                            value={(newAccount.tags || []).map(t => Object.keys(t)[0]).filter(Boolean).join(', ')}
+                                            onChange={e => {
+                                                const tagStrings = e.target.value.split(',').map(t => t.trim()).filter(t => t);
+                                                const tags = tagStrings.map(tag => ({ [tag]: true }));
+                                                setNewAccount({ ...newAccount, tags });
+                                            }}
                                         />
                                     </Box>
                                     <Box>

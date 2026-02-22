@@ -8,8 +8,16 @@ database_path: "data/trades.db"
 # Use database-configured connectors (respects Account.enabled and AccountConnector.enabled)
 use_database_connectors: true
 
-log_level_root: "WARNING"
-log_level_trade_exporter: "DEBUG"
+#log_level_root: "WARNING"
+#log_level_trade_exporter: "DEBUG"
+
+# Uvicorn Access Log Configuration
+# Controls HTTP request access logging for the API server
+# - null: Disable all access logs (default for clean dev logs)
+# - []: Enable all access logs (production mode)
+# - ["/path1", "/path2"]: Enable logs but exclude specific paths (e.g., health checks)
+# Environment variable UVICORN_ACCESS_LOG_EXCLUDE_PATHS (JSON list) takes precedence
+uvicorn_access_log_exclude_paths: null
 
 # ============================================================================
 # Mock Price Service Configuration (for testing)
@@ -27,8 +35,8 @@ mock_prices_seed: null # Options: null (random), any integer (deterministic)
 grouping_engine:
   # Time windows (in seconds)
   transfer_time_window: 300 # 5 minutes - max time between outflow and inflow for transfers
-  swap_time_window: 60 # 1 minute - max time between legs of a swap
-  bridge_time_window: 60 # 1 minute - max time for cross-chain bridge transactions
+  swap_time_window: 180 # 3 minutes - max time between legs of a swap
+  bridge_time_window: 180 # 3 minutes - max time for cross-chain bridge transactions
 
   # Tolerances (as decimals, e.g., 0.05 = 5%)
   quantity_tolerance: 0.10 # Max quantity difference ratio for matching transfers/bridges
@@ -39,6 +47,17 @@ grouping_engine:
   high_confidence: 0.95 # Strong match criteria met
   medium_confidence: 0.85 # Moderate match criteria
   low_confidence: 0.70 # Time-only match (no value confirmation)
+
+# Duplicate Detection Configuration
+duplicate_detection:
+  enabled: true # Master switch for all duplicate detection
+  time_window_seconds: 30 # ±30s tolerance for transaction hash computation (not used for querying)
+  amount_tolerance_percent: 1.0 # ±1% tolerance for transaction hash computation (not used for querying)
+  # NOTE: Duplicate detection is now VIEW-TIME ONLY:
+  # - At persist time: Only computes transaction_hash (no searching/tagging)
+  # - At view time: Queries transaction_hash column to find duplicates
+  # - Shows ALL transactions with matching hash (resolved + unresolved)
+  # - Resolution uses Option B: re-resolves entire group when user takes action
 
 # Web3 Wallets Configuration
 web3_wallets:

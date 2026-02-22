@@ -7,7 +7,7 @@ tasks:
       - task: unit
 
   unit:
-    desc: Run all unit tests
+    desc: Run all unit tests (no database required)
     cmds:
       - task: unit:backend
       - task: unit:frontend
@@ -16,14 +16,14 @@ tasks:
   unit:backend:
     desc: Run backend unit tests
     dir: "{{.BACKEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
-      - DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" .venv/bin/python -m pytest -v
+      - .venv/bin/python -m pytest tests/unit/ -v -m "not integration"
 
   unit:frontend:
     desc: Run frontend build and type check
     dir: "{{.FRONTEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
       - npm run build
       - npx tsc --noEmit || true
@@ -31,9 +31,32 @@ tasks:
   int:dev:
     desc: Run integration tests against dev environment
     dir: "{{.BACKEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
       - DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" .venv/bin/python -m pytest -v -m integration || true
+
+  int:local:
+    desc: Run integration tests against local integration database (trades_db_integ)
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running integration tests against trades_db_integ..."
+        echo "   (Set up with: task db:setup:integ)"
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          .venv/bin/python -m pytest tests/integration/ -v -m integration --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py
+
+  int:full:
+    desc: Run full integration test cycle (setup → test → cleanup)
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - echo "🔧 Setting up integration test database..."
+      - task: :db:setup:integ
+      - echo "🧪 Running integration tests..."
+      - task: int:local
+      - echo "🧹 Cleaning up integration test database..."
+      - task: :db:reset:integ
+      - echo "✅ Integration test cycle complete"
 
   int:test:
     desc: Run integration tests against test stack

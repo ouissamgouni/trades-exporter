@@ -20,6 +20,7 @@ from backend.db.repositories.account_connector_repository import (
     AccountConnectorRepository,
 )
 from backend.db.repositories.sync_job_repository import SyncJobRepository
+from backend.db.repositories.file_import_repository import FileImportRepository
 
 __all__ = [
     "make_json_serializable",
@@ -33,4 +34,5 @@ __all__ = [
     "RealizedPnlRepository",
     "AccountConnectorRepository",
     "SyncJobRepository",
+    "FileImportRepository",
 ]

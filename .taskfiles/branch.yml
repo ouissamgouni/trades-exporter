@@ -1,11 +1,27 @@
 version: "3"
 
+includes:
+  git: git.yml
+
 tasks:
   feature:
     desc: Create a new feature branch from develop
+    vars:
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+      NAME: "{{.CLI_ARGS}}"
+    deps:
+      - git:check:clean
+    prompt: |
+      Create feature/{{.NAME}} from develop branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to develop, then create feature/{{.NAME}}
+
+      Continue?
     cmds:
       - |
-        NAME="{{.CLI_ARGS}}"
+        NAME="{{.NAME}}"
         if [ -z "$NAME" ]; then
           echo "❌ Usage: task branch:feature -- <branch-name>"
           exit 1
@@ -31,9 +47,22 @@ tasks:
 
   fix:
     desc: Create a new fix branch from develop
+    vars:
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+      NAME: "{{.CLI_ARGS}}"
+    deps:
+      - git:check:clean
+    prompt: |
+      Create fix/{{.NAME}} from develop branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to develop, then create fix/{{.NAME}}
+
+      Continue?
     cmds:
       - |
-        NAME="{{.CLI_ARGS}}"
+        NAME="{{.NAME}}"
         if [ -z "$NAME" ]; then
           echo "❌ Usage: task branch:fix -- <branch-name>"
           exit 1
@@ -59,9 +88,24 @@ tasks:
 
   hotfix:
     desc: Create a hotfix branch from main
+    vars:
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+      NAME: "{{.CLI_ARGS}}"
+    deps:
+      - git:check:clean
+    prompt: |
+      Create hotfix/{{.NAME}} from main branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to main, then create hotfix/{{.NAME}}
+
+      ⚠️  Hotfixes are for urgent production fixes only!
+
+      Continue?
     cmds:
       - |
-        NAME="{{.CLI_ARGS}}"
+        NAME="{{.NAME}}"
         if [ -z "$NAME" ]; then
           echo "❌ Usage: task branch:hotfix -- <branch-name>"
           exit 1

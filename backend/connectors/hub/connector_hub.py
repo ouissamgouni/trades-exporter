@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Type
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
 from backend.connectors.connector_registry import get_connector_registry
-from backend.config.loader import configure_logging, load_settings, is_test_mode
+from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging("connector_hub")
 
@@ -58,9 +58,6 @@ class ConnectorHub(BaseHubConnector):
         # Get connector map from registry
         connector_map = self.get_connector_map()
 
-        # Get test mode from environment
-        test_mode = is_test_mode()
-
         # Configure which connectors to run
         if enabled_connectors is None:
             self.enabled_connectors = list(connector_map.keys())
@@ -78,16 +75,14 @@ class ConnectorHub(BaseHubConnector):
         # Build config with parent_output_path for BaseHubConnector
         hub_config = {"parent_output_path": parent_output_path} if parent_output_path else {}
 
-        # Build child connectors first
-        mode_str = "TEST MODE" if test_mode else "LIVE MODE"
-        log.info("initializing_connector_hub", mode=mode_str)
+
         log.info("enabled_connectors", connectors=self.enabled_connectors)
         
         # Initialize as BaseHubConnector first to get self.output_path
         child_connectors_list = []  # Will populate after creating instances
         super().__init__(
             child_connectors=child_connectors_list,
-            parallel_strategy="futures",  # Better for many connectors
+            parallel_strategy="queue",  # Better for many connectors
             config=hub_config,
         )
 
@@ -115,7 +110,7 @@ class ConnectorHub(BaseHubConnector):
         # Update child connectors list after instantiation
         self.child_connectors = list(self.connector_instances.items())
 
-        log.info("parallel_processing_enabled", strategy="futures")
+        log.info("parallel_processing_enabled", strategy="queue")
 
     def get_connector_stats(self) -> Dict[str, Dict[str, Any]]:
         """

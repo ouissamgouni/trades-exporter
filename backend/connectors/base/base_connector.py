@@ -11,7 +11,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Generator, Dict, List, Any, Optional
 
-from backend.config.loader import configure_logging, is_test_mode, get_connectors_output_path
+from backend.config.loader import configure_logging, get_connectors_output_path
 
 from backend.db.models import NormalizedTransaction
 
@@ -24,9 +24,14 @@ class BaseConnector(ABC):
     All exchange-specific connectors should inherit from this class.
 
     Subclasses must define:
-    - exchange_name: Abstract property returning the exchange/source name
-    - get_raws(): Abstract method to fetch raw data from the exchange/blockchain
+    - connector_name: Abstract property returning the exchange/source name
+    - yield_raws(): Generator method to fetch and yield raw data from the exchange/blockchain
     - raw_to_normalized(): Abstract method to convert raw data to NormalizedTransaction
+    
+    Streaming architecture:
+    - yield_raws() yields raw items as they are fetched (enables immediate processing)
+    - yield_normalized() consumes yield_raws() and applies normalization per item
+    - This allows processing (normalize, enrich, persist) to happen incrementally
     """
     
     # Flag to identify hub connectors (overridden in BaseHubConnector)
@@ -37,6 +42,8 @@ class BaseConnector(ABC):
         account_id: Optional[int] = None,
         connector_id: Optional[int] = None,
         config: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Any] = None,
+        abort_event: Optional[Any] = None,
     ):
         """
         Initialize the connector.
@@ -46,6 +53,8 @@ class BaseConnector(ABC):
             connector_id: The AccountConnector ID for this specific connector instance
             config: Connector configuration dict (may include test_mode, test_file_path, 
                    parent_output_path, since_datetime)
+            progress_callback: Optional callback function for progress reporting
+            abort_event: Optional threading.Event for abort signaling
 
         Note: Test mode priority:
             1. Per-connector config["test_mode"] (if set)
@@ -59,9 +68,14 @@ class BaseConnector(ABC):
         self.connector_id = connector_id
         self.config = config or {}
         self.exchange = None
+        self._progress_callback = progress_callback
+        self._abort_event = abort_event
         
         # Per-connector test mode takes priority over global setting
         self._test_mode = self.config.get("test_mode", None)
+        
+        # Renormalize mode: read from raw_transactions DB instead of external APIs
+        self._renormalize_mode = self.config.get("renormalize_mode", False)
         
         # Since datetime for incremental sync (if supported by connector)
         self._since_datetime: Optional[datetime] = self.config.get("since_datetime")
@@ -136,6 +150,26 @@ class BaseConnector(ABC):
             log.error(f"❌ [{self.connector_name}] Failed to setup file logger: {e}")
             self.file_logger = None
     
+    def _get_account_identifier(self) -> str:
+        """Get the account identifier for use in source_from_account/source_to_account fields.
+        
+        Returns the account's address_or_identifier if available, otherwise falls back
+        to the account name. This provides a stable, human-readable identifier that can
+        be used for account mapping and display.
+        
+        Returns:
+            str: Account identifier (address_or_identifier or account name)
+        """
+        identifier = self.config.get("_account_address_or_identifier")
+        if identifier:
+            return str(identifier)
+        # Fallback to account name
+        account_name = self.config.get("_account_name")
+        if account_name:
+            return str(account_name)
+        # Last resort: use account ID
+        return str(self.account_id) if self.account_id else "unknown"
+    
     def cleanup(self):
         """
         Cleanup resources, particularly file handlers.
@@ -157,30 +191,51 @@ class BaseConnector(ABC):
         """
 
     @abstractmethod
-    def get_raws(self) -> List[Dict[str, Any]]:
+    def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Fetch raw data from the exchange/blockchain.
-        Must be implemented by each connector.
+        Fetch and yield raw data from the exchange/blockchain.
+        Must be implemented by each connector as a generator.
+        
+        This method should yield items as they are fetched, enabling
+        incremental processing without waiting for all data to be collected.
+        
+        For parallel fetching (e.g., multiple symbols), use a queue-based
+        pattern where worker threads put items into a queue and the main
+        thread yields from the queue.
 
-        Returns:
-            List[Dict[str, Any]]: List of raw transaction/trade/event dictionaries
+        Yields:
+            Dict[str, Any]: Raw transaction/trade/event dictionaries
 
         Example:
-            For CEX: return self.exchange.fetch_my_trades(symbol)
-            For blockchain: return self.fetch_transactions(address)
+            For CEX with streaming:
+                for symbol in self.get_symbols():
+                    for trade in self.fetch_trades(symbol):
+                        yield trade
+            
+            For parallel fetching with queue:
+                queue = Queue()
+                # Start worker threads that put items into queue
+                while not done:
+                    item = queue.get()
+                    yield item
         """
 
     @abstractmethod
-    def raw_to_normalized(self, raw_item: dict) -> NormalizedTransaction:
+    def raw_to_normalized(self, raw_item: dict):
         """
         Convert raw API response to NormalizedTransaction dataclass.
         Must be implemented by subclasses.
+        
+        Can return either:
+        - A single NormalizedTransaction object
+        - A generator yielding multiple NormalizedTransaction objects (for multi-yield support)
 
         Args:
             raw_item: Raw data from exchange/source API
 
         Returns:
-            NormalizedTransaction: Typed dataclass with all transaction fields
+            NormalizedTransaction | Generator[NormalizedTransaction, None, None]:
+                Single transaction or generator yielding multiple transactions
         """
 
     @property
@@ -192,30 +247,82 @@ class BaseConnector(ABC):
             1. Per-connector config["test_mode"] (if explicitly set)
             2. Global TEST_MODE from environment/settings
         """
-        if self._test_mode is not None:
-            return self._test_mode
-        return is_test_mode()
+        return self._test_mode if self._test_mode is not None else False
+        
 
-    def _get_raws(self) -> List[Dict[str, Any]]:
+    @property
+    def renormalize_mode(self) -> bool:
+        """Check if connector is in renormalize mode (reading from raw_transactions DB)."""
+        return self._renormalize_mode
+
+    def _yield_raws(self) -> Generator[Dict[str, Any], None, None]:
         """
-        Get raw data, checking test mode first.
+        Yield raw data, checking renormalize and test modes first.
+        
+        In renormalize mode, reads from raw_transactions DB.
+        In test mode, loads data from test fixtures and yields items.
+        In live mode, yields from yield_raws() and collects items for JSON dump.
 
-        In test mode, loads data from test fixtures.
-        In live mode, calls get_raws() to fetch from API.
-
-        Returns:
-            List[Dict[str, Any]]: List of raw data items
+        Yields:
+            Dict[str, Any]: Raw data items
         """
+        if self._renormalize_mode and not getattr(self, 'is_hub_connector', False):
+            # Hub connectors skip this — they delegate to child connectors via yield_raws()
+            # Only leaf connectors read directly from raw_transactions DB
+            from backend.db.database import get_session
+            from backend.db.repositories.raw_transaction_repository import RawTransactionRepository
+            
+            log.info(f"🔄 [{self.connector_name}] Renormalize mode: reading from raw_transactions DB (connector_id={self.connector_id})")
+            
+            # Get total count for progress tracking
+            total_count = 0
+            with get_session() as count_session:
+                count_repo = RawTransactionRepository(count_session)
+                total_count = count_repo.count_by_connector_id(self.connector_id)
+            
+            self.update_progress(
+                "Renormalizing", 0, total_count,
+                f"Loading {total_count} raw transactions from DB",
+                fetched_count=0,
+            )
+            
+            item_count = 0
+            with get_session() as session:
+                repo = RawTransactionRepository(session)
+                for batch in repo.iter_by_connector_id(self.connector_id):
+                    for raw_tx in batch:
+                        item_count += 1
+                        if item_count % 50 == 0 or item_count == total_count:
+                            self.update_progress(
+                                "Renormalizing", item_count, total_count,
+                                fetched_count=item_count,
+                            )
+                        yield raw_tx.raw_data
+            
+            self.update_progress(
+                "Renormalize complete", item_count, item_count,
+                f"Yielded {item_count} raw items from DB",
+                fetched_count=item_count,
+            )
+            log.info(f"📦 [{self.connector_name}] Renormalize: yielded {item_count} raw items from DB")
+            return
+
         if self.test_mode:
             test_data = self._load_test_data()
-            # If None is returned, hub connector - call get_raws() to delegate to children
+            # If None is returned, hub connector - delegate to yield_raws()
             if test_data is None:
-                return self.get_raws()
-            return test_data
+                yield from self.yield_raws()
+            else:
+                for item in test_data:
+                    yield item
         else:
-            raw_data = self.get_raws()
-            self.dump_trades_to_json(raw_data)
-            return raw_data
+            # Collect items for JSON dump while yielding
+            collected_raws = []
+            for raw_item in self.yield_raws():
+                collected_raws.append(raw_item)
+                yield raw_item
+            # Dump all collected raws to JSON after streaming completes
+            self.dump_trades_to_json(collected_raws)
 
     def get_test_data_path(self) -> str:
         """
@@ -295,13 +402,18 @@ class BaseConnector(ABC):
         tuple[Dict[str, Any], NormalizedTransaction | None, str | None], None, None
     ]:
         """
-        Fetch raw data and yield normalized items with error handling.
+        Stream raw data and yield normalized items with error handling.
         This method is implemented in the base class and should not be overridden.
 
         The method:
-        1. Calls _get_raws() to fetch all raw data (handles test mode automatically)
-        2. Applies raw_to_normalized() to each item
-        3. Handles errors gracefully by yielding error string
+        1. Iterates over _yield_raws() generator (handles test mode automatically)
+        2. Applies raw_to_normalized() to each item as it arrives
+        3. Handles generators from raw_to_normalized() (multi-yield support)
+        4. Handles errors gracefully by yielding error string
+        
+        This enables incremental processing - each item can be normalized,
+        enriched, and persisted as soon as it's fetched, without waiting
+        for all data to be collected.
 
         Yields:
             tuple: (raw_item, normalized_item, None) for successful mapping
@@ -312,22 +424,28 @@ class BaseConnector(ABC):
                 if error:
                     handle_error(error)
                 else:
-                    process(normalized)
+                    process(normalized)  # Process immediately as items stream in
         """
-        log.info(f"🔄 [{self.connector_name}] Fetching data...")
+        import types
+        
+        log.info(f"🔄 [{self.connector_name}] Starting data stream...")
 
-        # Use _get_raws() which handles test mode automatically
-        all_raws = self._get_raws()
-
-        if not all_raws:
-            log.warning(f"⚠️ [{self.connector_name}] No data fetched")
-            return
-
-        for raw_item in all_raws:
+        item_count = 0
+        # Use _yield_raws() generator which handles test mode automatically
+        for raw_item in self._yield_raws():
+            item_count += 1
             try:
-                # Map to normalized format
-                normalized = self.raw_to_normalized(raw_item)
-                yield (raw_item, normalized, None)
+                # Map to normalized format immediately
+                result = self.raw_to_normalized(raw_item)
+                
+                # Check if result is a generator (multi-yield support)
+                if isinstance(result, types.GeneratorType):
+                    # Yield from generator - allows connectors to yield multiple normalized items per raw item
+                    for normalized in result:
+                        yield (raw_item, normalized, None)
+                else:
+                    # Single normalized item (backward compatible)
+                    yield (raw_item, result, None)
             except Exception as e:
                 # Yield error tuple to maintain streaming behavior
                 error_msg = str(e)
@@ -335,6 +453,9 @@ class BaseConnector(ABC):
                 log.warning(
                     f"⚠️ [{self.connector_name}] Failed to map item {raw_item.get('id', 'unknown')}: {e}"
                 )
+        
+        if item_count == 0:
+            log.warning(f"⚠️ [{self.connector_name}] No data fetched")
 
     def dump_trades_to_json(self, trades: List[Dict]) -> str:
         """Save raw trades data to JSON file in connector's output directory."""
@@ -367,3 +488,42 @@ class BaseConnector(ABC):
             self.file_logger.info(f"Saved {len(trades)} raw items to {raw_file}")
         
         return raw_file
+
+    def update_progress(
+        self,
+        operation: str,
+        current: int,
+        total: int,
+        log_message: Optional[str] = None,
+        fetched_count: Optional[int] = None,
+    ):
+        """
+        Update progress via callback if configured.
+
+        Args:
+            operation: Description of current operation (e.g., "Fetching BTC/USDT")
+            current: Current progress count
+            total: Total items to process
+            log_message: Optional log message to display
+            fetched_count: Optional count of items fetched from API so far
+        """
+        if self._progress_callback and self.connector_id:
+            self._progress_callback(
+                self.connector_id,
+                operation,
+                current,
+                total,
+                log_message,
+                fetched_count=fetched_count,
+            )
+
+    def is_abort_requested(self) -> bool:
+        """
+        Check if abort has been requested.
+
+        Returns:
+            True if abort event is set, False otherwise
+        """
+        if self._abort_event:
+            return self._abort_event.is_set()
+        return False

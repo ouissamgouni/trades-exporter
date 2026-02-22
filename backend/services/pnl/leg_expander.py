@@ -25,7 +25,7 @@ from datetime import datetime
 import uuid
 
 from backend.config.loader import configure_logging
-from backend.db.models import Account, Asset, CalculationUnitLeg, CalculationVersion, NormalizedTransaction
+from backend.db.models import Account, Asset, CalculationUnitLeg, CalculationVersion, LegType, NormalizedTransaction, TransactionType
 
 log = configure_logging("leg_expander")
 
@@ -48,7 +48,7 @@ def should_expand_as_trade(tx: NormalizedTransaction) -> bool:
     """
     # Check transaction_type instead of source_transaction_type
     tx_type = (tx.transaction_type or "").lower()
-    if tx_type != "trade":
+    if tx_type != TransactionType.TRADE.value:
         return False
     
     # Ensure valid direction for trade expansion
@@ -80,10 +80,11 @@ def should_expand_as_trade(tx: NormalizedTransaction) -> bool:
 
 
 def has_fee(tx: NormalizedTransaction) -> bool:
-    """Check if transaction has a non-zero fee with a valid fee asset."""
+    """Check if transaction has a non-zero fee with a valid fee asset AND should be included in P&L."""
     fee = tx.fee
     fee_asset_id = tx.fee_quote_asset_id
-    return bool(fee and fee > 0 and fee_asset_id)
+    include_fee = getattr(tx, 'include_fee', True)  # Default True for backward compatibility
+    return bool(fee and fee > 0 and fee_asset_id and include_fee)
 
 
 def is_neutral_transaction(tx: NormalizedTransaction) -> bool:
@@ -117,7 +118,7 @@ def _convert_to_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
     quantity = Decimal(str(tx.quantity)) if tx.quantity else Decimal("0")
     
     # Determine leg type from direction
-    leg_type = "inflow" if direction == "inflow" else "outflow"
+    leg_type = LegType.INFLOW if direction == "inflow" else LegType.OUTFLOW
     
     # Use relationships if available, otherwise create from IDs
     asset_rel = tx.asset
@@ -154,7 +155,7 @@ def _create_fee_leg(tx: NormalizedTransaction) -> CalculationUnitLeg:
         unit_id=tx.user_calculation_unit_id,  # FK to calculation_unit (will be set by parent)
         transaction_id=tx.id,
         asset_id=tx.fee_quote_asset_id,
-        leg_type="fee",
+        leg_type=LegType.FEE,
         quantity=Decimal(str(tx.fee)),
         transaction=tx,  # Set relationship for property access
         asset=fee_asset,  # Set relationship for property access
@@ -192,7 +193,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
-            leg_type="outflow",
+            leg_type=LegType.OUTFLOW,
             quantity=total or Decimal("0"),
             transaction=tx,
             asset=quote_rel,
@@ -201,7 +202,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
-            leg_type="inflow",
+            leg_type=LegType.INFLOW,
             quantity=quantity,
             transaction=tx,
             asset=base_rel,
@@ -212,7 +213,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.asset_id,
-            leg_type="outflow",
+            leg_type=LegType.OUTFLOW,
             quantity=quantity,
             transaction=tx,
             asset=base_rel,
@@ -221,7 +222,7 @@ def _expand_trade(tx: NormalizedTransaction) -> List[CalculationUnitLeg]:
             unit_id=tx.user_calculation_unit_id,
             transaction_id=tx.id,
             asset_id=tx.price_quote_asset_id,
-            leg_type="inflow",
+            leg_type=LegType.INFLOW,
             quantity=total or Decimal("0"),
             transaction=tx,
             asset=quote_rel,

@@ -7,10 +7,10 @@ import {
   Badge,
   HStack,
   Text,
-  Collapsible,
+  Flex,
   Icon,
 } from "@chakra-ui/react";
-import { FiChevronDown, FiChevronRight } from "react-icons/fi";
+import { FiChevronDown } from "react-icons/fi";
 import AccountsManagement from "./AccountsManagement";
 import { RawAccountsEditor } from "./RawAccountsEditor";
 import { AssetsEditor } from "./AssetsEditor";
@@ -32,7 +32,6 @@ interface SetupStatus {
   unmapped_raw_accounts_count?: number;
 }
 
-// Flattened navigation structure - all items at one level with optional grouping
 interface NavItem {
   id: string;
   label: string;
@@ -44,10 +43,17 @@ interface NavItem {
   description: string;
 }
 
+interface PrimaryTab {
+  id: string;
+  label: string;
+  icon: string;
+  status?: boolean;
+}
+
 const UnifiedSetupView: React.FC = () => {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
-  const [activeItem, setActiveItem] = useState<string>("base-currency");
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["accounts", "assets"]));
+  const [activeItem, setActiveItem] = useState<string>("accounts");
+  const [activePrimaryTab, setActivePrimaryTab] = useState<string>("accounts");
 
   useEffect(() => {
     fetchSetupStatus();
@@ -63,17 +69,9 @@ const UnifiedSetupView: React.FC = () => {
     }
   };
 
-  // Flattened navigation items - direct access to all configuration areas
+  // Navigation items organized by primary tabs
   const navItems: NavItem[] = [
-    {
-      id: "base-currency",
-      label: "Base Currency",
-      icon: "💵",
-      component: BaseCurrencySelector,
-      status: setupStatus?.base_currency_set,
-      badge: setupStatus?.base_currency_symbol || undefined,
-      description: "Set currency for P&L calculations",
-    },
+
     {
       id: "accounts",
       label: "Accounts & Connectors",
@@ -123,97 +121,160 @@ const UnifiedSetupView: React.FC = () => {
       status: true,
       description: "Organize assets by sector, region, etc.",
     },
+    {
+      id: "base-currency",
+      label: "Base Currency",
+      icon: "💵",
+      component: BaseCurrencySelector,
+      status: setupStatus?.base_currency_set,
+      badge: setupStatus?.base_currency_symbol || undefined,
+      description: "Set currency for P&L calculations",
+    },
   ];
 
-  // Group items for collapsible sections
-  const groups = [
-    { id: "accounts", label: "Accounts", icon: "👤" },
-    { id: "assets", label: "Assets", icon: "💰" },
+  // Primary tabs (top-level categories)
+  const primaryTabs: PrimaryTab[] = [
+    {
+      id: "accounts",
+      label: "Accounts",
+      icon: "👤",
+      status: setupStatus?.accounts_configured && !setupStatus?.unmapped_raw_accounts_count,
+    },
+    {
+      id: "assets",
+      label: "Assets",
+      icon: "💰",
+      status: setupStatus?.assets_configured && !setupStatus?.unmapped_raw_assets_count,
+    },
+    {
+      id: "base-currency",
+      label: "Base Currency",
+      icon: "💵",
+      status: setupStatus?.base_currency_set,
+    },
   ];
 
-  const toggleGroup = (groupId: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
+  // Get secondary items for current primary tab
+  const getSecondaryItems = () => {
+    if (activePrimaryTab === "base-currency") return [];
+    return navItems.filter((item) => item.group === activePrimaryTab);
   };
+
+  const secondaryItems = getSecondaryItems();
 
   const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || BaseCurrencySelector;
 
-  // Calculate completion percentage based on actual setup status
-  // Items that contribute to completeness:
-  // 1. Base currency set (25%)
-  // 2. At least one account configured (25%)
-  // 3. No unmapped raw accounts (25%)
-  // 4. No unmapped raw assets (25%)
+  // Calculate completion percentage
   const completionPercentage = setupStatus
     ? Math.round(
-        ((setupStatus.base_currency_set ? 25 : 0) +
-          (setupStatus.accounts_count > 0 ? 25 : 0) +
-          (!setupStatus.unmapped_raw_accounts_count ? 25 : 0) +
-          (!setupStatus.unmapped_raw_assets_count ? 25 : 0))
-      )
+      (setupStatus.base_currency_set ? 25 : 0) +
+      (setupStatus.accounts_count > 0 ? 25 : 0) +
+      (setupStatus.unmapped_raw_accounts_count ? 0 : 25) +
+      (setupStatus.unmapped_raw_assets_count ? 0 : 25)
+    )
     : 0;
 
-  // Check if there are setup issues (for tab badge in App.tsx via callback)
-  const hasSetupIssues = setupStatus && (
-    !setupStatus.base_currency_set ||
-    setupStatus.accounts_count === 0 ||
-    (setupStatus.unmapped_raw_accounts_count ?? 0) > 0 ||
-    (setupStatus.unmapped_raw_assets_count ?? 0) > 0
-  );
+  // Handle primary tab change
+  const handlePrimaryTabChange = (tabId: string) => {
+    setActivePrimaryTab(tabId);
+    if (tabId === "base-currency") {
+      setActiveItem("base-currency");
+    } else {
+      // Set to first item in the group
+      const firstItem = navItems.find((item) => item.group === tabId);
+      if (firstItem) setActiveItem(firstItem.id);
+    }
+  };
 
-  // Render a single nav item
-  const renderNavItem = (item: NavItem, indent: boolean = false) => {
+  // Render primary tab button
+  const renderPrimaryTab = (tab: PrimaryTab) => {
+    const isActive = activePrimaryTab === tab.id;
+    const hasWarning = tab.status === false;
+    const hasSubItems = tab.id !== "base-currency";
+
+    return (
+      <Box
+        key={tab.id}
+        px={{ base: 2, md: 3 }}
+        py={2}
+        borderRadius="md"
+        cursor="pointer"
+        bg={isActive ? "blue.500" : "white"}
+        color={isActive ? "white" : "gray.700"}
+        borderWidth={1}
+        borderColor={isActive ? "blue.500" : (hasWarning ? "orange.300" : "gray.200")}
+        _hover={{
+          bg: isActive ? "blue.600" : "gray.50",
+          borderColor: isActive ? "blue.600" : "blue.300"
+        }}
+        onClick={() => handlePrimaryTabChange(tab.id)}
+        transition="all 0.2s"
+        minW={{ base: "auto", md: "110px" }}
+      >
+        <HStack justify="center" gap={1.5}>
+          <Text fontSize={{ base: "sm", md: "md" }}>{tab.icon}</Text>
+          <Text fontWeight="semibold" fontSize={{ base: "xs", md: "sm" }} display={{ base: "none", sm: "block" }}>
+            {tab.label}
+          </Text>
+          {hasSubItems && (
+            <Icon
+              as={FiChevronDown}
+              boxSize={3}
+              color={isActive ? "white" : "gray.400"}
+            />
+          )}
+          {tab.status !== undefined && (
+            <Text fontSize="2xs">
+              {tab.status ? "✓" : "⚠"}
+            </Text>
+          )}
+        </HStack>
+      </Box>
+    );
+  };
+
+  // Render secondary item (pill style)
+  const renderSecondaryItem = (item: NavItem) => {
     const isActive = activeItem === item.id;
     const hasWarning = item.status === false || (typeof item.badge === 'string' && item.badge.includes('unmapped'));
 
     return (
       <Box
         key={item.id}
-        p={2}
-        pl={indent ? 6 : 2}
-        borderRadius="md"
+        px={3}
+        py={1.5}
+        borderRadius="full"
         cursor="pointer"
-        bg={isActive ? "blue.50" : "transparent"}
+        bg={isActive ? "blue.50" : "white"}
         borderWidth={1}
-        borderColor={isActive ? "blue.300" : "transparent"}
-        _hover={{ bg: isActive ? "blue.50" : "gray.50" }}
+        borderColor={isActive ? "blue.400" : (hasWarning ? "orange.200" : "gray.200")}
+        _hover={{
+          bg: isActive ? "blue.100" : "gray.50",
+          borderColor: isActive ? "blue.500" : "blue.200"
+        }}
         onClick={() => setActiveItem(item.id)}
-        transition="all 0.15s"
+        transition="all 0.2s"
       >
-        <HStack justify="space-between">
-          <HStack gap={2}>
-            <Text fontSize="sm">{item.icon}</Text>
-            <Text fontWeight={isActive ? "semibold" : "medium"} fontSize="sm">
-              {item.label}
+        <HStack gap={1.5}>
+          <Text fontSize="xs">{item.icon}</Text>
+          <Text fontWeight={isActive ? "semibold" : "medium"} fontSize="xs">
+            {item.label}
+          </Text>
+          {item.badge && (
+            <Badge
+              size="xs"
+              colorScheme={hasWarning ? "orange" : "gray"}
+              variant={hasWarning ? "solid" : "subtle"}
+            >
+              {item.badge}
+            </Badge>
+          )}
+          {item.status !== undefined && !item.badge && (
+            <Text fontSize="2xs" color={item.status ? "green.500" : "orange.400"}>
+              {item.status ? "✓" : "⚠"}
             </Text>
-          </HStack>
-          <HStack gap={1}>
-            {item.badge && (
-              <Badge
-                size="sm"
-                colorScheme={hasWarning ? "orange" : "gray"}
-                variant={hasWarning ? "solid" : "subtle"}
-              >
-                {item.badge}
-              </Badge>
-            )}
-            {item.status !== undefined && !item.badge && (
-              <Text fontSize="xs" color={item.status ? "green.500" : "orange.400"}>
-                {item.status ? "✓" : "⚠"}
-              </Text>
-            )}
-          </HStack>
+          )}
         </HStack>
-        <Text fontSize="xs" color="gray.500" ml={6} mt={0.5}>
-          {item.description}
-        </Text>
       </Box>
     );
   };
@@ -222,92 +283,68 @@ const UnifiedSetupView: React.FC = () => {
     <Container maxW="container.xl" py={8}>
       <VStack align="stretch" gap={6}>
         {/* Header with overall progress */}
-        <Box>
-          <HStack justify="space-between" mb={2}>
+        <Flex justify="space-between" align="center" mb={2} flexWrap="wrap" gap={3}>
+          <Box>
             <Heading size="lg">Setup & Configuration</Heading>
-            <Badge
-              colorScheme={completionPercentage === 100 ? "green" : "orange"}
-              fontSize="md"
-              px={3}
-              py={1}
-              borderRadius="md"
-            >
-              {completionPercentage}% Complete
-            </Badge>
+            <Text color="gray.600" fontSize="sm" mt={1} display={{ base: "none", md: "block" }}>
+              Configure your accounts, connectors, and assets to get started
+            </Text>
+          </Box>
+          <Badge
+            colorScheme={completionPercentage === 100 ? "green" : "orange"}
+            fontSize="md"
+            px={3}
+            py={1}
+            borderRadius="md"
+          >
+            {completionPercentage}% Complete
+          </Badge>
+        </Flex>
+
+        {/* Horizontal Two-Tier Navigation */}
+        <Box
+          borderWidth={1}
+          borderRadius="lg"
+          bg="white"
+          p={{ base: 2, md: 3 }}
+        >
+          {/* Primary Tabs Row */}
+          <HStack
+            gap={{ base: 1.5, md: 2 }}
+            mb={secondaryItems.length > 0 ? 3 : 0}
+            flexWrap={{ base: "wrap", md: "nowrap" }}
+            justify={{ base: "center", md: "flex-start" }}
+          >
+            {primaryTabs.map((tab) => renderPrimaryTab(tab))}
           </HStack>
-          <Text color="gray.600">
-            Configure your accounts, connectors, and assets to get started
-          </Text>
+
+          {/* Secondary Items Row (Pills) */}
+          {secondaryItems.length > 0 && (
+            <Box
+              pt={3}
+              borderTopWidth={1}
+              borderColor="gray.100"
+            >
+              <Flex
+                gap={1.5}
+                flexWrap="wrap"
+                justify={{ base: "center", md: "flex-start" }}
+              >
+                {secondaryItems.map((item) => renderSecondaryItem(item))}
+              </Flex>
+            </Box>
+          )}
         </Box>
 
-        {/* Two-column layout: Flat Navigation Sidebar + Content */}
-        <Box display="flex" gap={6}>
-          {/* Left Sidebar - Flattened Tree Navigation */}
-          <Box
-            width="280px"
-            flexShrink={0}
-            borderWidth={1}
-            borderRadius="lg"
-            p={3}
-            bg="white"
-            height="fit-content"
-          >
-            <VStack align="stretch" gap={1}>
-              {/* Standalone items (no group) */}
-              {navItems
-                .filter((item) => !item.group)
-                .map((item) => renderNavItem(item))}
-
-              {/* Grouped items with collapsible headers */}
-              {groups.map((group) => {
-                const groupItems = navItems.filter((item) => item.group === group.id);
-                const isExpanded = expandedGroups.has(group.id);
-                const groupHasWarning = groupItems.some(
-                  (item) => item.status === false || (typeof item.badge === 'string' && item.badge.includes('unmapped'))
-                );
-
-                return (
-                  <Box key={group.id}>
-                    {/* Group Header */}
-                    <Box
-                      p={2}
-                      borderRadius="md"
-                      cursor="pointer"
-                      _hover={{ bg: "gray.50" }}
-                      onClick={() => toggleGroup(group.id)}
-                    >
-                      <HStack justify="space-between">
-                        <HStack gap={2}>
-                          <Icon as={isExpanded ? FiChevronDown : FiChevronRight} boxSize={4} color="gray.500" />
-                          <Text fontSize="sm">{group.icon}</Text>
-                          <Text fontWeight="semibold" fontSize="sm" color="gray.700">
-                            {group.label}
-                          </Text>
-                        </HStack>
-                        {groupHasWarning && (
-                          <Text fontSize="xs" color="orange.400">⚠</Text>
-                        )}
-                      </HStack>
-                    </Box>
-
-                    {/* Group Items */}
-                    <Collapsible.Root open={isExpanded}>
-                      <Collapsible.Content>
-                        <VStack align="stretch" gap={0.5} mt={1}>
-                          {groupItems.map((item) => renderNavItem(item, true))}
-                        </VStack>
-                      </Collapsible.Content>
-                    </Collapsible.Root>
-                  </Box>
-                );
-              })}
-            </VStack>
-          </Box>
-
-          {/* Right Content Area */}
-          <Box flex={1} borderWidth={1} borderRadius="lg" p={6} bg="white" minH="500px">
-            <ActiveComponent />
-          </Box>
+        {/* Content Area */}
+        <Box
+          borderWidth={1}
+          borderRadius="lg"
+          p={{ base: 4, md: 6 }}
+          bg="white"
+          minH="500px"
+        >
+          <ActiveComponent />
         </Box>
       </VStack>
     </Container>

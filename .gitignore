@@ -194,3 +194,6 @@ jspm_packages/
 # DynamoDB Local files
 .dynamodb/
 
+# Git worktrees for safe build/deploy operations
+.worktrees/
+

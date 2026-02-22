@@ -24,7 +24,7 @@ from backend.db.database import get_session_dependency
 from backend.db.models import (
     Asset, NormalizedTransaction, CalculationUnit,
     CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg,
-    AssetCategory, Category
+    AssetCategory, Category, UnitPattern
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
@@ -56,10 +56,10 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 class AssetRef(BaseModel):
     """Asset reference with id and name for display."""
-    id: int
-    symbol: str
+    id: Optional[int] = None
+    symbol: Optional[str] = None
     label: Optional[str] = None
-    source_symbol: Optional[str] = None  # Optional human-readable label
+    source_symbol: Optional[str] = None  # Fallback for unlinked assets
 
 
 
@@ -2027,17 +2027,19 @@ def get_version_lot_events(
     if unit_id:
         base_query = base_query.where(CostLotEvent.triggered_by_unit_id == unit_id)
     
-    # Date range filter
+    # Date range filter (using centralized helpers for date-only support)
     if date_start:
         try:
-            start_dt = datetime.fromisoformat(date_start.replace('Z', '+00:00'))
+            from backend.core.utils import parse_date_from
+            start_dt = parse_date_from(date_start)
             base_query = base_query.where(CostLotEvent.timestamp >= start_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid date_start format: {date_start}")
     
     if date_end:
         try:
-            end_dt = datetime.fromisoformat(date_end.replace('Z', '+00:00'))
+            from backend.core.utils import parse_date_to
+            end_dt = parse_date_to(date_end)
             base_query = base_query.where(CostLotEvent.timestamp <= end_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid date_end format: {date_end}")

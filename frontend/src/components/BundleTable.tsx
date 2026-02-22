@@ -32,6 +32,8 @@ import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetBadge } from './AssetBadge';
 import { formatDateNumeric, getDateRangeDisplay, parseApiDate } from '../utils/dateUtils';
+import { formatQuantity } from '../utils/numberUtils';
+import { ValueDisplay } from './ValueDisplay';
 
 // ============================================================================
 // Types
@@ -99,28 +101,15 @@ interface TransactionDetail {
 // ============================================================================
 
 const patternColors: Record<string, string> = {
-    [UnitPattern.TRANSFER]: 'blue',
+    [UnitPattern.INTERNAL_TRANSFER]: 'blue',
     [UnitPattern.SWAP]: 'orange',
     [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.PENDING_TRANSFER]: 'yellow',
+    [UnitPattern.FLOW]: 'green',
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'yellow',
     [UnitPattern.UNKNOWN]: 'gray',
 };
 
 // Using formatDateNumeric from dateUtils for consistent date formatting
-
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
 
 // Using getDateRangeDisplay from dateUtils for consistent date range display
 
@@ -144,9 +133,10 @@ interface FilterBarProps {
     onFiltersChange: (filters: BundleFilters) => void;
     bundleCount: number;
     filteredCount: number;
+    onRefresh?: () => void;
 }
 
-const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleCount, filteredCount }) => {
+const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleCount, filteredCount, onRefresh }) => {
     const [showFilters, setShowFilters] = useState(false);
 
     const hasActiveFilters = filters.search || filters.pattern || filters.taxability;
@@ -160,6 +150,15 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
                     </Text>
                 </Flex>
                 <Flex gap={2}>
+                    {onRefresh && (
+                        <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={onRefresh}
+                        >
+                            🔄 Refresh
+                        </Button>
+                    )}
                     <Button
                         size="xs"
                         variant={showFilters ? 'solid' : 'outline'}
@@ -419,6 +418,10 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                             const fromAccount = tx.from_account_name || tx.source_from_account;
                             const toAccount = tx.to_account_name || tx.source_to_account;
                             const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
+                            // Build source tooltip: show source address when linked account name is displayed
+                            const fromToSource = tx.direction === 'inflow'
+                                ? (tx.from_account_name && tx.source_from_account && tx.source_from_account !== tx.from_account_name ? `Source: ${tx.source_from_account}` : undefined)
+                                : (tx.to_account_name && tx.source_to_account && tx.source_to_account !== tx.to_account_name ? `Source: ${tx.source_to_account}` : undefined);
 
                             return (
                                 <Table.Row key={tx.transaction_id}>
@@ -446,18 +449,20 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                         />
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right" fontFamily="mono">
-                                        {formatQty(tx.quantity || 0)}
+                                        <ValueDisplay value={tx.quantity} />
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right">
-                                        {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
+                                        {tx.price ? <ValueDisplay value={tx.price} currency={baseCurrency} /> : '-'}
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right">
-                                        {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
+                                        {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '-'}
                                     </Table.Cell>
                                     <Table.Cell fontSize="2xs" textAlign="right">
                                         {tx.fee ? (
                                             <Flex align="center" gap={1} justify="flex-end">
-                                                <Text color="orange.600">{formatQty(tx.fee)}</Text>
+                                                <Text color="orange.600">
+                                                    <ValueDisplay value={tx.fee} />
+                                                </Text>
                                                 <AssetBadge
                                                     asset={tx.fee_quote_asset}
                                                     sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
@@ -474,7 +479,7 @@ const ExpandedTransactionTable: React.FC<ExpandedTransactionTableProps> = ({
                                             {txType}
                                         </Badge>
                                     </Table.Cell>
-                                    <Table.Cell fontSize="2xs" color="gray.600">
+                                    <Table.Cell fontSize="2xs" color="gray.600" title={fromToSource}>
                                         {fromToAccount || '-'}
                                     </Table.Cell>
                                     {onRemoveTransaction && (
@@ -991,6 +996,7 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                 onFiltersChange={setFilters}
                 bundleCount={bundles.length}
                 filteredCount={filteredBundles.length}
+                onRefresh={onRefresh}
             />
 
             <BulkActionsBar

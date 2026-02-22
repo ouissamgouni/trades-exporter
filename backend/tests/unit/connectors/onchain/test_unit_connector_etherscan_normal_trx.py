@@ -54,7 +54,6 @@ class TestEtherscanNormalTxConnector:
             assert normalized_tx.include_fee is False
             assert normalized_tx.source_from_account == "0xSENDER_ADDRESS"
             assert normalized_tx.source_to_account == "0xtest_wallet"
-            assert "method_id" in normalized_tx.tags
 
     def test_normal_tx_outflow_mapping(self):
         """Test mapping of outflow normal transaction from mocked Etherscan API response."""
@@ -99,4 +98,3 @@ class TestEtherscanNormalTxConnector:
             assert normalized_tx.include_fee is True
             assert normalized_tx.source_from_account == "0xtest_wallet"
             assert normalized_tx.source_to_account == "0xRECEIVER_ADDRESS"
-            assert "method_id" in normalized_tx.tags
