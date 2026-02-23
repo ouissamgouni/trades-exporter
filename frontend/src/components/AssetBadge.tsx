@@ -115,6 +115,21 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
         );
     }
 
+    // Unlinked state without warning: show raw source symbol in gray badge
+    if (!hasLinkedAsset && hasSourceSymbol && !showWarning) {
+        return (
+            <Badge
+                size={size}
+                colorPalette="gray"
+                variant="subtle"
+                cursor={onClick ? 'pointer' : 'default'}
+                onClick={onClick}
+            >
+                {sourceSymbol}
+            </Badge>
+        );
+    }
+
     // No asset and no source symbol
     if (!hasLinkedAsset) {
         return (

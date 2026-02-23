@@ -383,3 +383,30 @@ class ConnectorXRPLedger(BaseConnector):
             "xrp",
             "xrp_ledger_transactions.json"
         )
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        try:
+            data = self.safe_request(f"/account/{self.wallet_address}")
+            xrp_balance = data.get("xrpBalance", "0")
+            if float(xrp_balance) > 0:
+                return [BalanceEntry(
+                    asset_symbol="XRP",
+                    total=Decimal(xrp_balance),
+                    available=Decimal(xrp_balance),
+                    chain="xrp",
+                    raw=data,
+                )]
+        except Exception as e:
+            log.warning(f"Failed to fetch XRP balance: {e}")
+        return []

@@ -363,6 +363,7 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
                     "account_type": account.account_type,
                     "enabled": account.enabled,
                     "address_or_identifier": account.address_or_identifier,
+                    "group": account.group,
                 }
         
         return {

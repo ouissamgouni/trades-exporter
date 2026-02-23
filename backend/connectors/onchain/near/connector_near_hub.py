@@ -94,3 +94,76 @@ class ConnectorNearHub(BaseHubConnector):
             ("native transactions", txns_connector),
             ("FT token transfers", ft_txns_connector),
         ]
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        import os
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("near", "near")
+        base_url = chain_config.base_url if chain_config else "https://api.nearblocks.io/v1"
+        api_key = (self.config or {}).get("api_key") or os.getenv("NEARBLOCKS_API_KEY", "")
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        entries = []
+
+        # Native NEAR balance
+        try:
+            resp = requests.get(
+                f"{base_url}/account/{self.wallet_address}",
+                headers=headers, timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            accounts = data.get("account", [])
+            if accounts:
+                amount = accounts[0].get("amount", "0")
+                if int(amount) > 0:
+                    total = Decimal(amount) / Decimal(10 ** 24)
+                    entries.append(BalanceEntry(
+                        asset_symbol="NEAR",
+                        total=total,
+                        available=total,
+                        chain="near",
+                        raw=accounts[0],
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to fetch native NEAR balance: {e}")
+
+        # FT token balances
+        try:
+            resp = requests.get(
+                f"{base_url}/account/{self.wallet_address}/inventory",
+                headers=headers, timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            tokens = data.get("inventory", {}).get("fts", [])
+            for tok in tokens:
+                amount = tok.get("amount", "0")
+                decimals = int(tok.get("ft_meta", {}).get("decimals", 0))
+                symbol = tok.get("ft_meta", {}).get("symbol", "UNKNOWN")
+                if int(amount) > 0 and decimals > 0:
+                    total = Decimal(amount) / Decimal(10 ** decimals)
+                    entries.append(BalanceEntry(
+                        asset_symbol=symbol,
+                        total=total,
+                        available=total,
+                        chain="near",
+                        raw=tok,
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to fetch NEAR FT balances: {e}")
+
+        return entries

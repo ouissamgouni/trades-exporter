@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from sqlmodel import Session, select
 from sqlalchemy import func, union_all, literal
 
-from backend.db.models import NormalizedTransaction, ReviewStatus, Asset, Account
+from backend.db.models import NormalizedTransaction, ReviewStatus, Asset, Account, AccountConnector
 from backend.api.schemas import TransactionIssue, IssueType, SuggestionInfo
 from backend.services.similarity_service import (
     get_best_asset_suggestion,
@@ -84,6 +84,12 @@ class LinkageIssueDetector(IssueDetector):
         # Fetch all assets and accounts for fuzzy matching
         all_assets = self.session.exec(select(Asset)).all()
         all_accounts = self.session.exec(select(Account)).all()
+
+        # Build account_connectors_map for connector-aware disambiguation
+        all_connectors = self.session.exec(select(AccountConnector)).all()
+        account_connectors_map: dict = {}
+        for c in all_connectors:
+            account_connectors_map.setdefault(c.account_id, []).append(c)
         
         # Collect unique account IDs and connector run IDs for batch fetching
         account_ids_set = {row[6] for row in issues_rows if row[6] is not None}
@@ -126,7 +132,12 @@ class LinkageIssueDetector(IssueDetector):
                 ):
                     suggestion = get_best_asset_suggestion(raw_value, all_assets)
                 elif issue_type == IssueType.UNLINKED_ACCOUNT.value:
-                    suggestion = get_best_account_suggestion(raw_value, all_accounts)
+                    suggestion = get_best_account_suggestion(
+                        raw_value,
+                        all_accounts,
+                        source=source,
+                        account_connectors_map=account_connectors_map,
+                    )
             
             # Resolve account name
             account_name = None

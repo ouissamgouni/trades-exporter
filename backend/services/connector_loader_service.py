@@ -301,8 +301,6 @@ class ConnectorLoaderService:
         """
         Get all enabled on-chain connector addresses grouped by chain.
 
-        This is used by ConnectorOnchainHub to know which addresses to sync.
-
         Returns:
             List of address configs with chain, address, and options
         """

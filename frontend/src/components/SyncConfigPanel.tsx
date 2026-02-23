@@ -19,6 +19,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown } from 'react-icons/lu';
+import { FiDollarSign } from 'react-icons/fi';
 import {
     API_URL,
     ConnectorOverride,
@@ -29,6 +30,7 @@ import {
 import { ConnectorFileUpload } from './ConnectorFileUpload';
 import { ConnectorJobSnippet } from './ConnectorJobSnippet';
 import { JobDetailDrawer } from './JobDetailDrawer';
+import { BalanceDrawer } from './BalanceDrawer';
 import { formatAddress, formatChainName } from '../utils/addressUtils';
 
 interface SyncConfigPanelProps {
@@ -122,6 +124,7 @@ const AccountCard: React.FC<{
     onCurrenciesChange: (connectorId: number, currencies: string[] | null) => void;
     onFileUploadComplete: (connectorId: number) => void;
     onJobSnippetClick: (connector: EnabledConnector) => void;
+    onBalanceClick: (accountId: number) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
     disabled?: boolean;
@@ -141,6 +144,7 @@ const AccountCard: React.FC<{
     onCurrenciesChange,
     onFileUploadComplete,
     onJobSnippetClick,
+    onBalanceClick,
     isCollapsed,
     onToggleCollapse,
     disabled,
@@ -218,6 +222,11 @@ const AccountCard: React.FC<{
                                     >
                                         {account.account_type}
                                     </Badge>
+                                    {account.group && (
+                                        <Badge size="xs" colorPalette="cyan" variant="outline">
+                                            {account.group}
+                                        </Badge>
+                                    )}
                                 </Flex>
                                 {account.address_or_identifier && (
                                     <Text fontSize="xs" color="gray.500" fontFamily="mono">
@@ -227,6 +236,25 @@ const AccountCard: React.FC<{
                             </VStack>
                         </Flex>
                         <Flex align="center" gap={2}>
+                            <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
+                                <Tooltip.Trigger asChild>
+                                    <IconButton
+                                        aria-label="View balance"
+                                        size="2xs"
+                                        variant="ghost"
+                                        colorPalette="green"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onBalanceClick(account.id);
+                                        }}
+                                    >
+                                        <FiDollarSign size={13} />
+                                    </IconButton>
+                                </Tooltip.Trigger>
+                                <Tooltip.Positioner>
+                                    <Tooltip.Content>View live balance</Tooltip.Content>
+                                </Tooltip.Positioner>
+                            </Tooltip.Root>
                             <Text fontSize="xs" color="gray.500">
                                 {enabledCount}/{connectors.length}
                             </Text>
@@ -574,6 +602,27 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
     // Job detail drawer state
     const [selectedJobConnector, setSelectedJobConnector] = useState<EnabledConnector | null>(null);
     const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
+
+    // Balance drawer state
+    const [balanceDrawerOpen, setBalanceDrawerOpen] = useState(false);
+    const [balanceMode, setBalanceMode] = useState<'global' | 'account'>('global');
+    const [balanceAccountId, setBalanceAccountId] = useState<number | undefined>();
+    const [balanceTitle, setBalanceTitle] = useState<string | undefined>();
+
+    const handleBalanceClick = useCallback((accountId: number) => {
+        const account = accounts.find(a => a.id === accountId);
+        setBalanceMode('account');
+        setBalanceAccountId(accountId);
+        setBalanceTitle(account ? `${account.name} Balance` : 'Account Balance');
+        setBalanceDrawerOpen(true);
+    }, [accounts]);
+
+    const handleGlobalBalanceClick = useCallback(() => {
+        setBalanceMode('global');
+        setBalanceAccountId(undefined);
+        setBalanceTitle('Global Balance');
+        setBalanceDrawerOpen(true);
+    }, []);
 
     // Initialize collapsed state for disabled accounts (all disabled accounts collapsed by default)
     useEffect(() => {
@@ -1081,6 +1130,18 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                             >
                                 🔄 Refresh
                             </Button>
+                            <Button
+                                size="xs"
+                                variant="ghost"
+                                colorPalette="green"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleGlobalBalanceClick();
+                                }}
+                            >
+                                <FiDollarSign size={12} />
+                                Balance
+                            </Button>
                         </Flex>
 
                         {/* Account Type Sections */}
@@ -1204,6 +1265,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                                                 onCurrenciesChange={handleCurrenciesChange}
                                                                 onFileUploadComplete={handleFileUploadComplete}
                                                                 onJobSnippetClick={handleJobSnippetClick}
+                                                                onBalanceClick={handleBalanceClick}
                                                                 isCollapsed={collapsedAccounts.get(account.id) ?? false}
                                                                 onToggleCollapse={() => toggleAccountCollapse(account.id)}
                                                                 disabled={disabled}
@@ -1231,6 +1293,15 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                     }}
                 />
             )}
+
+            {/* Balance Drawer */}
+            <BalanceDrawer
+                isOpen={balanceDrawerOpen}
+                onClose={() => setBalanceDrawerOpen(false)}
+                mode={balanceMode}
+                accountId={balanceAccountId}
+                title={balanceTitle}
+            />
         </Box>
     );
 };

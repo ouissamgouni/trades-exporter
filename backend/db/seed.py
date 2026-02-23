@@ -204,6 +204,7 @@ class DatabaseSeeder:
             )
             existing.tags = tags if tags is not None else existing.tags
             existing.owned = data.get("owned", existing.owned)
+            existing.group = data.get("group", existing.group)
             self.session.add(existing)
             return existing
 
@@ -215,6 +216,7 @@ class DatabaseSeeder:
             address_or_identifier=data.get("address_or_identifier"),
             tags=tags,
             owned=data.get("owned", True),
+            group=data.get("group"),
         )
         self.session.add(account)
         self.session.flush()  # Get ID assigned

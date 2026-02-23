@@ -556,3 +556,83 @@ class ConnectorSolanaHelius(BaseConnector):
             return "inflow"
         else:
             return "neutral"
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address) and bool(self.api_key)
+
+    def get_balance(self):
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.api_key}"
+        entries = []
+
+        # Native SOL balance via RPC
+        try:
+            resp = requests.post(
+                rpc_url,
+                json={
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "getBalance",
+                    "params": [self.wallet_address],
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            lamports = data.get("result", {}).get("value", 0)
+            if lamports > 0:
+                total = Decimal(lamports) / Decimal(10 ** 9)
+                entries.append(BalanceEntry(
+                    asset_symbol="SOL",
+                    total=total,
+                    available=total,
+                    chain="solana",
+                    raw=data,
+                ))
+        except Exception as e:
+            log.warning(f"Failed to fetch SOL native balance: {e}")
+
+        # SPL token balances via DAS
+        try:
+            resp = requests.post(
+                rpc_url,
+                json={
+                    "jsonrpc": "2.0", "id": 2,
+                    "method": "getAssetsByOwner",
+                    "params": {
+                        "ownerAddress": self.wallet_address,
+                        "displayOptions": {"showFungible": True},
+                    },
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("result", {}).get("items", [])
+            for item in items:
+                token_info = item.get("token_info") or {}
+                balance = token_info.get("balance")
+                decimals = token_info.get("decimals", 0)
+                symbol = token_info.get("symbol") or (
+                    item.get("content", {}).get("metadata", {}).get("symbol")
+                )
+                if balance and int(balance) > 0 and symbol:
+                    total = Decimal(balance) / Decimal(10 ** int(decimals))
+                    entries.append(BalanceEntry(
+                        asset_symbol=symbol,
+                        total=total,
+                        available=total,
+                        chain="solana",
+                        raw=item,
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to fetch Solana token balances: {e}")
+
+        return entries

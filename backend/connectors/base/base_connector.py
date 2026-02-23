@@ -7,7 +7,9 @@ import json
 import os
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from logging.handlers import RotatingFileHandler
 from typing import Generator, Dict, List, Any, Optional
 
@@ -16,6 +18,17 @@ from backend.config.loader import configure_logging, get_connectors_output_path
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("base_connector")
+
+
+@dataclass
+class BalanceEntry:
+    """A single asset balance as reported by the connector's API."""
+    asset_symbol: str  # e.g. "BTC", "ETH", "USDT"
+    total: Decimal  # Total balance (available + locked/staked)
+    available: Decimal = Decimal(0)  # Available for trading/transfer
+    locked: Decimal = Decimal(0)  # In open orders, staking, etc.
+    chain: Optional[str] = None  # Network/chain (for on-chain connectors)
+    raw: Dict[str, Any] = field(default_factory=dict)  # Original response data
 
 
 class BaseConnector(ABC):
@@ -237,6 +250,31 @@ class BaseConnector(ABC):
             NormalizedTransaction | Generator[NormalizedTransaction, None, None]:
                 Single transaction or generator yielding multiple transactions
         """
+
+    # ------------------------------------------------------------------
+    # Balance API (opt-in)
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        """Whether this connector can fetch live balances.
+
+        Override and return ``True`` in subclasses that implement
+        ``get_balance()``.
+        """
+        return False
+
+    def get_balance(self) -> List[BalanceEntry]:
+        """Fetch current balances from the connector's API.
+
+        Subclasses that set ``supports_balance = True`` must override this.
+
+        Returns:
+            List of BalanceEntry objects, one per asset with non-zero balance.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement get_balance()"
+        )
 
     @property
     def test_mode(self) -> bool:

@@ -179,9 +179,10 @@ accounts:
   # Wallet Accounts (On-chain)
   # =========================================================================
 
-  # Ethereum Mainnet Wallet
-  - name: "Tangem EVM"
+  # Tangem EVM Wallets (split per chain, grouped)
+  - name: "Tangem Ethereum"
     account_type: "wallet"
+    group: "Tangem EVM"
     address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
     connectors:
       - connector_type: "etherscan"
@@ -199,6 +200,12 @@ accounts:
           chain: "ethereum"
           include_internal_txs: true
           include_token_transfers: true
+
+  - name: "Tangem Base"
+    account_type: "wallet"
+    group: "Tangem EVM"
+    address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
+    connectors:
       - connector_type: "blockscout"
         enabled: true
         sync_priority: 10
@@ -206,6 +213,12 @@ accounts:
           chain: "base"
           include_internal_txs: true
           include_token_transfers: true
+
+  - name: "Tangem BSC"
+    account_type: "wallet"
+    group: "Tangem EVM"
+    address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
+    connectors:
       - connector_type: "moralis"
         enabled: true
         credentials_ref: "env:MORALIS_API_KEY"
@@ -220,9 +233,10 @@ accounts:
   #     label: "Pepe"
   #     asset_type: "crypto"
 
-  # Arbitrum Wallet with Moralis Connector
-  - name: "Metamask EVM"
+  # Metamask EVM Wallets (split per chain, grouped)
+  - name: "Metamask Arbitrum"
     account_type: "wallet"
+    group: "Metamask EVM"
     address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
     connectors:
       - connector_type: "moralis"
@@ -231,6 +245,12 @@ accounts:
         sync_priority: 10
         config:
           chain: "arbitrum"
+
+  - name: "Metamask Ethereum"
+    account_type: "wallet"
+    group: "Metamask EVM"
+    address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+    connectors:
       - connector_type: "blockscout"
         enabled: true
         sync_priority: 10

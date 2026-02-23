@@ -644,3 +644,93 @@ class ConnectorMoralisWalletHistory(BaseConnector):
             "moralis",
             f"wallet_history_{self.chain_name}.json"
         )
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address) and bool(self.api_key)
+
+    def get_balance(self):
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        headers = {"Accept": "application/json", "X-API-Key": self.api_key}
+        moralis_chain = {
+            "ethereum": "eth", "bsc": "bsc", "polygon": "polygon",
+            "arbitrum": "arbitrum", "optimism": "optimism", "base": "base",
+            "avalanche": "avalanche",
+        }.get(self.chain_name, self.chain_name)
+        entries = []
+
+        # Native balance
+        try:
+            resp = requests.get(
+                f"{self.base_url}/{self.wallet_address}/balance",
+                params={"chain": moralis_chain},
+                headers=headers, timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            balance = data.get("balance", "0")
+            if int(balance) > 0:
+                total = Decimal(balance) / Decimal(10 ** 18)
+                native_symbol = {
+                    "ethereum": "ETH", "bsc": "BNB", "polygon": "MATIC",
+                    "arbitrum": "ETH", "optimism": "ETH", "base": "ETH",
+                    "avalanche": "AVAX",
+                }.get(self.chain_name, "ETH")
+                entries.append(BalanceEntry(
+                    asset_symbol=native_symbol,
+                    total=total,
+                    available=total,
+                    chain=self.chain_name,
+                    raw=data,
+                ))
+        except Exception as e:
+            log.warning(f"Failed to fetch Moralis native balance: {e}")
+
+        # Token balances
+        try:
+            resp = requests.get(
+                f"{self.base_url}/wallets/{self.wallet_address}/tokens",
+                params={"chain": moralis_chain},
+                headers=headers, timeout=30,
+            )
+            resp.raise_for_status()
+            tokens = resp.json()
+            if isinstance(tokens, dict):
+                tokens = tokens.get("result", [])
+            for tok in tokens:
+                balance = tok.get("balance", "0")
+                decimals = int(tok.get("decimals", 18))
+                symbol = tok.get("symbol", "UNKNOWN")
+                if int(balance) > 0:
+                    total = Decimal(balance) / Decimal(10 ** decimals)
+                    entries.append(BalanceEntry(
+                        asset_symbol=symbol,
+                        total=total,
+                        available=total,
+                        chain=self.chain_name,
+                        raw=tok,
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to fetch Moralis token balances: {e}")
+
+        # Deduplicate by symbol — the tokens endpoint may return
+        # the native token that was already fetched via /balance.
+        seen: dict[str, BalanceEntry] = {}
+        for entry in entries:
+            key = entry.asset_symbol
+            if key in seen:
+                # Keep the entry with the larger balance
+                if entry.total > seen[key].total:
+                    seen[key] = entry
+            else:
+                seen[key] = entry
+        entries = list(seen.values())
+
+        return entries

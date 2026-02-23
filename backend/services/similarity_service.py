@@ -5,7 +5,7 @@ Centralized fuzzy matching and suggestion logic for raw asset/account mapping.
 Provides Levenshtein distance calculation and best-match suggestions.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from backend.api.schemas import SuggestionInfo
 
@@ -99,17 +99,24 @@ def get_best_asset_suggestion(
 def get_best_account_suggestion(
     label: str, 
     accounts: list, 
-    min_confidence: float = 0.5
+    min_confidence: float = 0.5,
+    source: Optional[str] = None,
+    account_connectors_map: Optional[Dict[int, list]] = None,
 ) -> Optional[SuggestionInfo]:
     """
     Get best fuzzy match for a raw account label.
     
     Prioritizes address_or_identifier match over name match when both exist.
+    When ``source`` and ``account_connectors_map`` are provided, accounts whose
+    connectors include a matching connector_type get a 0.05 confidence boost so
+    they are preferred during ambiguous (same-address) matches.
     
     Args:
         label: Raw account label to match
         accounts: List of Account objects with id, name, address_or_identifier
         min_confidence: Minimum confidence threshold (0-1)
+        source: Connector type that produced the transaction (e.g. 'blockscout')
+        account_connectors_map: Dict mapping account.id → list of AccountConnector objects
     
     Returns:
         SuggestionInfo if a match found above threshold, else None
@@ -126,6 +133,12 @@ def get_best_account_suggestion(
             confidence = addr_sim
         else:
             confidence = name_sim
+        
+        # Boost confidence if the account has a connector matching the source
+        if source and account_connectors_map and account.id in account_connectors_map:
+            connectors = account_connectors_map[account.id]
+            if any(getattr(c, 'connector_type', None) == source for c in connectors):
+                confidence = min(confidence + 0.05, 1.0)
         
         if confidence > best_confidence:
             best_confidence = confidence

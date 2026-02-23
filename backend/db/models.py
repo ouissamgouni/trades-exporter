@@ -281,6 +281,7 @@ class Account(SQLModel, table=True):
     name: str = Field(nullable=False, index=True)
     account_type: str = Field(nullable=False, index=True)  # 'cex', 'broker', 'wallet'
     address_or_identifier: Optional[str] = Field(default=None, index=True)
+    group: Optional[str] = Field(default=None, index=True)  # Grouping label (e.g. 'Tangem EVM', 'Trading')
     tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     owned: bool = Field(default=True)  # Whether this account is owned by the user
     enabled: bool = Field(default=True, index=True)  # Whether this account is enabled for sync
@@ -803,6 +804,11 @@ class NormalizedTransaction(SQLModel, table=True):
     # Duplicate detection - hash of transaction identity for efficient duplicate detection
     transaction_hash: Optional[str] = Field(default=None, index=True, max_length=64)
     
+    # Connector tracking - links to the account connector that produced this transaction
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
+
     # Sync job tracking - links to the connector run that last synced this transaction
     sync_connector_run_id: Optional[int] = Field(
         default=None, foreign_key="sync_job_connector_runs.id", index=True

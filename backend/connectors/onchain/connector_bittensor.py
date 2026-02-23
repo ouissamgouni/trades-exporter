@@ -404,3 +404,56 @@ class ConnectorBittensor(BaseConnector):
             "bittensor",
             "bittensor_transactions.json",
         )
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        try:
+            data = self.safe_request(
+                "/api/account/latest/v1",
+                params={"address": self.wallet_address},
+            )
+
+            # Taostats v1 API returns { pagination: {...}, data: [...] }
+            if isinstance(data, dict) and "data" in data:
+                items = data["data"]
+                if isinstance(items, list) and items:
+                    account = items[0]
+                else:
+                    return []
+            elif isinstance(data, list) and data:
+                account = data[0]
+            elif isinstance(data, dict):
+                account = data
+            else:
+                return []
+
+            # Use balance_total (rao), fallback to balance for legacy compat
+            balance_rao = int(
+                account.get("balance_total")
+                or account.get("balance")
+                or 0
+            )
+            if balance_rao > 0:
+                total = Decimal(balance_rao) / Decimal(10 ** 9)
+                available_rao = int(account.get("balance_free") or balance_rao)
+                available = Decimal(available_rao) / Decimal(10 ** 9)
+                return [BalanceEntry(
+                    asset_symbol="TAO",
+                    total=total,
+                    available=available,
+                    chain="bittensor",
+                    raw=account,
+                )]
+        except Exception as e:
+            log.warning(f"Failed to fetch Bittensor balance: {e}")
+        return []

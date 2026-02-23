@@ -115,6 +115,52 @@ class ConnectorEtherscanHub(BaseHubConnector):
         # Update child connectors after creation
         self.child_connectors = child_connectors
 
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
 
-# Tests available at:
-# pytest tests/unit/connectors/onchain/test_etherscan_connector.py -v
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        web3_config = load_settings().get("web3_wallets", {})
+        api_key = web3_config.get("etherscan_api_key", "")
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("etherscan", self.chain_name)
+        chain_id = chain_config.chain_id if chain_config else 1
+        entries = []
+
+        # Native balance
+        try:
+            resp = requests.get(
+                "https://api.etherscan.io/v2/api",
+                params={
+                    "module": "account",
+                    "action": "balance",
+                    "address": self.wallet_address,
+                    "chainid": chain_id,
+                    "apikey": api_key,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            result = data.get("result", "0")
+            if result and int(result) > 0:
+                total = Decimal(result) / Decimal(10 ** 18)
+                entries.append(BalanceEntry(
+                    asset_symbol="ETH",
+                    total=total,
+                    available=total,
+                    chain=self.chain_name,
+                    raw=data,
+                ))
+        except Exception as e:
+            log.warning(f"Failed to fetch native balance from Etherscan: {e}")
+
+        return entries

@@ -476,6 +476,28 @@ class BinanceTrxConnector(BaseConnector):
 
     # Inherits yield_normalized from BaseConnector
 
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
 
-# Integration tests available at:
-# pytest tests/integration/exchanges/test_connector_integration.py::TestConnectorIntegration::test_binance_connector -v
+    @property
+    def supports_balance(self) -> bool:
+        return not self.test_mode and self.exchange is not None
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        balance = self.exchange.fetch_balance()
+        entries = []
+        for asset, total in (balance.get("total") or {}).items():
+            if total and float(total) > 0:
+                free = float((balance.get("free") or {}).get(asset, 0) or 0)
+                used = float((balance.get("used") or {}).get(asset, 0) or 0)
+                entries.append(BalanceEntry(
+                    asset_symbol=asset,
+                    total=Decimal(str(total)),
+                    available=Decimal(str(free)),
+                    locked=Decimal(str(used)),
+                ))
+        return entries

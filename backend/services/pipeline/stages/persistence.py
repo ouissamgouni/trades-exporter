@@ -350,6 +350,10 @@ class PersistenceStage(PipelineStage):
         if sync_connector_run_id:
             existing.sync_connector_run_id = sync_connector_run_id
 
+        # Track which connector produced this transaction
+        if hasattr(new, 'connector_id') and new.connector_id is not None:
+            existing.connector_id = new.connector_id
+
     def _pydantic_to_sqlmodel(
         self,
         tx: NormalizedTransaction,
@@ -419,5 +423,6 @@ class PersistenceStage(PipelineStage):
             tags=tags,
             content_hash=tx.content_hash,  # Include content_hash for cross-source deduplication
             transaction_hash=transaction_hash,  # Hash for efficient duplicate detection
+            connector_id=tx.connector_id,  # Link to the connector that produced this
         )
 

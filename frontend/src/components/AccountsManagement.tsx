@@ -4,7 +4,8 @@ import {
     Switch, Table, Text, useDisclosure, VStack
 } from '@chakra-ui/react';
 import React, { useEffect, useState } from 'react';
-import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiDollarSign, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
+import { BalanceDrawer } from './BalanceDrawer';
 import { Account, API_URL } from '../types';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
@@ -22,6 +23,26 @@ const AccountsManagement: React.FC = () => {
     const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
 
     const deleteConfirm = useConfirmDialog<number>();
+
+    // Balance drawer state
+    const [balanceDrawerOpen, setBalanceDrawerOpen] = useState(false);
+    const [balanceMode, setBalanceMode] = useState<'global' | 'account'>('global');
+    const [balanceAccountId, setBalanceAccountId] = useState<number | undefined>();
+    const [balanceTitle, setBalanceTitle] = useState<string>('');
+
+    const handleBalanceClick = (account: Account) => {
+        setBalanceMode('account');
+        setBalanceAccountId(account.id);
+        setBalanceTitle(`${account.name} Balance`);
+        setBalanceDrawerOpen(true);
+    };
+
+    const handleGlobalBalanceClick = () => {
+        setBalanceMode('global');
+        setBalanceAccountId(undefined);
+        setBalanceTitle('Global Balance');
+        setBalanceDrawerOpen(true);
+    };
 
     const fetchAccounts = async () => {
         setLoading(true);
@@ -160,6 +181,9 @@ const AccountsManagement: React.FC = () => {
                         </Text>
                     </Box>
                     <HStack gap={2}>
+                        <Button size="sm" variant="ghost" onClick={handleGlobalBalanceClick}>
+                            <FiDollarSign /> Balance
+                        </Button>
                         <Button size="sm" variant="ghost" onClick={expandAll}>
                             Expand All
                         </Button>
@@ -265,6 +289,11 @@ const AccountsManagement: React.FC = () => {
                                                             <Badge colorScheme={getAccountTypeBadgeColor(account.account_type)}>
                                                                 {account.account_type.toUpperCase()}
                                                             </Badge>
+                                                            {account.group && (
+                                                                <Badge size="sm" variant="outline" colorScheme="cyan">
+                                                                    {account.group}
+                                                                </Badge>
+                                                            )}
                                                         </HStack>
                                                         {account.address_or_identifier && (
                                                             <Text fontSize="xs" color="gray.600" fontFamily="mono">
@@ -300,6 +329,15 @@ const AccountsManagement: React.FC = () => {
                                                             </Badge>
                                                         ) : null;
                                                     })}
+                                                    <IconButton
+                                                        aria-label="View balance"
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        onClick={() => handleBalanceClick(account)}
+                                                        title="View live balance"
+                                                    >
+                                                        <FiDollarSign />
+                                                    </IconButton>
                                                     <IconButton
                                                         aria-label="Edit account"
                                                         size="sm"
@@ -363,6 +401,14 @@ const AccountsManagement: React.FC = () => {
                 message="Are you sure you want to delete this account?"
                 confirmLabel="Delete"
                 isDestructive
+            />
+
+            <BalanceDrawer
+                isOpen={balanceDrawerOpen}
+                onClose={() => setBalanceDrawerOpen(false)}
+                mode={balanceMode}
+                accountId={balanceAccountId}
+                title={balanceTitle}
             />
         </Box>
     );

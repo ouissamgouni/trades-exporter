@@ -16,6 +16,7 @@ export interface AccountPrefill {
     name?: string;
     account_type?: 'cex' | 'broker' | 'wallet';
     address_or_identifier?: string;
+    group?: string;
 }
 
 interface AccountFormDialogProps {
@@ -35,6 +36,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         name: '',
         account_type: 'cex' as 'cex' | 'broker' | 'wallet',
         address_or_identifier: '',
+        group: '',
         tags: [] as Record<string, any>[],
         owned: true,
     });
@@ -68,6 +70,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 name: account.name,
                 account_type: account.account_type,
                 address_or_identifier: account.address_or_identifier || '',
+                group: account.group || '',
                 tags: account.tags || [],
                 owned: account.owned,
             });
@@ -80,6 +83,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 name: prefill.name || '',
                 account_type: prefill.account_type || 'cex',
                 address_or_identifier: prefill.address_or_identifier || '',
+                group: prefill.group || '',
                 tags: [],
                 owned: true,
             });
@@ -89,6 +93,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 name: '',
                 account_type: 'cex',
                 address_or_identifier: '',
+                group: '',
                 tags: [],
                 owned: true,
             });
@@ -132,6 +137,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 ...formData,
                 tags,
                 address_or_identifier: formData.address_or_identifier || null,
+                group: formData.group || null,
             };
 
             const url = account
@@ -236,6 +242,23 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                             }
                                             placeholder="0x1234... or account ID"
                                         />
+                                    </Box>
+
+                                    <Box>
+                                        <Text fontWeight="medium" mb={1}>Group</Text>
+                                        <Input
+                                            value={formData.group}
+                                            onChange={(e) =>
+                                                setFormData({
+                                                    ...formData,
+                                                    group: e.target.value,
+                                                })
+                                            }
+                                            placeholder="e.g. Tangem EVM, Metamask EVM"
+                                        />
+                                        <Text fontSize="sm" color="gray.500" mt={1}>
+                                            Optional label to group related accounts (e.g. same wallet on multiple chains)
+                                        </Text>
                                     </Box>
 
                                     <Box>

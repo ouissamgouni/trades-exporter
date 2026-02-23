@@ -77,6 +77,7 @@ export interface Account {
     name: string;
     account_type: `${AccountType}`;
     address_or_identifier?: string;
+    group?: string;
     tags: Record<string, any>[];
     owned: boolean;
     enabled: boolean;
@@ -110,6 +111,7 @@ export interface ConnectorTypeInfo {
     supported_chains?: string[];
     required_config: string[];
     optional_config: string[];
+    supports_balance?: boolean;
 }
 
 /**
@@ -686,6 +688,7 @@ export interface AccountSummary {
     account_type: string;
     enabled: boolean;
     address_or_identifier?: string;  // Wallet address or exchange identifier
+    group?: string;  // Visual grouping label (e.g. "Tangem EVM")
 }
 
 export interface AllConnectorsResponse {
@@ -996,4 +999,37 @@ export interface FileUploadDetailedPreview {
         row_index: number;
         error: string;
     }>;
+}
+
+
+// ============================================================================
+// Live Balance types (from connector APIs)
+// ============================================================================
+
+export interface LiveBalanceEntry {
+    asset_symbol: string;
+    total: string;       // Decimal as string
+    available: string;
+    locked: string;
+    chain: string | null;
+    raw: Record<string, unknown>;
+}
+
+export interface ConnectorBalance {
+    connector_id: number;
+    connector_type: string;
+    account_id: number;
+    account_name: string;
+    chain: string | null;
+    entries: LiveBalanceEntry[];
+    fetched_at: string;
+    error: string | null;
+}
+
+export interface AccountBalance {
+    account_id: number;
+    account_name: string;
+    account_type: string;
+    group: string | null;
+    connector_balances: ConnectorBalance[];
 }

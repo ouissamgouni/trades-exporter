@@ -688,3 +688,44 @@ class ConnectorSui(BaseConnector):
                 f"Error normalizing transaction {tx.get('digest', 'unknown')}: {e}"
             )
             raise
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        entries = []
+        try:
+            data = self.safe_request("suix_getAllBalances", [self.wallet_address])
+            if isinstance(data, list):
+                for item in data:
+                    coin_type = item.get("coinType", "")
+                    balance_str = item.get("totalBalance", "0")
+                    if int(balance_str) > 0:
+                        # SUI native uses 9 decimals, other tokens vary
+                        if "sui::SUI" in coin_type:
+                            symbol = "SUI"
+                            decimals = 9
+                        else:
+                            # Extract symbol from coin type (e.g. 0x...::usdc::USDC)
+                            parts = coin_type.split("::")
+                            symbol = parts[-1] if parts else "UNKNOWN"
+                            decimals = 9  # default
+                        total = Decimal(balance_str) / Decimal(10 ** decimals)
+                        entries.append(BalanceEntry(
+                            asset_symbol=symbol,
+                            total=total,
+                            available=total,
+                            chain="sui",
+                            raw=item,
+                        ))
+        except Exception as e:
+            log.warning(f"Failed to fetch SUI balance: {e}")
+        return entries

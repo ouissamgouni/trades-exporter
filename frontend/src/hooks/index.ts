@@ -31,3 +31,8 @@ export {
     useBundleColorMap,
     type UseBundleColorMapReturn,
 } from './useBundleColorMap';
+
+export {
+    useBalance,
+    type UseBalanceReturn,
+} from './useBalance';

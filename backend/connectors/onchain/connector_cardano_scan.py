@@ -535,3 +535,32 @@ class ConnectorCardanoScan(BaseConnector):
         except Exception as e:
             log.error(f"Error normalizing transaction {tx.get('hash', 'unknown')}: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        try:
+            data = self.safe_request("/address/balance", params={"address": self.wallet_address})
+            if data:
+                lovelace = int(data.get("balance", 0))
+                if lovelace > 0:
+                    total = Decimal(lovelace) / Decimal(10 ** 6)
+                    return [BalanceEntry(
+                        asset_symbol="ADA",
+                        total=total,
+                        available=total,
+                        chain="cardano",
+                        raw=data,
+                    )]
+        except Exception as e:
+            log.warning(f"Failed to fetch Cardano balance: {e}")
+        return []

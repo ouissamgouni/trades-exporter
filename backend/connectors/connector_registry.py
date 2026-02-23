@@ -44,6 +44,9 @@ class ConnectorInfo:
     connector_family: Optional[str] = None  # e.g., "mexc-transactions" for both API and file variants
     is_file_connector: bool = False  # True for file-based import connectors
 
+    # Balance support - True for connectors that can fetch live balances
+    supports_balance: bool = False
+
     def to_api_dict(self) -> Dict[str, Any]:
         """Convert to API-friendly dictionary."""
         return {
@@ -56,6 +59,7 @@ class ConnectorInfo:
             "supports_incremental_sync": self.supports_incremental_sync,
             "connector_family": self.connector_family,
             "is_file_connector": self.is_file_connector,
+            "supports_balance": self.supports_balance,
         }
 
 
@@ -127,6 +131,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["symbols", "start_date"],
                 supports_incremental_sync=True,
+                supports_balance=True,
             )
         )
 
@@ -161,6 +166,7 @@ class ConnectorRegistry:
                 optional_config=["symbols", "start_date"],
                 supports_incremental_sync=True,
                 connector_family="mexc-transactions",
+                supports_balance=True,
             )
         )
 
@@ -234,6 +240,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["start_date"],
                 supports_incremental_sync=True,
+                supports_balance=True,
             )
         )
 
@@ -304,6 +311,7 @@ class ConnectorRegistry:
                 required_config=[],
                 optional_config=["symbols", "start_date"],
                 supports_incremental_sync=True,
+                supports_balance=True,
             )
         )
 
@@ -350,6 +358,7 @@ class ConnectorRegistry:
                     "include_internal_txs",
                     "include_token_transfers",
                 ],
+                supports_balance=True,
             )
         )
 
@@ -366,6 +375,7 @@ class ConnectorRegistry:
                     "include_internal_txs",
                     "include_token_transfers",
                 ],
+                supports_balance=True,
             )
         )
 
@@ -387,6 +397,7 @@ class ConnectorRegistry:
                 ],
                 required_config=["chain", "address"],
                 optional_config=[],
+                supports_balance=True,
             )
         )
 
@@ -399,6 +410,7 @@ class ConnectorRegistry:
                 supported_chains=["solana"],
                 required_config=["address"],
                 optional_config=["api_key"],
+                supports_balance=True,
             )
         )
 
@@ -411,6 +423,7 @@ class ConnectorRegistry:
                 supported_chains=["xrp"],
                 required_config=["address"],
                 optional_config=[],
+                supports_balance=True,
             )
         )
 
@@ -423,6 +436,7 @@ class ConnectorRegistry:
                 supported_chains=["cardano"],
                 required_config=["address"],
                 optional_config=["api_key"],
+                supports_balance=True,
             )
         )
 
@@ -435,6 +449,7 @@ class ConnectorRegistry:
                 supported_chains=["sui"],
                 required_config=["address"],
                 optional_config=[],
+                supports_balance=True,
             )
         )
 
@@ -447,6 +462,7 @@ class ConnectorRegistry:
                 supported_chains=["bitcoin"],
                 required_config=["address"],
                 optional_config=[],
+                supports_balance=True,
             )
         )
 
@@ -459,6 +475,7 @@ class ConnectorRegistry:
                 supported_chains=["near"],
                 required_config=["address"],
                 optional_config=["api_key"],
+                supports_balance=True,
             )
         )
 
@@ -471,6 +488,7 @@ class ConnectorRegistry:
                 supported_chains=["bittensor"],
                 required_config=["address"],
                 optional_config=["api_key"],
+                supports_balance=True,
             )
         )
 

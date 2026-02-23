@@ -755,3 +755,45 @@ class ConnectorBitcoinEsplora(BaseConnector):
         except Exception as e:
             log.error(f"❌ Error normalizing transaction {tx.get('txid', 'unknown')}: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
+
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        total_sats = 0
+        try:
+            if self.xpub_mode and self.derived_addresses_set:
+                # Sum balance across all derived addresses
+                for addr in self.derived_addresses_set:
+                    data = self.safe_request(f"/address/{addr}")
+                    if data:
+                        funded = data.get("chain_stats", {}).get("funded_txo_sum", 0)
+                        spent = data.get("chain_stats", {}).get("spent_txo_sum", 0)
+                        total_sats += funded - spent
+            else:
+                data = self.safe_request(f"/address/{self.wallet_address}")
+                if data:
+                    funded = data.get("chain_stats", {}).get("funded_txo_sum", 0)
+                    spent = data.get("chain_stats", {}).get("spent_txo_sum", 0)
+                    total_sats = funded - spent
+
+            if total_sats > 0:
+                total = Decimal(total_sats) / Decimal(10 ** 8)
+                return [BalanceEntry(
+                    asset_symbol="BTC",
+                    total=total,
+                    available=total,
+                    chain="bitcoin",
+                    raw={"total_sats": total_sats},
+                )]
+        except Exception as e:
+            log.warning(f"Failed to fetch Bitcoin balance: {e}")
+        return []

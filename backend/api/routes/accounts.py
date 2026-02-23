@@ -26,6 +26,7 @@ class AccountCreate(BaseModel):
     name: str
     account_type: str
     address_or_identifier: Optional[str] = None
+    group: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
     owned: bool = True
     enabled: bool = True
@@ -37,6 +38,7 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = None
     account_type: Optional[str] = None
     address_or_identifier: Optional[str] = None
+    group: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
     owned: Optional[bool] = None
     enabled: Optional[bool] = None
@@ -49,6 +51,7 @@ class AccountResponse(BaseModel):
     name: str
     account_type: str
     address_or_identifier: Optional[str]
+    group: Optional[str]
     tags: Optional[List[Dict[str, Any]]]
     owned: bool
     enabled: bool
@@ -100,6 +103,7 @@ def list_accounts(
             name=acc.name,
             account_type=acc.account_type,
             address_or_identifier=acc.address_or_identifier,
+            group=acc.group,
             tags=acc.tags or [],
             owned=acc.owned,
             enabled=acc.enabled,
@@ -130,6 +134,7 @@ def get_account(account_id: int, session: Session = Depends(get_session_dependen
         name=account.name,
         account_type=account.account_type,
         address_or_identifier=account.address_or_identifier,
+        group=account.group,
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
@@ -174,6 +179,7 @@ def create_account(
         name=account_data.name,
         account_type=account_data.account_type,
         address_or_identifier=account_data.address_or_identifier,
+        group=account_data.group,
         tags=account_data.tags or [],
         owned=account_data.owned,
         enabled=account_data.enabled,
@@ -188,6 +194,7 @@ def create_account(
         name=account.name,
         account_type=account.account_type,
         address_or_identifier=account.address_or_identifier,
+        group=account.group,
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
@@ -249,6 +256,8 @@ def update_account(
         account.owned = account_data.owned
     if account_data.enabled is not None:
         account.enabled = account_data.enabled
+    if account_data.group is not None:
+        account.group = account_data.group
 
     session.add(account)
     session.commit()
@@ -259,6 +268,7 @@ def update_account(
         name=account.name,
         account_type=account.account_type,
         address_or_identifier=account.address_or_identifier,
+        group=account.group,
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
