@@ -6,6 +6,7 @@ Tests the resolution of source addresses to account IDs.
 from datetime import datetime
 
 from backend.db.models import NormalizedTransaction, Account, RawAccount
+from backend.core.network_normalizer import normalize_network
 
 
 # Helper to create test transactions with required fields
@@ -46,26 +47,29 @@ class MockRawAccountRepository:
     def __init__(self):
         self.raw_accounts = {}
 
-    def get(self, source: str, label: str):
-        """Mock get method."""
-        key = f"{source}:{label}"
-        return self.raw_accounts.get(key)
+    def _key(self, source: str, label: str, network: str = "") -> str:
+        network = normalize_network(network) or ""
+        return f"{source}:{label}:{network}"
 
-    def get_or_create(self, source: str, label: str):
+    def get(self, source: str, label: str, network: str = ""):
+        """Mock get method."""
+        return self.raw_accounts.get(self._key(source, label, network))
+
+    def get_or_create(self, source: str, label: str, network: str = ""):
         """Mock get_or_create method."""
-        key = f"{source}:{label}"
+        key = self._key(source, label, network)
         if key in self.raw_accounts:
             return self.raw_accounts[key]
         # Create and store new unlinked raw account
-        raw_account = RawAccount(source=source, label=label, account_id=None)
+        raw_account = RawAccount(source=source, label=label, network=network, account_id=None)
         self.raw_accounts[key] = raw_account
         return raw_account
 
-    def add_mapping(self, source: str, label: str, account_id: int):
+    def add_mapping(self, source: str, label: str, account_id: int, network: str = ""):
         """Helper to add a mapping for testing."""
-        key = f"{source}:{label}"
+        key = self._key(source, label, network)
         self.raw_accounts[key] = RawAccount(
-            source=source, label=label, account_id=account_id
+            source=source, label=label, network=network, account_id=account_id
         )
 
 
@@ -371,3 +375,138 @@ class TestCaching:
 
         # Verify cache was used (account should be in cache)
         assert 1 in resolver._account_owned_cache
+
+
+class TestNetworkAwareResolution:
+    """Tests for network-aware account resolution."""
+
+    def test_same_label_different_networks_resolve_differently(self):
+        """Same address on different networks should resolve to different accounts."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="Tangem Base", owned=True)
+        session.accounts[2] = Account(id=2, name="Tangem BSC", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("blockscout_base", "0xshared", 1, network="base")
+        mock_repo.add_mapping("blockscout_base", "0xshared", 2, network="bsc")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        aid_base, _ = resolver.resolve_account("blockscout_base", "0xshared", network="base")
+        aid_bsc, _ = resolver.resolve_account("blockscout_base", "0xshared", network="bsc")
+
+        assert aid_base == 1
+        assert aid_bsc == 2
+
+    def test_empty_network_creates_separate_raw_account(self):
+        """Empty network should not collide with network-specific mappings."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="Tangem Base", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("blockscout_base", "0xshared", 1, network="base")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        # Empty network ≠ 'base'
+        aid_empty, _ = resolver.resolve_account("blockscout_base", "0xshared", network="")
+        aid_base, _ = resolver.resolve_account("blockscout_base", "0xshared", network="base")
+
+        assert aid_empty is None  # no mapping for empty network
+        assert aid_base == 1
+
+    def test_resolve_transaction_accounts_with_network(self):
+        """Transaction resolution should forward network to per-address lookups."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="Sender", owned=True)
+        session.accounts[2] = Account(id=2, name="Receiver", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("blockscout_base", "0xfrom", 1, network="base")
+        mock_repo.add_mapping("blockscout_base", "0xto", 2, network="base")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        from_id, to_id = resolver.resolve_transaction_accounts(
+            source="blockscout_base",
+            source_from_account="0xfrom",
+            source_to_account="0xto",
+            network="base",
+        )
+
+        assert from_id == 1
+        assert to_id == 2
+
+    def test_enrich_transaction_extracts_network(self):
+        """enrich_transaction should use tx.network for raw account lookups."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="From Account", owned=True)
+        session.accounts[2] = Account(id=2, name="To Account", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("blockscout_base", "0xfrom", 1, network="base")
+        mock_repo.add_mapping("blockscout_base", "0xto", 2, network="base")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        tx = make_tx(
+            source="blockscout_base",
+            source_from_account="0xfrom",
+            source_to_account="0xto",
+            network="base",
+            transaction_type="transfer",
+        )
+
+        enriched = resolver.enrich_transaction(tx, "blockscout_base")
+
+        assert enriched.from_account_id == 1
+        assert enriched.to_account_id == 2
+
+    def test_non_canonical_network_resolves_via_normalization(self):
+        """Passing a non-canonical alias (e.g. 'ETH') should resolve to a mapping stored under 'ethereum'."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="Ethereum Wallet", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("etherscan", "0xaddr", 1, network="ethereum")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        # "ETH" is an alias for "ethereum" in NETWORK_ALIASES
+        aid, owned = resolver.resolve_account("etherscan", "0xaddr", network="ETH")
+
+        assert aid == 1
+        assert owned is True
+
+    def test_none_network_normalizes_to_empty(self):
+        """None network should normalize to empty string and match mappings with network=''."""
+        from backend.services.account_resolver import AccountResolver
+
+        session = MockSession()
+        session.accounts[1] = Account(id=1, name="CEX Account", owned=True)
+
+        mock_repo = MockRawAccountRepository()
+        mock_repo.add_mapping("binance", "main", 1, network="")
+
+        resolver = AccountResolver(session)
+        resolver.raw_account_repo = mock_repo
+
+        aid, owned = resolver.resolve_account("binance", "main", network=None)
+
+        assert aid == 1
+        assert owned is True

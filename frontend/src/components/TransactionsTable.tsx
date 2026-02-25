@@ -7,8 +7,8 @@ import {
 import { BiTransfer } from 'react-icons/bi';
 import { RiExchangeFundsLine } from 'react-icons/ri';
 import { FaQuestion } from 'react-icons/fa';
-import { LuPencil, LuUpload, LuArrowUp, LuArrowDown, LuArrowUpDown, LuPackageX, LuCheck } from 'react-icons/lu';
-import { FiActivity, FiFileText, FiCopy } from 'react-icons/fi';
+import { LuPencil, LuUpload, LuArrowUp, LuArrowDown, LuArrowUpDown, LuPackageX, LuCheck, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import { FiActivity, FiFileText, FiCopy, FiPlusCircle } from 'react-icons/fi';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -24,7 +24,6 @@ import { useDataHealth } from '../contexts/DataHealthContext';
 import { AssetSelector } from './AssetSelector';
 import { AccountSelector } from './AccountSelector';
 import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
-import { TransactionEditorDialog } from './TransactionEditorDialog';
 
 
 import { TransactionDetailDrawer } from './TransactionDetailDrawer';
@@ -34,7 +33,10 @@ import { Tooltip } from './ui/tooltip';
 import { AssetBadge } from './AssetBadge';
 import { AccountBadge } from './AccountBadge';
 import { SourceInfoCell } from './SourceInfoCell';
-import { getAccountSuggestions, getAssetSuggestions, getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import { getAssetSuggestions, getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import { linkRawAccount } from '../utils/rawAccountApi';
+import { fetchAccountSuggestionsBatch, useAccountSuggestions, AccountSuggestion } from '../hooks/useAccountSuggestions';
+import { AccountSuggestionBadges } from './AccountSuggestionBadges';
 import {
     formatDateTimeCompact,
     toDateTimeLocalString,
@@ -47,7 +49,11 @@ import { TablePagination } from './TablePagination';
 import { ValueDisplay } from './ValueDisplay';
 import { TableConfig, ColumnPlugin, RowAction, BulkAction, TransactionColumnKey, resolveTableConfig, presetToVisibility, ColumnVisibilityPopover } from './tables';
 import { BundleSuggestionIcon, SuggestionPopover, BundleMembershipPopover } from './bundles';
+import { DuplicateIcon, DuplicatePopover } from './duplicates';
 import { LuPackage2 } from 'react-icons/lu';
+import { useDuplicateMap } from '../hooks/useDuplicateMap';
+import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
+import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 
 // Types for CSV import
 interface TradesImportPreviewTransaction {
@@ -132,22 +138,24 @@ const getDuplicateTags = (tx: Transaction): any[] => {
 const hasPotentialDuplicateTag = (tx: Transaction): boolean => {
     const tags = getDuplicateTags(tx);
     return tags.some((tag: any) =>
-        tag && typeof tag === 'object' && tag.dup_group
+        tag && typeof tag === 'object' && (tag.dup_group || tag.sys_group)
     );
 };
 
 const getDuplicateResolutionTag = (tx: Transaction): any | null => {
     const tags = getDuplicateTags(tx);
 
-    // Check for new format (dup_resolution key)
+    // Check for sys_resolution (new format) or dup_resolution (legacy)
     const resolutionTag = tags.find((tag: any) =>
-        tag && typeof tag === 'object' && tag.dup_resolution
+        tag && typeof tag === 'object' && (tag.sys_resolution || tag.dup_resolution)
     );
     if (resolutionTag) {
         return {
-            dup_resolution: resolutionTag.dup_resolution,
-            group_hash: tags.find((t: any) => t?.dup_group)?.dup_group,
-            dup_resolved_at: tags.find((t: any) => t?.dup_resolved_at)?.dup_resolved_at,
+            dup_resolution: resolutionTag.sys_resolution || resolutionTag.dup_resolution,
+            group_hash: tags.find((t: any) => t?.sys_group || t?.dup_group)?.sys_group
+                || tags.find((t: any) => t?.dup_group)?.dup_group,
+            dup_resolved_at: tags.find((t: any) => t?.sys_resolved_at || t?.dup_resolved_at)?.sys_resolved_at
+                || tags.find((t: any) => t?.dup_resolved_at)?.dup_resolved_at,
         };
     }
 
@@ -157,11 +165,11 @@ const getDuplicateResolutionTag = (tx: Transaction): any | null => {
 const getDuplicateGroupHash = (tx: Transaction): string | null => {
     const tags = getDuplicateTags(tx);
 
-    // Check for new format (dup_group key)
+    // Check for sys_group (new) or dup_group (legacy)
     const groupTag = tags.find((tag: any) =>
-        tag && typeof tag === 'object' && tag.dup_group
+        tag && typeof tag === 'object' && (tag.sys_group || tag.dup_group)
     );
-    return groupTag?.dup_group || null;
+    return groupTag?.sys_group || groupTag?.dup_group || null;
 };
 
 // Pattern colors for suggestions (simplified to swap and transfer)
@@ -270,9 +278,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // Centralized cache invalidation after any transaction mutation.
     // Ensures both the transaction list AND bundle suggestions are refreshed together.
+    // Uses refetchType: 'active' to only refetch queries with mounted observers,
+    // preventing unnecessary fetches for inactive cached queries from other tabs.
     const invalidateTransactionData = () => {
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+        queryClient.invalidateQueries({ queryKey: ['transactions'], refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'], refetchType: 'active' });
     };
 
     // Resolve table configuration with defaults
@@ -417,6 +427,54 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     // Track which bundle is hovered for sibling highlighting
     const [hoveredBundleId, setHoveredBundleId] = useState<number | null>(null);
 
+    // ============== Duplicate Suspicion State ==============
+    const { duplicateMap, getGroupTxIds: getDuplicateGroupTxIds } = useDuplicateMap();
+    const [openDuplicateTxId, setOpenDuplicateTxId] = useState<number | null>(null);
+    const [hoveredDuplicateGroup, setHoveredDuplicateGroup] = useState<number | null>(null);
+
+    // ============== Quick-Create Dialog State ==============
+    // When non-null, AccountFormDialog / AssetFormDialog is open for the given tx + field
+    const [quickCreateAccount, setQuickCreateAccount] = useState<{
+        txId: number;
+        field: 'account_id' | 'from_account_id' | 'to_account_id';
+        prefill: AccountPrefill;
+        rawSource?: string;
+        rawLabel?: string;
+        rawNetwork?: string;
+    } | null>(null);
+
+    const [quickCreateAsset, setQuickCreateAsset] = useState<{
+        txId: number;
+        field: 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id';
+        prefill: AssetPrefill;
+        rawSource?: string;
+        rawSymbol?: string;
+    } | null>(null);
+
+    // ============== Invalid Row Collapse State ==============
+    // Invalid rows are collapsed by default; this set tracks which ones are expanded
+    const [expandedInvalidIds, setExpandedInvalidIds] = useState<Set<number>>(new Set());
+
+    const toggleInvalidRow = useCallback((id: number) => {
+        setExpandedInvalidIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    }, []);
+
+    const isInvalidCollapsed = useCallback((tx: Transaction) => {
+        return tx.review_status === 'invalid' && !expandedInvalidIds.has(tx.id);
+    }, [expandedInvalidIds]);
+
+    const collapseAllInvalid = useCallback(() => {
+        setExpandedInvalidIds(new Set());
+    }, []);
+
     // Use global data health context (for refresh trigger only)
     // Hook must be called at the top level (React rules of hooks)
     const { refreshHealthData } = useDataHealth();
@@ -453,9 +511,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
-    // Transaction editor dialog state
-    const [showEditorDialog, setShowEditorDialog] = useState(false);
-    const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
+    // Transaction editor dialog state (replaced by drawer)
+    // Pencil icon now opens the detail drawer for inline editing
 
     // CSV Import state
     const [showImportDialog, setShowImportDialog] = useState(false);
@@ -482,9 +539,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             const params = new URLSearchParams();
             // Apply review status filter (support multiple via comma-separated)
             if (filters.reviewStatus.length > 0) {
-                // If only one, use it directly; otherwise API doesn't support multiple review_status currently
-                // So we just take the first one for now (or could send comma-separated if backend supports)
-                params.append('review_status', filters.reviewStatus[0]);
+                params.append('review_status', filters.reviewStatus.join(','));
             }
             if (filters.taxability.length > 0) {
                 params.append('taxability', filters.taxability.join(','));
@@ -523,11 +578,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 params.append('date_to', filters.dateTo);
             }
             // P&L audit filters
-            if (filters.pnlCalVersion) {
-                params.append('pnl_cal_version', filters.pnlCalVersion);
+            if (filters.versionId) {
+                params.append('pnl_cal_version', filters.versionId);
             }
-            if (filters.pnlCalInclusionsStatus) {
-                params.append('pnl_cal_inclusions_status', filters.pnlCalInclusionsStatus);
+            if (filters.inclusionStatus) {
+                params.append('pnl_cal_inclusions_status', filters.inclusionStatus);
             }
             // Transaction IDs filter (for issue-specific views)
             if (filters.transactionIds && filters.transactionIds.length > 0) {
@@ -554,6 +609,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     const transactions = transactionResponse?.results || [];
     const error = queryError ? (queryError instanceof Error ? queryError.message : 'Unknown error') : null;
+
+    const expandAllInvalid = useCallback(() => {
+        const invalidIds = new Set(
+            transactions
+                .filter(tx => tx.review_status === 'invalid')
+                .map(tx => tx.id)
+        );
+        setExpandedInvalidIds(invalidIds);
+    }, [transactions]);
 
     // ============== TanStack Table Instance (for sorting) ==============
 
@@ -631,6 +695,54 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
+    // Quick-create handlers: link newly created account/asset to the originating transaction
+    const handleQuickAccountCreated = async (accountId?: number) => {
+        if (accountId && quickCreateAccount) {
+            try {
+                const response = await fetch(`${API_URL}/transactions/${quickCreateAccount.txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [quickCreateAccount.field]: accountId }),
+                });
+                if (!response.ok) throw new Error('Failed to link account');
+                // Also link the raw_account
+                if (quickCreateAccount.rawLabel) {
+                    try {
+                        await linkRawAccount({
+                            source: quickCreateAccount.rawSource || '',
+                            label: quickCreateAccount.rawLabel,
+                            network: quickCreateAccount.rawNetwork,
+                            accountId,
+                        });
+                    } catch { }
+                }
+                invalidateTransactionData();
+                fetchAccounts();
+            } catch (err) {
+                toaster.error({ title: 'Error', description: 'Failed to link new account' });
+            }
+        }
+        setQuickCreateAccount(null);
+    };
+
+    const handleQuickAssetCreated = async (assetId?: number) => {
+        if (assetId && quickCreateAsset) {
+            try {
+                const response = await fetch(`${API_URL}/transactions/${quickCreateAsset.txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [quickCreateAsset.field]: assetId }),
+                });
+                if (!response.ok) throw new Error('Failed to link asset');
+                invalidateTransactionData();
+                fetchAssets();
+            } catch (err) {
+                toaster.error({ title: 'Error', description: 'Failed to link new asset' });
+            }
+        }
+        setQuickCreateAsset(null);
+    };
+
     // Helper to update editValues state AND ref synchronously
     const updateEditValues = (updates: Partial<Transaction>) => {
         setEditValues(prev => {
@@ -653,6 +765,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
+            // Auto-collapse row when set to invalid
+            if (field === 'review_status' && value === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(txId);
+                    return next;
+                });
+            }
         } catch (err) {
             toaster.error({ title: 'Error', description: `Failed to save ${field}` });
         }
@@ -773,6 +893,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
+            // Auto-collapse row when set to invalid
+            if (values.review_status === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
+            }
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
@@ -910,10 +1038,17 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            await refetchTransactions();
-            queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+            invalidateTransactionData();
             refreshHealthData();
             onDataChange?.();
+            // Auto-collapse rows when bulk-set to invalid
+            if (status === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    selectedIds.forEach(id => next.delete(id));
+                    return next;
+                });
+            }
             setSelectedIds(new Set());
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
@@ -938,11 +1073,53 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
             invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setSelectedIds(new Set());
             setShowBulkTypeDialog(false);
             setBulkType('');
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkUnbundle = async () => {
+        if (selectedIds.size === 0) return;
+        const selectedTxs = transactions.filter(tx => selectedIds.has(tx.id) && tx.user_calculation_unit_id != null);
+        if (selectedTxs.length === 0) {
+            toaster.error({ title: 'No bundled transactions', description: 'None of the selected transactions belong to a bundle.' });
+            return;
+        }
+        setBulkActionLoading(true);
+        try {
+            // Group by bundle ID to make one request per bundle
+            const byBundle = new Map<number, number[]>();
+            for (const tx of selectedTxs) {
+                const bundleId = tx.user_calculation_unit_id!;
+                if (!byBundle.has(bundleId)) byBundle.set(bundleId, []);
+                byBundle.get(bundleId)!.push(tx.id);
+            }
+            let totalRemoved = 0;
+            for (const [bundleId, txIds] of byBundle) {
+                const response = await fetch(`${API_URL}/bundles/${bundleId}/remove-transactions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transaction_ids: txIds }),
+                });
+                if (!response.ok) throw new Error(`Failed to remove from bundle #${bundleId}`);
+                const result = await response.json();
+                totalRemoved += result.removed_count || 0;
+            }
+            toaster.success({ title: 'Unbundled', description: `${totalRemoved} transaction(s) removed from ${byBundle.size} bundle(s)` });
+            invalidateTransactionData();
+            queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unbundle' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -963,6 +1140,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
             invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setSelectedIds(new Set());
             setShowBulkDeleteDialog(false);
         } catch (err) {
@@ -987,6 +1166,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
             invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setShowDeleteDialog(false);
             setTransactionToDelete(null);
         } catch (err) {
@@ -1108,6 +1289,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
         // Highlight sibling rows when hovering a bundle membership indicator
         if (hoveredBundleId !== null && tx.user_calculation_unit_id === hoveredBundleId) return 'purple.50';
+        // Highlight sibling rows when hovering a duplicate indicator
+        if (hoveredDuplicateGroup !== null) {
+            const dupEntry = duplicateMap.get(tx.id);
+            if (dupEntry && dupEntry.groupIndex === hoveredDuplicateGroup) return 'red.50';
+        }
         // Invalid rows get dark gray background to de-emphasize
         if (tx.review_status === 'invalid') return 'gray.300';
         return directionRowColors[tx.direction] || 'white';
@@ -1178,10 +1364,46 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
         setBulkActionLoading(true);
 
+        // Collect all account labels that need suggestions (batch API call)
+        const accountBatchItems: { label: string; source?: string | null; network?: string | null; txField: string; txId: number }[] = [];
+        for (const tx of selectedTxs) {
+            if (tx.source_from_account && !tx.from_account_id) {
+                accountBatchItems.push({ label: tx.source_from_account, source: tx.source, network: tx.network, txField: 'from_account_id', txId: tx.id });
+            }
+            if (tx.source_to_account && !tx.to_account_id) {
+                accountBatchItems.push({ label: tx.source_to_account, source: tx.source, network: tx.network, txField: 'to_account_id', txId: tx.id });
+            }
+            if (tx.source_account && !tx.account_id) {
+                accountBatchItems.push({ label: tx.source_account, source: tx.source, network: tx.network, txField: 'account_id', txId: tx.id });
+            }
+        }
+
+        // Fetch network-aware account suggestions in one batch
+        const batchResults = accountBatchItems.length > 0
+            ? await fetchAccountSuggestionsBatch(
+                accountBatchItems.map(item => ({
+                    label: item.label,
+                    source: item.source,
+                    network: item.network,
+                    minConfidence: MIN_CONFIDENCE,
+                    maxResults: 1,
+                }))
+            )
+            : [];
+
+        // Build a lookup: txId:field → best suggestion
+        const accountSuggestionLookup = new Map<string, AccountSuggestion>();
+        batchResults.forEach((result, idx) => {
+            if (result.suggestions.length > 0 && result.suggestions[0].confidence >= MIN_CONFIDENCE) {
+                const item = accountBatchItems[idx];
+                accountSuggestionLookup.set(`${item.txId}:${item.txField}`, result.suggestions[0]);
+            }
+        });
+
         for (const tx of selectedTxs) {
             const updates: Record<string, number> = {};
 
-            // Check asset
+            // Check asset (still client-side — no network disambiguation needed for assets)
             if (tx.source_asset_symbol && !tx.asset_id) {
                 const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, MIN_CONFIDENCE, 1);
                 if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
@@ -1205,29 +1427,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 }
             }
 
-            // Check from_account
-            if (tx.source_from_account && !tx.from_account_id) {
-                const suggestions = getAccountSuggestions(tx.source_from_account, accounts, MIN_CONFIDENCE, 1);
-                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
-                    updates.from_account_id = suggestions[0].item.id;
-                }
-            }
+            // Check account fields — use network-aware batch results
+            const fromSugg = accountSuggestionLookup.get(`${tx.id}:from_account_id`);
+            if (fromSugg) updates.from_account_id = fromSugg.id;
 
-            // Check to_account
-            if (tx.source_to_account && !tx.to_account_id) {
-                const suggestions = getAccountSuggestions(tx.source_to_account, accounts, MIN_CONFIDENCE, 1);
-                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
-                    updates.to_account_id = suggestions[0].item.id;
-                }
-            }
+            const toSugg = accountSuggestionLookup.get(`${tx.id}:to_account_id`);
+            if (toSugg) updates.to_account_id = toSugg.id;
 
-            // Check ownership account
-            if (tx.source_account && !tx.account_id) {
-                const suggestions = getAccountSuggestions(tx.source_account, accounts, MIN_CONFIDENCE, 1);
-                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
-                    updates.account_id = suggestions[0].item.id;
-                }
-            }
+            const acctSugg = accountSuggestionLookup.get(`${tx.id}:account_id`);
+            if (acctSugg) updates.account_id = acctSugg.id;
 
             // Apply updates if any
             if (Object.keys(updates).length > 0) {
@@ -1239,6 +1447,18 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     });
                     if (response.ok) {
                         linkedCount += Object.keys(updates).length;
+                        // Also link raw accounts for account fields
+                        const rawLinkPromises: Promise<void>[] = [];
+                        if (updates.from_account_id && tx.source_from_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_from_account, network: tx.network || undefined, accountId: updates.from_account_id }).catch(() => { }));
+                        }
+                        if (updates.to_account_id && tx.source_to_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_to_account, network: tx.network || undefined, accountId: updates.to_account_id }).catch(() => { }));
+                        }
+                        if (updates.account_id && tx.source_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_account, network: tx.network || undefined, accountId: updates.account_id }).catch(() => { }));
+                        }
+                        await Promise.all(rawLinkPromises);
                     } else {
                         errors.push(`Transaction ${tx.id}: Failed to update`);
                     }
@@ -1264,6 +1484,17 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
+    // ============== Invalid Row Collapse Counts ==============
+    const invalidTransactions = useMemo(
+        () => sortedTransactions.filter(tx => tx.review_status === 'invalid'),
+        [sortedTransactions]
+    );
+    const collapsedInvalidCount = useMemo(
+        () => invalidTransactions.filter(tx => !expandedInvalidIds.has(tx.id)).length,
+        [invalidTransactions, expandedInvalidIds]
+    );
+    const totalInvalidCount = invalidTransactions.length;
+
     return (
         <Box pb={selectedIds.size > 0 ? '72px' : '0'}>
             <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
@@ -1271,6 +1502,38 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     <Heading as="h2" size="md" mb={1}>{title}</Heading>
                     <Text color="gray.600" fontSize="sm">{subtitle}</Text>
                 </Box>
+                {/* Invalid row collapse indicator */}
+                {totalInvalidCount > 0 && (
+                    <HStack gap={2} fontSize="xs" color="gray.500">
+                        <Badge colorPalette="red" variant="subtle" size="sm">
+                            <LuX size={10} />
+                            {totalInvalidCount} invalid
+                        </Badge>
+                        {collapsedInvalidCount > 0 ? (
+                            <Button
+                                size="xs"
+                                variant="ghost"
+                                color="gray.500"
+                                _hover={{ color: 'red.600' }}
+                                onClick={expandAllInvalid}
+                                title="Expand all invalid rows"
+                            >
+                                <LuPlus size={12} /> Show
+                            </Button>
+                        ) : (
+                            <Button
+                                size="xs"
+                                variant="ghost"
+                                color="gray.500"
+                                _hover={{ color: 'red.600' }}
+                                onClick={collapseAllInvalid}
+                                title="Collapse all invalid rows"
+                            >
+                                <LuMinus size={12} /> Hide
+                            </Button>
+                        )}
+                    </HStack>
+                )}
             </Flex>
 
             {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
@@ -1358,6 +1621,16 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         disabled={bulkActionLoading}
                                     >
                                         📦 Bundle
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={bulkUnbundle}
+                                        disabled={bulkActionLoading}
+                                        title="Remove selected transactions from their bundles"
+                                    >
+                                        🔓 Unbundle
                                     </Button>
 
                                     <Box borderLeft="1px solid" borderColor="gray.300" h="24px" mx={1} />
@@ -1566,6 +1839,64 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                 ) : (
                                     paginatedTransactions.map(tx => {
                                         const suggestionEntry = showSuggestions ? suggestionMap.get(tx.id) : undefined;
+                                        const duplicateEntry = duplicateMap.get(tx.id);
+
+                                        // ============== Collapsed Invalid Row ==============
+                                        if (isInvalidCollapsed(tx)) {
+                                            return (
+                                                <Table.Row
+                                                    key={tx.id}
+                                                    bg="gray.200"
+                                                    _hover={{ bg: 'gray.300' }}
+                                                    cursor="pointer"
+                                                    onClick={() => toggleInvalidRow(tx.id)}
+                                                    height="20px"
+                                                >
+                                                    <Table.Cell
+                                                        colSpan={visibleColumnCount}
+                                                        py={0}
+                                                        px={0}
+                                                        position="relative"
+                                                    >
+                                                        {/* Red status band on far left */}
+                                                        <Box
+                                                            position="absolute"
+                                                            left={0}
+                                                            top={0}
+                                                            bottom={0}
+                                                            width="4px"
+                                                            bg="red.500"
+                                                        />
+                                                        <Flex align="center" gap={2} pl="10px" pr={2} minH="20px">
+                                                            <Box
+                                                                as="button"
+                                                                display="flex"
+                                                                alignItems="center"
+                                                                color="gray.400"
+                                                                _hover={{ color: 'red.500' }}
+                                                                onClick={(e: React.MouseEvent) => {
+                                                                    e.stopPropagation();
+                                                                    toggleInvalidRow(tx.id);
+                                                                }}
+                                                                title="Expand invalid row"
+                                                                flexShrink={0}
+                                                            >
+                                                                <LuPlus size={11} />
+                                                            </Box>
+                                                            <Badge colorPalette="red" variant="subtle" size="xs" fontSize="7px" px={1}>
+                                                                <LuX size={8} /> Invalid
+                                                            </Badge>
+                                                            <Text fontSize="7px" color="gray.400" truncate maxW="200px">
+                                                                {formatDateTimeCompact(tx.date_time)} · {tx.source_asset_symbol || tx.linked_asset?.symbol || '—'}
+                                                                {tx.source ? ` · ${tx.source}` : ''}
+                                                            </Text>
+                                                        </Flex>
+                                                    </Table.Cell>
+                                                </Table.Row>
+                                            );
+                                        }
+
+                                        // ============== Normal / Expanded Row ==============
                                         return (
                                             <React.Fragment key={tx.id}>
                                                 <Table.Row
@@ -1574,10 +1905,12 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                     onMouseEnter={() => {
                                                         if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
                                                         if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(tx.user_calculation_unit_id);
+                                                        if (duplicateEntry) setHoveredDuplicateGroup(duplicateEntry.groupIndex);
                                                     }}
                                                     onMouseLeave={() => {
                                                         if (suggestionEntry) setHoveredSuggestionGroup(null);
                                                         if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(null);
+                                                        if (duplicateEntry) setHoveredDuplicateGroup(null);
                                                     }}
                                                 >
                                                     <Table.Cell position="sticky" left={0} bg={getRowBgColor(tx)} zIndex={5} borderRight="2px solid" borderColor="gray.300" p={0}>
@@ -1614,7 +1947,48 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                 zIndex={1}
                                                             />
                                                         ) : null}
-                                                        <Flex gap={1} align="center" pl={(suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px'} pr={1} minH="28px">
+                                                        {/* Duplicate band (Band 3) — right of suggestion/bundle band */}
+                                                        {duplicateEntry && (
+                                                            <Box
+                                                                position="absolute"
+                                                                left="10px"
+                                                                top={0}
+                                                                bottom={0}
+                                                                width="4px"
+                                                                bg={duplicateEntry.color}
+                                                                borderRadius="2px"
+                                                                zIndex={1}
+                                                            />
+                                                        )}
+                                                        <Flex gap={1} align="center" pl={duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px'} pr={1} minH="28px">
+                                                            {/* Duplicate icon — clickable, opens popover */}
+                                                            {duplicateEntry && (
+                                                                <DuplicatePopover
+                                                                    groupHash={duplicateEntry.groupHash}
+                                                                    transactionIds={duplicateEntry.transactionIds}
+                                                                    matchCriteria={duplicateEntry.matchCriteria}
+                                                                    open={openDuplicateTxId === tx.id}
+                                                                    onOpenChange={(open) => setOpenDuplicateTxId(open ? tx.id : null)}
+                                                                    onTransactionClick={(txId) => {
+                                                                        setDrawerTransactionId(txId);
+                                                                        setIsDrawerOpen(true);
+                                                                    }}
+                                                                >
+                                                                    <Box
+                                                                        as="button"
+                                                                        display="flex"
+                                                                        alignItems="center"
+                                                                        p={0}
+                                                                        cursor="pointer"
+                                                                        color={duplicateEntry.color}
+                                                                        _hover={{ opacity: 0.7 }}
+                                                                        title={`Duplicate suspicion: ${duplicateEntry.matchCriteria}`}
+                                                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                                                    >
+                                                                        <DuplicateIcon size={11} />
+                                                                    </Box>
+                                                                </DuplicatePopover>
+                                                            )}
                                                             {/* Suggestion band icon — clickable, opens popover */}
                                                             {suggestionEntry && (
                                                                 <SuggestionPopover
@@ -1669,6 +2043,25 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                         📦 #{tx.user_calculation_unit_id}
                                                                     </Badge>
                                                                 </BundleMembershipPopover>
+                                                            )}
+                                                            {/* Collapse toggle for expanded invalid rows */}
+                                                            {tx.review_status === 'invalid' && expandedInvalidIds.has(tx.id) && (
+                                                                <Box
+                                                                    as="button"
+                                                                    display="flex"
+                                                                    alignItems="center"
+                                                                    color="red.400"
+                                                                    _hover={{ color: 'red.600' }}
+                                                                    onClick={(e: React.MouseEvent) => {
+                                                                        e.stopPropagation();
+                                                                        toggleInvalidRow(tx.id);
+                                                                    }}
+                                                                    title="Collapse invalid row"
+                                                                    p={0}
+                                                                    flexShrink={0}
+                                                                >
+                                                                    <LuMinus size={11} />
+                                                                </Box>
                                                             )}
                                                             <Checkbox.Root
                                                                 checked={selectedIds.has(tx.id)}
@@ -1741,39 +2134,21 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                         placeholder="Link account..."
                                                                         rawAccountSource={tx.source}
                                                                         rawAccountLabel={tx.source_account}
+                                                                        rawAccountNetwork={tx.network || undefined}
                                                                     />
-                                                                    {/* Show asset suggestions below the selector when editing */}
-                                                                    {tx.source_account && !tx.account_id && (() => {
-                                                                        const suggestions = getAccountSuggestions(tx.source_account, accounts);
-                                                                        return suggestions.length > 0 ? (
-                                                                            <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                                                <Text fontSize="7px" color="gray.500">Suggestions:</Text>
-                                                                                {suggestions.map((s, idx) => (
-                                                                                    <Tooltip
-                                                                                        key={idx}
-                                                                                        content={`${formatConfidence(s.confidence)} match`}
-                                                                                        openDelay={100}
-                                                                                    >
-                                                                                        <Badge
-                                                                                            size="xs"
-                                                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                            cursor="pointer"
-                                                                                            fontSize="7px"
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                updateEditValues({ account_id: s.item.id });
-                                                                                                saveAndClose();
-                                                                                            }}
-                                                                                        >
-                                                                                            {s.item.name.slice(0, 12)}{s.item.name.length > 12 ? '…' : ''}
-                                                                                            {s.confidence >= 0.9 && ' ✓'}
-                                                                                        </Badge>
-                                                                                    </Tooltip>
-                                                                                ))}
-                                                                            </HStack>
-                                                                        ) : null;
-                                                                    })()}
+                                                                    {/* Show account suggestions below the selector when editing */}
+                                                                    {tx.source_account && !tx.account_id && (
+                                                                        <AccountSuggestionBadges
+                                                                            label={tx.source_account}
+                                                                            source={tx.source}
+                                                                            network={tx.network}
+                                                                            showLabel
+                                                                            onAccept={(s) => {
+                                                                                updateEditValues({ account_id: s.id });
+                                                                                saveAndClose();
+                                                                            }}
+                                                                        />
+                                                                    )}
                                                                     {/* Secondary info shown when editing */}
                                                                     <Text fontSize="7px" color="gray.400">
                                                                         {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
@@ -1793,11 +2168,20 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     syncConnectorRunId={tx.sync_connector_run_id}
                                                                     network={tx.network}
                                                                     onClick={() => startCellEdit(tx, 'account_id')}
-                                                                    accountSuggestions={
-                                                                        !tx.account_id && tx.source_account
-                                                                            ? getAccountSuggestions(tx.source_account, accounts, 0.5, 2)
-                                                                            : []
-                                                                    }
+                                                                    onCreateAccount={!tx.account_id && tx.source_account ? () => {
+                                                                        setQuickCreateAccount({
+                                                                            txId: tx.id,
+                                                                            field: 'account_id',
+                                                                            prefill: {
+                                                                                name: tx.source_account || '',
+                                                                                account_type: tx.source_account?.startsWith('0x') ? 'wallet' : 'cex',
+                                                                                address_or_identifier: tx.source_account || '',
+                                                                            },
+                                                                            rawSource: tx.source,
+                                                                            rawLabel: tx.source_account || undefined,
+                                                                            rawNetwork: tx.network || undefined,
+                                                                        });
+                                                                    } : undefined}
                                                                     onAcceptSuggestion={async (accountId) => {
                                                                         try {
                                                                             const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
@@ -1806,13 +2190,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                 body: JSON.stringify({ account_id: accountId })
                                                                             });
                                                                             if (!response.ok) throw new Error('Failed to update');
-                                                                            // Also link the raw_account if it exists
+                                                                            // Also link the raw_account with network
                                                                             if (tx.source_account) {
                                                                                 try {
-                                                                                    await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_account)}`, {
-                                                                                        method: 'PATCH',
-                                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                                        body: JSON.stringify({ account_id: accountId })
+                                                                                    await linkRawAccount({
+                                                                                        source: tx.source,
+                                                                                        label: tx.source_account,
+                                                                                        network: tx.network || undefined,
+                                                                                        accountId,
                                                                                     });
                                                                                 } catch (linkErr) {
                                                                                     console.warn('Failed to link raw account:', linkErr);
@@ -1860,114 +2245,116 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                             size="sm"
                                                                             rawAccountSource={tx.source}
                                                                             rawAccountLabel={tx.source_from_account}
+                                                                            rawAccountNetwork={tx.network || undefined}
                                                                         />
                                                                         {/* Suggestion badges when editing */}
-                                                                        {tx.source_from_account && !tx.from_account_id && (() => {
-                                                                            const suggestions = getAccountSuggestions(tx.source_from_account, accounts, 0.5, 3);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={1} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.name} (${formatConfidence(s.confidence)} match)`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ from_account_id: s.item.id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        invalidateTransactionData();
-                                                                                                        setEditingCell(null);
-                                                                                                        setEditValues({});
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
+                                                                        {tx.source_from_account && !tx.from_account_id && (
+                                                                            <AccountSuggestionBadges
+                                                                                label={tx.source_from_account}
+                                                                                source={tx.source}
+                                                                                network={tx.network}
+                                                                                fontSize="6px"
+                                                                                onAccept={async (s) => {
+                                                                                    try {
+                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                                            body: JSON.stringify({ from_account_id: s.id })
+                                                                                        });
+                                                                                        if (!response.ok) throw new Error('Failed to update');
+                                                                                        invalidateTransactionData();
+                                                                                        setEditingCell(null);
+                                                                                        setEditValues({});
+                                                                                    } catch (err) {
+                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        )}
                                                                     </Flex>
                                                                 ) : (tx.from_account_id || tx.source_from_account) ? (
                                                                     <Flex direction="column" gap={0.5} align="start">
-                                                                        <Tooltip
-                                                                            content={
-                                                                                tx.from_account_id
-                                                                                    ? `From: ${tx.from_account_name || 'Account'}${tx.source_from_account ? ` — Source: ${tx.source_from_account}` : ''} — Click to edit`
-                                                                                    : `From: ${tx.source_from_account} - Click to link`
-                                                                            }
-                                                                            openDelay={200}
-                                                                        >
-                                                                            <Badge
-                                                                                size="xs"
-                                                                                colorPalette={tx.from_account_id ? 'cyan' : 'orange'}
-                                                                                variant="subtle"
-                                                                                cursor="pointer"
-                                                                                onClick={() => startCellEdit(tx, 'from_account_id')}
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <Tooltip
+                                                                                content={
+                                                                                    tx.from_account_id
+                                                                                        ? `From: ${tx.from_account_name || 'Account'}${tx.source_from_account ? ` — Source: ${tx.source_from_account}` : ''} — Click to edit`
+                                                                                        : `From: ${tx.source_from_account} - Click to link`
+                                                                                }
+                                                                                openDelay={200}
                                                                             >
-                                                                                {tx.from_account_id ? (
-                                                                                    (tx.from_account_name || `#${tx.from_account_id}`).slice(0, 10)
-                                                                                ) : (
-                                                                                    <>⚠ {(tx.source_from_account || '').slice(0, 8)}{(tx.source_from_account || '').length > 8 && '…'}</>
-                                                                                )}
-                                                                            </Badge>
-                                                                        </Tooltip>
+                                                                                <Badge
+                                                                                    size="xs"
+                                                                                    colorPalette={tx.from_account_id ? 'cyan' : 'orange'}
+                                                                                    variant="subtle"
+                                                                                    cursor="pointer"
+                                                                                    onClick={() => startCellEdit(tx, 'from_account_id')}
+                                                                                >
+                                                                                    {tx.from_account_id ? (
+                                                                                        (tx.from_account_name || `#${tx.from_account_id}`).slice(0, 10)
+                                                                                    ) : (
+                                                                                        <>⚠ {(tx.source_from_account || '').slice(0, 8)}{(tx.source_from_account || '').length > 8 && '…'}</>
+                                                                                    )}
+                                                                                </Badge>
+                                                                            </Tooltip>
+                                                                            {!tx.from_account_id && tx.source_from_account && (
+                                                                                <Tooltip content="Create new account" openDelay={100}>
+                                                                                    <Box
+                                                                                        as="button"
+                                                                                        onClick={(e: React.MouseEvent) => {
+                                                                                            e.stopPropagation();
+                                                                                            setQuickCreateAccount({
+                                                                                                txId: tx.id,
+                                                                                                field: 'from_account_id',
+                                                                                                prefill: {
+                                                                                                    name: tx.source_from_account || '',
+                                                                                                    account_type: tx.source_from_account?.startsWith('0x') ? 'wallet' : 'cex',
+                                                                                                    address_or_identifier: tx.source_from_account || '',
+                                                                                                },
+                                                                                                rawSource: tx.source,
+                                                                                                rawLabel: tx.source_from_account || undefined,
+                                                                                                rawNetwork: tx.network || undefined,
+                                                                                            });
+                                                                                        }}
+                                                                                        color="green.500"
+                                                                                        cursor="pointer"
+                                                                                        flexShrink={0}
+                                                                                        _hover={{ color: 'green.700' }}
+                                                                                    >
+                                                                                        <FiPlusCircle size={10} />
+                                                                                    </Box>
+                                                                                </Tooltip>
+                                                                            )}
+                                                                        </Flex>
                                                                         {/* Always-visible suggestion badges for unlinked from_account */}
-                                                                        {tx.source_from_account && !tx.from_account_id && (() => {
-                                                                            const suggestions = getAccountSuggestions(tx.source_from_account, accounts, 0.5, 2);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={0.5} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.name} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ from_account_id: s.item.id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        // Also link the raw_account
-                                                                                                        if (tx.source_from_account) {
-                                                                                                            try {
-                                                                                                                await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_from_account)}`, {
-                                                                                                                    method: 'PATCH',
-                                                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                                                    body: JSON.stringify({ account_id: s.item.id })
-                                                                                                                });
-                                                                                                            } catch { }
-                                                                                                        }
-                                                                                                        invalidateTransactionData();
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
+                                                                        {tx.source_from_account && !tx.from_account_id && (
+                                                                            <AccountSuggestionBadges
+                                                                                label={tx.source_from_account}
+                                                                                source={tx.source}
+                                                                                network={tx.network}
+                                                                                maxResults={2}
+                                                                                fontSize="6px"
+                                                                                onAccept={async (s) => {
+                                                                                    try {
+                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                                            body: JSON.stringify({ from_account_id: s.id })
+                                                                                        });
+                                                                                        if (!response.ok) throw new Error('Failed to update');
+                                                                                        // Also link the raw_account
+                                                                                        if (tx.source_from_account) {
+                                                                                            try {
+                                                                                                await linkRawAccount({ source: tx.source, label: tx.source_from_account, network: tx.network, accountId: s.id });
+                                                                                            } catch { }
+                                                                                        }
+                                                                                        invalidateTransactionData();
+                                                                                    } catch (err) {
+                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        )}
                                                                     </Flex>
                                                                 ) : (
                                                                     <Badge
@@ -2011,114 +2398,116 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                             size="sm"
                                                                             rawAccountSource={tx.source}
                                                                             rawAccountLabel={tx.source_to_account}
+                                                                            rawAccountNetwork={tx.network || undefined}
                                                                         />
                                                                         {/* Suggestion badges when editing */}
-                                                                        {tx.source_to_account && !tx.to_account_id && (() => {
-                                                                            const suggestions = getAccountSuggestions(tx.source_to_account, accounts, 0.5, 3);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={1} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.name} (${formatConfidence(s.confidence)} match)`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ to_account_id: s.item.id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        invalidateTransactionData();
-                                                                                                        setEditingCell(null);
-                                                                                                        setEditValues({});
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
+                                                                        {tx.source_to_account && !tx.to_account_id && (
+                                                                            <AccountSuggestionBadges
+                                                                                label={tx.source_to_account}
+                                                                                source={tx.source}
+                                                                                network={tx.network}
+                                                                                fontSize="6px"
+                                                                                onAccept={async (s) => {
+                                                                                    try {
+                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                                            body: JSON.stringify({ to_account_id: s.id })
+                                                                                        });
+                                                                                        if (!response.ok) throw new Error('Failed to update');
+                                                                                        invalidateTransactionData();
+                                                                                        setEditingCell(null);
+                                                                                        setEditValues({});
+                                                                                    } catch (err) {
+                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        )}
                                                                     </Flex>
                                                                 ) : (tx.to_account_id || tx.source_to_account) ? (
                                                                     <Flex direction="column" gap={0.5} align="start">
-                                                                        <Tooltip
-                                                                            content={
-                                                                                tx.to_account_id
-                                                                                    ? `To: ${tx.to_account_name || 'Account'}${tx.source_to_account ? ` — Source: ${tx.source_to_account}` : ''} — Click to edit`
-                                                                                    : `To: ${tx.source_to_account} - Click to link`
-                                                                            }
-                                                                            openDelay={200}
-                                                                        >
-                                                                            <Badge
-                                                                                size="xs"
-                                                                                colorPalette={tx.to_account_id ? 'cyan' : 'orange'}
-                                                                                variant="subtle"
-                                                                                cursor="pointer"
-                                                                                onClick={() => startCellEdit(tx, 'to_account_id')}
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <Tooltip
+                                                                                content={
+                                                                                    tx.to_account_id
+                                                                                        ? `To: ${tx.to_account_name || 'Account'}${tx.source_to_account ? ` — Source: ${tx.source_to_account}` : ''} — Click to edit`
+                                                                                        : `To: ${tx.source_to_account} - Click to link`
+                                                                                }
+                                                                                openDelay={200}
                                                                             >
-                                                                                {tx.to_account_id ? (
-                                                                                    (tx.to_account_name || `#${tx.to_account_id}`).slice(0, 10)
-                                                                                ) : (
-                                                                                    <>⚠ {(tx.source_to_account || '').slice(0, 8)}{(tx.source_to_account || '').length > 8 && '…'}</>
-                                                                                )}
-                                                                            </Badge>
-                                                                        </Tooltip>
+                                                                                <Badge
+                                                                                    size="xs"
+                                                                                    colorPalette={tx.to_account_id ? 'cyan' : 'orange'}
+                                                                                    variant="subtle"
+                                                                                    cursor="pointer"
+                                                                                    onClick={() => startCellEdit(tx, 'to_account_id')}
+                                                                                >
+                                                                                    {tx.to_account_id ? (
+                                                                                        (tx.to_account_name || `#${tx.to_account_id}`).slice(0, 10)
+                                                                                    ) : (
+                                                                                        <>⚠ {(tx.source_to_account || '').slice(0, 8)}{(tx.source_to_account || '').length > 8 && '…'}</>
+                                                                                    )}
+                                                                                </Badge>
+                                                                            </Tooltip>
+                                                                            {!tx.to_account_id && tx.source_to_account && (
+                                                                                <Tooltip content="Create new account" openDelay={100}>
+                                                                                    <Box
+                                                                                        as="button"
+                                                                                        onClick={(e: React.MouseEvent) => {
+                                                                                            e.stopPropagation();
+                                                                                            setQuickCreateAccount({
+                                                                                                txId: tx.id,
+                                                                                                field: 'to_account_id',
+                                                                                                prefill: {
+                                                                                                    name: tx.source_to_account || '',
+                                                                                                    account_type: tx.source_to_account?.startsWith('0x') ? 'wallet' : 'cex',
+                                                                                                    address_or_identifier: tx.source_to_account || '',
+                                                                                                },
+                                                                                                rawSource: tx.source,
+                                                                                                rawLabel: tx.source_to_account || undefined,
+                                                                                                rawNetwork: tx.network || undefined,
+                                                                                            });
+                                                                                        }}
+                                                                                        color="green.500"
+                                                                                        cursor="pointer"
+                                                                                        flexShrink={0}
+                                                                                        _hover={{ color: 'green.700' }}
+                                                                                    >
+                                                                                        <FiPlusCircle size={10} />
+                                                                                    </Box>
+                                                                                </Tooltip>
+                                                                            )}
+                                                                        </Flex>
                                                                         {/* Always-visible suggestion badges for unlinked to_account */}
-                                                                        {tx.source_to_account && !tx.to_account_id && (() => {
-                                                                            const suggestions = getAccountSuggestions(tx.source_to_account, accounts, 0.5, 2);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={0.5} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.name} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ to_account_id: s.item.id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        // Also link the raw_account
-                                                                                                        if (tx.source_to_account) {
-                                                                                                            try {
-                                                                                                                await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_to_account)}`, {
-                                                                                                                    method: 'PATCH',
-                                                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                                                    body: JSON.stringify({ account_id: s.item.id })
-                                                                                                                });
-                                                                                                            } catch { }
-                                                                                                        }
-                                                                                                        invalidateTransactionData();
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
+                                                                        {tx.source_to_account && !tx.to_account_id && (
+                                                                            <AccountSuggestionBadges
+                                                                                label={tx.source_to_account}
+                                                                                source={tx.source}
+                                                                                network={tx.network}
+                                                                                maxResults={2}
+                                                                                fontSize="6px"
+                                                                                onAccept={async (s) => {
+                                                                                    try {
+                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                                            method: 'PATCH',
+                                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                                            body: JSON.stringify({ to_account_id: s.id })
+                                                                                        });
+                                                                                        if (!response.ok) throw new Error('Failed to update');
+                                                                                        // Also link the raw_account
+                                                                                        if (tx.source_to_account) {
+                                                                                            try {
+                                                                                                await linkRawAccount({ source: tx.source, label: tx.source_to_account, network: tx.network, accountId: s.id });
+                                                                                            } catch { }
+                                                                                        }
+                                                                                        invalidateTransactionData();
+                                                                                    } catch (err) {
+                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        )}
                                                                     </Flex>
                                                                 ) : (
                                                                     <Badge
@@ -2296,11 +2685,34 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     />
                                                                 ) : tx.source_asset_symbol ? (
                                                                     <Flex direction="column" gap={0.5} align="start">
-                                                                        <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
-                                                                            <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
-                                                                                ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
-                                                                            </Text>
-                                                                        </Tooltip>
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
+                                                                                <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
+                                                                                    ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
+                                                                                </Text>
+                                                                            </Tooltip>
+                                                                            <Tooltip content="Create new asset" openDelay={100}>
+                                                                                <Box
+                                                                                    as="button"
+                                                                                    onClick={(e: React.MouseEvent) => {
+                                                                                        e.stopPropagation();
+                                                                                        setQuickCreateAsset({
+                                                                                            txId: tx.id,
+                                                                                            field: 'asset_id',
+                                                                                            prefill: { symbol: tx.source_asset_symbol || '' },
+                                                                                            rawSource: tx.source,
+                                                                                            rawSymbol: tx.source_asset_symbol || undefined,
+                                                                                        });
+                                                                                    }}
+                                                                                    color="green.500"
+                                                                                    cursor="pointer"
+                                                                                    flexShrink={0}
+                                                                                    _hover={{ color: 'green.700' }}
+                                                                                >
+                                                                                    <FiPlusCircle size={10} />
+                                                                                </Box>
+                                                                            </Tooltip>
+                                                                        </Flex>
                                                                         {/* Always-visible suggestion badges for unlinked asset */}
                                                                         {(() => {
                                                                             const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
@@ -2462,7 +2874,30 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     />
                                                                 ) : tx.source_price_quote_asset_symbol ? (
                                                                     <Flex direction="column" gap={0.5} align="start">
-                                                                        <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
+                                                                            <Tooltip content="Create new asset" openDelay={100}>
+                                                                                <Box
+                                                                                    as="button"
+                                                                                    onClick={(e: React.MouseEvent) => {
+                                                                                        e.stopPropagation();
+                                                                                        setQuickCreateAsset({
+                                                                                            txId: tx.id,
+                                                                                            field: 'price_quote_asset_id',
+                                                                                            prefill: { symbol: tx.source_price_quote_asset_symbol || '' },
+                                                                                            rawSource: tx.source,
+                                                                                            rawSymbol: tx.source_price_quote_asset_symbol || undefined,
+                                                                                        });
+                                                                                    }}
+                                                                                    color="green.500"
+                                                                                    cursor="pointer"
+                                                                                    flexShrink={0}
+                                                                                    _hover={{ color: 'green.700' }}
+                                                                                >
+                                                                                    <FiPlusCircle size={9} />
+                                                                                </Box>
+                                                                            </Tooltip>
+                                                                        </Flex>
                                                                         {/* Always-visible suggestion badges for unlinked price quote asset */}
                                                                         {(() => {
                                                                             const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 2);
@@ -2604,7 +3039,30 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     />
                                                                 ) : tx.source_fee_quote_asset_symbol ? (
                                                                     <Flex direction="column" gap={0.5} align="start">
-                                                                        <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
+                                                                            <Tooltip content="Create new asset" openDelay={100}>
+                                                                                <Box
+                                                                                    as="button"
+                                                                                    onClick={(e: React.MouseEvent) => {
+                                                                                        e.stopPropagation();
+                                                                                        setQuickCreateAsset({
+                                                                                            txId: tx.id,
+                                                                                            field: 'fee_quote_asset_id',
+                                                                                            prefill: { symbol: tx.source_fee_quote_asset_symbol || '' },
+                                                                                            rawSource: tx.source,
+                                                                                            rawSymbol: tx.source_fee_quote_asset_symbol || undefined,
+                                                                                        });
+                                                                                    }}
+                                                                                    color="green.500"
+                                                                                    cursor="pointer"
+                                                                                    flexShrink={0}
+                                                                                    _hover={{ color: 'green.700' }}
+                                                                                >
+                                                                                    <FiPlusCircle size={9} />
+                                                                                </Box>
+                                                                            </Tooltip>
+                                                                        </Flex>
                                                                         {/* Always-visible suggestion badges for unlinked fee quote asset */}
                                                                         {(() => {
                                                                             const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 2);
@@ -2909,8 +3367,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                         variant="ghost"
                                                                         colorPalette="blue"
                                                                         onClick={() => {
-                                                                            setTransactionToEdit(tx);
-                                                                            setShowEditorDialog(true);
+                                                                            setDrawerTransactionId(tx.id);
+                                                                            setIsDrawerOpen(true);
                                                                         }}
                                                                         title="Edit all fields"
                                                                         p={0}
@@ -3154,16 +3612,6 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     </Dialog.Positioner>
                 </Portal>
             </Dialog.Root>
-
-            {/* Transaction Editor Dialog */}
-            <TransactionEditorDialog
-                transaction={transactionToEdit}
-                isOpen={showEditorDialog}
-                onClose={() => {
-                    setShowEditorDialog(false);
-                    setTransactionToEdit(null);
-                }}
-            />
 
             {/* CSV Import Dialog */}
             <Dialog.Root open={showImportDialog} onOpenChange={(e) => setShowImportDialog(e.open)} size="xl">
@@ -3546,6 +3994,26 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         console.error('Failed to update tags:', err);
                     }
                 }}
+                onTransactionUpdate={() => {
+                    invalidateTransactionData();
+                    onDataChange?.();
+                }}
+            />
+
+            {/* Quick-Create Account Dialog */}
+            <AccountFormDialog
+                isOpen={!!quickCreateAccount}
+                onClose={handleQuickAccountCreated}
+                prefill={quickCreateAccount?.prefill}
+            />
+
+            {/* Quick-Create Asset Dialog */}
+            <AssetFormDialog
+                isOpen={!!quickCreateAsset}
+                onClose={handleQuickAssetCreated}
+                prefill={quickCreateAsset?.prefill}
+                rawAssetSource={quickCreateAsset?.rawSource}
+                rawAssetSymbol={quickCreateAsset?.rawSymbol}
             />
         </Box >
     );

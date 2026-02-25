@@ -208,8 +208,11 @@ const ConnectorsManager: React.FC = () => {
     const getAccountTypeBadge = (accountType: string) => {
         const colors: Record<string, string> = {
             cex: 'blue',
+            dex: 'cyan',
             wallet: 'purple',
             broker: 'green',
+            bank: 'teal',
+            investment: 'orange',
         };
         return (
             <Badge colorPalette={colors[accountType] || 'gray'} size="sm">

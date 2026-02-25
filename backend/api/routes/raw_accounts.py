@@ -3,12 +3,14 @@ Raw Accounts endpoints for the Trade Exporter API.
 Maps source-specific account labels/addresses to normalized accounts.
 """
 
+import time
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select, func
 from sqlalchemy import update, or_
+from sqlalchemy.exc import OperationalError
 
 from backend.db.database import get_db
 from backend.db.models import RawAccount, NormalizedTransaction
@@ -23,6 +25,7 @@ class RawAccountCreate(BaseModel):
 
     source: str
     label: str
+    network: str = ""
     account_id: Optional[int] = None
 
 
@@ -38,6 +41,7 @@ class RawAccountResponse(BaseModel):
     id: int
     source: str
     label: str
+    network: str = ""
     account_id: Optional[int] = None
     transaction_count: int = 0
     dismissed: bool = False
@@ -65,6 +69,7 @@ class BulkDismissItem(BaseModel):
     """Single item for bulk dismiss."""
     source: str = Field(..., description="Source identifier")
     label: str = Field(..., description="Raw account label")
+    network: str = Field("", description="Network/chain filter")
     reason: str = Field(..., description="Reason for dismissing")
 
 
@@ -108,38 +113,49 @@ def bulk_map_accounts(
                 
                 source = raw_account.source
                 label = raw_account.label
+                network = raw_account.network
                 raw_account.account_id = item.account_id
                 
                 # Propagate to transactions
+                # When network is set, only propagate to matching-network transactions
                 # Update from_account_id for transactions matching source_from_account
+                from_conditions = [
+                    NormalizedTransaction.source == source,
+                    NormalizedTransaction.source_from_account == label,
+                ]
+                if network:
+                    from_conditions.append(NormalizedTransaction.network == network)
                 stmt_from = (
                     update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == source,
-                        NormalizedTransaction.source_from_account == label,
-                    )
+                    .where(*from_conditions)
                     .values(from_account_id=item.account_id)
                 )
                 session.exec(stmt_from)
                 
                 # Update to_account_id for transactions matching source_to_account
+                to_conditions = [
+                    NormalizedTransaction.source == source,
+                    NormalizedTransaction.source_to_account == label,
+                ]
+                if network:
+                    to_conditions.append(NormalizedTransaction.network == network)
                 stmt_to = (
                     update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == source,
-                        NormalizedTransaction.source_to_account == label,
-                    )
+                    .where(*to_conditions)
                     .values(to_account_id=item.account_id)
                 )
                 session.exec(stmt_to)
                 
                 # Update account_id for transactions matching source_account
+                account_conditions = [
+                    NormalizedTransaction.source == source,
+                    NormalizedTransaction.source_account == label,
+                ]
+                if network:
+                    account_conditions.append(NormalizedTransaction.network == network)
                 stmt_account = (
                     update(NormalizedTransaction)
-                    .where(
-                        NormalizedTransaction.source == source,
-                        NormalizedTransaction.source_account == label,
-                    )
+                    .where(*account_conditions)
                     .values(account_id=item.account_id)
                 )
                 session.exec(stmt_account)
@@ -263,6 +279,7 @@ def list_raw_accounts(
                     id=ra.id,
                     source=ra.source,
                     label=ra.label,
+                    network=ra.network,
                     account_id=ra.account_id,
                     transaction_count=tx_count,
                     dismissed=ra.dismissed,
@@ -322,6 +339,7 @@ def count_raw_accounts(
 def get_raw_account(
     source: str,
     label: str,
+    network: str = Query("", description="Network/chain filter"),
     session: Session = Depends(get_db),
 ):
     """
@@ -329,11 +347,13 @@ def get_raw_account(
 
     - **source**: Source exchange/platform name
     - **label**: Account label/address from the source
+    - **network**: Network/chain filter (optional)
     """
     try:
         statement = select(RawAccount).where(
             RawAccount.source == source,
             RawAccount.label == label,
+            RawAccount.network == network,
         )
         raw_account = session.exec(statement).first()
 
@@ -355,6 +375,7 @@ def get_raw_account(
             id=raw_account.id,
             source=raw_account.source,
             label=raw_account.label,
+            network=raw_account.network,
             account_id=raw_account.account_id,
             transaction_count=tx_count,
             dismissed=raw_account.dismissed,
@@ -372,6 +393,7 @@ def get_raw_account(
 def get_raw_account_transactions(
     source: str,
     label: str,
+    network: str = Query("", description="Network/chain filter (optional)"),
     field_type: str = Query(
         "all",
         description="Filter by field type: 'account' (source_account), 'from' (source_from_account), 'to' (source_to_account), or 'all'"
@@ -414,6 +436,11 @@ def get_raw_account_transactions(
                 detail=f"Invalid field_type: {field_type}. Must be 'account', 'from', 'to', or 'all'"
             )
         
+        # Build base conditions (source + optional network)
+        base_conditions = [NormalizedTransaction.source == source]
+        if network:
+            base_conditions.append(NormalizedTransaction.network == network)
+
         # Query transactions matching this raw account with necessary joins
         statement = (
             select(NormalizedTransaction)
@@ -427,7 +454,7 @@ def get_raw_account_transactions(
                 joinedload(NormalizedTransaction.sync_connector_run),
             )
             .where(
-                NormalizedTransaction.source == source,
+                *base_conditions,
                 or_(*field_conditions)
             )
             .order_by(NormalizedTransaction.date_time.desc())
@@ -435,15 +462,15 @@ def get_raw_account_transactions(
         
         # Get field-specific counts for metadata
         account_count_stmt = select(func.count()).select_from(NormalizedTransaction).where(
-            NormalizedTransaction.source == source,
+            *base_conditions,
             NormalizedTransaction.source_account == label
         )
         from_count_stmt = select(func.count()).select_from(NormalizedTransaction).where(
-            NormalizedTransaction.source == source,
+            *base_conditions,
             NormalizedTransaction.source_from_account == label
         )
         to_count_stmt = select(func.count()).select_from(NormalizedTransaction).where(
-            NormalizedTransaction.source == source,
+            *base_conditions,
             NormalizedTransaction.source_to_account == label
         )
         
@@ -493,18 +520,20 @@ def create_raw_account(
         statement = select(RawAccount).where(
             RawAccount.source == raw_account_data.source,
             RawAccount.label == raw_account_data.label,
+            RawAccount.network == raw_account_data.network,
         )
         existing = session.exec(statement).first()
 
         if existing:
             raise HTTPException(
                 status_code=400,
-                detail=f"Raw account ({raw_account_data.source}, {raw_account_data.label}) already exists",
+                detail=f"Raw account ({raw_account_data.source}, {raw_account_data.label}, {raw_account_data.network}) already exists",
             )
 
         raw_account = RawAccount(
             source=raw_account_data.source,
             label=raw_account_data.label,
+            network=raw_account_data.network,
             account_id=raw_account_data.account_id,
         )
 
@@ -516,6 +545,7 @@ def create_raw_account(
             id=raw_account.id,
             source=raw_account.source,
             label=raw_account.label,
+            network=raw_account.network,
             account_id=raw_account.account_id,
         )
 
@@ -530,6 +560,7 @@ def update_raw_account(
     source: str,
     label: str,
     account_update: RawAccountUpdate,
+    network: str = Query("", description="Network/chain filter (optional)"),
     session: Session = Depends(get_db),
 ):
     """
@@ -540,73 +571,110 @@ def update_raw_account(
     - **label**: Account label/address from the source
     - **update**: Fields to update
     """
-    try:
-        statement = select(RawAccount).where(
-            RawAccount.source == source,
-            RawAccount.label == label,
-        )
-        existing = session.exec(statement).first()
-
-        if not existing:
-            raise HTTPException(status_code=404, detail="Raw account not found")
-
-        # Update account_id
-        update_data = account_update.model_dump(exclude_unset=True)
-        if "account_id" in update_data:
-            new_account_id = update_data["account_id"]
-            existing.account_id = new_account_id
-
-            # Propagate account_id to transactions where this raw account is used
-            # Use bulk updates for efficiency and reliability
-
-            # Update account_id for transactions matching source_from_account
-            stmt_from = (
-                update(NormalizedTransaction)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Lock the raw_account row first to serialize concurrent updates
+            statement = (
+                select(RawAccount)
                 .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_from_account == label,
+                    RawAccount.source == source,
+                    RawAccount.label == label,
+                    RawAccount.network == network,
                 )
-                .values(from_account_id=new_account_id)
+                .with_for_update()
             )
-            session.exec(stmt_from)
+            existing = session.exec(statement).first()
 
-            # Update account_id for transactions matching source_to_account
-            stmt_to = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_to_account == label,
+            if not existing:
+                raise HTTPException(status_code=404, detail="Raw account not found")
+
+            # Update account_id
+            update_data = account_update.model_dump(exclude_unset=True)
+            if "account_id" in update_data:
+                new_account_id = update_data["account_id"]
+                existing.account_id = new_account_id
+
+                # Propagate account_id to transactions where this raw account is used.
+                # Lock affected rows first (sorted by id) to prevent deadlocks when
+                # two concurrent updates touch overlapping transaction sets.
+                base_conditions = [NormalizedTransaction.source == source]
+                if network:
+                    base_conditions.append(NormalizedTransaction.network == network)
+
+                # Find all transaction IDs that match any of the three source fields
+                affected_ids_stmt = (
+                    select(NormalizedTransaction.id)
+                    .where(
+                        *base_conditions,
+                        or_(
+                            NormalizedTransaction.source_from_account == label,
+                            NormalizedTransaction.source_to_account == label,
+                            NormalizedTransaction.source_account == label,
+                        ),
+                    )
+                    .order_by(NormalizedTransaction.id)
+                    .with_for_update()
                 )
-                .values(to_account_id=new_account_id)
+                affected_ids = [row for row in session.exec(affected_ids_stmt).all()]
+
+                if affected_ids:
+                    # Update from_account_id
+                    stmt_from = (
+                        update(NormalizedTransaction)
+                        .where(
+                            NormalizedTransaction.id.in_(affected_ids),
+                            NormalizedTransaction.source_from_account == label,
+                        )
+                        .values(from_account_id=new_account_id)
+                    )
+                    session.exec(stmt_from)
+
+                    # Update to_account_id
+                    stmt_to = (
+                        update(NormalizedTransaction)
+                        .where(
+                            NormalizedTransaction.id.in_(affected_ids),
+                            NormalizedTransaction.source_to_account == label,
+                        )
+                        .values(to_account_id=new_account_id)
+                    )
+                    session.exec(stmt_to)
+
+                    # Update account_id (ownership)
+                    stmt_account = (
+                        update(NormalizedTransaction)
+                        .where(
+                            NormalizedTransaction.id.in_(affected_ids),
+                            NormalizedTransaction.source_account == label,
+                        )
+                        .values(account_id=new_account_id)
+                    )
+                    session.exec(stmt_account)
+
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+
+            return RawAccountResponse(
+                id=existing.id,
+                source=existing.source,
+                label=existing.label,
+                network=existing.network,
+                account_id=existing.account_id,
             )
-            session.exec(stmt_to)
 
-            # Update account_id for transactions matching source_account (ownership)
-            stmt_account = (
-                update(NormalizedTransaction)
-                .where(
-                    NormalizedTransaction.source == source,
-                    NormalizedTransaction.source_account == label,
-                )
-                .values(account_id=new_account_id)
-            )
-            session.exec(stmt_account)
-
-        session.add(existing)
-        session.commit()
-        session.refresh(existing)
-
-        return RawAccountResponse(
-            id=existing.id,
-            source=existing.source,
-            label=existing.label,
-            account_id=existing.account_id,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except OperationalError as e:
+            session.rollback()
+            if "deadlock detected" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 class UpdateTransferSourceRequest(BaseModel):
@@ -649,79 +717,92 @@ def update_transfer_source(
     Returns:
         UpdateTransferSourceResponse with update details
     """
-    try:
-        # Fetch transaction
-        tx = session.get(NormalizedTransaction, transaction_id)
-        if not tx:
-            raise HTTPException(status_code=404, detail="Transaction not found")
-        
-        # Validate field matches transaction direction
-        if request.field == "source_from_account" and tx.direction != "inflow":
-            raise HTTPException(
-                status_code=400, 
-                detail="source_from_account only applies to inflow transactions"
-            )
-        if request.field == "source_to_account" and tx.direction != "outflow":
-            raise HTTPException(
-                status_code=400, 
-                detail="source_to_account only applies to outflow transactions"
-            )
-        
-        # Update the source field
-        setattr(tx, request.field, request.value)
-        
-        raw_account_created = False
-        account_id_set = None
-        
-        # If account_id provided, create/update RawAccount mapping and set account link
-        if request.account_id is not None:
-            # Check if RawAccount mapping already exists
-            existing_raw = session.exec(
-                select(RawAccount).where(
-                    RawAccount.source == tx.source,
-                    RawAccount.label == request.value,
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Fetch transaction
+            tx = session.get(NormalizedTransaction, transaction_id)
+            if not tx:
+                raise HTTPException(status_code=404, detail="Transaction not found")
+            
+            # Validate field matches transaction direction
+            if request.field == "source_from_account" and tx.direction != "inflow":
+                raise HTTPException(
+                    status_code=400, 
+                    detail="source_from_account only applies to inflow transactions"
                 )
-            ).first()
-            
-            if existing_raw:
-                # Update existing mapping
-                existing_raw.account_id = request.account_id
-                session.add(existing_raw)
-            else:
-                # Create new mapping
-                new_raw = RawAccount(
-                    source=tx.source,
-                    label=request.value,
-                    account_id=request.account_id,
+            if request.field == "source_to_account" and tx.direction != "outflow":
+                raise HTTPException(
+                    status_code=400, 
+                    detail="source_to_account only applies to outflow transactions"
                 )
-                session.add(new_raw)
-                raw_account_created = True
             
-            # Set the corresponding account link on transaction
-            if request.field == "source_from_account":
-                tx.from_account_id = request.account_id
-            else:  # source_to_account
-                tx.to_account_id = request.account_id
+            # Update the source field
+            setattr(tx, request.field, request.value)
             
-            account_id_set = request.account_id
+            raw_account_created = False
+            account_id_set = None
+            
+            # If account_id provided, create/update RawAccount mapping and set account link
+            if request.account_id is not None:
+                # Check if RawAccount mapping already exists (FOR UPDATE to prevent deadlocks)
+                tx_network = tx.network or ""
+                existing_raw = session.exec(
+                    select(RawAccount)
+                    .where(
+                        RawAccount.source == tx.source,
+                        RawAccount.label == request.value,
+                        RawAccount.network == tx_network,
+                    )
+                    .with_for_update()
+                ).first()
+                
+                if existing_raw:
+                    # Update existing mapping
+                    existing_raw.account_id = request.account_id
+                    session.add(existing_raw)
+                else:
+                    # Create new mapping
+                    new_raw = RawAccount(
+                        source=tx.source,
+                        label=request.value,
+                        network=tx_network,
+                        account_id=request.account_id,
+                    )
+                    session.add(new_raw)
+                    raw_account_created = True
+                
+                # Set the corresponding account link on transaction
+                if request.field == "source_from_account":
+                    tx.from_account_id = request.account_id
+                else:  # source_to_account
+                    tx.to_account_id = request.account_id
+                
+                account_id_set = request.account_id
+            
+            session.add(tx)
+            session.commit()
+            session.refresh(tx)
+            
+            return UpdateTransferSourceResponse(
+                transaction_id=tx.id,
+                field=request.field,
+                value=request.value,
+                account_id_set=account_id_set,
+                raw_account_created=raw_account_created,
+            )
         
-        session.add(tx)
-        session.commit()
-        session.refresh(tx)
-        
-        return UpdateTransferSourceResponse(
-            transaction_id=tx.id,
-            field=request.field,
-            value=request.value,
-            account_id_set=account_id_set,
-            raw_account_created=raw_account_created,
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        session.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except OperationalError as e:
+            session.rollback()
+            if "deadlock detected" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(0.1 * (attempt + 1))  # backoff: 100ms, 200ms
+                continue
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.post("/{source}/{label}/dismiss")
@@ -729,6 +810,7 @@ def dismiss_raw_account(
     source: str,
     label: str,
     request: DismissRequest,
+    network: str = Query("", description="Network/chain filter (optional)"),
     session: Session = Depends(get_db),
 ):
     """
@@ -745,6 +827,7 @@ def dismiss_raw_account(
         statement = select(RawAccount).where(
             RawAccount.source == source,
             RawAccount.label == label,
+            RawAccount.network == network,
         )
         raw_account = session.exec(statement).first()
         
@@ -760,12 +843,13 @@ def dismiss_raw_account(
         session.commit()
         session.refresh(raw_account)
         
-        log.info(f"Dismissed raw account {source}:{label} - Reason: {request.reason}")
+        log.info(f"Dismissed raw account {source}:{label}:{network} - Reason: {request.reason}")
         
         return {
             "message": "Raw account dismissed successfully",
             "source": source,
             "label": label,
+            "network": network,
             "dismissed_at": raw_account.dismissed_at,
             "dismissed_reason": raw_account.dismissed_reason,
         }
@@ -782,6 +866,7 @@ def dismiss_raw_account(
 def undismiss_raw_account(
     source: str,
     label: str,
+    network: str = Query("", description="Network/chain filter (optional)"),
     session: Session = Depends(get_db),
 ):
     """
@@ -797,6 +882,7 @@ def undismiss_raw_account(
         statement = select(RawAccount).where(
             RawAccount.source == source,
             RawAccount.label == label,
+            RawAccount.network == network,
         )
         raw_account = session.exec(statement).first()
         
@@ -815,12 +901,13 @@ def undismiss_raw_account(
         session.commit()
         session.refresh(raw_account)
         
-        log.info(f"Un-dismissed raw account {source}:{label}")
+        log.info(f"Un-dismissed raw account {source}:{label}:{network}")
         
         return {
             "message": "Raw account un-dismissed successfully",
             "source": source,
             "label": label,
+            "network": network,
         }
     
     except HTTPException:
@@ -850,11 +937,12 @@ def bulk_dismiss_raw_accounts(
                 statement = select(RawAccount).where(
                     RawAccount.source == item.source,
                     RawAccount.label == item.label,
+                    RawAccount.network == item.network,
                 )
                 raw_account = session.exec(statement).first()
                 
                 if not raw_account:
-                    errors.append(f"{item.source}:{item.label} not found")
+                    errors.append(f"{item.source}:{item.label}:{item.network} not found")
                     continue
                 
                 raw_account.dismissed = True
@@ -887,6 +975,7 @@ def bulk_dismiss_raw_accounts(
 def delete_raw_account(
     source: str,
     label: str,
+    network: str = Query("", description="Network/chain filter (optional)"),
     session: Session = Depends(get_db),
 ):
     """
@@ -899,6 +988,7 @@ def delete_raw_account(
         statement = select(RawAccount).where(
             RawAccount.source == source,
             RawAccount.label == label,
+            RawAccount.network == network,
         )
         existing = session.exec(statement).first()
 
@@ -912,6 +1002,7 @@ def delete_raw_account(
             "message": "Raw account deleted successfully",
             "source": source,
             "label": label,
+            "network": network,
         }
 
     except HTTPException:

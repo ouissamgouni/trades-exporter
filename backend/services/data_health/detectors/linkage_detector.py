@@ -73,6 +73,7 @@ class LinkageIssueDetector(IssueDetector):
                 NormalizedTransaction.sync_connector_run_id,
                 issues_union.c.issue_type,
                 issues_union.c.raw_value,
+                NormalizedTransaction.network,
             )
             .join(issues_union, NormalizedTransaction.id == issues_union.c.tx_id)
             .order_by(NormalizedTransaction.date_time.desc())
@@ -120,7 +121,7 @@ class LinkageIssueDetector(IssueDetector):
         # Build TransactionIssue objects with suggestions
         issues_list = []
         for row in issues_rows:
-            tx_id, date_time, direction, quantity, source_asset_symbol, source, account_id, source_account, sync_connector_run_id, issue_type, raw_value = row
+            tx_id, date_time, direction, quantity, source_asset_symbol, source, account_id, source_account, sync_connector_run_id, issue_type, raw_value, network = row
             
             # Get suggestion based on issue type
             suggestion = None
@@ -137,6 +138,7 @@ class LinkageIssueDetector(IssueDetector):
                         all_accounts,
                         source=source,
                         account_connectors_map=account_connectors_map,
+                        network=network,
                     )
             
             # Resolve account name

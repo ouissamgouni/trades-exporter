@@ -253,7 +253,7 @@ class ConnectorEtherscanTokenTransfers(BaseConnector):
                 direction=direction,
                 source_transaction_type="token-transfer",
                 transaction_type="transfer",
-                source_asset_symbol=f"{token_symbol}_{contract_address}",
+                source_asset_symbol=token_symbol,
                 quantity=float(value),
                 fee=float(fee),
                 source_fee_quote_asset_symbol=self.native_token,

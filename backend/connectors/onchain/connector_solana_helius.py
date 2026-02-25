@@ -13,6 +13,7 @@ from typing import Dict, Any, Generator, Optional
 
 from backend.connectors.base.base_connector import BaseConnector
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("solana_helius")
@@ -436,7 +437,7 @@ class ConnectorSolanaHelius(BaseConnector):
                     # Addresses
                     source_from_account=from_address,
                     source_to_account=to_address,
-                    network="solana",
+                    network=normalize_network("solana"),
                     token_contract_address=None,
                 )
             
@@ -493,7 +494,7 @@ class ConnectorSolanaHelius(BaseConnector):
                     # Addresses
                     source_from_account=from_address,
                     source_to_account=to_address,
-                    network="solana",
+                    network=normalize_network("solana"),
                     token_contract_address=mint,
                 )
             
@@ -525,7 +526,7 @@ class ConnectorSolanaHelius(BaseConnector):
                     # Addresses
                     source_from_account=self.wallet_address,
                     source_to_account=None,
-                    network="solana",
+                    network=normalize_network("solana"),
                     token_contract_address=None,
                 )
             

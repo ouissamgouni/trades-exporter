@@ -129,7 +129,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Binance Transactions",
                 required_config=[],
-                optional_config=["symbols", "start_date"],
+                optional_config=["symbols", "start_datetime"],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
@@ -141,7 +141,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Binance Deposits",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -152,7 +152,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Binance Withdrawals",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -163,7 +163,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="MEXC Transactions (API)",
                 required_config=[],
-                optional_config=["symbols", "start_date"],
+                optional_config=["symbols", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="mexc-transactions",
                 supports_balance=True,
@@ -189,7 +189,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="MEXC Deposits",
                 required_config=[],
-                optional_config=["currencies", "start_date"],
+                optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="mexc-deposits",
             )
@@ -214,7 +214,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="MEXC Withdrawals",
                 required_config=[],
-                optional_config=["currencies", "start_date"],
+                optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -238,7 +238,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="OKX Transactions",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
@@ -250,7 +250,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="OKX Convert",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -261,7 +261,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="OKX Deposits",
                 required_config=[],
-                optional_config=["currencies", "start_date"],
+                optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -272,7 +272,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="OKX Withdrawals",
                 required_config=[],
-                optional_config=["currencies", "start_date"],
+                optional_config=["currencies", "start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -309,7 +309,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Coinbase Transactions",
                 required_config=[],
-                optional_config=["symbols", "start_date"],
+                optional_config=["symbols", "start_datetime"],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
@@ -321,7 +321,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Coinbase Deposits",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -332,7 +332,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Coinbase Withdrawals",
                 required_config=[],
-                optional_config=["start_date"],
+                optional_config=["start_datetime"],
                 supports_incremental_sync=True,
             )
         )
@@ -351,10 +351,11 @@ class ConnectorRegistry:
                     "polygon",
                     "arbitrum",
                     "optimism",
+                    "hyperevm",
                 ],
                 required_config=["chain", "address"],
                 optional_config=[
-                    "start_block",
+                    "start_datetime",
                     "include_internal_txs",
                     "include_token_transfers",
                 ],
@@ -371,7 +372,7 @@ class ConnectorRegistry:
                 supported_chains=["ethereum"],
                 required_config=["address"],
                 optional_config=[
-                    "start_block",
+                    "start_datetime",
                     "include_internal_txs",
                     "include_token_transfers",
                 ],
@@ -531,6 +532,13 @@ class ConnectorRegistry:
                 base_url="https://optimism.blockscout.com/api/v2",
                 chain_id=10,
                 native_currency="ETH",
+                native_token_decimals=18,
+            ),
+            "hyperevm": ChainConfig(
+                explorer_type="blockscout",
+                base_url="https://hyperliquid.cloud.blockscout.com/api/v2",
+                chain_id=998,
+                native_currency="HYPE",
                 native_token_decimals=18,
             ),
         }

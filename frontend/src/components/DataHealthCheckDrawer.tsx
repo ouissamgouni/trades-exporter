@@ -51,7 +51,9 @@ import { AssetLinkageTable } from './tables/wrappers/AssetLinkageTable';
 import { defaultFilterState } from './TransactionFilters';
 import { formatQuantity } from '../utils/numberUtils';
 import { AccountMappingPanel } from './AccountMappingPanel';
+import { DuplicateResolutionPanel } from './DuplicateResolutionPanel';
 import { useDataHealth } from '../contexts/DataHealthContext';
+import { linkRawAccount, linkRawAsset } from '../utils/rawAccountApi';
 
 // =============================================================================
 // Constants & Configuration
@@ -165,30 +167,10 @@ const IssueRow: React.FC<IssueRowProps> = ({
 
     // API call to map raw asset/account
     const mapRawItem = async (id: number) => {
-        const endpoint = isAccountIssue ? 'raw-accounts' : 'raw-assets';
-        const idKey = isAccountIssue ? 'account_id' : 'asset_id';
-        const createBody = isAccountIssue
-            ? { label: issue.raw_value, source: issue.source, account_id: id }
-            : { symbol: issue.raw_value, source: issue.source, asset_id: id };
-
-        const response = await fetch(
-            `${API_URL}/${endpoint}/${encodeURIComponent(issue.source)}/${encodeURIComponent(issue.raw_value)}`,
-            {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [idKey]: id }),
-            }
-        );
-
-        // If not found, create it
-        if (response.status === 404) {
-            await fetch(`${API_URL}/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(createBody),
-            });
-        } else if (!response.ok) {
-            throw new Error(`Failed to map ${isAccountIssue ? 'account' : 'asset'}`);
+        if (isAccountIssue) {
+            await linkRawAccount({ source: issue.source, label: issue.raw_value, network: issue.network || undefined, accountId: id });
+        } else {
+            await linkRawAsset({ source: issue.source, symbol: issue.raw_value, network: issue.network || undefined, assetId: id });
         }
     };
 
@@ -355,6 +337,7 @@ const IssueRow: React.FC<IssueRowProps> = ({
                                     defaultName={issue.raw_value}
                                     rawAccountLabel={issue.raw_value}
                                     rawAccountSource={issue.source}
+                                    rawAccountNetwork={issue.network || undefined}
                                 />
                             ) : (
                                 <AssetSelector
@@ -415,8 +398,8 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const [isApplyingAll, setIsApplyingAll] = useState(false);
-    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'pending'>('missing-data');
-    
+    const [activeTab, setActiveTab] = useState<'missing-data' | 'assets-linkage' | 'accounts-linkage' | 'pending' | 'duplicates'>('missing-data');
+
     // Get dismiss state from context
     const { showDismissedMappings, setShowDismissedMappings } = useDataHealth();
 
@@ -584,18 +567,11 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                 });
             }
 
-            // Map accounts individually (deduplicated)
+            // Map accounts individually (deduplicated) — with network
             if (accountIssues.length) {
-                const unique = new Map(accountIssues.map(i => [`${i.source}:${i.raw_value}`, i]));
+                const unique = new Map(accountIssues.map(i => [`${i.source}:${i.raw_value}:${i.network || ''}`, i]));
                 for (const issue of unique.values()) {
-                    await fetch(
-                        `${API_URL}/raw-accounts/${encodeURIComponent(issue.source)}/${encodeURIComponent(issue.raw_value)}`,
-                        {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ account_id: issue.suggestion!.id }),
-                        }
-                    );
+                    await linkRawAccount({ source: issue.source, label: issue.raw_value, network: issue.network || undefined, accountId: issue.suggestion!.id });
                 }
             }
 
@@ -621,11 +597,13 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
     // Check if current tab has issues - check BOTH status count AND actual fetched data
     const statusHasIssues = activeTab === 'missing-data'
         ? (data?.missing_data_issues_count ?? 0) > 0
-        : activeTab === 'linkage'
+        : activeTab === 'assets-linkage'
             ? (data?.linkage_issues_count ?? 0) > 0
-            : activeTab === 'transfer'
+            : activeTab === 'accounts-linkage'
                 ? (data?.transfer_issues_count ?? 0) > 0
-                : false;
+                : activeTab === 'duplicates'
+                    ? (data?.duplicate_count ?? 0) > 0
+                    : false;
 
     // Use fetched data if available, otherwise fall back to status count
     const hasIssues = issuesTotal > 0 || (statusHasIssues && issues.length === 0);
@@ -806,6 +784,14 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                             </Badge>
                                         )}
                                     </Tabs.Trigger>
+                                    <Tabs.Trigger value="duplicates">
+                                        Duplicates
+                                        {(data.duplicate_count || 0) > 0 && (
+                                            <Badge ml={1} size="xs" colorPalette="red">
+                                                {data.duplicate_count}
+                                            </Badge>
+                                        )}
+                                    </Tabs.Trigger>
                                 </Tabs.List>
                             </Tabs.Root>
 
@@ -920,6 +906,21 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                         includeDismissed={showDismissedMappings}
                                         onDismissedChange={setShowDismissedMappings}
                                     />
+                                </Box>
+                            )}
+
+                            {/* Duplicates tab content */}
+                            {activeTab === 'duplicates' && (
+                                <Box>
+                                    {(data.duplicate_count || 0) > 0 ? (
+                                        <DuplicateResolutionPanel compactMode={true} />
+                                    ) : (
+                                        <Box p={3} bg="green.50" borderRadius="md" textAlign="center">
+                                            <Text fontSize="sm" color="green.700">
+                                                No duplicate transactions found! ✓
+                                            </Text>
+                                        </Box>
+                                    )}
                                 </Box>
                             )}
 

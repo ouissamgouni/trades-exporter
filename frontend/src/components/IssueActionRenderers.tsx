@@ -27,6 +27,7 @@ import { AssetSelector } from './AssetSelector';
 import { AccountSelector } from './AccountSelector';
 import { toaster } from './ui/toaster';
 import { ActionRendererProps } from './UnifiedIssueTransactionTable';
+import { linkRawAccount, linkRawAsset } from '../utils/rawAccountApi';
 
 // =============================================================================
 // Asset/Account Mapping Renderers
@@ -53,30 +54,10 @@ export const LinkageActionRenderer: React.FC<ActionRendererProps> = ({
 
     // API call to map raw asset/account
     const mapRawItem = async (id: number) => {
-        const endpoint = isAccountIssue ? 'raw-accounts' : 'raw-assets';
-        const idKey = isAccountIssue ? 'account_id' : 'asset_id';
-        const createBody = isAccountIssue
-            ? { label: issue.raw_value, source: issue.source, account_id: id }
-            : { symbol: issue.raw_value, source: issue.source, asset_id: id };
-
-        const response = await fetch(
-            `${API_URL}/${endpoint}/${encodeURIComponent(issue.source)}/${encodeURIComponent(issue.raw_value)}`,
-            {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [idKey]: id }),
-            }
-        );
-
-        // If not found, create it
-        if (response.status === 404) {
-            await fetch(`${API_URL}/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(createBody),
-            });
-        } else if (!response.ok) {
-            throw new Error(`Failed to map ${isAccountIssue ? 'account' : 'asset'}`);
+        if (isAccountIssue) {
+            await linkRawAccount({ source: issue.source, label: issue.raw_value, network: issue.network || undefined, accountId: id });
+        } else {
+            await linkRawAsset({ source: issue.source, symbol: issue.raw_value, network: issue.network || undefined, assetId: id });
         }
     };
 
@@ -151,6 +132,7 @@ export const LinkageActionRenderer: React.FC<ActionRendererProps> = ({
                     defaultName={issue.raw_value}
                     rawAccountLabel={issue.raw_value}
                     rawAccountSource={issue.source}
+                    rawAccountNetwork={issue.network || undefined}
                 />
             ) : (
                 <AssetSelector

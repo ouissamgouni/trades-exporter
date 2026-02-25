@@ -97,7 +97,7 @@ class ValidationWarning(BaseModel):
 class AppliedFilters(BaseModel):
     """Filters that were actually applied to the query."""
     
-    review_status: Optional[str] = None
+    review_statuses: List[str] = Field(default_factory=list)
     taxability: Optional[str] = None
     sources: List[str] = Field(default_factory=list)
     account_ids: List[int] = Field(default_factory=list)

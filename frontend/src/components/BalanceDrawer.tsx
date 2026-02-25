@@ -19,9 +19,10 @@ import {
     Badge,
     Button,
 } from '@chakra-ui/react';
-import { FiX, FiDollarSign, FiRefreshCw, FiChevronDown, FiChevronRight } from 'react-icons/fi';
+import { FiX, FiPieChart, FiRefreshCw, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { useBalance } from '../hooks/useBalance';
 import { AssetBadge } from './AssetBadge';
+import { AccountBadge } from './AccountBadge';
 import { API_URL } from '../types';
 import type { ConnectorBalance, AccountBalance, AssetRef } from '../types';
 
@@ -99,7 +100,7 @@ function flattenConnectorBalance(cb: ConnectorBalance): AccountHolding[] {
 }
 
 /** Build the token-aggregated list from AccountBalance[] */
-function aggregateFromAccounts(abs: AccountBalance[]): AggregatedToken[] {
+function aggregateFromAccounts(abs: AccountBalance[], txCounts?: Map<string, number>): AggregatedToken[] {
     const map = new Map<string, AggregatedToken>();
 
     for (const ab of abs) {
@@ -124,11 +125,13 @@ function aggregateFromAccounts(abs: AccountBalance[]): AggregatedToken[] {
         }
     }
 
-    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+    return Array.from(map.values()).sort((a, b) =>
+        (txCounts?.get(b.symbol.toUpperCase()) ?? 0) - (txCounts?.get(a.symbol.toUpperCase()) ?? 0)
+    );
 }
 
 /** Build the token-aggregated list from a single ConnectorBalance */
-function aggregateFromConnector(cb: ConnectorBalance): AggregatedToken[] {
+function aggregateFromConnector(cb: ConnectorBalance, txCounts?: Map<string, number>): AggregatedToken[] {
     const map = new Map<string, AggregatedToken>();
 
     for (const entry of cb.entries) {
@@ -149,11 +152,13 @@ function aggregateFromConnector(cb: ConnectorBalance): AggregatedToken[] {
         });
     }
 
-    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+    return Array.from(map.values()).sort((a, b) =>
+        (txCounts?.get(b.symbol.toUpperCase()) ?? 0) - (txCounts?.get(a.symbol.toUpperCase()) ?? 0)
+    );
 }
 
 /** Build the account-aggregated list from AccountBalance[] */
-function aggregateByAccount(abs: AccountBalance[]): AggregatedAccount[] {
+function aggregateByAccount(abs: AccountBalance[], txCounts?: Map<string, number>): AggregatedAccount[] {
     const map = new Map<string, AggregatedAccount>();
 
     for (const ab of abs) {
@@ -185,7 +190,10 @@ function aggregateByAccount(abs: AccountBalance[]): AggregatedAccount[] {
         agg.totalTokens = agg.entries.length;
     }
 
-    return Array.from(map.values()).sort((a, b) => b.totalTokens - a.totalTokens);
+    const accountTxScore = (acc: AggregatedAccount) =>
+        acc.entries.reduce((sum, e) => sum + (txCounts?.get(e.symbol.toUpperCase()) ?? 0), 0);
+
+    return Array.from(map.values()).sort((a, b) => accountTxScore(b) - accountTxScore(a));
 }
 
 /** Build the account-aggregated list from a single ConnectorBalance */
@@ -255,9 +263,16 @@ const TokenRow: React.FC<{
                         showWarning={false}
                     />
                     {showDrillDown && (
-                        <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
-                            {token.accounts.length} acct{token.accounts.length !== 1 ? 's' : ''}
-                        </Badge>
+                        <Flex gap={0.5} flexWrap="wrap" maxW="180px">
+                            {token.accounts.slice(0, 3).map((h, i) => (
+                                <AccountBadge key={`${h.accountName}-${i}`} accountName={h.accountName} size="xs" />
+                            ))}
+                            {token.accounts.length > 3 && (
+                                <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
+                                    +{token.accounts.length - 3}
+                                </Badge>
+                            )}
+                        </Flex>
                     )}
                 </Flex>
                 <Text fontSize="sm" fontFamily="mono" fontWeight="medium">
@@ -277,9 +292,7 @@ const TokenRow: React.FC<{
                             px={1}
                         >
                             <Flex align="center" gap={1} flexWrap="wrap">
-                                <Text fontSize="xs" color="gray.700">
-                                    {h.accountName}
-                                </Text>
+                                <AccountBadge accountName={h.accountName} size="xs" />
                                 <Badge size="xs" variant="outline" colorPalette="blue" fontSize="2xs">
                                     {h.connectorType}
                                 </Badge>
@@ -322,16 +335,6 @@ const AccountRow: React.FC<{ account: AggregatedAccount; assetMap: Map<string, A
                     <Text fontSize="sm" fontWeight="medium">
                         {account.accountName}
                     </Text>
-                    {account.accountType && (
-                        <Badge size="xs" variant="subtle" colorPalette="purple" fontSize="2xs">
-                            {account.accountType}
-                        </Badge>
-                    )}
-                    {account.group && (
-                        <Badge size="xs" variant="outline" colorPalette="teal" fontSize="2xs">
-                            {account.group}
-                        </Badge>
-                    )}
                     <Badge size="xs" variant="subtle" colorPalette="gray" fontSize="2xs">
                         {account.totalTokens} token{account.totalTokens !== 1 ? 's' : ''}
                     </Badge>
@@ -446,6 +449,22 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
             .catch(() => { });
     }, [isOpen]);
 
+    // Fetch transaction counts for sorting
+    const [txCounts, setTxCounts] = useState<Map<string, number>>(new Map());
+    useEffect(() => {
+        if (!isOpen) return;
+        fetch(`${API_URL}/assets/transaction-counts`)
+            .then((r) => r.json())
+            .then((data: Record<string, number>) => {
+                const map = new Map<string, number>();
+                for (const [sym, cnt] of Object.entries(data)) {
+                    map.set(sym.toUpperCase(), cnt);
+                }
+                setTxCounts(map);
+            })
+            .catch(() => { });
+    }, [isOpen]);
+
     // Trigger fetch when drawer opens
     useEffect(() => {
         if (!isOpen) {
@@ -469,13 +488,13 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
     // Aggregate tokens (by asset view)
     const tokens = useMemo<AggregatedToken[]>(() => {
         if (mode === 'connector' && connectorBalance) {
-            return aggregateFromConnector(connectorBalance);
+            return aggregateFromConnector(connectorBalance, txCounts);
         }
         if ((mode === 'account' || mode === 'global') && accountBalances.length > 0) {
-            return aggregateFromAccounts(accountBalances);
+            return aggregateFromAccounts(accountBalances, txCounts);
         }
         return [];
-    }, [mode, connectorBalance, accountBalances]);
+    }, [mode, connectorBalance, accountBalances, txCounts]);
 
     // Aggregate by account view
     const accountAggs = useMemo<AggregatedAccount[]>(() => {
@@ -483,10 +502,10 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
             return aggregateByAccountFromConnector(connectorBalance);
         }
         if ((mode === 'account' || mode === 'global') && accountBalances.length > 0) {
-            return aggregateByAccount(accountBalances);
+            return aggregateByAccount(accountBalances, txCounts);
         }
         return [];
-    }, [mode, connectorBalance, accountBalances]);
+    }, [mode, connectorBalance, accountBalances, txCounts]);
 
     // Show drill-down only when multiple accounts could contribute
     const showDrillDown = mode === 'global' || (mode === 'account' && accountBalances.length > 0);
@@ -552,7 +571,7 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
                     zIndex={1}
                 >
                     <Flex align="center" gap={1.5}>
-                        <FiDollarSign size={16} />
+                        <FiPieChart size={16} />
                         <Text fontWeight="semibold" fontSize="sm">
                             {headerTitle}
                         </Text>

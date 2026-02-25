@@ -36,6 +36,7 @@ const statusColorMap: Record<ConnectorSyncStatus, string> = {
     completed: 'green',
     failed: 'red',
     skipped: 'yellow',
+    warning: 'orange',
 };
 
 const formatDuration = (startedAt?: string, finishedAt?: string): string => {

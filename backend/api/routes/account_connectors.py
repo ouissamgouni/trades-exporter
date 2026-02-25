@@ -51,6 +51,7 @@ class AccountConnectorCreate(BaseModel):
     config: Dict[str, Any] = {}
     credentials_ref: Optional[str] = None
     sync_priority: int = 100
+    color: Optional[str] = None
 
 
 class AccountConnectorUpdate(BaseModel):
@@ -60,6 +61,7 @@ class AccountConnectorUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = None
     credentials_ref: Optional[str] = None
     sync_priority: Optional[int] = None
+    color: Optional[str] = None
 
 
 class AccountConnectorResponse(BaseModel):
@@ -75,6 +77,7 @@ class AccountConnectorResponse(BaseModel):
     last_sync_at: Optional[str]
     last_sync_status: Optional[str]
     last_error: Optional[str]
+    color: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -90,6 +93,7 @@ class ConnectorTypeInfo(BaseModel):
     supported_chains: Optional[List[str]] = None
     required_config: List[str]
     optional_config: List[str]
+    is_file_connector: bool = False
 
 
 # ============================================================================
@@ -111,6 +115,7 @@ def get_available_connectors() -> Dict[str, ConnectorTypeInfo]:
                 supported_chains=info.supported_chains,
                 required_config=info.required_config,
                 optional_config=info.optional_config,
+                is_file_connector=info.is_file_connector,
             )
     return available
 
@@ -169,6 +174,7 @@ def connector_to_response(connector: AccountConnector) -> AccountConnectorRespon
         else None,
         last_sync_status=connector.last_sync_status,
         last_error=connector.last_error,
+        color=connector.color,
         created_at=connector.created_at.isoformat(),
         updated_at=connector.updated_at.isoformat(),
     )
@@ -302,6 +308,7 @@ def create_account_connector(
         config=connector_data.config,
         credentials_ref=connector_data.credentials_ref,
         sync_priority=connector_data.sync_priority,
+        color=connector_data.color,
     )
 
     created = repo.create(connector)
@@ -340,6 +347,8 @@ def update_account_connector(
         connector.credentials_ref = connector_data.credentials_ref
     if connector_data.sync_priority is not None:
         connector.sync_priority = connector_data.sync_priority
+    if connector_data.color is not None:
+        connector.color = connector_data.color
 
     updated = repo.update(connector)
     session.commit()

@@ -62,7 +62,7 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
     onAccepted,
     onDismissed,
     onTransactionClick,
-    maxSuggestions = 10,
+    maxSuggestions = 100,
     mb,
 }) => {
     const queryClient = useQueryClient();
@@ -70,20 +70,23 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
     const [taxabilityOverrides, setTaxabilityOverrides] = useState<Record<number, TaxabilityStatus>>({});
     const [acceptingIndex, setAcceptingIndex] = useState<number | null>(null);
 
-    // Fetch suggestions
+    // Fetch suggestions — shares the ['bundleSuggestions'] cache with App.tsx
     const {
-        data: suggestions = [],
+        data: allSuggestions = [],
         isLoading,
         error,
         refetch,
     } = useQuery({
-        queryKey: ['bundleSuggestions', maxSuggestions],
+        queryKey: ['bundleSuggestions'],
         queryFn: async () => {
-            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=${maxSuggestions}`);
+            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=100`);
             if (!response.ok) throw new Error('Failed to fetch suggestions');
             return response.json() as Promise<BundleSuggestion[]>;
         },
     });
+
+    // Slice client-side to the requested max
+    const suggestions = allSuggestions.slice(0, maxSuggestions);
 
     // Accept a suggestion
     const acceptSuggestion = async (suggestion: BundleSuggestion, idx: number) => {

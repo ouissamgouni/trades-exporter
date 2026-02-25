@@ -162,7 +162,7 @@ class ConnectorBlockscoutTokenTransfers(BlockscoutConnectorBase):
                 "token_name": token_name,
             }
 
-            source_asset_symbol = f"{token_symbol}_{contract_address}"
+            source_asset_symbol = token_symbol
             source_transaction_id = f"{tx_hash}_{tx_log_index}"
 
             normalized = NormalizedTransaction(

@@ -3,6 +3,7 @@ Transaction endpoints for the Trade Exporter API.
 """
 
 import uuid
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from typing import List, Optional, Dict, Any
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import OperationalError
 
 from backend.api.schemas import (
     TransactionResponse, 
@@ -1365,10 +1367,15 @@ def list_transactions(
             joinedload(NormalizedTransaction.sync_connector_run),
         )
 
-        if applied_filters.review_status:
-            statement = statement.where(
-                NormalizedTransaction.review_status == applied_filters.review_status
-            )
+        if applied_filters.review_statuses:
+            if len(applied_filters.review_statuses) == 1:
+                statement = statement.where(
+                    NormalizedTransaction.review_status == applied_filters.review_statuses[0]
+                )
+            else:
+                statement = statement.where(
+                    NormalizedTransaction.review_status.in_(applied_filters.review_statuses)
+                )
 
         if applied_filters.taxability:
             statement = statement.where(
@@ -1798,9 +1805,9 @@ def bulk_update_status(
             errors.append(f"Transaction {tx_id} not found")
             continue
 
-        tx.status = request.status
+        tx.review_status = request.review_status.value
         if request.taxability_status:
-            tx.taxability_status = request.taxability_status
+            tx.taxability_status = request.taxability_status.value
 
         session.add(tx)
         updated += 1
@@ -1880,12 +1887,14 @@ def _upsert_raw_account_mappings(
         if not source_label or not new_account_id:
             continue
 
-        # Try to find existing raw_account
+        # Try to find existing raw_account (FOR UPDATE to prevent deadlocks)
         existing = session.exec(
-            select(RawAccount).where(
+            select(RawAccount)
+            .where(
                 RawAccount.source == source,
                 RawAccount.label == source_label,
             )
+            .with_for_update()
         ).first()
 
         if existing:
@@ -1911,44 +1920,52 @@ def update_transaction(
     - **transaction_id**: The ID of the transaction to update
     - **update**: Fields to update (only provided fields will be changed)
     """
-    try:
-        statement = (
-            select(NormalizedTransaction)
-            .options(
-                joinedload(NormalizedTransaction.asset),
-                joinedload(NormalizedTransaction.price_quote_asset),
-                joinedload(NormalizedTransaction.fee_quote_asset),
-                joinedload(NormalizedTransaction.account_rel),
-                joinedload(NormalizedTransaction.from_account),
-                joinedload(NormalizedTransaction.to_account),
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            statement = (
+                select(NormalizedTransaction)
+                .options(
+                    joinedload(NormalizedTransaction.asset),
+                    joinedload(NormalizedTransaction.price_quote_asset),
+                    joinedload(NormalizedTransaction.fee_quote_asset),
+                    joinedload(NormalizedTransaction.account_rel),
+                    joinedload(NormalizedTransaction.from_account),
+                    joinedload(NormalizedTransaction.to_account),
+                )
+                .where(NormalizedTransaction.id == transaction_id)
             )
-            .where(NormalizedTransaction.id == transaction_id)
-        )
-        tx = session.exec(statement).first()
+            tx = session.exec(statement).first()
 
-        if not tx:
-            raise HTTPException(status_code=404, detail="Transaction not found")
+            if not tx:
+                raise HTTPException(status_code=404, detail="Transaction not found")
 
-        # Update only provided fields
-        update_data = update.model_dump(exclude_unset=True)
-        print(f"DEBUG: Updating transaction {transaction_id} with data: {update_data}")
-        
-        for key, value in update_data.items():
-            setattr(tx, key, value)
+            # Update only provided fields
+            update_data = update.model_dump(exclude_unset=True)
+            
+            for key, value in update_data.items():
+                setattr(tx, key, value)
 
-        # Auto-create/update raw_account mappings when account FKs are set
-        _upsert_raw_account_mappings(session, tx, update_data)
+            # Auto-create/update raw_account mappings when account FKs are set
+            _upsert_raw_account_mappings(session, tx, update_data)
 
-        session.add(tx)
-        session.commit()
-        session.refresh(tx)
+            session.add(tx)
+            session.commit()
+            session.refresh(tx)
 
-        return _build_transaction_response(tx, session)
+            return _build_transaction_response(tx, session)
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except OperationalError as e:
+            session.rollback()
+            if "deadlock detected" in str(e).lower() and attempt < max_retries - 1:
+                time.sleep(0.1 * (attempt + 1))  # backoff: 100ms, 200ms
+                continue
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 class CreateTransactionResponse(BaseModel):
@@ -2119,7 +2136,7 @@ def bulk_update_transactions(
                 continue
 
             if request.review_status:
-                tx.review_status = request.review_status
+                tx.review_status = request.review_status.value
             if request.transaction_type:
                 tx.transaction_type = request.transaction_type
 

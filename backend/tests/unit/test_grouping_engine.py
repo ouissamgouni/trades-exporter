@@ -147,6 +147,117 @@ class TestRule1NetworkTxMatch:
         ]
         assert len(transfer_suggestions) == 0
 
+    def test_same_network_tx_id_different_source_tx_id(self, engine):
+        """Should match when both sides share the same network_transaction_id
+        even if source_transaction_id differs (e.g. Moralis appends _erc20_6).
+
+        Real-world case: Binance withdrawal + Moralis wallet inflow both record
+        the same on-chain tx hash, but Moralis uses a derived source_transaction_id.
+        """
+        now = datetime.now()
+        tx_hash = "0x589f340766cc5d5b2bb8bff0d12644f3669b63b823ef5c57b6ee898bb7c4107c"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="USDC",
+            asset_id=226,
+            account_id=310,
+            dt=now,
+            quantity=Decimal("132.540760"),
+            network="arbitrum",
+            network_transaction_id=tx_hash,
+            source_transaction_id="e68b2a8d66464925880c0626fcd309f0",  # CEX internal ID
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            asset_id=226,
+            account_id=318,
+            dt=now + timedelta(seconds=41),
+            quantity=Decimal("132.540760"),
+            network="arbitrum",
+            network_transaction_id=tx_hash,  # Same on-chain hash
+            source_transaction_id=f"{tx_hash}_erc20_6",  # Moralis-derived ID with suffix
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        transfer_suggestions = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfer_suggestions) == 1
+        assert transfer_suggestions[0].confidence == 1.0
+        assert set(transfer_suggestions[0].transaction_ids) == {1, 2}
+        assert "network tx hash match" in transfer_suggestions[0].reason.lower()
+
+    def test_same_network_tx_id_requires_same_asset(self, engine):
+        """network_transaction_id match should not pair transactions with different assets."""
+        now = datetime.now()
+        tx_hash = "0xabc123"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="USDC",
+            asset_id=100,
+            account_id=1,
+            dt=now,
+            network_transaction_id=tx_hash,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=200,
+            account_id=2,
+            dt=now + timedelta(seconds=10),
+            network_transaction_id=tx_hash,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should NOT match via Rule 1 (different assets)
+        rule1_matches = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and s.confidence == 1.0
+        ]
+        assert len(rule1_matches) == 0
+
+    def test_same_network_tx_id_requires_different_accounts(self, engine):
+        """network_transaction_id match should not pair transactions on the same account."""
+        now = datetime.now()
+        tx_hash = "0xabc123"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=100,
+            account_id=1,
+            dt=now,
+            network_transaction_id=tx_hash,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            asset_id=100,
+            account_id=1,  # Same account
+            dt=now + timedelta(seconds=10),
+            network_transaction_id=tx_hash,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Should NOT match via Rule 1 strategy (b) — same account
+        rule1_matches = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and s.confidence == 1.0
+        ]
+        assert len(rule1_matches) == 0
+
 
 # =============================================================================
 # Rule 2: Same Asset Transfer Tests

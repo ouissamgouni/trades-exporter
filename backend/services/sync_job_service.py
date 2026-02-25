@@ -110,6 +110,8 @@ class ConnectorProgress:
     connector_id: int
     connector_type: str
     account_name: str
+    account_type: Optional[str] = None
+    account_group: Optional[str] = None
     status: ConnectorSyncStatus = ConnectorSyncStatus.QUEUED
     test_mode: bool = False
     connector_run_id: Optional[int] = None  # Database connector run ID for history tracking
@@ -158,6 +160,8 @@ class ConnectorProgress:
             "connector_id": self.connector_id,
             "connector_type": self.connector_type,
             "account_name": self.account_name,
+            "account_type": self.account_type,
+            "account_group": self.account_group,
             "status": self.status.value,
             "test_mode": self.test_mode,
             "connector_run_id": self.connector_run_id,
@@ -1491,13 +1495,33 @@ class SyncJobService:
                                     f"📅 Connector {connector_id} performing full sync (override)"
                                 )
                         else:
-                            # Compute default from max transaction datetime
+                            # Compute default from max transaction datetime,
+                            # then fall back to start_datetime from connector config
                             max_dt = tx_repo.get_max_datetime_by_connector(connector_id)
-                            connector_since_map[connector_id] = max_dt
                             if max_dt:
+                                connector_since_map[connector_id] = max_dt
                                 self.logger.info(
                                     f"📅 Connector {connector_id} computed since: {max_dt}"
                                 )
+                            else:
+                                # No transactions yet — use start_datetime from config if set
+                                ac = next((ac for ac, _ in enabled_connectors if ac.id == connector_id), None)
+                                cfg_start_raw = (ac.config or {}).get("start_datetime") if ac else None
+                                cfg_start = None
+                                if cfg_start_raw:
+                                    try:
+                                        cfg_start = datetime.fromisoformat(str(cfg_start_raw))
+                                    except (ValueError, TypeError):
+                                        cfg_start = None
+                                connector_since_map[connector_id] = cfg_start
+                                if cfg_start:
+                                    self.logger.info(
+                                        f"📅 Connector {connector_id} using config start_datetime: {cfg_start}"
+                                    )
+                                else:
+                                    self.logger.info(
+                                        f"📅 Connector {connector_id} performing full sync (no history, no config start)"
+                                    )
 
                 # Initialize per-connector statuses BEFORE creating hub
                 # This ensures the progress callback can find connector IDs
@@ -1514,6 +1538,8 @@ class SyncJobService:
                         connector_id=connector_id,
                         connector_type=account_connector.connector_type,
                         account_name=account.name,
+                        account_type=account.account_type,
+                        account_group=account.group,
                         status=ConnectorSyncStatus.QUEUED,
                         test_mode=effective_test_mode,
                     )

@@ -58,8 +58,11 @@ export enum ReviewStatus {
  */
 export enum AccountType {
   CEX = 'cex',
+  DEX = 'dex',
   BROKER = 'broker',
   WALLET = 'wallet',
+  BANK = 'bank',
+  INVESTMENT = 'investment',
 }
 
 /**
@@ -182,8 +185,11 @@ export function getReviewStatusLabel(status: ReviewStatus | string): string {
 export function getAccountTypeLabel(type: AccountType | string): string {
   const labels: Record<string, string> = {
     [AccountType.CEX]: 'Centralized Exchange',
+    [AccountType.DEX]: 'Decentralized Exchange',
     [AccountType.BROKER]: 'Broker',
     [AccountType.WALLET]: 'Wallet',
+    [AccountType.BANK]: 'Bank',
+    [AccountType.INVESTMENT]: 'Investment',
   };
   return labels[type] || type;
 }

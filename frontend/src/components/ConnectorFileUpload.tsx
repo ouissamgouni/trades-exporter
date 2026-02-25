@@ -9,7 +9,7 @@ import {
     Stack,
     IconButton,
 } from '@chakra-ui/react';
-import { LuUpload, LuFile, LuX, LuCheck, LuHistory, LuTrash2, LuTriangleAlert, LuEye } from 'react-icons/lu';
+import { LuUpload, LuFile, LuX, LuCheck, LuHistory, LuTrash2, LuTriangleAlert, LuEye, LuPin } from 'react-icons/lu';
 import { API_URL } from '../types';
 import { FileUploadPreviewModal } from './FileUploadPreviewModal';
 
@@ -47,6 +47,7 @@ interface ConnectorFileUploadProps {
     connectorType: string;
     disabled?: boolean;
     onUploadComplete: () => void;
+    defaultFileName?: string;
 }
 
 const formatDate = (isoString: string | null): string => {
@@ -80,6 +81,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
     connectorType,
     disabled = false,
     onUploadComplete,
+    defaultFileName,
 }) => {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<FileUploadPreview | null>(null);
@@ -254,7 +256,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
         setShowPreviewModal(false);
     }, []);
 
-    const handleModalConfirm = useCallback(async () => {
+    const handleModalConfirm = useCallback(async (asDefault?: boolean) => {
         setShowPreviewModal(false);
         if (!selectedFile) return;
 
@@ -266,8 +268,12 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
             const formData = new FormData();
             formData.append('file', selectedFile);
 
+            const url = asDefault
+                ? `${API_URL}/connectors/${connectorId}/upload-file/confirm?as_default=true`
+                : `${API_URL}/connectors/${connectorId}/upload-file/confirm`;
+
             const response = await fetch(
-                `${API_URL}/connectors/${connectorId}/upload-file/confirm`,
+                url,
                 {
                     method: 'POST',
                     body: formData,
@@ -284,7 +290,8 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
             // Success - clear state, show message, refresh history, and notify parent
             setSelectedFile(null);
             setPreview(null);
-            setSuccessMessage(`✅ File "${result.filename}" uploaded successfully. It will be processed on the next sync.`);
+            const defaultLabel = asDefault ? ' as default' : '';
+            setSuccessMessage(`✅ File "${result.filename}" uploaded${defaultLabel} successfully. It will be processed on the next sync.`);
             setShowHistory(true);
             fetchImportHistory();
             onUploadComplete();
@@ -318,6 +325,25 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                 borderColor="gray.200"
                 bg="gray.50"
             >
+                {/* Default File Indicator */}
+                {defaultFileName && (
+                    <Box
+                        mb={3}
+                        p={2}
+                        bg="teal.50"
+                        borderRadius="md"
+                        borderWidth="1px"
+                        borderColor="teal.200"
+                    >
+                        <Flex align="center" gap={2} minW={0}>
+                            <LuPin size={12} style={{ flexShrink: 0 }} />
+                            <Text fontSize="xs" color="teal.700" truncate>
+                                Default: <Text as="span" fontWeight="medium">{defaultFileName}</Text>
+                            </Text>
+                        </Flex>
+                    </Box>
+                )}
+
                 {/* Pending Imports Indicator */}
                 {pendingImports.length > 0 && (
                     <Box
@@ -489,7 +515,8 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                                                 colorPalette={
                                                     entry.status === 'completed' ? 'green' :
                                                         entry.status === 'pending' ? 'yellow' :
-                                                            entry.status === 'processing' ? 'blue' : 'red'
+                                                            entry.status === 'processing' ? 'blue' :
+                                                                entry.status === 'default' ? 'teal' : 'red'
                                                 }
                                             >
                                                 {entry.status}
@@ -638,6 +665,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     open={showPreviewModal}
                     onClose={handleModalClose}
                     onConfirm={handleModalConfirm}
+                    hasExistingDefault={!!defaultFileName}
                     connectorId={connectorId}
                     fileName={selectedFile.name}
                     fileSize={selectedFile.size}

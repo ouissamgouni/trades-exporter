@@ -15,7 +15,8 @@ interface AssetSelectorProps {
     onAssetCreated?: () => void;
     placeholder?: string;
     defaultSymbol?: string; // Pre-fill new asset symbol
-    size?: 'sm' | 'md';
+    size?: 'xs' | 'sm' | 'md';
+    disabled?: boolean;
     // For linking raw_asset when creating new asset from transaction context
     rawAssetSource?: string;
     rawAssetSymbol?: string;
@@ -31,6 +32,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     placeholder = 'Search or select asset...',
     defaultSymbol = '',
     size = 'sm',
+    disabled,
     rawAssetSource,
     rawAssetSymbol,
     dimensionData: propsDimensionData,

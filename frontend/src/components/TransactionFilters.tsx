@@ -10,6 +10,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { LuCalendar, LuCheck, LuChevronDown, LuFilter, LuRotateCcw, LuSearch, LuX } from 'react-icons/lu';
+import { useQuery } from '@tanstack/react-query';
 import { API_URL } from '../types';
 import type { AppliedFilters as BackendAppliedFilters, FilterMetadata, ValidationWarning } from '../types';
 import { toDateInputString, getDateRangePreset } from '../utils/dateUtils';
@@ -75,12 +76,12 @@ export interface TransactionFilterState {
     transactionIds?: number[];
 }
 
-// Default filter state - excludes invalid transactions by default
+// Default filter state - includes all statuses; invalid rows are collapsed client-side
 export const defaultFilterState: TransactionFilterState = {
-    reviewStatus: ['pending', 'valid'],  // Exclude invalid by default
+    reviewStatus: ['pending', 'valid', 'invalid'],  // Fetch all; invalid collapsed in UI
     taxability: [],
-    pnlCalVersion: undefined,
-    pnlCalInclusionsStatus: undefined,
+    versionId: undefined,
+    inclusionStatus: undefined,
     sources: [],
     accountIds: [],
     assetIds: [],
@@ -911,8 +912,16 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     filterMetadata,
     resetFilters,
 }) => {
-    const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
-    const [loading, setLoading] = useState(true);
+    const { data: filterOptions = null, isLoading: loading } = useQuery({
+        queryKey: ['filterOptions'],
+        queryFn: async () => {
+            const response = await fetch(`${API_URL}/transactions/filter-options`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json() as Promise<FilterOptions>;
+        },
+        staleTime: 5 * 60_000, // Cache for 5 minutes
+        retry: 2,
+    });
 
     // Local state for pending filter changes
     const [localFilters, setLocalFilters] = useState<TransactionFilterState>(filters);
@@ -935,60 +944,34 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         }
     }, [filters]);
 
-    // Fetch filter options from backend - ONLY once on mount to prevent cascade
-    // This prevents the infinite loop where applying filters triggers refetch of filter options
-    useEffect(() => {
-        const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), 5000); // 5 second timeout
-
-        const fetchFilterOptions = async () => {
-            try {
-                // Fetch all filter options without applying current filters
-                // This provides the full list of available options
-                const url = `${API_URL}/transactions/filter-options`;
-                const response = await fetch(url, { signal: abortController.signal });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    setFilterOptions(data);
-                } else {
-                    console.error('Failed to fetch filter options: HTTP', response.status);
-                }
-            } catch (err) {
-                if (err instanceof Error && err.name === 'AbortError') {
-                    console.warn('Filter options fetch timed out after 5s');
-                } else {
-                    console.error('Failed to fetch filter options:', err);
-                }
-                // On error, keep existing filter options if available
-            } finally {
-                clearTimeout(timeoutId);
-                setLoading(false);
-            }
-        };
-
-        fetchFilterOptions();
-
-        // Cleanup: abort fetch if component unmounts
-        return () => {
-            clearTimeout(timeoutId);
-            abortController.abort();
-        };
-    }, []); // Empty array - only fetch once on mount, never refetch
-
     // Check if there are unapplied changes
     const hasChanges = !filtersEqual(localFilters, filters);
 
-    // Count active filters
+    // The effective reset target: resetFilters prop or defaultFilterState
+    const effectiveResetState = resetFilters || defaultFilterState;
+
+    // Count active filters relative to the reset state,
+    // so filters that are part of the default/reset state aren't counted
     const getActiveFilterCount = (): number => {
         let count = 0;
-        if (localFilters.dateFrom || localFilters.dateTo) count++;
+        const resetDates = effectiveResetState;
+        if ((localFilters.dateFrom || localFilters.dateTo) &&
+            (localFilters.dateFrom !== resetDates.dateFrom || localFilters.dateTo !== resetDates.dateTo)) count++;
         FILTER_DEFS.forEach(def => {
             const values = localFilters[def.key];
-            if (Array.isArray(values) && values.length > 0) count++;
+            const resetValues = effectiveResetState[def.key];
+            if (Array.isArray(values) && Array.isArray(resetValues)) {
+                // Only count as active if different from reset state
+                if (JSON.stringify(values) !== JSON.stringify(resetValues)) count++;
+            } else if (Array.isArray(values) && values.length > 0) {
+                count++;
+            }
         });
         return count;
     };
+
+    // Whether filters differ from the reset state (used to show "Clear All" button)
+    const canReset = !filtersEqual(localFilters, effectiveResetState);
 
     // Update local filter state
     const updateLocalFilter = <K extends keyof TransactionFilterState>(
@@ -1029,7 +1012,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
         // Use backend applied filters if available, otherwise fall back to local filters
         const sourceFilters = appliedFilters || {
-            review_status: localFilters.reviewStatus[0],
+            review_statuses: localFilters.reviewStatus,
             taxability: localFilters.taxability[0],
             sources: localFilters.sources,
             account_ids: localFilters.accountIds,
@@ -1042,6 +1025,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             networks: localFilters.networks,
             date_from: localFilters.dateFrom,
             date_to: localFilters.dateTo,
+            pnl_cal_version: localFilters.versionId ? Number(localFilters.versionId) : undefined,
+            pnl_cal_inclusions_status: localFilters.inclusionStatus,
         };
 
         // P&L Calculation Version chip
@@ -1049,7 +1034,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             chips.push({
                 id: 'pnl-version',
                 label: `P&L Version: #${sourceFilters.pnl_cal_version}`,
-                filterKey: 'pnlCalVersion',
+                filterKey: 'versionId',
                 value: String(sourceFilters.pnl_cal_version),
                 category: 'P&L Context',
                 color: 'purple',
@@ -1062,7 +1047,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             chips.push({
                 id: 'pnl-inclusion',
                 label: statusLabel,
-                filterKey: 'pnlCalInclusionsStatus',
+                filterKey: 'inclusionStatus',
                 value: sourceFilters.pnl_cal_inclusions_status,
                 category: 'P&L Context',
                 color: sourceFilters.pnl_cal_inclusions_status === 'included' ? 'green' : 'orange',
@@ -1093,8 +1078,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             let values: (string | number)[] = [];
 
             // Map backend applied_filters to filter def keys
-            if (def.key === 'reviewStatus' && sourceFilters.review_status) {
-                values = [sourceFilters.review_status];
+            if (def.key === 'reviewStatus' && sourceFilters.review_statuses?.length) {
+                values = sourceFilters.review_statuses;
             } else if (def.key === 'taxability' && sourceFilters.taxability) {
                 values = [sourceFilters.taxability];
             } else if (def.key === 'sources') {
@@ -1141,7 +1126,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
 
     // Handle removing a chip
     const handleRemoveChip = (chip: FilterChipData) => {
-        if (chip.filterKey === 'pnlCalVersion' || chip.filterKey === 'pnlCalInclusionsStatus') {
+        if (chip.filterKey === 'versionId' || chip.filterKey === 'inclusionStatus') {
             // P&L context filters cannot be removed individually - they define the view context
             // User should navigate away from P&L audit view instead
             return;
@@ -1229,7 +1214,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                         )}
                     </Flex>
                     <Flex gap={1.5} onClick={(e) => e.stopPropagation()}>
-                        {activeFilterCount > 0 && (
+                        {canReset && (
                             <Button
                                 size="xs"
                                 variant="ghost"

@@ -12,8 +12,16 @@ tasks:
     desc: Stop dev database
     dotenv: [.env, .env.dev]
     cmds:
-      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev stop
-      - echo "✅ Dev database stopped"
+      - |
+        ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
+        # Confirm no containers remain for this compose project
+        CONTAINERS=$(docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev ps -q || true)
+        if [ -n "$CONTAINERS" ]; then
+          echo "❌ Dev database still present: $CONTAINERS"
+          exit 1
+        else
+          echo "✅ Dev database stopped"
+        fi
 
   dev:backend:
     desc: Stop dev backend

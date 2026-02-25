@@ -13,6 +13,7 @@ from backend.connectors.onchain.near.base_near_connector import (
     NEAR_DIVISOR,
 )
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("near_ft_txns")
@@ -290,7 +291,7 @@ class ConnectorNearFtTxns(NearConnectorBase):
                 # Addresses
                 source_from_account=from_account,
                 source_to_account=to_account,
-                network="near",
+                network=normalize_network("near"),
                 token_contract_address=contract,
             )
 

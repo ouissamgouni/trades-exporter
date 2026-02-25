@@ -24,9 +24,11 @@ NETWORK_ALIASES: dict[str, str] = {
     "eth": "ethereum",
     "erc20": "ethereum",
     "erc-20": "ethereum",
+    "eth-erc20": "ethereum",
     "eth-ethereum mainnet": "ethereum",
     "eth-ethereum": "ethereum",
     "ethereum mainnet": "ethereum",
+    "ethereum(erc20)": "ethereum",
     "usdt-erc20": "ethereum",
     "usdc-erc20": "ethereum",
     # BNB Smart Chain (BSC)
@@ -42,6 +44,7 @@ NETWORK_ALIASES: dict[str, str] = {
     # Solana
     "sol": "solana",
     "sol-solana": "solana",
+    "solana(sol)": "solana",
     # Bitcoin
     "btc": "bitcoin",
     "btc-bitcoin": "bitcoin",
@@ -74,10 +77,13 @@ NETWORK_ALIASES: dict[str, str] = {
     "ripple": "xrp",
     # Cardano
     "ada": "cardano",
+    "ada-cardano": "cardano",
     # NEAR
     "near protocol": "near",
     # SUI
     "sui network": "sui",
+    "sui-sui": "sui",
+    "usdc-sui": "sui",
     # Bittensor
     "tao": "bittensor",
     "bittensor network": "bittensor",
@@ -92,6 +98,14 @@ NETWORK_ALIASES: dict[str, str] = {
     "ltc": "litecoin",
     # Dogecoin
     "doge": "dogecoin",
+    # HyperEVM (Hyperliquid)
+    "hyperevm": "hyperevm",
+    "hyper evm": "hyperevm",
+    "hyperliquid": "hyperevm",
+    "hyperliquid evm": "hyperevm",
+    # Sonic
+    "s": "sonic",
+    "sonic network": "sonic",
 }
 
 # Identity mappings (canonical -> canonical) are implied by the lookup logic.
@@ -120,6 +134,8 @@ NETWORK_DISPLAY_NAMES: dict[str, str] = {
     "cosmos": "Cosmos",
     "litecoin": "Litecoin",
     "dogecoin": "Dogecoin",
+    "hyperevm": "HyperEVM",
+    "sonic": "Sonic",
 }
 
 

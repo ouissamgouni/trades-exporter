@@ -9,11 +9,11 @@ import {
     Portal,
     Text,
     Textarea,
-    Switch,
 } from '@chakra-ui/react';
 
 import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
-import FileDropzone from './FileDropzone';
+import { ColorPaletteField } from './ColorPaletteField';
+import { getNextAvailableEntityColor } from '../hooks/useEntityColors';
 
 interface ConnectorFormDialogProps {
     isOpen: boolean;
@@ -22,6 +22,8 @@ interface ConnectorFormDialogProps {
     connector?: AccountConnector | null;
     connectorTypes: ConnectorTypeInfo[];
     existingConnectorTypes: string[];
+    /** Colors already assigned to sibling connectors (for dedup hints) */
+    usedColors?: string[];
 }
 
 const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
@@ -31,6 +33,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     connector,
     connectorTypes,
     existingConnectorTypes,
+    usedColors = [],
 }) => {
     const [formData, setFormData] = useState({
         connector_type: '',
@@ -38,13 +41,13 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         config: {} as Record<string, any>,
         credentials_ref: '',
         sync_priority: 100,
+        color: null as string | null,
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [testMode, setTestMode] = useState(false);
-    const [fixtureFile, setFixtureFile] = useState<File | null>(null);
-    const [uploadingFixture, setUploadingFixture] = useState(false);
-    const [currentFixtureName, setCurrentFixtureName] = useState<string | null>(null);
+    const [defaultFile, setDefaultFile] = useState<File | null>(null);
+    const [defaultFileName, setDefaultFileName] = useState<string | null>(null);
+    const [uploadingDefault, setUploadingDefault] = useState(false);
 
     // Track previous isOpen state to detect when dialog opens
     const prevIsOpenRef = React.useRef(isOpen);
@@ -72,46 +75,33 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 config: connector.config || {},
                 credentials_ref: connector.credentials_ref || '',
                 sync_priority: connector.sync_priority,
+                color: connector.color || null,
             });
-            // Load test mode state from config
-            setTestMode(connector.config?.test_mode || false);
-            // Fetch fixture status if editing
-            if (connector.id) {
-                fetch(`${API_URL}/fixtures/connectors/${connector.id}/test-fixture`)
-                    .then(res => res.ok ? res.json() : null)
-                    .then(data => {
-                        if (data?.has_fixture) {
-                            setCurrentFixtureName(`${connector.id}.json (${data.item_count} items)`);
-                        } else {
-                            setCurrentFixtureName(null);
-                        }
-                    })
-                    .catch(() => setCurrentFixtureName(null));
-            }
+            // Load default file name if set
+            setDefaultFileName(connector.config?.default_file_name || null);
+            setDefaultFile(null);
         } else {
             // Reset form for creating new connector
             const firstAvailable = connectorTypes.find(t => !existingConnectorTypes.includes(t.type));
-            
+
             // Auto-detect chain from account address for wallet accounts
             const isWalletAccount = account.account_type === 'wallet';
             const accountAddress = account.address_or_identifier;
             const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
-            
+
             const initialConfig: Record<string, any> = {};
             if (detectedChain && firstAvailable?.supported_chains?.includes(detectedChain)) {
                 initialConfig.chain = detectedChain;
             }
-            
+
             setFormData({
                 connector_type: firstAvailable?.type || '',
                 enabled: true,
                 config: initialConfig,
                 credentials_ref: '',
                 sync_priority: 100,
+                color: getNextAvailableEntityColor(usedColors),
             });
-            setTestMode(false);
-            setCurrentFixtureName(null);
-            setFixtureFile(null);
         }
         setError('');
     }, [isOpen, connector, connectorTypes, existingConnectorTypes, account]);
@@ -122,15 +112,8 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         setError('');
 
         try {
-            // Build config with test_mode if enabled
             const configToSave = { ...formData.config };
-            if (testMode) {
-                configToSave.test_mode = true;
-            } else {
-                delete configToSave.test_mode;
-                delete configToSave.test_file_path;
-            }
-            
+
             // Remove address from config if it's inherited from account
             // (Backend will auto-inherit it)
             const isWalletAccount = account.account_type === 'wallet';
@@ -145,6 +128,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 config: configToSave,
                 credentials_ref: formData.credentials_ref || null,
                 sync_priority: formData.sync_priority,
+                color: formData.color || null,
             };
 
             const url = connector
@@ -166,23 +150,23 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
 
             const savedConnector = await response.json();
 
-            // Upload fixture file if test mode is enabled and we have a file
-            if (testMode && fixtureFile && savedConnector.id) {
-                setUploadingFixture(true);
-                const fixtureFormData = new FormData();
-                fixtureFormData.append('file', fixtureFile);
+            // Upload default file for file connectors if a file was selected
+            if (defaultFile && savedConnector.id) {
+                setUploadingDefault(true);
+                const fileFormData = new FormData();
+                fileFormData.append('file', defaultFile);
 
-                const fixtureResponse = await fetch(
-                    `${API_URL}/fixtures/connectors/${savedConnector.id}/test-fixture`,
+                const uploadResponse = await fetch(
+                    `${API_URL}/connectors/${savedConnector.id}/upload-file/confirm?as_default=true`,
                     {
                         method: 'POST',
-                        body: fixtureFormData,
+                        body: fileFormData,
                     }
                 );
 
-                if (!fixtureResponse.ok) {
-                    const errorData = await fixtureResponse.json();
-                    throw new Error(errorData.detail || 'Failed to upload fixture');
+                if (!uploadResponse.ok) {
+                    const errorData = await uploadResponse.json();
+                    throw new Error(errorData.detail || 'Failed to upload default file');
                 }
             }
 
@@ -191,24 +175,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             setError(err.message || 'An error occurred');
         } finally {
             setLoading(false);
-            setUploadingFixture(false);
-        }
-    };
-
-    const handleRemoveFixture = async () => {
-        if (!connector?.id) return;
-
-        try {
-            const response = await fetch(
-                `${API_URL}/fixtures/connectors/${connector.id}/test-fixture`,
-                { method: 'DELETE' }
-            );
-            if (response.ok) {
-                setCurrentFixtureName(null);
-                setTestMode(false);
-            }
-        } catch (err) {
-            console.error('Failed to remove fixture:', err);
+            setUploadingDefault(false);
         }
     };
 
@@ -222,24 +189,24 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     // Detect blockchain chain from address format
     const detectChainFromAddress = (address?: string): string | null => {
         if (!address) return null;
-        
+
         // EVM chains (Ethereum, Base, etc.) start with 0x
         if (address.startsWith('0x')) {
             // Default to ethereum for EVM addresses
             // Could be any EVM chain, but we'll let user choose if needed
             return 'ethereum';
         }
-        
+
         // XRP addresses start with 'r'
         if (address.startsWith('r') && address.length >= 25 && address.length <= 35) {
             return 'xrp';
         }
-        
+
         // Solana addresses are base58 encoded, typically 32-44 characters
         if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
             return 'solana';
         }
-        
+
         return null;
     };
 
@@ -247,7 +214,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         if (!selectedTypeInfo) return null;
 
         const fields = [];
-        
+
         // Check if this is a wallet account with an address
         const isWalletAccount = account.account_type === 'wallet';
         const accountAddress = account.address_or_identifier;
@@ -258,8 +225,10 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         if (selectedTypeInfo.supported_chains?.length) {
             // For wallet accounts, auto-select detected chain
             const chainValue = detectedChain || formData.config.chain || '';
-            const isChainInherited = isWalletAccount && detectedChain;
-            
+            // Only lock chain for unambiguous address formats (XRP, Solana)
+            // EVM addresses (0x) are valid on multiple chains, so pre-select but don't lock
+            const isChainInherited = isWalletAccount && detectedChain && detectedChain !== 'ethereum';
+
             fields.push(
                 <Box key="chain">
                     <Text fontWeight="medium" mb={1}>
@@ -283,6 +252,11 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                             Detected from account address
                         </Text>
                     )}
+                    {isWalletAccount && detectedChain === 'ethereum' && (
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                            Pre-selected from address (EVM-compatible)
+                        </Text>
+                    )}
                 </Box>
             );
         }
@@ -292,7 +266,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             selectedTypeInfo.optional_config.includes('address')) {
             const isRequired = selectedTypeInfo.required_config.includes('address');
             const addressValue = shouldInheritAddress ? accountAddress : (formData.config.address || '');
-            
+
             fields.push(
                 <Box key="address">
                     <Text fontWeight="medium" mb={1}>
@@ -342,31 +316,19 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             );
         }
 
-        // Start block for on-chain
-        if (selectedTypeInfo.optional_config.includes('start_block')) {
+        // Start datetime for configuring default sync start
+        if (selectedTypeInfo.optional_config.includes('start_datetime')) {
             fields.push(
-                <Box key="start_block">
-                    <Text fontWeight="medium" mb={1}>Start Block</Text>
-                    <Input
-                        type="number"
-                        value={formData.config.start_block || ''}
-                        onChange={(e) => updateConfig('start_block', parseInt(e.target.value) || null)}
-                        placeholder="Leave empty for all history"
-                    />
-                </Box>
-            );
-        }
-
-        // Start date for CEX
-        if (selectedTypeInfo.optional_config.includes('start_date')) {
-            fields.push(
-                <Box key="start_date">
+                <Box key="start_datetime">
                     <Text fontWeight="medium" mb={1}>Start Date</Text>
                     <Input
-                        type="date"
-                        value={formData.config.start_date || ''}
-                        onChange={(e) => updateConfig('start_date', e.target.value)}
+                        type="datetime-local"
+                        value={formData.config.start_datetime || ''}
+                        onChange={(e) => updateConfig('start_datetime', e.target.value || null)}
                     />
+                    <Text fontSize="xs" color="gray.500" mt={1}>
+                        Default start date for incremental sync
+                    </Text>
                 </Box>
             );
         }
@@ -459,54 +421,65 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                                         </Text>
                                     </Box>
 
-                                    {/* Test Mode Section */}
-                                    <Box
-                                        p={4}
-                                        borderWidth="1px"
-                                        borderRadius="md"
-                                        borderColor={testMode ? 'orange.300' : 'gray.200'}
-                                        bg={testMode ? 'orange.50' : 'transparent'}
-                                    >
-                                        <Flex align="center" justify="space-between" mb={testMode ? 3 : 0}>
-                                            <Box>
-                                                <Text fontWeight="medium">🧪 Test Mode</Text>
-                                                <Text fontSize="sm" color="gray.500">
-                                                    Use fixture data instead of live API
-                                                </Text>
-                                            </Box>
-                                            <Switch.Root
-                                                checked={testMode}
-                                                onCheckedChange={(e) => setTestMode(e.checked)}
-                                            >
-                                                <Switch.HiddenInput />
-                                                <Switch.Control>
-                                                    <Switch.Thumb />
-                                                </Switch.Control>
-                                            </Switch.Root>
-                                        </Flex>
+                                    {/* Color */}
+                                    <ColorPaletteField
+                                        value={formData.color}
+                                        onChange={(color) => setFormData(prev => ({ ...prev, color }))}
+                                        usedColors={usedColors}
+                                    />
 
-                                        {testMode && (
-                                            <Box mt={3}>
-                                                <Text fontSize="sm" fontWeight="medium" mb={2}>
-                                                    Test Fixture File
-                                                </Text>
-                                                <FileDropzone
-                                                    onFileSelect={(file) => setFixtureFile(file)}
-                                                    currentFileName={fixtureFile?.name || currentFixtureName}
-                                                    onRemove={connector?.id ? handleRemoveFixture : () => setFixtureFile(null)}
-                                                    accept=".json"
-                                                    maxSize={1024 * 1024}
-                                                    disabled={uploadingFixture}
-                                                />
-                                                {!connector && !fixtureFile && (
-                                                    <Text fontSize="xs" color="gray.500" mt={2}>
-                                                        Upload a JSON array of transactions to use for testing.
-                                                        You can also upload after creating the connector.
+                                    {/* Default File for file connectors */}
+                                    {selectedTypeInfo?.is_file_connector && (
+                                        <Box
+                                            p={4}
+                                            borderWidth="1px"
+                                            borderRadius="md"
+                                            borderColor={defaultFile || defaultFileName ? 'blue.200' : 'gray.200'}
+                                            bg={defaultFile || defaultFileName ? 'blue.50' : 'transparent'}
+                                        >
+                                            <Text fontWeight="medium" mb={2}>📁 Default File</Text>
+                                            <Text fontSize="sm" color="gray.500" mb={3}>
+                                                Set a default file to auto-use when syncing this connector.
+                                            </Text>
+                                            {defaultFileName && !defaultFile && (
+                                                <Flex align="center" gap={2} mb={2}>
+                                                    <Text fontSize="sm" color="blue.600">
+                                                        Current: {defaultFileName}
                                                     </Text>
-                                                )}
-                                            </Box>
-                                        )}
-                                    </Box>
+                                                    <Button
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        colorPalette="red"
+                                                        onClick={() => setDefaultFileName(null)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </Flex>
+                                            )}
+                                            <Input
+                                                type="file"
+                                                accept={selectedTypeInfo.type.includes('okx') ? '.csv' : '.xlsx,.xls'}
+                                                onChange={(e) => {
+                                                    const file = e.target.files?.[0] || null;
+                                                    setDefaultFile(file);
+                                                }}
+                                                disabled={uploadingDefault}
+                                                size="sm"
+                                            />
+                                            {defaultFile && (
+                                                <Text fontSize="xs" color="blue.600" mt={1}>
+                                                    Will upload: {defaultFile.name}
+                                                </Text>
+                                            )}
+                                            {!connector && (
+                                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                                    File will be uploaded after the connector is created.
+                                                </Text>
+                                            )}
+                                        </Box>
+                                    )}
+
+
                                 </Flex>
                             </Dialog.Body>
 

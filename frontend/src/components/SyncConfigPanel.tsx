@@ -18,8 +18,8 @@ import {
     VStack,
 } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown } from 'react-icons/lu';
-import { FiDollarSign } from 'react-icons/fi';
+import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown, LuPlus } from 'react-icons/lu';
+import { FiPieChart } from 'react-icons/fi';
 import {
     API_URL,
     ConnectorOverride,
@@ -31,10 +31,13 @@ import { ConnectorFileUpload } from './ConnectorFileUpload';
 import { ConnectorJobSnippet } from './ConnectorJobSnippet';
 import { JobDetailDrawer } from './JobDetailDrawer';
 import { BalanceDrawer } from './BalanceDrawer';
+import { ConnectorPickerModal } from './ConnectorPickerModal';
+import { useSyncConfigStore } from '../hooks/useSyncConfigStore';
 import { formatAddress, formatChainName } from '../utils/addressUtils';
 
 interface SyncConfigPanelProps {
     onOverridesChange: (overrides: ConnectorOverride[]) => void;
+    onConfigDataChange?: (connectors: EnabledConnector[], accounts: AccountSummary[]) => void;
     disabled?: boolean;
 }
 
@@ -125,6 +128,7 @@ const AccountCard: React.FC<{
     onFileUploadComplete: (connectorId: number) => void;
     onJobSnippetClick: (connector: EnabledConnector) => void;
     onBalanceClick: (accountId: number) => void;
+    onRemove?: () => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
     disabled?: boolean;
@@ -145,6 +149,7 @@ const AccountCard: React.FC<{
     onFileUploadComplete,
     onJobSnippetClick,
     onBalanceClick,
+    onRemove,
     isCollapsed,
     onToggleCollapse,
     disabled,
@@ -236,6 +241,27 @@ const AccountCard: React.FC<{
                             </VStack>
                         </Flex>
                         <Flex align="center" gap={2}>
+                            {onRemove && (
+                                <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
+                                    <Tooltip.Trigger asChild>
+                                        <IconButton
+                                            aria-label="Remove from sync config"
+                                            size="2xs"
+                                            variant="ghost"
+                                            colorPalette="red"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onRemove();
+                                            }}
+                                        >
+                                            <LuX size={13} />
+                                        </IconButton>
+                                    </Tooltip.Trigger>
+                                    <Tooltip.Positioner>
+                                        <Tooltip.Content>Remove from sync config</Tooltip.Content>
+                                    </Tooltip.Positioner>
+                                </Tooltip.Root>
+                            )}
                             <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
                                 <Tooltip.Trigger asChild>
                                     <IconButton
@@ -248,7 +274,7 @@ const AccountCard: React.FC<{
                                             onBalanceClick(account.id);
                                         }}
                                     >
-                                        <FiDollarSign size={13} />
+                                        <FiPieChart size={13} />
                                     </IconButton>
                                 </Tooltip.Trigger>
                                 <Tooltip.Positioner>
@@ -314,7 +340,7 @@ const AccountCard: React.FC<{
 
                             // Since datetime handling
                             const supportsIncremental = connector.supports_incremental_sync ?? false;
-                            const defaultSince = connector.default_since_datetime ?? null;
+                            const defaultSince = connector.default_since_datetime ?? connector.start_datetime ?? null;
                             const currentSince = override?.since_datetime !== undefined
                                 ? override.since_datetime
                                 : defaultSince;
@@ -368,6 +394,9 @@ const AccountCard: React.FC<{
                                                         </Text>
                                                         {connector.is_file_connector && (
                                                             <Badge colorPalette="blue" size="xs" variant="subtle">📁 File</Badge>
+                                                        )}
+                                                        {connector.is_file_connector && connector.config?.default_file_name && (
+                                                            <Badge colorPalette="teal" size="xs" variant="subtle">📌 default</Badge>
                                                         )}
                                                         {connector.chain_name && (
                                                             <Badge colorPalette="purple" size="xs" variant="subtle">
@@ -540,6 +569,7 @@ const AccountCard: React.FC<{
                                             connectorType={connector.connector_type}
                                             disabled={disabled}
                                             onUploadComplete={() => onFileUploadComplete(connector.connector_id)}
+                                            defaultFileName={connector.config?.default_file_name}
                                         />
                                     )}
 
@@ -582,13 +612,31 @@ const AccountCard: React.FC<{
 
 export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
     onOverridesChange,
+    onConfigDataChange,
     disabled = false,
 }) => {
-    const [connectors, setConnectors] = useState<EnabledConnector[]>([]);
-    const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+    // ── All connectors / accounts from backend (full catalog) ──────────
+    const [allConnectors, setAllConnectors] = useState<EnabledConnector[]>([]);
+    const [allAccounts, setAllAccounts] = useState<AccountSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [expanded, setExpanded] = useState(false);
+
+    // ── Sync config store (persists selected connector IDs) ────────────
+    const configStore = useSyncConfigStore();
+
+    // ── Picker modal state ─────────────────────────────────────────────
+    const [pickerOpen, setPickerOpen] = useState(false);
+
+    // ── Derived: filter full catalog to only selected connectors ───────
+    const connectors = useMemo(
+        () => allConnectors.filter(c => configStore.selectedIds.has(c.connector_id)),
+        [allConnectors, configStore.selectedIds],
+    );
+    const accounts = useMemo(() => {
+        const selectedAccountIds = new Set(connectors.map(c => c.account_id));
+        return allAccounts.filter(a => selectedAccountIds.has(a.id));
+    }, [allAccounts, connectors]);
 
     // Track overrides as a map: connector_id -> override settings
     const [overrides, setOverrides] = useState<Map<number, ConnectorOverride>>(new Map());
@@ -648,8 +696,8 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             const response = await fetch(`${API_URL}/sync-job/all-connectors`);
             if (!response.ok) throw new Error('Failed to fetch connectors');
             const data: AllConnectorsResponse = await response.json();
-            setConnectors(data.connectors);
-            setAccounts(data.accounts);
+            setAllConnectors(data.connectors);
+            setAllAccounts(data.accounts);
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unknown error');
@@ -662,6 +710,11 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         fetchConnectors();
     }, [fetchConnectors]);
 
+    // Report selected connectors/accounts to parent whenever they change
+    useEffect(() => {
+        onConfigDataChange?.(connectors, accounts);
+    }, [connectors, accounts, onConfigDataChange]);
+
     // Group connectors by account
     const connectorsByAccount = useMemo(() => {
         const grouped = new Map<number, EnabledConnector[]>();
@@ -673,12 +726,16 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         return grouped;
     }, [connectors]);
 
-    // Group accounts by type
+    // Group accounts by type (flat — no group nesting)
     const accountsByType = useMemo(() => {
-        const exchanges = accounts.filter(a => a.account_type === 'cex');
-        const wallets = accounts.filter(a => a.account_type === 'wallet');
-        const brokers = accounts.filter(a => a.account_type === 'broker');
-        return { exchanges, wallets, brokers };
+        const result = new Map<string, AccountSummary[]>();
+        for (const type of ['cex', 'dex', 'wallet', 'broker', 'bank', 'investment']) {
+            const typeAccounts = accounts.filter(a => a.account_type === type);
+            if (typeAccounts.length > 0) {
+                result.set(type, typeAccounts);
+            }
+        }
+        return result;
     }, [accounts]);
 
     // Track collapsed state for account type sections
@@ -701,8 +758,10 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
     useEffect(() => {
         const overrideList: ConnectorOverride[] = [];
 
-        // Add explicit connector overrides (including since_datetime, symbols, currencies)
+        // 1. Add explicit connector overrides for SELECTED connectors
         for (const [connectorId, override] of overrides) {
+            // Only include overrides for connectors in the selection
+            if (!configStore.selectedIds.has(connectorId)) continue;
             if (override.enabled !== undefined || override.test_mode !== undefined ||
                 override.since_datetime !== undefined || override.symbols !== undefined ||
                 override.currencies !== undefined) {
@@ -710,7 +769,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             }
         }
 
-        // Add account-level overrides as individual connector overrides
+        // 2. Add account-level overrides as individual connector overrides
         for (const [accountId, enabled] of accountOverrides) {
             const accountConnectors = connectorsByAccount.get(accountId) || [];
             for (const connector of accountConnectors) {
@@ -724,8 +783,17 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             }
         }
 
+        // 3. For connectors NOT in the selection, send enabled: false so the
+        //    backend skips them (backend defaults to DB enabled state otherwise)
+        const selectedAndOverriddenIds = new Set(overrideList.map(o => o.connector_id));
+        for (const c of allConnectors) {
+            if (!configStore.selectedIds.has(c.connector_id) && !selectedAndOverriddenIds.has(c.connector_id)) {
+                overrideList.push({ connector_id: c.connector_id, enabled: false });
+            }
+        }
+
         onOverridesChange(overrideList);
-    }, [overrides, accountOverrides, connectorsByAccount, onOverridesChange]);
+    }, [overrides, accountOverrides, connectorsByAccount, onOverridesChange, configStore.selectedIds, allConnectors]);
 
     const handleConnectorEnabledChange = (connectorId: number, enabled: boolean, defaultEnabled: boolean) => {
         // Check if this change makes all connectors in the account disabled
@@ -1003,6 +1071,52 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         resetOverrides();
     };
 
+    // ── Remove an account from the sync config ────────────────────────
+    const handleRemoveAccount = useCallback((accountId: number) => {
+        const accountConnectorIds = (connectorsByAccount.get(accountId) || []).map(c => c.connector_id);
+        configStore.removeConnectors(accountConnectorIds);
+        // Clean up any overrides for removed connectors
+        setOverrides(prev => {
+            const next = new Map(prev);
+            for (const id of accountConnectorIds) next.delete(id);
+            return next;
+        });
+        setAccountOverrides(prev => {
+            const next = new Map(prev);
+            next.delete(accountId);
+            return next;
+        });
+    }, [connectorsByAccount, configStore]);
+
+    // ── Handle picker modal confirmation ──────────────────────────────
+    const handlePickerConfirm = useCallback((selectedIds: Set<number>) => {
+        configStore.replaceAll(Array.from(selectedIds));
+        // Clean up overrides for connectors no longer in selection
+        setOverrides(prev => {
+            const next = new Map(prev);
+            for (const id of prev.keys()) {
+                if (!selectedIds.has(id)) next.delete(id);
+            }
+            return next;
+        });
+        setAccountOverrides(prev => {
+            // Remove account overrides whose accounts are no longer represented
+            const selectedAccountIds = new Set(
+                allConnectors.filter(c => selectedIds.has(c.connector_id)).map(c => c.account_id)
+            );
+            const next = new Map(prev);
+            for (const accountId of prev.keys()) {
+                if (!selectedAccountIds.has(accountId)) next.delete(accountId);
+            }
+            return next;
+        });
+        setPickerOpen(false);
+        // Auto-expand to show results
+        if (selectedIds.size > 0 && !expanded) {
+            setExpanded(true);
+        }
+    }, [configStore, allConnectors, expanded]);
+
     const hasOverrides = overrides.size > 0 || accountOverrides.size > 0;
     const enabledCount = connectors.filter(c => getEffectiveEnabled(c)).length;
 
@@ -1030,7 +1144,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         );
     }
 
-    if (connectors.length === 0) {
+    if (allConnectors.length === 0) {
         return (
             <Box p={3} bg="yellow.50" borderRadius="md" borderWidth="1px" borderColor="yellow.200">
                 <Text color="yellow.700" fontSize="sm">
@@ -1081,91 +1195,156 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                 <Collapsible.Content>
                     <Box p={3} borderTopWidth="1px" borderColor="gray.100" bg="white">
                         {/* Action buttons */}
-                        <Flex justify="flex-end" gap={1} mb={3}>
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    selectAll();
-                                }}
-                                disabled={disabled}
-                            >
-                                All
-                            </Button>
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    selectNone();
-                                }}
-                                disabled={disabled}
-                            >
-                                None
-                            </Button>
-                            {hasOverrides && (
+                        <Flex justify="space-between" gap={1} mb={3}>
+                            <Flex gap={1}>
                                 <Button
                                     size="xs"
-                                    variant="ghost"
-                                    colorPalette="orange"
+                                    colorPalette="blue"
+                                    variant="outline"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        resetOverrides();
+                                        setPickerOpen(true);
                                     }}
                                     disabled={disabled}
                                 >
-                                    Reset
+                                    <LuPlus size={12} />
+                                    Add
                                 </Button>
-                            )}
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                colorPalette="blue"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    refreshConfiguration();
-                                }}
-                                disabled={disabled || loading}
-                            >
-                                🔄 Refresh
-                            </Button>
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                colorPalette="green"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleGlobalBalanceClick();
-                                }}
-                            >
-                                <FiDollarSign size={12} />
-                                Balance
-                            </Button>
+                                {configStore.hasSelection && (
+                                    <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        colorPalette="red"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            configStore.clearAll();
+                                            resetOverrides();
+                                        }}
+                                        disabled={disabled}
+                                    >
+                                        Clear All
+                                    </Button>
+                                )}
+                            </Flex>
+                            <Flex gap={1}>
+                                {connectors.length > 0 && (
+                                    <>
+                                        <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                selectAll();
+                                            }}
+                                            disabled={disabled}
+                                        >
+                                            All
+                                        </Button>
+                                        <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                selectNone();
+                                            }}
+                                            disabled={disabled}
+                                        >
+                                            None
+                                        </Button>
+                                    </>
+                                )}
+                                {hasOverrides && (
+                                    <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        colorPalette="orange"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            resetOverrides();
+                                        }}
+                                        disabled={disabled}
+                                    >
+                                        Reset
+                                    </Button>
+                                )}
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    colorPalette="blue"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        refreshConfiguration();
+                                    }}
+                                    disabled={disabled || loading}
+                                >
+                                    🔄 Refresh
+                                </Button>
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    colorPalette="green"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleGlobalBalanceClick();
+                                    }}
+                                >
+                                    <FiPieChart size={12} />
+                                    Balance
+                                </Button>
+                            </Flex>
                         </Flex>
 
+                        {/* Empty state */}
+                        {connectors.length === 0 && (
+                            <Box
+                                py={8}
+                                textAlign="center"
+                                borderWidth="1px"
+                                borderColor="gray.200"
+                                borderStyle="dashed"
+                                borderRadius="md"
+                                bg="gray.50"
+                            >
+                                <Text color="gray.500" fontSize="sm" mb={3}>
+                                    No accounts configured for sync.
+                                </Text>
+                                <Button
+                                    size="sm"
+                                    colorPalette="blue"
+                                    onClick={() => setPickerOpen(true)}
+                                    disabled={disabled}
+                                >
+                                    <LuPlus size={14} />
+                                    Add Accounts & Connectors
+                                </Button>
+                            </Box>
+                        )}
+
                         {/* Account Type Sections */}
-                        {[{ type: 'cex', label: '🏦 Exchanges', accounts: accountsByType.exchanges, colorScheme: 'purple' },
-                        { type: 'wallet', label: '💼 Wallets', accounts: accountsByType.wallets, colorScheme: 'teal' },
-                        { type: 'broker', label: '📊 Brokers', accounts: accountsByType.brokers, colorScheme: 'blue' }]
-                            .filter(section => section.accounts.length > 0)
+                        {[{ type: 'cex', label: '🏦 CEX', colorScheme: 'blue' },
+                        { type: 'dex', label: '🔗 DEX', colorScheme: 'cyan' },
+                        { type: 'wallet', label: '💼 Wallets', colorScheme: 'purple' },
+                        { type: 'broker', label: '📊 Brokers', colorScheme: 'green' },
+                        { type: 'bank', label: '🏛️ Banks', colorScheme: 'teal' },
+                        { type: 'investment', label: '📈 Investments', colorScheme: 'orange' }]
+                            .filter(section => accountsByType.has(section.type))
                             .map(section => {
-                                const sectionConnectors = section.accounts.flatMap(a => connectorsByAccount.get(a.id) || []);
+                                const allTypeAccounts = accountsByType.get(section.type)!;
+                                const sectionConnectors = allTypeAccounts.flatMap(a => connectorsByAccount.get(a.id) || []);
                                 const sectionEnabledCount = sectionConnectors.filter(c => getEffectiveEnabled(c)).length;
                                 const isCollapsed = collapsedSections[section.type] ?? false;
-
-                                // Check if all connectors in section are enabled
                                 const allEnabled = sectionConnectors.length > 0 && sectionConnectors.every(c => getEffectiveEnabled(c));
+                                const isMixed = sectionEnabledCount > 0 && !allEnabled;
 
                                 const toggleSectionAll = (enabled: boolean) => {
-                                    section.accounts.forEach(account => {
+                                    allTypeAccounts.forEach(account => {
                                         handleAccountToggle(account.id, enabled);
                                     });
                                 };
 
                                 return (
                                     <Box key={section.type} mb={4}>
-                                        {/* Section Header */}
+                                        {/* Type Section Header */}
                                         <Flex
                                             align="center"
                                             justify="space-between"
@@ -1184,29 +1363,20 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                                     {section.label}
                                                 </Text>
                                                 <Badge colorPalette="gray" size="xs" variant="subtle">
-                                                    {section.accounts.length} {section.accounts.length === 1 ? 'account' : 'accounts'}
+                                                    {allTypeAccounts.length} {allTypeAccounts.length === 1 ? 'account' : 'accounts'}
                                                 </Badge>
                                                 <Badge colorPalette="blue" size="xs" variant="subtle">
                                                     {sectionEnabledCount}/{sectionConnectors.length}
                                                 </Badge>
                                             </Flex>
                                             <Flex align="center" gap={2} onClick={(e) => e.stopPropagation()}>
-                                                <Tooltip.Root
-                                                    positioning={{ placement: "top" }}
-                                                    openDelay={300}
-                                                >
+                                                <Tooltip.Root positioning={{ placement: "top" }} openDelay={300}>
                                                     <Tooltip.Trigger asChild>
                                                         <Box display="inline-flex">
                                                             <Checkbox.Root
-                                                                checked={allEnabled}
-                                                                indeterminate={sectionEnabledCount > 0 && !allEnabled}
+                                                                checked={isMixed ? 'indeterminate' : allEnabled}
                                                                 disabled={disabled}
                                                                 onCheckedChange={(details) => {
-                                                                    // Determine if we're in mixed state
-                                                                    const isMixed = sectionEnabledCount > 0 && !allEnabled;
-                                                                    // When in mixed state, always enable all
-                                                                    // When all enabled, disable all
-                                                                    // When none enabled, enable all
                                                                     toggleSectionAll(isMixed ? true : !!details.checked);
                                                                 }}
                                                                 size="sm"
@@ -1221,12 +1391,8 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                                     <Tooltip.Positioner>
                                                         <Tooltip.Content>
                                                             {(() => {
-                                                                if (allEnabled) {
-                                                                    return `Click to disable all ${section.label} connectors`;
-                                                                }
-                                                                if (sectionEnabledCount > 0) {
-                                                                    return `${sectionEnabledCount} of ${sectionConnectors.length} enabled - Click to enable all`;
-                                                                }
+                                                                if (allEnabled) return `Click to disable all ${section.label} connectors`;
+                                                                if (sectionEnabledCount > 0) return `${sectionEnabledCount} of ${sectionConnectors.length} enabled - Click to enable all`;
                                                                 return `Click to enable all ${section.label} connectors`;
                                                             })()}
                                                         </Tooltip.Content>
@@ -1235,15 +1401,11 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                             </Flex>
                                         </Flex>
 
-                                        {/* Section Content - Account Cards */}
+                                        {/* Account Cards Grid */}
                                         <Collapsible.Root open={!isCollapsed}>
                                             <Collapsible.Content>
-                                                <Flex
-                                                    wrap="wrap"
-                                                    gap={3}
-                                                    pl={2}
-                                                >
-                                                    {section.accounts.map((account) => {
+                                                <Grid templateColumns="repeat(auto-fill, minmax(340px, 1fr))" gap={3}>
+                                                    {allTypeAccounts.map((account) => {
                                                         const accountConnectors = connectorsByAccount.get(account.id) || [];
                                                         if (accountConnectors.length === 0) return null;
 
@@ -1266,13 +1428,14 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                                                 onFileUploadComplete={handleFileUploadComplete}
                                                                 onJobSnippetClick={handleJobSnippetClick}
                                                                 onBalanceClick={handleBalanceClick}
+                                                                onRemove={() => handleRemoveAccount(account.id)}
                                                                 isCollapsed={collapsedAccounts.get(account.id) ?? false}
                                                                 onToggleCollapse={() => toggleAccountCollapse(account.id)}
                                                                 disabled={disabled}
                                                             />
                                                         );
                                                     })}
-                                                </Flex>
+                                                </Grid>
                                             </Collapsible.Content>
                                         </Collapsible.Root>
                                     </Box>
@@ -1301,6 +1464,16 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                 mode={balanceMode}
                 accountId={balanceAccountId}
                 title={balanceTitle}
+            />
+
+            {/* Connector Picker Modal */}
+            <ConnectorPickerModal
+                isOpen={pickerOpen}
+                onClose={() => setPickerOpen(false)}
+                onConfirm={handlePickerConfirm}
+                allConnectors={allConnectors}
+                allAccounts={allAccounts}
+                alreadySelected={configStore.selectedIds}
             />
         </Box>
     );

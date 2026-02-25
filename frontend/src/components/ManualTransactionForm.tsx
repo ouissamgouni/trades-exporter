@@ -119,19 +119,13 @@ const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
 
 // Date utilities imported from utils/dateUtils
 
-// Props for supporting both create and edit modes
+// Props for create mode
 export interface ManualTransactionFormProps {
-    mode?: 'create' | 'edit';
-    transaction?: import('../types').Transaction;
     onSuccess?: () => void;
-    onCancel?: () => void;
 }
 
 export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
-    mode = 'create',
-    transaction,
     onSuccess,
-    onCancel,
 }) => {
     const queryClient = useQueryClient();
     const [formData, setFormData] = useState<FormData>(initialFormData);
@@ -146,57 +140,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
     const [creatingAccount, setCreatingAccount] = useState(false);
     const [newAccountName, setNewAccountName] = useState('');
-    const [newAccountType, setNewAccountType] = useState<'cex' | 'broker' | 'wallet'>('wallet');
+    const [newAccountType, setNewAccountType] = useState<'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment'>('wallet');
     const [newAccountOwned, setNewAccountOwned] = useState(true);
-
-    // Helper to convert transaction to form data for edit mode
-    const transactionToFormData = (tx: import('../types').Transaction): FormData => {
-        const simplifiedType = deriveSimplifiedType(tx.transaction_type);
-
-        // Convert tags from backend format [{key: value}] to frontend format {key, value}
-        const tagsArray: Tag[] = tx.tags && Array.isArray(tx.tags)
-            ? tx.tags.flatMap(tagObj => 
-                Object.entries(tagObj).map(([key, value]) => ({ 
-                    key, 
-                    value: String(value) 
-                }))
-              )
-            : [];
-
-        return {
-            date_time: toDateTimeLocalString(tx.date_time) || toDateTimeLocalString(new Date()),
-            direction: tx.direction || Direction.INFLOW,
-            simplified_type: simplifiedType,
-            transaction_type: tx.transaction_type || TransactionType.TRADE,
-            source_transaction_type: tx.source_transaction_type || '',
-            source_transaction_id: tx.source_transaction_id || '',
-            source: tx.source || 'manual',
-            source_account: tx.source_account || '',
-            account_id: tx.account_id || null,
-            from_account_id: tx.from_account_id || null,
-            to_account_id: tx.to_account_id || null,
-            quantity: tx.quantity?.toString() || '',
-            source_asset_symbol: tx.source_asset_symbol || '',
-            asset_id: tx.asset_id || null,
-            price: tx.price?.toString() || '',
-            source_price_quote_asset_symbol: tx.source_price_quote_asset_symbol || '',
-            price_quote_asset_id: tx.price_quote_asset_id || null,
-            total: tx.total?.toString() || '',
-            fee: tx.fee?.toString() || '',
-            source_fee_quote_asset_symbol: tx.source_fee_quote_asset_symbol || '',
-            fee_quote_asset_id: tx.fee_quote_asset_id || null,
-            include_fee: tx.include_fee ?? true,
-            disposal_taxable: tx.disposal_taxable ?? false,
-            from_address: tx.source_from_account || '',
-            to_address: tx.source_to_account || '',
-            network: tx.network || '',
-            network_transaction_id: tx.network_transaction_id || '',
-            token_contract_address: tx.token_contract_address || '',
-            review_status: tx.review_status || ReviewStatus.PENDING,
-            review_notes: tx.review_notes || '',
-            tags: tagsArray,
-        };
-    };
 
     useEffect(() => {
         const initForm = async () => {
@@ -205,13 +150,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             await fetchAccounts();
             await fetchTags();
 
-            // If in edit mode with a transaction, populate form data
-            if (mode === 'edit' && transaction) {
-                setFormData(transactionToFormData(transaction));
-                return;
-            }
-
-            // Create mode: Set default datetime to now
+            // Set default datetime to now
             const now = new Date();
 
             // Find EUR asset to set as default for price/fee quote
@@ -226,7 +165,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             }));
         };
         initForm();
-    }, [mode, transaction]);
+    }, []);
 
     // Update from_account_id and to_account_id based on direction and account_id for transfers
     useEffect(() => {
@@ -313,7 +252,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         return null;
     };
 
-    const createAccount = async (name: string, accountType: 'cex' | 'broker' | 'wallet', owned: boolean): Promise<Account | null> => {
+    const createAccount = async (name: string, accountType: 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment', owned: boolean): Promise<Account | null> => {
         try {
             const response = await fetch(`${API_URL}/accounts/`, {
                 method: 'POST',
@@ -395,9 +334,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         setSuccess(null);
 
         try {
-            const isEditMode = mode === 'edit' && transaction?.id;
-
-            // Build payload - for PATCH, only include fields that have values
+            // Build payload
             const payload: any = {
                 date_time: dateTimeLocalToISO(formData.date_time),
                 direction: formData.direction,
@@ -433,75 +370,35 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             if (formData.review_notes) payload.review_notes = formData.review_notes;
             if (formData.from_account_id) payload.from_account_id = formData.from_account_id;
             if (formData.to_account_id) payload.to_account_id = formData.to_account_id;
-            
+
             // Convert tags from {key, value} format to [{key: value}] format
             if (formData.tags.length > 0) {
                 payload.tags = formData.tags.map(tag => ({ [tag.key]: tag.value }));
             }
 
-            // Different API call for create vs edit mode
-            const url = isEditMode
-                ? `${API_URL}/transactions/${transaction.id}`
-                : `${API_URL}/transactions`;
-            const method = isEditMode ? 'PATCH' : 'POST';
-
-            const response = await fetch(url, {
-                method,
+            const response = await fetch(`${API_URL}/transactions`, {
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.detail || `Failed to ${isEditMode ? 'update' : 'create'} transaction`);
+                throw new Error(errorData.detail || 'Failed to create transaction');
             }
 
             const result = await response.json();
 
-            if (isEditMode) {
-                // Edit mode: single transaction updated
-                setSuccess('Transaction updated successfully!');
-                // Trigger refresh of transactions in other components
-                queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                // Call success callback if provided
-                onSuccess?.();
-            } else {
-                // Create mode: API returns { transactions: [...], split: bool, message: str }
-                const createdTransactions = result.transactions || [];
-                setSuccess(`Transaction created successfully! ${result.message}`);
-                // Add all created transactions (may be multiple if split into legs)
-                setRecentTransactions(prev => [...createdTransactions, ...prev].slice(0, 5));
+            // API returns { transactions: [...], split: bool, message: str }
+            const createdTransactions = result.transactions || [];
+            setSuccess(`Transaction created successfully! ${result.message}`);
+            // Add all created transactions (may be multiple if split into legs)
+            setRecentTransactions(prev => [...createdTransactions, ...prev].slice(0, 5));
 
-                // Trigger refresh of transactions in other components
-                queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            // Trigger refresh of transactions in other components
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
 
-                // Reset form but keep date near current time and EUR defaults
-                const now = new Date();
-                const eurAsset = assets.find(a => a.symbol === 'EUR');
-                const eurAssetId = eurAsset?.asset_id || null;
-                setFormData({
-                    ...initialFormData,
-                    date_time: toDateTimeLocalString(now),
-                    price_quote_asset_id: eurAssetId,
-                    fee_quote_asset_id: eurAssetId,
-                });
-            }
-
-        } catch (err) {
-            setError(err instanceof Error ? err.message : `Failed to ${mode === 'edit' ? 'update' : 'create'} transaction`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleClear = () => {
-        if (mode === 'edit') {
-            // In edit mode, reset to original transaction data
-            if (transaction) {
-                setFormData(transactionToFormData(transaction));
-            }
-        } else {
-            // In create mode, reset to defaults
+            // Reset form but keep date near current time and EUR defaults
             const now = new Date();
             const eurAsset = assets.find(a => a.symbol === 'EUR');
             const eurAssetId = eurAsset?.asset_id || null;
@@ -511,7 +408,25 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                 price_quote_asset_id: eurAssetId,
                 fee_quote_asset_id: eurAssetId,
             });
+
+            onSuccess?.();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to create transaction');
+        } finally {
+            setLoading(false);
         }
+    };
+
+    const handleClear = () => {
+        const now = new Date();
+        const eurAsset = assets.find(a => a.symbol === 'EUR');
+        const eurAssetId = eurAsset?.asset_id || null;
+        setFormData({
+            ...initialFormData,
+            date_time: toDateTimeLocalString(now),
+            price_quote_asset_id: eurAssetId,
+            fee_quote_asset_id: eurAssetId,
+        });
         setError(null);
         setSuccess(null);
     };
@@ -525,19 +440,15 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
         </Text>
     );
 
-    const isEditMode = mode === 'edit';
-
     return (
         <Box maxW="1200px" mx="auto">
             {/* Header */}
             <Box mb={6}>
                 <Heading as="h2" size="lg" mb={2} color="gray.800">
-                    {isEditMode ? 'Edit Transaction' : 'Add Transaction'}
+                    Add Transaction
                 </Heading>
                 <Text color="gray.500" fontSize="sm">
-                    {isEditMode
-                        ? 'Update transaction details. Changes will be saved when you click Save.'
-                        : 'Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.'}
+                    Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.
                 </Text>
             </Box>
             {/* Alerts */}
@@ -750,12 +661,15 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                 <NativeSelect.Root size="sm" flex={1}>
                                                                     <NativeSelect.Field
                                                                         value={newAccountType}
-                                                                        onChange={e => setNewAccountType(e.target.value as 'cex' | 'broker' | 'wallet')}
+                                                                        onChange={e => setNewAccountType(e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment')}
                                                                         borderRadius="md"
                                                                     >
                                                                         <option value="wallet">Wallet</option>
                                                                         <option value="cex">CEX</option>
+                                                                        <option value="dex">DEX</option>
                                                                         <option value="broker">Broker</option>
+                                                                        <option value="bank">Bank</option>
+                                                                        <option value="investment">Investment</option>
                                                                     </NativeSelect.Field>
                                                                 </NativeSelect.Root>
                                                                 <Checkbox.Root
@@ -1301,23 +1215,13 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                     zIndex={10}
                 >
                     <Flex gap={3} justify="flex-end">
-                        {isEditMode && onCancel && (
-                            <Button
-                                variant="ghost"
-                                onClick={onCancel}
-                                disabled={loading}
-                                size="lg"
-                            >
-                                Cancel
-                            </Button>
-                        )}
                         <Button
                             variant="ghost"
                             onClick={handleClear}
                             disabled={loading}
                             size="lg"
                         >
-                            {isEditMode ? 'Reset' : 'Clear'}
+                            Clear
                         </Button>
                         <Button
                             type="submit"
@@ -1327,16 +1231,14 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             px={8}
                         >
                             {loading ? <Spinner size="sm" mr={2} /> : null}
-                            {loading
-                                ? (isEditMode ? 'Saving...' : 'Creating...')
-                                : (isEditMode ? '💾 Save Changes' : '➕ Create Transaction')}
+                            {loading ? 'Creating...' : '➕ Create Transaction'}
                         </Button>
                     </Flex>
                 </Box>
             </form>
 
-            {/* Recent Transactions - only show in create mode */}
-            {!isEditMode && recentTransactions.length > 0 && (
+            {/* Recent Transactions */}
+            {recentTransactions.length > 0 && (
                 <Card.Root mt={8} shadow="sm" borderRadius="xl">
                     <Card.Header bg="gray.50" py={3} px={4}>
                         <Heading size="sm" color="gray.700">✨ Recently Created</Heading>

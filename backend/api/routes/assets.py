@@ -224,6 +224,23 @@ def get_available_price_getters():
     return list_price_getters()
 
 
+@router.get("/transaction-counts", response_model=Dict[str, int])
+def get_transaction_counts_by_symbol(session: Session = Depends(get_db)):
+    """Return {symbol: count} for non-invalid transactions, grouped by source_asset_symbol."""
+    statement = (
+        select(NormalizedTransaction.source_asset_symbol, func.count().label("cnt"))
+        .where(
+            NormalizedTransaction.review_status != "invalid",
+            NormalizedTransaction.source_asset_symbol != "",
+            NormalizedTransaction.source_asset_symbol.isnot(None),
+        )
+        .group_by(NormalizedTransaction.source_asset_symbol)
+        .order_by(func.count().desc())
+    )
+    rows = session.exec(statement).all()
+    return {symbol: cnt for symbol, cnt in rows}
+
+
 @router.get("/{asset_id}", response_model=AssetResponse)
 def get_asset(
     asset_id: int,

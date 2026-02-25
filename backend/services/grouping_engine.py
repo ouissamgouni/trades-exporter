@@ -169,11 +169,16 @@ class GroupingEngine:
         self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
     ) -> List[GroupingSuggestion]:
         """
-        Rule 1: If outflow has network_transaction_id, find inflow where
-        source_transaction_id == network_transaction_id.
+        Rule 1: Match outflow/inflow by on-chain transaction hash.
 
-        This indicates a direct on-chain transfer where the receiving side
-        references the same transaction hash.
+        Two matching strategies (tried in order for each outflow):
+        a) outflow.network_transaction_id == inflow.source_transaction_id
+           → Direct reference match (e.g. CEX withdrawal ID appears as on-chain hash)
+        b) outflow.network_transaction_id == inflow.network_transaction_id
+           AND same asset AND different accounts
+           → Both sides recorded the same blockchain tx hash (e.g. Binance
+             withdrawal + Moralis wallet inflow share the same on-chain hash,
+             but Moralis appends a suffix like _erc20_6 to source_transaction_id)
 
         Confidence: 1.0 (exact hash match)
         """
@@ -185,29 +190,47 @@ class GroupingEngine:
             if not outflow.network_transaction_id:
                 continue
 
-            # Find matching inflow by source_transaction_id
+            matched_inflow = None
+            match_reason = ""
+
             for inflow in inflows:
                 if inflow.id in self._used_tx_ids:
                     continue
-                if inflow.source_transaction_id == outflow.network_transaction_id:
-                    # Found exact match
-                    self._used_tx_ids.add(outflow.id)
-                    self._used_tx_ids.add(inflow.id)
 
-                    symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
-                    suggestions.append(
-                        GroupingSuggestion(
-                            pattern=PATTERN_INTERNAL_TRANSFER,
-                            label=f"{symbol} Transfer",
-                            reason=f"Exact network TX hash match: outflow.network_tx_id == inflow.source_tx_id",
-                            confidence=self.config.exact_match_confidence,
-                            transactions=[
-                                self._make_tx_summary(outflow),
-                                self._make_tx_summary(inflow),
-                            ],
-                        )
-                    )
+                # Strategy (a): source_transaction_id == network_transaction_id
+                if inflow.source_transaction_id == outflow.network_transaction_id:
+                    matched_inflow = inflow
+                    match_reason = "outflow.network_tx_id == inflow.source_tx_id"
                     break
+
+                # Strategy (b): both share the same network_transaction_id + same asset + different accounts
+                if (
+                    inflow.network_transaction_id
+                    and inflow.network_transaction_id == outflow.network_transaction_id
+                    and self._assets_match(outflow, inflow)
+                    and outflow.account_id != inflow.account_id
+                ):
+                    matched_inflow = inflow
+                    match_reason = "outflow.network_tx_id == inflow.network_tx_id (same on-chain hash)"
+                    break
+
+            if matched_inflow:
+                self._used_tx_ids.add(outflow.id)
+                self._used_tx_ids.add(matched_inflow.id)
+
+                symbol = outflow.source_asset_symbol or matched_inflow.source_asset_symbol
+                suggestions.append(
+                    GroupingSuggestion(
+                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        label=f"{symbol} Transfer",
+                        reason=f"Exact network TX hash match: {match_reason}",
+                        confidence=self.config.exact_match_confidence,
+                        transactions=[
+                            self._make_tx_summary(outflow),
+                            self._make_tx_summary(matched_inflow),
+                        ],
+                    )
+                )
 
         return suggestions
 

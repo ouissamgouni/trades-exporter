@@ -80,12 +80,25 @@ class DuplicateGroupsResponse(BaseModel):
     amount_tolerance_percent: float
 
 
+class DuplicateSuspicion(BaseModel):
+    """Lightweight duplicate suspicion for the TransactionsTable map."""
+    group_hash: str
+    transaction_ids: List[int]
+    match_criteria: str
+
+
+class DuplicateSuspicionsResponse(BaseModel):
+    """Response for duplicate suspicions (lightweight)."""
+    suspicions: List[DuplicateSuspicion]
+
+
 class ResolveDuplicateGroupRequest(BaseModel):
     """Request to resolve a duplicate group."""
     
     group_hash: str
     action: str  # "keep_selected" or "dismiss_selected"
     selected_transaction_ids: List[int]
+    all_transaction_ids: List[int]  # All TX IDs in the group (needed for fuzzy groups)
     note: Optional[str] = None
 
 
@@ -125,33 +138,48 @@ def _tx_to_summary(tx: NormalizedTransaction) -> TransactionSummary:
     )
 
 
-def _get_duplicate_group_transactions(session: Session, group_hash: str) -> List[NormalizedTransaction]:
+def _get_duplicate_group_transactions(
+    session: Session,
+    group_hash: str,
+    transaction_ids: Optional[List[int]] = None,
+) -> List[NormalizedTransaction]:
     """
-    Get all non-invalid transactions for a duplicate group hash.
+    Get all non-invalid transactions for a duplicate group.
     
-    This ensures consistent filtering across duplicate detection and resolution.
-    Only returns transactions with review_status != "invalid" and excludes
-    transactions from the same connector run with different source_transaction_id.
+    With fuzzy detection, the group_hash is derived from sorted TX IDs
+    and is NOT stored on the transaction rows. So we use transaction_ids
+    to look up the transactions.
+    
+    Falls back to querying by transaction_hash column for backward
+    compatibility with already-resolved groups.
     
     Args:
         session: Database session
-        group_hash: Transaction hash identifying the duplicate group
+        group_hash: Group hash (used for tag lookup fallback)
+        transaction_ids: Explicit list of transaction IDs in the group
     
     Returns:
-        List of NormalizedTransaction objects (excluding invalid transactions
-        and same-run different-ID transactions)
+        List of NormalizedTransaction objects (excluding invalid transactions)
     """
     from sqlmodel import select
     from backend.services.duplicate_detection_service import _filter_same_run_different_id_transactions
     
-    all_txs = session.exec(
-        select(NormalizedTransaction).where(
-            NormalizedTransaction.transaction_hash == group_hash,
-            NormalizedTransaction.review_status != "invalid"
-        )
-    ).all()
+    if transaction_ids:
+        all_txs = session.exec(
+            select(NormalizedTransaction).where(
+                NormalizedTransaction.id.in_(transaction_ids),
+                NormalizedTransaction.review_status != "invalid"
+            )
+        ).all()
+    else:
+        # Fallback: try transaction_hash column (legacy exact-hash groups)
+        all_txs = session.exec(
+            select(NormalizedTransaction).where(
+                NormalizedTransaction.transaction_hash == group_hash,
+                NormalizedTransaction.review_status != "invalid"
+            )
+        ).all()
     
-    # Apply same filtering as duplicate detection
     return _filter_same_run_different_id_transactions(all_txs)
 
 
@@ -302,7 +330,9 @@ def resolve_duplicate_group(
     # Get all transactions in this group
     from sqlmodel import select
     
-    all_group_txs = _get_duplicate_group_transactions(session, request.group_hash)
+    all_group_txs = _get_duplicate_group_transactions(
+        session, request.group_hash, request.all_transaction_ids
+    )
     
     if not all_group_txs:
         raise HTTPException(
@@ -357,8 +387,10 @@ def resolve_duplicate_group(
     # Fetch updated group with new resolution statuses
     from backend.db.models import SyncJobConnectorRun
     
-    # Get all transactions for this group hash again (with updated resolution tags)
-    updated_txs = _get_duplicate_group_transactions(session, request.group_hash)
+    # Get all transactions for this group again (with updated resolution tags)
+    updated_txs = _get_duplicate_group_transactions(
+        session, request.group_hash, request.all_transaction_ids
+    )
     
     # Build updated group response
     transactions = []
@@ -398,14 +430,14 @@ def resolve_duplicate_group(
             
             # Iterate through ALL tags to collect resolution info from separate tag objects
             for tag in tx.tags:
-                if tag.get("dup_group") == request.group_hash:
+                if tag.get("sys_group") == request.group_hash:
                     has_group_tag = True
-                if tag.get("dup_resolution"):
-                    dup_resolution = tag.get("dup_resolution")
-                if tag.get("dup_resolved_at"):
-                    dup_resolved_at = tag.get("dup_resolved_at")
-                if tag.get("dup_kept_ids"):
-                    dup_kept_ids = tag.get("dup_kept_ids")
+                if tag.get("sys_resolution"):
+                    dup_resolution = tag.get("sys_resolution")
+                if tag.get("sys_resolved_at"):
+                    dup_resolved_at = tag.get("sys_resolved_at")
+                if tag.get("sys_kept_ids"):
+                    dup_kept_ids = tag.get("sys_kept_ids")
             
             # Only set resolution fields if transaction belongs to this group and has resolution
             if has_group_tag and dup_resolution:
@@ -520,4 +552,51 @@ def get_duplicate_count(
         "account_id": account_id,
         "connector_run_id": connector_run_id,
     }
+
+
+@router.get("/duplicate-suspicions", response_model=DuplicateSuspicionsResponse)
+def get_duplicate_suspicions(
+    account_id: Optional[int] = Query(None, description="Filter by account ID"),
+    time_filter: Optional[str] = Query(None, description="Time filter: 'week', '30d', '90d', 'all'"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Lightweight endpoint returning only duplicate group hashes and transaction IDs.
+    
+    Used by the TransactionsTable to build a duplicate-suspicion map
+    without fetching full transaction details.
+    """
+    from backend.services.duplicate_detection_service import detect_duplicate_suspicions
+
+    settings = load_settings()
+    dup_config = settings.get("duplicate_detection", {})
+
+    time_filter_cutoff = None
+    if time_filter and time_filter != "all":
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if time_filter == "week":
+            time_filter_cutoff = now - timedelta(days=7)
+        elif time_filter == "30d":
+            time_filter_cutoff = now - timedelta(days=30)
+        elif time_filter == "90d":
+            time_filter_cutoff = now - timedelta(days=90)
+
+    suspicions = detect_duplicate_suspicions(
+        session=session,
+        account_id=account_id,
+        config=dup_config,
+        time_filter_cutoff=time_filter_cutoff,
+    )
+
+    return DuplicateSuspicionsResponse(
+        suspicions=[
+            DuplicateSuspicion(
+                group_hash=s["group_hash"],
+                transaction_ids=s["transaction_ids"],
+                match_criteria=s["match_criteria"],
+            )
+            for s in suspicions
+        ]
+    )
 

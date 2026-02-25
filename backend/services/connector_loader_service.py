@@ -186,6 +186,16 @@ class ConnectorLoaderService:
         # Start with database config
         config = db_config.copy()
 
+        # For file connectors: fall back to default file if no pending file uploaded
+        if not config.get("file_path") and config.get("default_file_path"):
+            config["file_path"] = config["default_file_path"]
+            if config.get("default_file_import_id"):
+                config["file_import_id"] = config["default_file_import_id"]
+            log.info(
+                f"📌 Using default file for connector '{connector_type}': "
+                f"{config['default_file_path']}"
+            )
+
         # Add account context
         config["_account_id"] = account.id
         config["_account_name"] = account.name

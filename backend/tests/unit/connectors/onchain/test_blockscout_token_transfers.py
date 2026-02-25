@@ -349,3 +349,44 @@ class TestBlockscoutTokenTransfersConnector:
             assert normalized is not None
             assert normalized.direction == "outflow"
             assert normalized.transaction_type == "transfer"
+
+    def test_hyperevm_chain(self):
+        """Test token transfers connector works with HyperEVM chain."""
+        connector = ConnectorBlockscoutTokenTransfers(
+            wallet_address="0x347681ec529f767dafB3703486570Bc3Da136993",
+            chain_name="hyperevm",
+        )
+
+        mock_api_response = {
+            "items": [
+                {
+                    "tx_hash": "0xhype_token_transfer",
+                    "timestamp": "2025-12-01T10:30:00.000000Z",
+                    "from": {"hash": "0xSENDER"},
+                    "to": {"hash": "0x347681ec529f767dafB3703486570Bc3Da136993"},
+                    "total": {"value": "5000000000000000000", "decimals": 18},
+                    "token": {
+                        "address": "0xHYPE_TOKEN",
+                        "address_hash": "0xHYPE_TOKEN",
+                        "symbol": "USDC",
+                        "type": "ERC-20",
+                        "decimals": 18,
+                    },
+                    "block_number": "100000",
+                }
+            ],
+            "next_page_params": None,
+        }
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+
+            assert len(results) == 1
+            raw, normalized, error = results[0]
+
+            assert error is None
+            assert normalized is not None
+            assert normalized.direction == "inflow"
+            assert normalized.transaction_type == "transfer"
+            assert normalized.network == "hyperevm"
+            assert normalized.source_asset_symbol == "USDC_0xHYPE_TOKEN"

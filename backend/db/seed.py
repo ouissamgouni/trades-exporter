@@ -18,6 +18,7 @@ Examples:
 
 import argparse
 import os
+import shutil
 import yaml
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -30,6 +31,8 @@ from backend.db.models import (
     Account,
     AccountConnector,
     Asset,
+    FileImport,
+    FileImportStatus,
     NormalizedTransaction,
     UserCalculationBundle,
 )
@@ -41,6 +44,8 @@ log = configure_logging("db_seed")
 # Default config paths
 SEED_DATA_DIR = Path(__file__).parent / "seed_data"
 EXPORT_DATA_DIR = Path(__file__).parent / "seed_data" / "exports"
+BROKER_EXPORTS_DIR = Path(__file__).parent.parent / "data" / "input" / "brokers-exports"
+DEFAULT_FILES_DIR = Path(__file__).parent.parent / "data" / "input" / "defaults"
 DEFAULT_CONFIG_PATH = SEED_DATA_DIR / "accounts.yaml"
 DEFAULT_ASSETS_PATH = SEED_DATA_DIR / "assets.yaml"
 DEFAULT_BUNDLES_PATH = SEED_DATA_DIR / "bundles.yaml"
@@ -205,6 +210,7 @@ class DatabaseSeeder:
             existing.tags = tags if tags is not None else existing.tags
             existing.owned = data.get("owned", existing.owned)
             existing.group = data.get("group", existing.group)
+            existing.color = data.get("color", existing.color)
             self.session.add(existing)
             return existing
 
@@ -217,6 +223,7 @@ class DatabaseSeeder:
             tags=tags,
             owned=data.get("owned", True),
             group=data.get("group"),
+            color=data.get("color"),
         )
         self.session.add(account)
         self.session.flush()  # Get ID assigned
@@ -281,7 +288,16 @@ class DatabaseSeeder:
                 "credentials_ref", existing.credentials_ref
             )
             existing.sync_priority = data.get("sync_priority", existing.sync_priority)
+            existing.color = data.get("color", existing.color)
             self.session.add(existing)
+            self.session.flush()
+
+            # Seed default file if specified and not already set
+            default_file = data.get("default_file")
+            config = existing.config or {}
+            if default_file and not config.get("default_file_path"):
+                self._seed_default_file(existing, default_file)
+
             return "updated"
 
         # Create new connector
@@ -297,9 +313,100 @@ class DatabaseSeeder:
             config=data.get("config", {}),
             credentials_ref=data.get("credentials_ref"),
             sync_priority=data.get("sync_priority", 100),
+            color=data.get("color"),
         )
         self.session.add(connector)
+        self.session.flush()  # Get ID assigned
+
+        # Seed default file if specified
+        default_file = data.get("default_file")
+        if default_file:
+            self._seed_default_file(connector, default_file)
+
         return "created"
+
+    def _seed_default_file(
+        self, connector: AccountConnector, default_file_path: str
+    ) -> None:
+        """
+        Seed a default file for a file connector.
+
+        Copies the source file to data/input/defaults/{connector_id}/ and creates
+        a FileImport record with DEFAULT status. Updates the connector config
+        with default_file_path, default_file_import_id, default_file_name.
+
+        The default_file_path in YAML can be:
+        - Relative to broker-exports dir: "mexc/filename.xlsx"
+        - Relative to seed_data dir: "../seed_data/files/filename.csv"
+        - Absolute path
+
+        Args:
+            connector: AccountConnector instance (must have .id assigned)
+            default_file_path: Path to the source file
+        """
+        # Resolve the source file path
+        source = Path(default_file_path)
+        if not source.is_absolute():
+            # Try relative to broker-exports dir first
+            candidate = BROKER_EXPORTS_DIR / default_file_path
+            if candidate.exists():
+                source = candidate
+            else:
+                # Try relative to seed_data dir
+                candidate = SEED_DATA_DIR / default_file_path
+                if candidate.exists():
+                    source = candidate
+
+        if not source.exists():
+            log.warning(
+                f"⚠️ Default file not found for connector {connector.connector_type} "
+                f"(id={connector.id}): {default_file_path}"
+            )
+            return
+
+        # Prepare destination
+        dest_dir = DEFAULT_FILES_DIR / str(connector.id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Sanitize filename (replace spaces with underscores)
+        safe_name = source.name.replace(" ", "_")
+        dest_filename = f"default_{timestamp}_{safe_name}"
+        dest_path = dest_dir / dest_filename
+
+        # Copy file
+        shutil.copy2(str(source), str(dest_path))
+        file_size = dest_path.stat().st_size
+
+        log.info(
+            f"📌 Seeding default file for {connector.connector_type} "
+            f"(id={connector.id}): {source.name}"
+        )
+
+        # Create FileImport record
+        file_import = FileImport(
+            connector_id=connector.id,
+            filename=dest_filename,
+            original_filename=source.name,
+            file_path=str(dest_path),
+            file_size=file_size,
+            status=FileImportStatus.DEFAULT,
+            uploaded_at=datetime.now(timezone.utc),
+            row_count=0,  # Unknown at seed time
+            new_count=0,
+            updated_count=0,
+            skipped_count=0,
+        )
+        self.session.add(file_import)
+        self.session.flush()
+
+        # Update connector config
+        config = dict(connector.config or {})
+        config["default_file_path"] = str(dest_path)
+        config["default_file_import_id"] = file_import.id
+        config["default_file_name"] = source.name
+        connector.config = config
+        self.session.add(connector)
 
     def seed_default_assets(self) -> int:
         """

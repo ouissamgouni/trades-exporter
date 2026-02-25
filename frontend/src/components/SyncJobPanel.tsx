@@ -1,17 +1,19 @@
 import {
     Badge, Box,
-    Button, Card, Flex,
+    Button, Card, Collapsible, Flex,
     Heading, HStack, Progress, Spinner, Tabs, Text
 } from '@chakra-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuEye, LuHistory } from 'react-icons/lu';
 import {
     API_URL,
+    AccountSummary,
     ConnectorOverride,
     ConnectorProgress,
     ConnectorsInfo,
     ConnectorSyncStatus,
+    EnabledConnector,
     JobHistoryResponse,
     SyncJobProgress,
     SyncJobStartRequest,
@@ -22,7 +24,7 @@ import { ConnectorProgressCard } from './ConnectorProgressCard';
 import { JobDetailDrawer } from './JobDetailDrawer';
 import { JobHistoryTable } from './JobHistoryTable';
 import { SyncConfigPanel } from './SyncConfigPanel';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { SyncRecapDialog } from './SyncRecapDialog';
 import { toaster } from './ui/toaster';
 
 // Status badge color helper
@@ -86,8 +88,23 @@ export const SyncJobPanel: React.FC = () => {
     // Per-sync configuration overrides (enable/disable connectors, test mode, since datetime)
     const [syncOverrides, setSyncOverrides] = useState<ConnectorOverride[]>([]);
 
-    // Renormalize confirmation dialog
-    const renormalizeConfirm = useConfirmDialog();
+    // Accordion state for progress cards grouping
+    const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+    // Initialize both as "all expanded" on first render
+    const typesInitialized = useRef(false);
+
+    // Stable callback for config data from SyncConfigPanel (avoids re-render loop)
+    const handleConfigDataChange = useCallback((connectors: EnabledConnector[], accounts: AccountSummary[]) => {
+        setConfigConnectors(connectors);
+        setConfigAccounts(accounts);
+    }, []);
+
+    // Recap dialog state (replaces old renormalize confirm)
+    const [recapOpen, setRecapOpen] = useState(false);
+    const [recapRenormalize, setRecapRenormalize] = useState(false);
+    const [configConnectors, setConfigConnectors] = useState<EnabledConnector[]>([]);
+    const [configAccounts, setConfigAccounts] = useState<AccountSummary[]>([]);
 
     // Job history state
     const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
@@ -354,6 +371,7 @@ export const SyncJobPanel: React.FC = () => {
                     <Box mb={4}>
                         <SyncConfigPanel
                             onOverridesChange={setSyncOverrides}
+                            onConfigDataChange={handleConfigDataChange}
                             disabled={isFullJobRunning}
                         />
                     </Box>
@@ -390,7 +408,7 @@ export const SyncJobPanel: React.FC = () => {
                                         <>
                                             <Button
                                                 colorPalette="blue"
-                                                onClick={() => startJob(false)}
+                                                onClick={() => { setRecapRenormalize(false); setRecapOpen(true); }}
                                                 loading={actionLoading}
                                                 disabled={!canStart}
                                             >
@@ -399,7 +417,7 @@ export const SyncJobPanel: React.FC = () => {
                                             <Button
                                                 colorPalette="purple"
                                                 variant="outline"
-                                                onClick={() => renormalizeConfirm.open()}
+                                                onClick={() => { setRecapRenormalize(true); setRecapOpen(true); }}
                                                 loading={actionLoading}
                                                 disabled={!canStart}
                                             >
@@ -513,29 +531,203 @@ export const SyncJobPanel: React.FC = () => {
                                     </Box>
                                 </Flex>
 
-                                {/* Per-Connector Progress - Using ConnectorProgressCard */}
+                                {/* Per-Connector Progress - Grouped by Type → Group with Accordion */}
                                 {jobStatus.connector_statuses &&
                                     Object.keys(jobStatus.connector_statuses).length > 0 && (
                                         <Box>
                                             <Text fontSize="sm" color="gray.500" mb={3}>
                                                 Connector Progress
                                             </Text>
-                                            <Box
-                                                display="grid"
-                                                gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }}
-                                                gap={3}
-                                            >
-                                                {getSortedConnectorStatuses().map((cp: ConnectorProgress) => (
-                                                    <ConnectorProgressCard
-                                                        key={cp.connector_id}
-                                                        progress={cp}
-                                                        isExpanded={cp.status === 'running' || cp.status === 'failed'}
-                                                        onRetry={retryConnector}
-                                                        retryLoading={retryLoading === cp.connector_id}
-                                                        renormalize={jobStatus.renormalize}
-                                                    />
-                                                ))}
-                                            </Box>
+                                            {(() => {
+                                                const sorted = getSortedConnectorStatuses();
+                                                // Build nested grouping: type → group → connectors (flat, no per-account grid)
+                                                const typeMap = new Map<string, Map<string, ConnectorProgress[]>>();
+                                                const typeLabels: Record<string, string> = {
+                                                    cex: '🏦 Exchanges',
+                                                    dex: '🔗 DEX',
+                                                    wallet: '💼 Wallets',
+                                                    broker: '📊 Brokers',
+                                                    bank: '🏛️ Banks',
+                                                    investment: '📈 Investments',
+                                                };
+                                                for (const cp of sorted) {
+                                                    const t = cp.account_type || 'other';
+                                                    const g = cp.account_group || 'Ungrouped';
+                                                    if (!typeMap.has(t)) typeMap.set(t, new Map());
+                                                    const groupMap = typeMap.get(t)!;
+                                                    if (!groupMap.has(g)) groupMap.set(g, []);
+                                                    groupMap.get(g)!.push(cp);
+                                                }
+                                                const typeOrder = ['cex', 'dex', 'wallet', 'broker', 'bank', 'investment', 'other'];
+                                                const sortedTypes = Array.from(typeMap.keys()).sort(
+                                                    (a, b) => (typeOrder.indexOf(a) === -1 ? 99 : typeOrder.indexOf(a)) - (typeOrder.indexOf(b) === -1 ? 99 : typeOrder.indexOf(b))
+                                                );
+                                                const hasManyTypes = sortedTypes.length > 1;
+
+                                                // Initialize accordion state on first data
+                                                if (!typesInitialized.current && sorted.length > 0) {
+                                                    typesInitialized.current = true;
+                                                    setExpandedTypes(new Set(sortedTypes));
+                                                    const allGroupKeys = new Set<string>();
+                                                    for (const [t, gm] of typeMap) {
+                                                        for (const g of gm.keys()) allGroupKeys.add(`${t}:${g}`);
+                                                    }
+                                                    setExpandedGroups(allGroupKeys);
+                                                }
+
+                                                // Helper to compute aggregate status for a set of connectors
+                                                const getAggregateInfo = (cps: ConnectorProgress[]) => {
+                                                    const total = cps.length;
+                                                    const completed = cps.filter(c => c.status === 'completed').length;
+                                                    const failed = cps.filter(c => c.status === 'failed').length;
+                                                    const running = cps.filter(c => c.status === 'running').length;
+                                                    const warning = cps.filter(c => c.status === 'warning').length;
+                                                    const pending = cps.filter(c => c.status === 'pending' || c.status === 'queued').length;
+                                                    const skipped = cps.filter(c => c.status === 'skipped').length;
+                                                    const totalNew = cps.reduce((s, c) => s + (c.new_count ?? c.new_entries ?? 0), 0);
+                                                    const totalErrors = cps.reduce((s, c) => s + (c.errors ?? 0), 0);
+
+                                                    let icon = '⏳';
+                                                    let color = 'gray';
+                                                    if (running > 0) { icon = '🔄'; color = 'blue'; }
+                                                    else if (failed > 0) { icon = '❌'; color = 'red'; }
+                                                    else if (warning > 0) { icon = '⚠️'; color = 'orange'; }
+                                                    else if (completed === total) { icon = '✅'; color = 'green'; }
+                                                    else if (skipped === total) { icon = '⏭️'; color = 'gray'; }
+
+                                                    return { total, completed, failed, running, warning, pending, skipped, totalNew, totalErrors, icon, color };
+                                                };
+
+                                                return sortedTypes.map(typeKey => {
+                                                    const groupMap = typeMap.get(typeKey)!;
+                                                    const groupEntries = Array.from(groupMap.entries());
+                                                    const hasManyGroups = groupEntries.length > 1 || (groupEntries.length === 1 && groupEntries[0][0] !== 'Ungrouped');
+                                                    const allTypeConnectors = groupEntries.flatMap(([, cps]) => cps);
+                                                    const typeInfo = getAggregateInfo(allTypeConnectors);
+                                                    const isTypeExpanded = expandedTypes.has(typeKey);
+
+                                                    return (
+                                                        <Box key={typeKey} mb={3}>
+                                                            {/* Type accordion header */}
+                                                            {hasManyTypes && (
+                                                                <Flex
+                                                                    align="center"
+                                                                    justify="space-between"
+                                                                    py={1.5}
+                                                                    px={2}
+                                                                    bg={`${typeInfo.color}.50`}
+                                                                    borderRadius="md"
+                                                                    mb={1}
+                                                                    cursor="pointer"
+                                                                    onClick={() => setExpandedTypes(prev => {
+                                                                        const next = new Set(prev);
+                                                                        if (next.has(typeKey)) next.delete(typeKey); else next.add(typeKey);
+                                                                        return next;
+                                                                    })}
+                                                                    _hover={{ opacity: 0.85 }}
+                                                                    transition="opacity 0.15s"
+                                                                >
+                                                                    <Flex align="center" gap={2}>
+                                                                        <Text color="gray.400" fontSize="xs">{isTypeExpanded ? '▼' : '▶'}</Text>
+                                                                        <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+                                                                            {typeLabels[typeKey] || typeKey}
+                                                                        </Text>
+                                                                        <Text fontSize="xs" color="gray.500">
+                                                                            {typeInfo.icon} {typeInfo.completed}/{typeInfo.total}
+                                                                        </Text>
+                                                                    </Flex>
+                                                                    <Flex align="center" gap={2}>
+                                                                        {typeInfo.totalNew > 0 && (
+                                                                            <Text fontSize="xs" color="green.500">+{typeInfo.totalNew}</Text>
+                                                                        )}
+                                                                        {typeInfo.totalErrors > 0 && (
+                                                                            <Text fontSize="xs" color="red.500">{typeInfo.totalErrors} err</Text>
+                                                                        )}
+                                                                        {typeInfo.running > 0 && (
+                                                                            <Badge colorPalette="blue" size="xs">{typeInfo.running} running</Badge>
+                                                                        )}
+                                                                    </Flex>
+                                                                </Flex>
+                                                            )}
+
+                                                            <Collapsible.Root open={!hasManyTypes || isTypeExpanded}>
+                                                                <Collapsible.Content>
+                                                                    {groupEntries.map(([groupName, groupConnectors]) => {
+                                                                        const groupKey = `${typeKey}:${groupName}`;
+                                                                        const isGroupExpanded = expandedGroups.has(groupKey);
+                                                                        const groupInfo = getAggregateInfo(groupConnectors);
+
+                                                                        return (
+                                                                            <Box key={groupName} ml={hasManyTypes ? 2 : 0} mb={2}>
+                                                                                {/* Group accordion header */}
+                                                                                {hasManyGroups && (
+                                                                                    <Flex
+                                                                                        align="center"
+                                                                                        justify="space-between"
+                                                                                        py={1}
+                                                                                        px={2}
+                                                                                        borderRadius="sm"
+                                                                                        mb={1}
+                                                                                        cursor="pointer"
+                                                                                        onClick={() => setExpandedGroups(prev => {
+                                                                                            const next = new Set(prev);
+                                                                                            if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey);
+                                                                                            return next;
+                                                                                        })}
+                                                                                        _hover={{ bg: 'gray.50' }}
+                                                                                    >
+                                                                                        <Flex align="center" gap={2}>
+                                                                                            <Text color="gray.400" fontSize="xs">{isGroupExpanded ? '▼' : '▶'}</Text>
+                                                                                            <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                                                                                                {groupName}
+                                                                                            </Text>
+                                                                                            <Text fontSize="xs" color="gray.400">
+                                                                                                {groupInfo.icon} {groupInfo.completed}/{groupInfo.total}
+                                                                                            </Text>
+                                                                                        </Flex>
+                                                                                        <Flex align="center" gap={2}>
+                                                                                            {groupInfo.totalNew > 0 && (
+                                                                                                <Text fontSize="xs" color="green.500">+{groupInfo.totalNew}</Text>
+                                                                                            )}
+                                                                                            {groupInfo.totalErrors > 0 && (
+                                                                                                <Text fontSize="xs" color="red.500">{groupInfo.totalErrors} err</Text>
+                                                                                            )}
+                                                                                        </Flex>
+                                                                                    </Flex>
+                                                                                )}
+
+                                                                                <Collapsible.Root open={!hasManyGroups || isGroupExpanded}>
+                                                                                    <Collapsible.Content>
+                                                                                        {/* Grid at GROUP level - all cards from all accounts in this group */}
+                                                                                        <Box
+                                                                                            display="grid"
+                                                                                            gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }}
+                                                                                            gap={2}
+                                                                                            ml={hasManyGroups ? 2 : 0}
+                                                                                        >
+                                                                                            {groupConnectors.map((cp) => (
+                                                                                                <ConnectorProgressCard
+                                                                                                    key={cp.connector_id}
+                                                                                                    progress={cp}
+                                                                                                    isExpanded={cp.status === 'failed' || cp.status === 'warning'}
+                                                                                                    showAccountName={hasManyGroups || groupConnectors.length > 1}
+                                                                                                    onRetry={retryConnector}
+                                                                                                    retryLoading={retryLoading === cp.connector_id}
+                                                                                                    renormalize={jobStatus.renormalize}
+                                                                                                />
+                                                                                            ))}
+                                                                                        </Box>
+                                                                                    </Collapsible.Content>
+                                                                                </Collapsible.Root>
+                                                                            </Box>
+                                                                        );
+                                                                    })}
+                                                                </Collapsible.Content>
+                                                            </Collapsible.Root>
+                                                        </Box>
+                                                    );
+                                                });
+                                            })()}
                                         </Box>
                                     )}
 
@@ -620,15 +812,19 @@ export const SyncJobPanel: React.FC = () => {
                 }}
             />
 
-            {/* Re-Normalize Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={renormalizeConfirm.isOpen}
-                onClose={renormalizeConfirm.close}
-                onConfirm={() => startJob(true)}
-                title="Re-Normalize Transactions"
-                message="This will delete existing normalized transactions and recreate them from stored raw data. Derived data (cost lots, P&L, etc.) will also be removed and must be recalculated."
-                confirmLabel="Re-Normalize"
-                isDestructive
+            {/* Sync Recap / Confirmation Dialog */}
+            <SyncRecapDialog
+                isOpen={recapOpen}
+                onClose={() => setRecapOpen(false)}
+                onConfirm={() => {
+                    setRecapOpen(false);
+                    startJob(recapRenormalize);
+                }}
+                connectors={configConnectors}
+                accounts={configAccounts}
+                overrides={syncOverrides}
+                renormalize={recapRenormalize}
+                loading={actionLoading}
             />
         </Box>
     );

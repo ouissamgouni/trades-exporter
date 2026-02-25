@@ -50,6 +50,17 @@ class TestBlockscoutHubConnector:
         assert hub.chain_name == "polygon"
         assert len(hub.child_connectors) == 2
 
+    def test_hub_with_hyperevm_chain(self):
+        """Test hub connector initialization with HyperEVM chain."""
+        hub = ConnectorBlockscoutHub(
+            wallet_address="0x347681ec529f767dafB3703486570Bc3Da136993",
+            chain_name="hyperevm",
+        )
+
+        assert hub.connector_name == "blockscout_hub_hyperevm"
+        assert hub.chain_name == "hyperevm"
+        assert len(hub.child_connectors) == 2
+
     def test_hub_missing_wallet_address_raises_error(self):
         """Test that missing wallet address raises ValueError."""
         try:

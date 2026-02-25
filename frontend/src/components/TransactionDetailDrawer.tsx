@@ -1,9 +1,9 @@
 /**
- * TransactionDetailDrawer - Slide-in drawer for full transaction details
- * 
- * Wraps SlidePanel + TransactionDetailPanel for consistent transaction
- * detail inspection across the app. Opens from left side.
- * 
+ * TransactionDetailDrawer - Slide-in drawer for viewing & editing transactions.
+ *
+ * Wraps TransactionSidePanel for unified transaction inspection + inline
+ * editing across the app. Opens from right side at 450px width.
+ *
  * Usage:
  * <TransactionDetailDrawer
  *     transaction={selectedTransaction}
@@ -12,6 +12,7 @@
  *     accounts={accounts}
  *     onNotesChange={handleNotesChange}
  *     onTagsChange={handleTagsChange}
+ *     onTransactionUpdate={handleTransactionUpdate}
  * />
  */
 
@@ -19,7 +20,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Flex, Button, Spinner, Text } from '@chakra-ui/react';
 import { FiX, FiFileText } from 'react-icons/fi';
 import { Transaction, Account, API_URL } from '../types';
-import { TransactionDetailPanel } from './TransactionDetailPanel';
+import { TransactionSidePanel } from './TransactionSidePanel';
 
 interface TransactionDetailDrawerProps {
     /** Full transaction object (if already loaded) */
@@ -36,6 +37,8 @@ interface TransactionDetailDrawerProps {
     onNotesChange?: (txId: number, notes: string) => void;
     /** Callback when tags are changed */
     onTagsChange?: (txId: number, tags: Record<string, unknown>[]) => void;
+    /** Callback when a transaction field is updated inline */
+    onTransactionUpdate?: (updated: Transaction) => void;
     /** Width of the drawer */
     width?: string;
 }
@@ -48,7 +51,8 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
     accounts,
     onNotesChange,
     onTagsChange,
-    width = '420px',
+    onTransactionUpdate,
+    width = '450px',
 }) => {
     const [fetchedTransaction, setFetchedTransaction] = useState<Transaction | null>(null);
     const [loading, setLoading] = useState(false);
@@ -161,11 +165,16 @@ export const TransactionDetailDrawer: React.FC<TransactionDetailDrawerProps> = (
                     )}
 
                     {transaction && !loading && !error && (
-                        <TransactionDetailPanel
+                        <TransactionSidePanel
                             transaction={transaction}
                             accounts={accounts}
                             onNotesChange={onNotesChange}
                             onTagsChange={onTagsChange}
+                            onTransactionUpdate={(updated) => {
+                                // Update local state if we fetched the transaction
+                                if (needsFetch) setFetchedTransaction(updated);
+                                onTransactionUpdate?.(updated);
+                            }}
                         />
                     )}
 

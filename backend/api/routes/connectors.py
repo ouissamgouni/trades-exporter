@@ -40,6 +40,7 @@ class ConnectorWithAccountResponse(BaseModel):
     config: Dict[str, Any]
     credentials_ref: Optional[str]
     sync_priority: int
+    color: Optional[str]
     last_sync_at: Optional[str]
     last_sync_status: Optional[str]
     last_error: Optional[str]
@@ -58,6 +59,7 @@ class ConnectorTypeInfo(BaseModel):
     supported_chains: Optional[List[str]] = None
     required_config: List[str]
     optional_config: List[str]
+    is_file_connector: bool = False
 
 
 class ConnectorUpdate(BaseModel):
@@ -67,6 +69,7 @@ class ConnectorUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = None
     credentials_ref: Optional[str] = None
     sync_priority: Optional[int] = None
+    color: Optional[str] = None
 
 
 class FileUploadPreviewResponse(BaseModel):
@@ -159,6 +162,7 @@ def connector_to_response(
         config=connector.config or {},
         credentials_ref=connector.credentials_ref,
         sync_priority=connector.sync_priority,
+        color=connector.color,
         last_sync_at=connector.last_sync_at.isoformat()
         if connector.last_sync_at
         else None,
@@ -225,6 +229,7 @@ def list_connector_types():
                     supported_chains=info.supported_chains,
                     required_config=info.required_config,
                     optional_config=info.optional_config,
+                    is_file_connector=info.is_file_connector,
                 )
             )
     return available
@@ -405,6 +410,13 @@ def _get_upload_dir(connector_id: int) -> str:
     import os
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(backend_dir, "data", "input", "uploads", str(connector_id))
+
+
+def _get_default_file_dir(connector_id: int) -> str:
+    """Get the default file directory path for a connector."""
+    import os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(backend_dir, "data", "input", "defaults", str(connector_id))
 
 
 @router.post("/{connector_id}/upload-file/preview", response_model=FileUploadPreviewResponse)
@@ -661,6 +673,7 @@ async def preview_file_upload_detailed(
 async def confirm_file_upload(
     connector_id: int,
     file: UploadFile = File(...),
+    as_default: bool = Query(False, description="If true, save as default file for this connector instead of pending upload"),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -742,15 +755,19 @@ async def confirm_file_upload(
             raise HTTPException(status_code=400, detail="File contains no valid trades")
         
         # Create upload directory
-        upload_dir = _get_upload_dir(connector_id)
-        os.makedirs(upload_dir, exist_ok=True)
+        if as_default:
+            save_dir = _get_default_file_dir(connector_id)
+        else:
+            save_dir = _get_upload_dir(connector_id)
+        os.makedirs(save_dir, exist_ok=True)
         
         # Generate unique filename with timestamp
-        # Format: pending_{timestamp}_{original_filename}
+        # Format: {prefix}_{timestamp}_{original_filename}
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_filename = file.filename.replace(" ", "_")
-        saved_filename = f"pending_{timestamp}_{safe_filename}"
-        file_path = os.path.join(upload_dir, saved_filename)
+        prefix = "default" if as_default else "pending"
+        saved_filename = f"{prefix}_{timestamp}_{safe_filename}"
+        file_path = os.path.join(save_dir, saved_filename)
         
         # Save file
         with open(file_path, "wb") as f:
@@ -760,6 +777,7 @@ async def confirm_file_upload(
         
         # Create FileImport record in database
         file_import_repo = FileImportRepository(session)
+        import_status = "default" if as_default else "pending"
         file_import = FileImport(
             connector_id=connector_id,
             filename=saved_filename,
@@ -767,7 +785,7 @@ async def confirm_file_upload(
             file_path=file_path,
             file_size=file_size,
             row_count=row_count,
-            status="pending",
+            status=import_status,
         )
         file_import = file_import_repo.create(file_import)
         
@@ -776,8 +794,13 @@ async def confirm_file_upload(
         config = dict(old_config)  # Create a copy
         
         # Set file path and import ID for the connector to use during sync
-        config["file_path"] = file_path
-        config["file_import_id"] = file_import.id
+        if as_default:
+            config["default_file_path"] = file_path
+            config["default_file_import_id"] = file_import.id
+            config["default_file_name"] = file.filename
+        else:
+            config["file_path"] = file_path
+            config["file_import_id"] = file_import.id
         
         # Assign the new dict and flag as modified to ensure SQLAlchemy persists the change
         connector.config = config
@@ -786,7 +809,7 @@ async def confirm_file_upload(
         session.commit()
         session.refresh(connector)
         
-        log.info(f"✅ File upload confirmed for connector {connector_id}: {row_count} rows, file_import_id={file_import.id}")
+        log.info(f"{'📌' if as_default else '✅'} File {'default set' if as_default else 'upload confirmed'} for connector {connector_id}: {row_count} rows, file_import_id={file_import.id}")
         
         return FileUploadConfirmResponse(
             status="confirmed",

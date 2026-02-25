@@ -203,7 +203,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
                                 style={{ fontSize: '11px', padding: '2px 4px' }}
                             >
                                 <option value="">All</option>
-                                <option value={UnitPattern.TRANSFER}>Transfer</option>
+                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
                                 <option value={UnitPattern.SWAP}>Swap</option>
                                 <option value={UnitPattern.SPLIT}>Split</option>
                                 <option value={UnitPattern.UNKNOWN}>Unknown</option>

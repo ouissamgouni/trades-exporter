@@ -86,15 +86,17 @@ export interface TransactionsViewProps {
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
     const preset = VIEW_PRESETS[mode];
 
-    // Fetch suggestion count for tab badge (inbox only)
+    // Read suggestion count from shared cache (App.tsx owns the query)
     const { data: suggestions = [] } = useQuery({
         queryKey: ['bundleSuggestions'],
         queryFn: async () => {
-            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=10`);
+            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=100`);
             if (!response.ok) return [];
             return response.json() as Promise<BundleSuggestion[]>;
         },
+        // Only enable when suggestions are needed; otherwise just reads from cache
         enabled: preset.showSuggestions,
+        staleTime: 60_000, // Avoid refetching if App.tsx already populated the cache
     });
 
     return (

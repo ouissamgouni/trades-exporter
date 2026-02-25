@@ -13,6 +13,8 @@ export interface QuantityFormatOptions {
   useLargeNumberSuffixes?: boolean;
   /** Minimum value for K suffix (default: 1000) */
   largeNumberThreshold?: number;
+  /** If true, show full precision without truncation or suffixes */
+  forceFullPrecision?: boolean;
 }
 
 const DEFAULT_OPTIONS: Required<QuantityFormatOptions> = {

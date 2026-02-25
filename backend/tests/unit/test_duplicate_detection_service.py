@@ -2,9 +2,12 @@
 Unit tests for duplicate detection service.
 
 Tests cover:
-- Group hash computation (6 tests)
-- Duplicate group detection (5 tests)
-- Resolution tagging (3 tests)
+- Legacy transaction hash computation (6 tests)
+- Deterministic group hash (4 tests)
+- Union-find transitive clustering (4 tests)
+- Helper tag inspection functions (6 tests)
+- Fuzzy duplicate group detection (7 tests)
+- Resolution tagging with sys_* format (4 tests)
 
 Uses mocks to isolate logic from database operations.
 """
@@ -18,8 +21,13 @@ from sqlmodel import Session
 
 from backend.services.duplicate_detection_service import (
     compute_transaction_hash,
+    compute_group_hash,
     detect_duplicate_groups,
+    detect_duplicate_suspicions,
     mark_duplicate_resolution,
+    _UnionFind,
+    _transaction_has_resolution_tag,
+    _transaction_has_any_resolution,
 )
 from backend.db.models import NormalizedTransaction
 
@@ -194,691 +202,556 @@ class TestComputeGroupHash:
         assert hash1 == hash2
 
 
-class TestDetectDuplicateGroups:
-    """Test duplicate group detection using transaction_hash column."""
-    
-    def test_detects_exact_duplicates(self, mock_session):
-        """Should detect transactions with identical transaction_hash."""
-        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
-        
-        # Compute hash for test data
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0")
-        )
-        
-        # Create two transactions with same hash (duplicates)
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="mexc_transactions_file",
-            source_transaction_id="TX1",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
-        )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="mexc_api_sync",
-            source_transaction_id="TX2",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
-        )
-        
-        # Mock session.exec() for two queries:
-        # 1. Query for duplicate hashes (GROUP BY with HAVING COUNT > 1)
-        # 2. Query for transactions with that hash
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = [(test_hash, 2)]  # hash, count
-        
-        mock_tx_result = MagicMock()
-        mock_tx_result.all.return_value = [tx1, tx2]
-        
-        # Setup mock to return different results for each call
-        mock_session.exec.side_effect = [mock_hash_result, mock_tx_result]
-        mock_session.get.return_value = None  # No connector run
-        
-        # Detect duplicates with new signature
-        groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
-        # Should find 1 group
+class TestComputeGroupHash2:
+    """Test compute_group_hash (deterministic hash from sorted TX IDs)."""
+
+    def test_deterministic(self):
+        """Same IDs should always produce the same hash."""
+        h1 = compute_group_hash([1, 2, 3])
+        h2 = compute_group_hash([1, 2, 3])
+        assert h1 == h2
+
+    def test_order_independent(self):
+        """Input order should not affect the hash."""
+        h1 = compute_group_hash([3, 1, 2])
+        h2 = compute_group_hash([1, 2, 3])
+        assert h1 == h2
+
+    def test_different_ids_different_hash(self):
+        """Different membership should produce a different hash."""
+        h1 = compute_group_hash([1, 2])
+        h2 = compute_group_hash([1, 3])
+        assert h1 != h2
+
+    def test_md5_length(self):
+        """Should produce a 32-character hex string."""
+        h = compute_group_hash([10, 20])
+        assert len(h) == 32
+        assert all(c in "0123456789abcdef" for c in h)
+
+
+class TestUnionFind:
+    """Test _UnionFind for transitive clustering of fuzzy pairs."""
+
+    def test_basic_union(self):
+        uf = _UnionFind()
+        uf.union(1, 2)
+        groups = uf.groups()
         assert len(groups) == 1
-        # Check group has both transactions
+        members = list(groups.values())[0]
+        assert set(members) == {1, 2}
+
+    def test_transitive_closure(self):
+        """union(1,2) + union(2,3) ⇒ single group {1,2,3}."""
+        uf = _UnionFind()
+        uf.union(1, 2)
+        uf.union(2, 3)
+        groups = uf.groups()
+        assert len(groups) == 1
+        members = list(groups.values())[0]
+        assert set(members) == {1, 2, 3}
+
+    def test_separate_groups(self):
+        uf = _UnionFind()
+        uf.union(1, 2)
+        uf.union(3, 4)
+        groups = uf.groups()
+        assert len(groups) == 2
+
+    def test_find_creates_element(self):
+        uf = _UnionFind()
+        root = uf.find(42)
+        assert root == 42
+
+
+class TestHelperFunctions:
+    """Test tag inspection helper functions."""
+
+    def test_has_resolution_tag_true(self):
+        tags = [{"sys_group": "abc123"}, {"sys_resolution": "kept"}]
+        assert _transaction_has_resolution_tag(tags, "abc123") is True
+
+    def test_has_resolution_tag_wrong_hash(self):
+        tags = [{"sys_group": "other_hash"}]
+        assert _transaction_has_resolution_tag(tags, "abc123") is False
+
+    def test_has_resolution_tag_none(self):
+        assert _transaction_has_resolution_tag(None, "abc123") is False
+
+    def test_has_any_resolution_true(self):
+        tags = [{"sys_resolution": "kept"}]
+        assert _transaction_has_any_resolution(tags) is True
+
+    def test_has_any_resolution_false(self):
+        tags = [{"type": "other"}]
+        assert _transaction_has_any_resolution(tags) is False
+
+    def test_has_any_resolution_none(self):
+        assert _transaction_has_any_resolution(None) is False
+
+
+def _make_mock_tx(**kwargs):
+    """Create a MagicMock transaction with sensible defaults for detect tests."""
+    tx = MagicMock()
+    defaults = {
+        "id": 1,
+        "source": "test_source",
+        "source_transaction_id": "TX1",
+        "source_transaction_type": None,
+        "account_id": 1,
+        "date_time": datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc),
+        "direction": "inflow",
+        "transaction_type": "deposit",
+        "source_asset_symbol": "BTC",
+        "source_price_quote_asset_symbol": "USDT",
+        "quantity": Decimal("0.5"),
+        "price": Decimal("42000.0"),
+        "total": None,
+        "review_status": "pending",
+        "transaction_hash": None,
+        "tags": None,
+        "sync_connector_run_id": None,
+        "synced_at": None,
+        "created_at": None,
+        "asset": None,
+        "price_quote_asset": None,
+        "fee_quote_asset": None,
+    }
+    defaults.update(kwargs)
+    for key, val in defaults.items():
+        setattr(tx, key, val)
+    return tx
+
+
+class TestDetectDuplicateGroups:
+    """Test fuzzy duplicate group detection via SQL self-join + union-find."""
+
+    def test_detects_fuzzy_duplicates(self, mock_session):
+        """Should detect transactions matched by fuzzy self-join pairs."""
+        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
+
+        tx1 = _make_mock_tx(id=1, source="source_a", source_transaction_id="TX1", date_time=dt)
+        tx2 = _make_mock_tx(id=2, source="source_b", source_transaction_id="TX2", date_time=dt)
+
+        # First exec → fuzzy pairs, second exec → transaction objects
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.get.return_value = None
+
+        groups = detect_duplicate_groups(session=mock_session, account_id=1)
+
+        assert len(groups) == 1
         assert len(groups[0].transactions) == 2
-        # Verify transaction IDs
         tx_ids = [tx["id"] for tx in groups[0].transactions]
         assert 1 in tx_ids
         assert 2 in tx_ids
-    
+        assert groups[0].match_type == "fuzzy"
+
     def test_filters_out_fully_resolved_groups(self, mock_session):
-        """Should not return groups where all transactions are resolved."""
+        """Should skip groups where all transactions carry sys_group tag."""
         dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="ETH",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0")
+
+        group_hash = compute_group_hash([1, 2])
+
+        tx1 = _make_mock_tx(
+            id=1, source="source_a", source_transaction_id="TX1", date_time=dt,
+            tags=[{"sys_group": group_hash, "sys_resolution": "kept"}],
         )
-        
-        # Both transactions are resolved
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="ETH",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=[{"type": "duplicate_resolution", "resolution": "kept", "group_hash": test_hash}],
+        tx2 = _make_mock_tx(
+            id=2, source="source_b", source_transaction_id="TX2", date_time=dt,
+            tags=[{"sys_group": group_hash, "sys_resolution": "merged"}],
         )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="source_b",
-            source_transaction_id="TX2",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="ETH",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=[{"type": "duplicate_resolution", "resolution": "merged", "group_hash": test_hash}],
-        )
-        
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = [(test_hash, 2)]
-        
-        mock_tx_result = MagicMock()
-        mock_tx_result.all.return_value = [tx1, tx2]
-        
-        mock_session.exec.side_effect = [mock_hash_result, mock_tx_result]
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
         mock_session.get.return_value = None
-        
+
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
-        # Should return 0 groups since all transactions are resolved
+
         assert len(groups) == 0
-    
+
     def test_includes_partially_resolved_groups(self, mock_session):
         """Should return groups with at least one unresolved transaction."""
         dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="SOL",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("100.0"),
-            price=Decimal("50.0")
+
+        group_hash = compute_group_hash([1, 2])
+
+        tx1 = _make_mock_tx(
+            id=1, source="source_a", source_transaction_id="TX1", date_time=dt,
+            tags=[{"sys_group": group_hash, "sys_resolution": "kept"}],
         )
-        
-        # tx1 is resolved, tx2 is unresolved
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="SOL",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("100.0"),
-            price=Decimal("50.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=[{"type": "duplicate_resolution", "resolution": "kept", "group_hash": test_hash}],
+        tx2 = _make_mock_tx(
+            id=2, source="source_b", source_transaction_id="TX2", date_time=dt,
+            tags=None,
         )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="source_b",
-            source_transaction_id="TX2",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="SOL",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("100.0"),
-            price=Decimal("50.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,  # Unresolved
-        )
-        
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = [(test_hash, 2)]
-        
-        mock_tx_result = MagicMock()
-        mock_tx_result.all.return_value = [tx1, tx2]
-        
-        mock_session.exec.side_effect = [mock_hash_result, mock_tx_result]
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
         mock_session.get.return_value = None
-        
+
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
-        # Should return 1 group with both resolved and unresolved transactions
+
         assert len(groups) == 1
         assert len(groups[0].transactions) == 2
-        # Check resolved flag is set correctly
         resolved_count = sum(1 for tx in groups[0].transactions if tx.get("dup_resolved"))
         assert resolved_count == 1
-    
+
     def test_no_duplicates_returns_empty(self, mock_session):
-        """Should return empty list when no duplicate hashes exist."""
-        # Mock no duplicate hashes found
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = []  # No hashes with count > 1
-        
-        mock_session.exec.return_value = mock_hash_result
-        
+        """Should return empty list when self-join finds no pairs."""
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = []
+
+        mock_session.exec.return_value = mock_pairs
+
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
+
         assert len(groups) == 0
-    
+
     def test_filters_by_account_id(self, mock_session):
-        """Should filter results by account_id when provided."""
-        dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0")
-        )
-        
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
-        )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="source_b",
-            source_transaction_id="TX2",
-            account_id=1,
-            date_time=dt,
-            direction="outflow",  # Different direction
-            transaction_type="trade",
-            source_asset_symbol="ETH",  # Different asset
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),  # Different quantity
-            price=Decimal("2000.0"),
-            review_status="pending",
-        )
-        
-        mock_exec = MagicMock()
-        mock_exec.all.return_value = [tx1, tx2]
-        mock_session.exec.return_value = mock_exec
-        
-        groups = detect_duplicate_groups([1, 2], mock_session)
-        
+        """Should accept account_id filter and pass it to query."""
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = []
+
+        mock_session.exec.return_value = mock_pairs
+
+        groups = detect_duplicate_groups(session=mock_session, account_id=42)
+
         assert len(groups) == 0
-    
+        mock_session.exec.assert_called_once()
+
     def test_excludes_same_run_different_source_id(self, mock_session):
-        """Should exclude transactions from same run with different source_transaction_id."""
+        """Should exclude same-run transactions with different source_transaction_id."""
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0")
+
+        tx1 = _make_mock_tx(
+            id=1, source="mexc_api", source_transaction_id="DEPOSIT_123",
+            date_time=dt, sync_connector_run_id=100,
         )
-        
-        # Two transactions from same connector run but different source IDs
-        # These should NOT be considered duplicates
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="mexc_api",
-            source_transaction_id="DEPOSIT_123",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            sync_connector_run_id=100,  # Same run
-            tags=None,
+        tx2 = _make_mock_tx(
+            id=2, source="mexc_api", source_transaction_id="DEPOSIT_456",
+            date_time=dt, sync_connector_run_id=100,
         )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="mexc_api",
-            source_transaction_id="DEPOSIT_456",  # Different ID
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            sync_connector_run_id=100,  # Same run
-            tags=None,
-        )
-        
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = [(test_hash, 2)]
-        
-        mock_tx_result = MagicMock()
-        mock_tx_result.all.return_value = [tx1, tx2]
-        
-        mock_session.exec.side_effect = [mock_hash_result, mock_tx_result]
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
         mock_session.get.return_value = None
-        
+
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
-        # Should NOT find any groups (filtered out due to same run, different IDs)
+
         assert len(groups) == 0
-    
+
     def test_includes_same_run_same_source_id(self, mock_session):
-        """Should include transactions from same run with same source_transaction_id as duplicates."""
+        """Should keep same-run transactions when source_transaction_id matches."""
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0")
+
+        tx1 = _make_mock_tx(
+            id=1, source="mexc_api", source_transaction_id="DEPOSIT_123",
+            date_time=dt, sync_connector_run_id=100,
         )
-        
-        # Two transactions from same connector run AND same source ID
-        # These SHOULD be considered duplicates (shouldn't happen, but test the logic)
-        tx1 = NormalizedTransaction(
-            id=1,
-            source="mexc_api",
-            source_transaction_id="DEPOSIT_123",  # Same ID
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            sync_connector_run_id=100,
-            tags=None,
+        tx2 = _make_mock_tx(
+            id=2, source="mexc_api", source_transaction_id="DEPOSIT_123",
+            date_time=dt, sync_connector_run_id=100,
         )
-        tx2 = NormalizedTransaction(
-            id=2,
-            source="mexc_api",
-            source_transaction_id="DEPOSIT_123",  # Same ID
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="deposit",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            sync_connector_run_id=100,
-            tags=None,
-        )
-        
-        mock_hash_result = MagicMock()
-        mock_hash_result.all.return_value = [(test_hash, 2)]
-        
-        mock_tx_result = MagicMock()
-        mock_tx_result.all.return_value = [tx1, tx2]
-        
-        mock_session.exec.side_effect = [mock_hash_result, mock_tx_result]
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
         mock_session.get.return_value = None
-        
+
         groups = detect_duplicate_groups(session=mock_session, account_id=1)
-        
-        # Should find 1 group (not filtered out)
+
         assert len(groups) == 1
         assert len(groups[0].transactions) == 2
+
+    def test_includes_cross_run_different_source_id(self, mock_session):
+        """Should keep transactions from different runs even with different source IDs.
+
+        Regression test: previously _filter_same_run_different_id_transactions
+        would incorrectly exclude single-transaction-per-run buckets because
+        len([one_id]) == len(set([one_id])) is trivially True.
+        """
+        dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+        tx1 = _make_mock_tx(
+            id=1, source="okx-funding-file", source_transaction_id="10018451232",
+            date_time=dt, sync_connector_run_id=1384,
+        )
+        tx2 = _make_mock_tx(
+            id=2, source="okx-withdrawals", source_transaction_id="1000487221",
+            date_time=dt, sync_connector_run_id=1498,
+        )
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.get.return_value = None
+
+        groups = detect_duplicate_groups(session=mock_session, account_id=1)
+
+        assert len(groups) == 1
+        assert len(groups[0].transactions) == 2
+        tx_ids = [tx["id"] for tx in groups[0].transactions]
+        assert 1 in tx_ids
+        assert 2 in tx_ids
+
+
+class TestDetectDuplicateSuspicions:
+    """Test lightweight suspicion wrapper."""
+
+    def test_returns_lightweight_format(self, mock_session):
+        """Should return only group_hash, transaction_ids, match_criteria."""
+        dt = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
+
+        tx1 = _make_mock_tx(id=1, date_time=dt)
+        tx2 = _make_mock_tx(id=2, source="source_b", source_transaction_id="TX2", date_time=dt)
+
+        mock_pairs = MagicMock()
+        mock_pairs.all.return_value = [(1, 2)]
+
+        mock_txs = MagicMock()
+        mock_txs.all.return_value = [tx1, tx2]
+
+        mock_session.exec.side_effect = [mock_pairs, mock_txs]
+        mock_session.get.return_value = None
+
+        suspicions = detect_duplicate_suspicions(session=mock_session, account_id=1)
+
+        assert len(suspicions) == 1
+        s = suspicions[0]
+        assert "group_hash" in s
+        assert "transaction_ids" in s
+        assert "match_criteria" in s
+        assert set(s["transaction_ids"]) == {1, 2}
 
 
 class TestMarkDuplicateResolution:
-    """Test duplicate resolution marking (Option B: Re-resolve entire group)."""
-    
+    """Test resolution tagging with sys_* tag format."""
+
     def test_clears_old_resolution_tags_before_applying_new(self, mock_session):
-        """Should clear all old resolution tags for the group_hash before applying new ones."""
-        dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
-        test_hash = compute_transaction_hash(
-            account_id=1,
-            datetime_obj=dt,
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            direction="inflow",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0")
-        )
-        
-        # tx1 has old resolution tag
+        """Should remove old sys_group tags for the hash, then apply new ones."""
+        group_hash = "test_hash_abc123"
+
         tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
+            id=1, source="source_a", source_transaction_id="TX1",
             account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
+            date_time=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            direction="inflow", transaction_type="trade",
+            source_asset_symbol="BTC", source_price_quote_asset_symbol="USDT",
+            quantity=Decimal("0.5"), price=Decimal("42000.0"),
             review_status="pending",
-            transaction_hash=test_hash,
-            tags=[{"type": "duplicate_resolution", "resolution": "merged", "group_hash": test_hash}],
+            tags=[
+                {"sys_group": group_hash, "sys_resolution": "merged", "sys_resolved_at": "2024-01-01T00:00:00"},
+            ],
         )
-        
-        # tx2 has no tags
+
         tx2 = NormalizedTransaction(
-            id=2,
-            source="source_b",
-            source_transaction_id="TX2",
+            id=2, source="source_b", source_transaction_id="TX2",
             account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
+            date_time=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            direction="inflow", transaction_type="trade",
+            source_asset_symbol="BTC", source_price_quote_asset_symbol="USDT",
+            quantity=Decimal("0.5"), price=Decimal("42000.0"),
             review_status="pending",
-            transaction_hash=test_hash,
             tags=None,
         )
-        
-        # Mock session.exec to return all transactions with this hash
-        mock_exec = MagicMock()
-        mock_exec.all.return_value = [tx1, tx2]
-        mock_session.exec.return_value = mock_exec
-        
-        # Mock session.get to return specific transactions
-        def get_side_effect(model, tx_id):
-            if tx_id == 1:
-                return tx1
-            elif tx_id == 2:
-                return tx2
+
+        def get_side_effect(model, obj_id):
+            if model == NormalizedTransaction:
+                return {1: tx1, 2: tx2}.get(obj_id)
             return None
-        
+
         mock_session.get.side_effect = get_side_effect
-        
-        # Mark tx1 as kept, tx2 as merged (opposite of old state)
+
         mark_duplicate_resolution(
-            group_hash=test_hash,
+            group_hash=group_hash,
             kept_tx_ids=[1],
             merged_tx_ids=[2],
             dismissed_tx_ids=[],
             session=mock_session,
         )
-        
-        # Verify old tags were cleared and new tags applied
-        # tx1 should now have "kept" tag (old "merged" tag cleared)
-        resolution_tags_tx1 = [tag for tag in tx1.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(resolution_tags_tx1) == 1
-        assert resolution_tags_tx1[0]["resolution"] == "kept"
-        
-        # tx2 should now have "merged" tag
-        resolution_tags_tx2 = [tag for tag in tx2.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(resolution_tags_tx2) == 1
-        assert resolution_tags_tx2[0]["resolution"] == "merged"
-    
+
+        # tx1: old "merged" cleared → new "kept" (combined tag)
+        group_tags_tx1 = [tag for tag in tx1.tags if tag.get("sys_group") == group_hash]
+        assert len(group_tags_tx1) == 1
+        assert group_tags_tx1[0]["sys_resolution"] == "kept"
+        assert "sys_resolved_at" in group_tags_tx1[0]
+
+        # tx2: new "merged" (combined tag)
+        group_tags_tx2 = [tag for tag in tx2.tags if tag.get("sys_group") == group_hash]
+        assert len(group_tags_tx2) == 1
+        assert group_tags_tx2[0]["sys_resolution"] == "merged"
+
     def test_marks_kept_merged_dismissed(self, mock_session):
-        """Should correctly mark kept, merged, and dismissed transactions."""
+        """Should correctly apply kept / merged / dismissed sys_resolution tags."""
+        group_hash = "test_hash_abc123"
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
-        test_hash = "test_hash_abc123"
-        
+
         tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="ETH",
+            id=1, source="source_a", source_transaction_id="TX1",
+            account_id=1, date_time=dt, direction="inflow",
+            transaction_type="trade", source_asset_symbol="ETH",
             source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
+            quantity=Decimal("1.0"), price=Decimal("2000.0"),
+            review_status="pending", tags=None,
         )
-        
         tx2 = NormalizedTransaction(
-            id=2,
-            source="source_b",
-            source_transaction_id="TX2",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="ETH",
+            id=2, source="source_b", source_transaction_id="TX2",
+            account_id=1, date_time=dt, direction="inflow",
+            transaction_type="trade", source_asset_symbol="ETH",
             source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
+            quantity=Decimal("1.0"), price=Decimal("2000.0"),
+            review_status="pending", tags=None,
         )
-        
         tx3 = NormalizedTransaction(
-            id=3,
-            source="source_c",
-            source_transaction_id="TX3",
-            account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="ETH",
+            id=3, source="source_c", source_transaction_id="TX3",
+            account_id=1, date_time=dt, direction="inflow",
+            transaction_type="trade", source_asset_symbol="ETH",
             source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("1.0"),
-            price=Decimal("2000.0"),
-            review_status="pending",
-            transaction_hash=test_hash,
-            tags=None,
+            quantity=Decimal("1.0"), price=Decimal("2000.0"),
+            review_status="pending", tags=None,
         )
-        
-        # Mock session.exec for clearing old tags
-        mock_exec = MagicMock()
-        mock_exec.all.return_value = [tx1, tx2, tx3]
-        mock_session.exec.return_value = mock_exec
-        
-        # Mock session.get to return specific transactions
-        def get_side_effect(model, tx_id):
-            if tx_id == 1:
-                return tx1
-            elif tx_id == 2:
-                return tx2
-            elif tx_id == 3:
-                return tx3
+
+        def get_side_effect(model, obj_id):
+            if model == NormalizedTransaction:
+                return {1: tx1, 2: tx2, 3: tx3}.get(obj_id)
             return None
-        
+
         mock_session.get.side_effect = get_side_effect
-        
-        # Mark tx1 as kept, tx2 as merged, tx3 as dismissed
+
         mark_duplicate_resolution(
-            group_hash=test_hash,
+            group_hash=group_hash,
             kept_tx_ids=[1],
             merged_tx_ids=[2],
             dismissed_tx_ids=[3],
             session=mock_session,
         )
-        
-        # Verify tx1 is marked as kept
-        kept_tags = [tag for tag in tx1.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(kept_tags) == 1
-        assert kept_tags[0]["resolution"] == "kept"
-        
-        # Verify tx2 is marked as merged with reference to kept tx
-        merged_tags = [tag for tag in tx2.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(merged_tags) == 1
-        assert merged_tags[0]["resolution"] == "merged"
-        assert 1 in merged_tags[0]["kept_tx_ids"]
-        
-        # Verify tx3 is marked as dismissed
-        dismissed_tags = [tag for tag in tx3.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(dismissed_tags) == 1
-        assert dismissed_tags[0]["resolution"] == "dismissed"
-        
-        # Verify commit was called
+
+        # tx1 → combined tag with kept + group
+        group_tags_tx1 = [t for t in tx1.tags if t.get("sys_group") == group_hash]
+        assert len(group_tags_tx1) == 1
+        assert group_tags_tx1[0]["sys_resolution"] == "kept"
+
+        # tx2 → combined tag with merged + sys_kept_ids
+        group_tags_tx2 = [t for t in tx2.tags if t.get("sys_group") == group_hash]
+        assert len(group_tags_tx2) == 1
+        assert group_tags_tx2[0]["sys_resolution"] == "merged"
+        assert "1" in group_tags_tx2[0]["sys_kept_ids"]
+
+        # tx3 → combined tag with dismissed
+        group_tags_tx3 = [t for t in tx3.tags if t.get("sys_group") == group_hash]
+        assert len(group_tags_tx3) == 1
+        assert group_tags_tx3[0]["sys_resolution"] == "dismissed"
+
         mock_session.commit.assert_called_once()
-    
+
     def test_marks_dismissed_transaction(self, mock_session):
-        """Should mark transaction as dismissed."""
-        dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
+        """Should mark a single transaction as dismissed."""
+        group_hash = "test_hash_456"
+
         tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
+            id=1, source="source_a", source_transaction_id="TX1",
             account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
+            date_time=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            direction="inflow", transaction_type="trade",
+            source_asset_symbol="BTC", source_price_quote_asset_symbol="USDT",
+            quantity=Decimal("0.5"), price=Decimal("42000.0"),
             review_status="pending",
-            tags=[{"type": "potential_duplicate", "group_hash": "test_hash_456"}],
+            tags=[{"type": "potential_duplicate", "group_hash": group_hash}],
         )
-        
-        mock_session.get.return_value = tx1
-        
-        # Dismiss tx1
+
+        def get_side_effect(model, obj_id):
+            if model == NormalizedTransaction:
+                if obj_id == 1:
+                    return tx1
+            return None
+
+        mock_session.get.side_effect = get_side_effect
+
         mark_duplicate_resolution(
-            group_hash="test_hash_456",
+            group_hash=group_hash,
             kept_tx_ids=[],
             merged_tx_ids=[],
             dismissed_tx_ids=[1],
             session=mock_session,
         )
-        
-        mock_session.get.assert_called_once_with(NormalizedTransaction, 1)
+
         mock_session.add.assert_called_once_with(tx1)
         mock_session.commit.assert_called_once()
-        
-        # Check tx1 has dismissed tag
-        resolution_tags = [tag for tag in tx1.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(resolution_tags) == 1
-        assert resolution_tags[0]["status"] == "dismissed"
-        assert resolution_tags[0]["group_hash"] == "test_hash_456"
-    
+
+        # Check combined dismissed tag
+        group_tags = [t for t in tx1.tags if t.get("sys_group") == group_hash]
+        assert len(group_tags) == 1
+        assert group_tags[0]["sys_resolution"] == "dismissed"
+
     def test_preserves_existing_tags(self, mock_session):
-        """Should preserve non-duplicate tags when adding resolution tag."""
-        dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        
+        """Should keep non-duplicate tags intact while adding resolution tags."""
+        group_hash = "test_hash_789"
         existing_tag = {"type": "custom_tag", "data": {"note": "important"}}
-        
+
         tx1 = NormalizedTransaction(
-            id=1,
-            source="source_a",
-            source_transaction_id="TX1",
+            id=1, source="source_a", source_transaction_id="TX1",
             account_id=1,
-            date_time=dt,
-            direction="inflow",
-            transaction_type="trade",
-            source_asset_symbol="BTC",
-            source_price_quote_asset_symbol="USDT",
-            quantity=Decimal("0.5"),
-            price=Decimal("42000.0"),
+            date_time=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            direction="inflow", transaction_type="trade",
+            source_asset_symbol="BTC", source_price_quote_asset_symbol="USDT",
+            quantity=Decimal("0.5"), price=Decimal("42000.0"),
             review_status="pending",
-            tags=[
-                {"type": "potential_duplicate", "group_hash": "test_hash_789"},
-                existing_tag
-            ],
+            tags=[existing_tag],
         )
-        
-        mock_session.get.return_value = tx1
-        
-        # Mark as kept
+
+        def get_side_effect(model, obj_id):
+            if model == NormalizedTransaction:
+                if obj_id == 1:
+                    return tx1
+            return None
+
+        mock_session.get.side_effect = get_side_effect
+
         mark_duplicate_resolution(
-            group_hash="test_hash_789",
+            group_hash=group_hash,
             kept_tx_ids=[1],
             merged_tx_ids=[],
             dismissed_tx_ids=[],
             session=mock_session,
         )
-        
-        mock_session.get.assert_called_once_with(NormalizedTransaction, 1)
+
         mock_session.add.assert_called_once_with(tx1)
         mock_session.commit.assert_called_once()
-        
-        # Check tags: potential_duplicate tag is removed by design, custom tag is preserved
-        assert len(tx1.tags) == 2  # custom_tag + resolution (potential_duplicate removed)
-        
-        # Find each tag type
-        custom_tags = [tag for tag in tx1.tags if tag.get("type") == "custom_tag"]
+
+        # custom_tag preserved
+        custom_tags = [t for t in tx1.tags if t.get("type") == "custom_tag"]
         assert len(custom_tags) == 1
         assert custom_tags[0]["data"]["note"] == "important"
-        
-        # potential_duplicate tag should be removed after resolution
-        potential_dup_tags = [tag for tag in tx1.tags if tag.get("type") == "potential_duplicate"]
-        assert len(potential_dup_tags) == 0
-        
-        resolution_tags = [tag for tag in tx1.tags if tag.get("type") == "duplicate_resolution"]
-        assert len(resolution_tags) == 1
-        assert resolution_tags[0]["status"] == "kept"
+
+        # Combined resolution tag present
+        group_tags = [t for t in tx1.tags if t.get("sys_group") == group_hash]
+        assert len(group_tags) == 1
+        assert group_tags[0]["sys_resolution"] == "kept"

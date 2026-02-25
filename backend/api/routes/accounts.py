@@ -2,12 +2,13 @@
 API routes for Account CRUD operations.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlmodel import Session, select, col
-from backend.db.models import Account
+from backend.db.models import Account, AccountConnector
 from backend.db.database import get_session_dependency
-from typing import Any, Dict
+from backend.api.schemas import SuggestionInfo
+from backend.services.similarity_service import get_top_account_suggestions
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -30,6 +31,7 @@ class AccountCreate(BaseModel):
     tags: Optional[List[Dict[str, Any]]] = None
     owned: bool = True
     enabled: bool = True
+    color: Optional[str] = None
 
 
 class AccountUpdate(BaseModel):
@@ -42,6 +44,7 @@ class AccountUpdate(BaseModel):
     tags: Optional[List[Dict[str, Any]]] = None
     owned: Optional[bool] = None
     enabled: Optional[bool] = None
+    color: Optional[str] = None
 
 
 class AccountResponse(BaseModel):
@@ -55,6 +58,7 @@ class AccountResponse(BaseModel):
     tags: Optional[List[Dict[str, Any]]]
     owned: bool
     enabled: bool
+    color: Optional[str]
     created_at: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -107,10 +111,117 @@ def list_accounts(
             tags=acc.tags or [],
             owned=acc.owned,
             enabled=acc.enabled,
+            color=acc.color,
             created_at=acc.created_at.isoformat(),
         )
         for acc in accounts
     ]
+
+
+# ============================================================================
+# Account Suggestion Helpers
+# ============================================================================
+
+
+def _build_connectors_map(session: Session) -> Dict[int, list]:
+    """Build account_id → list[AccountConnector] lookup from the database."""
+    all_connectors = session.exec(select(AccountConnector)).all()
+    connectors_map: Dict[int, list] = {}
+    for c in all_connectors:
+        connectors_map.setdefault(c.account_id, []).append(c)
+    return connectors_map
+
+
+# ============================================================================
+# Account Suggestion Endpoints (must be before /{account_id} to avoid
+# FastAPI matching "suggest" as an account_id path parameter)
+# ============================================================================
+
+
+class SuggestAccountItem(BaseModel):
+    """Single item in a batch suggestion request."""
+    label: str
+    source: Optional[str] = None
+    network: Optional[str] = None
+    min_confidence: float = 0.5
+    max_results: int = 3
+
+
+class SuggestAccountBatchRequest(BaseModel):
+    """Request for batch account suggestions."""
+    items: List[SuggestAccountItem]
+
+
+class SuggestAccountBatchResponseItem(BaseModel):
+    """Response for a single batch suggestion request item."""
+    label: str
+    suggestions: List[SuggestionInfo]
+
+
+@router.get("/suggest", response_model=List[SuggestionInfo])
+def suggest_accounts(
+    label: str = Query(..., description="Raw account label or address to match"),
+    source: Optional[str] = Query(None, description="Connector source type (e.g. 'blockscout')"),
+    network: Optional[str] = Query(None, description="Chain/network name (e.g. 'bsc', 'ethereum')"),
+    min_confidence: float = Query(0.5, ge=0, le=1, description="Minimum confidence threshold"),
+    max_results: int = Query(3, ge=1, le=20, description="Maximum number of suggestions"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get network-aware account suggestions for a raw account label.
+
+    Uses fuzzy matching with Levenshtein distance, boosted by connector
+    source matching and filtered by chain/network when available.
+
+    This is the centralized suggestion endpoint that should be used by all
+    frontend components instead of client-side similarity matching.
+    """
+    all_accounts = session.exec(select(Account)).all()
+    connectors_map = _build_connectors_map(session)
+
+    return get_top_account_suggestions(
+        label=label,
+        accounts=all_accounts,
+        min_confidence=min_confidence,
+        max_results=max_results,
+        source=source,
+        account_connectors_map=connectors_map,
+        network=network,
+    )
+
+
+@router.post("/suggest-batch", response_model=List[SuggestAccountBatchResponseItem])
+def suggest_accounts_batch(
+    request: SuggestAccountBatchRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Batch account suggestions — avoids N+1 API calls for bulk operations
+    like auto-link or AccountMappingPanel.
+
+    Each item in the request specifies a label (and optional source/network)
+    and receives its own list of suggestions.
+    """
+    all_accounts = session.exec(select(Account)).all()
+    connectors_map = _build_connectors_map(session)
+
+    results: List[SuggestAccountBatchResponseItem] = []
+    for item in request.items:
+        suggestions = get_top_account_suggestions(
+            label=item.label,
+            accounts=all_accounts,
+            min_confidence=item.min_confidence,
+            max_results=item.max_results,
+            source=item.source,
+            account_connectors_map=connectors_map,
+            network=item.network,
+        )
+        results.append(SuggestAccountBatchResponseItem(
+            label=item.label,
+            suggestions=suggestions,
+        ))
+
+    return results
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
@@ -138,6 +249,7 @@ def get_account(account_id: int, session: Session = Depends(get_session_dependen
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
+        color=account.color,
         created_at=account.created_at.isoformat(),
     )
 
@@ -158,7 +270,7 @@ def create_account(
         Created account
     """
     # Validate account_type
-    valid_types = ["cex", "broker", "wallet"]
+    valid_types = ["cex", "dex", "broker", "wallet", "bank", "investment"]
     if account_data.account_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -183,6 +295,7 @@ def create_account(
         tags=account_data.tags or [],
         owned=account_data.owned,
         enabled=account_data.enabled,
+        color=account_data.color,
     )
 
     session.add(account)
@@ -198,6 +311,7 @@ def create_account(
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
+        color=account.color,
         created_at=account.created_at.isoformat(),
     )
 
@@ -225,7 +339,7 @@ def update_account(
 
     # Validate account_type if provided
     if account_data.account_type is not None:
-        valid_types = ["cex", "broker", "wallet"]
+        valid_types = ["cex", "dex", "broker", "wallet", "bank", "investment"]
         if account_data.account_type not in valid_types:
             raise HTTPException(
                 status_code=400,
@@ -258,6 +372,8 @@ def update_account(
         account.enabled = account_data.enabled
     if account_data.group is not None:
         account.group = account_data.group
+    if account_data.color is not None:
+        account.color = account_data.color
 
     session.add(account)
     session.commit()
@@ -272,6 +388,7 @@ def update_account(
         tags=account.tags or [],
         owned=account.owned,
         enabled=account.enabled,
+        color=account.color,
         created_at=account.created_at.isoformat(),
     )
 
@@ -296,3 +413,4 @@ def delete_account(account_id: int, session: Session = Depends(get_session_depen
     session.commit()
 
     return None
+

@@ -326,6 +326,7 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
                 "account_name": account.name,
                 "account_type": account.account_type,
                 "account_enabled": account.enabled,
+                "account_group": account.group,
                 "enabled": account_connector.enabled,
                 "test_mode": config.get("test_mode", False),
                 "test_file_path": config.get("test_file_path"),
@@ -353,6 +354,8 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
                 "last_job_error_message": last_job_error_message,
                 "last_job_last_transaction": last_tx,
                 "last_synced_transaction": last_synced_tx,
+                # Start datetime from connector config (default since for sync)
+                "start_datetime": config.get("start_datetime"),
             })
             
             # Build accounts map for deduplication
@@ -374,6 +377,7 @@ def get_all_connectors(session: Session = Depends(get_session_dependency)):
         }
     
     except Exception as e:
+        
         raise HTTPException(
             status_code=500, detail=f"Failed to get all connectors: {str(e)}"
         )

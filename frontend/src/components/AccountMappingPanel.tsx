@@ -11,6 +11,7 @@ import { toaster } from './ui/toaster';
 import { Tooltip } from './ui/tooltip';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import { TransactionsTable } from './TransactionsTable';
+import { fetchAccountSuggestionsBatch, AccountSuggestion } from '../hooks/useAccountSuggestions';
 
 // Props interface for AccountMappingPanel
 interface AccountMappingPanelProps {
@@ -20,16 +21,17 @@ interface AccountMappingPanelProps {
 }
 
 // Component to show transaction sections by field type
-const TransactionFieldSections: React.FC<{ source: string; label: string }> = ({ source, label }) => {
+const TransactionFieldSections: React.FC<{ source: string; label: string; network?: string }> = ({ source, label, network }) => {
     const [counts, setCounts] = useState<{ account: number; from: number; to: number } | null>(null);
     const [loading, setLoading] = useState(true);
     const [openSections, setOpenSections] = useState<Set<string>>(new Set());
+    const networkParam = network ? `&network=${encodeURIComponent(network)}` : '';
 
     useEffect(() => {
         const fetchCounts = async () => {
             try {
                 const response = await fetch(
-                    `${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?limit=1&offset=0`
+                    `${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?limit=1&offset=0${networkParam}`
                 );
                 if (response.ok) {
                     const data = await response.json();
@@ -131,7 +133,7 @@ const TransactionFieldSections: React.FC<{ source: string; label: string }> = ({
                                     showBundles={false}
                                     showSuggestions={false}
                                     hiddenColumns={['total', 'taxability', 'feeInBase', 'bundle']}
-                                    customApiUrl={`${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?field_type=${section.fieldType}`}
+                                    customApiUrl={`${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?field_type=${section.fieldType}${networkParam}`}
                                 />
                             </Box>
                         )}
@@ -142,62 +144,21 @@ const TransactionFieldSections: React.FC<{ source: string; label: string }> = ({
     );
 };
 
-// Fuzzy matching utility
-const calculateSimilarity = (str1: string, str2: string): number => {
-    const s1 = str1.toLowerCase().trim();
-    const s2 = str2.toLowerCase().trim();
-
-    if (s1 === s2) return 1.0;
-    if (s1.includes(s2) || s2.includes(s1)) return 0.8;
-    if (s1.startsWith(s2) || s2.startsWith(s1)) return 0.7;
-    if (s1.endsWith(s2) || s2.endsWith(s1)) return 0.6;
-
-    if (s1.length > 10 && s2.length > 10) {
-        const prefix1 = s1.slice(0, 6);
-        const prefix2 = s2.slice(0, 6);
-        const suffix1 = s1.slice(-4);
-        const suffix2 = s2.slice(-4);
-        if (prefix1 === prefix2 && suffix1 === suffix2) return 0.95;
-        if (prefix1 === prefix2 || suffix1 === suffix2) return 0.5;
-    }
-
-    const maxLen = Math.max(s1.length, s2.length);
-    if (maxLen === 0) return 1.0;
-    if (maxLen > 20) return 0;
-
-    const distance = levenshteinDistance(s1, s2);
-    return 1 - (distance / maxLen);
-};
-
-const levenshteinDistance = (str1: string, str2: string): number => {
-    const m = str1.length;
-    const n = str2.length;
-    const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
-
-    for (let i = 0; i <= m; i++) dp[i][0] = i;
-    for (let j = 0; j <= n; j++) dp[0][j] = j;
-
-    for (let i = 1; i <= m; i++) {
-        for (let j = 1; j <= n; j++) {
-            if (str1[i - 1] === str2[j - 1]) {
-                dp[i][j] = dp[i - 1][j - 1];
-            } else {
-                dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-            }
-        }
-    }
-    return dp[m][n];
-};
-
-interface SuggestedMatch {
-    account: Account;
-    confidence: number;
-}
+// SuggestedMatch wraps AccountSuggestion for backward compatibility in this component
+type SuggestedMatch = AccountSuggestion;
 
 // Truncate long labels
 const truncateLabel = (label: string, maxLength: number = 20) => {
     if (label.length <= maxLength) return label;
     return `${label.slice(0, 8)}...${label.slice(-6)}`;
+};
+
+// Build raw account API URL with optional network query param
+const rawAccountUrl = (source: string, label: string, network?: string, suffix?: string) => {
+    let url = `${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}`;
+    if (suffix) url += suffix;
+    if (network) url += `${url.includes('?') ? '&' : '?'}network=${encodeURIComponent(network)}`;
+    return url;
 };
 
 // Dismiss reason chips
@@ -221,18 +182,18 @@ const SourceGroup: React.FC<{
     const [expandedRawIds, setExpandedRawIds] = useState<Set<string>>(new Set());
     const [editingKey, setEditingKey] = useState<string | null>(null);
     const [editAccountId, setEditAccountId] = useState<number | null>(null);
-    
+
     // Dismiss state
     const [showDismissDialog, setShowDismissDialog] = useState(false);
     const [dismissingRawAccount, setDismissingRawAccount] = useState<RawAccount | null>(null);
     const [dismissReason, setDismissReason] = useState('');
-    
+
     // Account creation
     const [showAccountDialog, setShowAccountDialog] = useState(false);
     const [accountPrefill, setAccountPrefill] = useState<AccountPrefill | undefined>(undefined);
     const [pendingRawAccount, setPendingRawAccount] = useState<RawAccount | null>(null);
 
-    const getEditKey = (rawAccount: RawAccount) => `${rawAccount.source}:${rawAccount.label}`;
+    const getEditKey = (rawAccount: RawAccount) => `${rawAccount.source}:${rawAccount.label}:${rawAccount.network || ''}`;
 
     const getAccountName = (accountId: number | null | undefined) => {
         if (accountId === null || accountId === undefined) return null;
@@ -248,7 +209,7 @@ const SourceGroup: React.FC<{
     const saveRawAccount = async (rawAccount: RawAccount) => {
         try {
             const response = await fetch(
-                `${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`,
+                rawAccountUrl(rawAccount.source, rawAccount.label, rawAccount.network),
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -267,7 +228,7 @@ const SourceGroup: React.FC<{
     const acceptSuggestion = async (rawAccount: RawAccount, accountId: number) => {
         try {
             const response = await fetch(
-                `${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`,
+                rawAccountUrl(rawAccount.source, rawAccount.label, rawAccount.network),
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -296,7 +257,7 @@ const SourceGroup: React.FC<{
 
         try {
             const response = await fetch(
-                `${API_URL}/raw-accounts/${encodeURIComponent(dismissingRawAccount.source)}/${encodeURIComponent(dismissingRawAccount.label)}/dismiss`,
+                rawAccountUrl(dismissingRawAccount.source, dismissingRawAccount.label, dismissingRawAccount.network, '/dismiss'),
                 {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -317,7 +278,7 @@ const SourceGroup: React.FC<{
     const undismissRawAccount = async (rawAccount: RawAccount) => {
         try {
             const response = await fetch(
-                `${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}/dismiss`,
+                rawAccountUrl(rawAccount.source, rawAccount.label, rawAccount.network, '/dismiss'),
                 {
                     method: 'DELETE'
                 }
@@ -333,7 +294,7 @@ const SourceGroup: React.FC<{
     const unlinkRawAccount = async (rawAccount: RawAccount) => {
         try {
             const response = await fetch(
-                `${API_URL}/raw-accounts/${encodeURIComponent(rawAccount.source)}/${encodeURIComponent(rawAccount.label)}`,
+                rawAccountUrl(rawAccount.source, rawAccount.label, rawAccount.network),
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -353,7 +314,7 @@ const SourceGroup: React.FC<{
             rawAccount.source.toLowerCase().includes('scan') ||
             rawAccount.source.toLowerCase().includes('wallet');
 
-        const accountType: 'cex' | 'broker' | 'wallet' = isWalletAddress ? 'wallet' : 'cex';
+        const accountType: 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment' = isWalletAddress ? 'wallet' : 'cex';
 
         setAccountPrefill({
             name: rawAccount.label,
@@ -439,6 +400,9 @@ const SourceGroup: React.FC<{
                                                         {truncateLabel(rawAccount.label)}
                                                     </Text>
                                                 </Tooltip>
+                                                {rawAccount.network && (
+                                                    <Badge colorPalette="purple" size="sm">{rawAccount.network}</Badge>
+                                                )}
                                                 {isDismissed && (
                                                     <Badge colorPalette="gray" size="sm">Dismissed</Badge>
                                                 )}
@@ -450,6 +414,7 @@ const SourceGroup: React.FC<{
                                                     value={editAccountId ?? undefined}
                                                     onChange={(id) => setEditAccountId(id ?? null)}
                                                     size="sm"
+                                                    rawAccountNetwork={rawAccount.network || undefined}
                                                 />
                                             ) : rawAccount.account_id ? (
                                                 <Badge colorPalette="green">{getAccountName(rawAccount.account_id)}</Badge>
@@ -467,9 +432,9 @@ const SourceGroup: React.FC<{
                                                                 fontSize="2xs"
                                                                 variant="outline"
                                                                 colorPalette={s.confidence >= 0.9 ? 'green' : 'blue'}
-                                                                onClick={() => acceptSuggestion(rawAccount, s.account.id)}
+                                                                onClick={() => acceptSuggestion(rawAccount, s.id)}
                                                             >
-                                                                {s.account.name}
+                                                                {s.name}
                                                             </Button>
                                                         </Tooltip>
                                                     ))}
@@ -521,7 +486,7 @@ const SourceGroup: React.FC<{
                                     {isExpanded && (
                                         <Table.Row>
                                             <Table.Cell colSpan={4} p={4} bg="gray.50">
-                                                <TransactionFieldSections source={rawAccount.source} label={rawAccount.label} />
+                                                <TransactionFieldSections source={rawAccount.source} label={rawAccount.label} network={rawAccount.network} />
                                             </Table.Cell>
                                         </Table.Row>
                                     )}
@@ -643,35 +608,36 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
         }
     };
 
-    // Compute smart suggestions
-    const suggestionsMap = useMemo(() => {
-        const map = new Map<string, SuggestedMatch[]>();
+    // Compute smart suggestions via backend batch endpoint
+    const [suggestionsMap, setSuggestionsMap] = useState<Map<string, SuggestedMatch[]>>(new Map());
 
-        rawAccounts
-            .filter(ra => !ra.account_id)
-            .forEach(rawAccount => {
-                const label = rawAccount.label;
-                const suggestions: SuggestedMatch[] = [];
+    useEffect(() => {
+        const unlinked = rawAccounts.filter(ra => !ra.account_id);
+        if (unlinked.length === 0) {
+            setSuggestionsMap(new Map());
+            return;
+        }
 
-                for (const account of accounts) {
-                    const nameSim = calculateSimilarity(label, account.name);
-                    const addrSim = account.address_or_identifier
-                        ? calculateSimilarity(label, account.address_or_identifier)
-                        : 0;
-                    const similarity = Math.max(nameSim, addrSim);
+        const items = unlinked.map(ra => ({
+            label: ra.label,
+            source: ra.source,
+            network: ra.network || undefined,
+            maxResults: 3,
+        }));
 
-                    if (similarity >= 0.5) {
-                        suggestions.push({ account, confidence: similarity });
-                    }
-                }
-
-                suggestions.sort((a, b) => b.confidence - a.confidence);
-                const key = `${rawAccount.source}:${rawAccount.label}`;
-                map.set(key, suggestions.slice(0, 3));
-            });
-
-        return map;
-    }, [rawAccounts, accounts]);
+        fetchAccountSuggestionsBatch(items).then(results => {
+            const map = new Map<string, SuggestedMatch[]>();
+            for (let i = 0; i < results.length; i++) {
+                const ra = unlinked[i];
+                const result = results[i];
+                const key = `${ra.source}:${ra.label}:${ra.network || ''}`;
+                map.set(key, result.suggestions);
+            }
+            setSuggestionsMap(map);
+        }).catch(err => {
+            console.error('Failed to fetch account suggestions:', err);
+        });
+    }, [rawAccounts]);
 
     // Group by source
     const groupedBySource = useMemo(() => {

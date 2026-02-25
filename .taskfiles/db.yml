@@ -233,6 +233,86 @@ tasks:
 
   # === Tag Cleanup ===
 
+  # === Database Copy / Promotion ===
+
+  copy:
+    desc: "🔄 Copy a database to another env, completely replacing the target (usage: task db:copy -- <src> <dst>)"
+    prompt: "This will REPLACE the target database with source data. Continue?"
+    cmds:
+      - |
+        SRC="$1"
+        DST="$2"
+
+        if [ -z "$SRC" ] || [ -z "$DST" ]; then
+          echo "Usage: task db:copy -- <source> <target>"
+          echo "       task db:copy -- dev test"
+          echo "       task db:copy -- dev prod"
+          echo "Available environments: dev, test, prod"
+          exit 1
+        fi
+
+        if [ "$SRC" = "$DST" ]; then
+          echo "❌ Source and target must be different environments"
+          exit 1
+        fi
+
+        SRC_ENV="{{.ROOT_DIR}}/.env.$SRC"
+        DST_ENV="{{.ROOT_DIR}}/.env.$DST"
+
+        if [ ! -f "$SRC_ENV" ]; then echo "❌ Source env file not found: $SRC_ENV"; exit 1; fi
+        if [ ! -f "$DST_ENV" ]; then echo "❌ Target env file not found: $DST_ENV"; exit 1; fi
+
+        # Parse source connection details
+        SRC_USER=$(grep '^POSTGRES_USER='     "$SRC_ENV" | cut -d= -f2 | tr -d '\r')
+        SRC_PASS=$(grep '^POSTGRES_PASSWORD=' "$SRC_ENV" | cut -d= -f2 | tr -d '\r')
+        SRC_DB=$(grep   '^POSTGRES_DB='       "$SRC_ENV" | cut -d= -f2 | tr -d '\r')
+        SRC_HOST=$(grep '^POSTGRES_HOST='     "$SRC_ENV" | cut -d= -f2 | tr -d '\r')
+        SRC_PORT=$(grep '^POSTGRES_PORT='     "$SRC_ENV" | cut -d= -f2 | tr -d '\r')
+
+        # Parse target connection details
+        DST_USER=$(grep '^POSTGRES_USER='     "$DST_ENV" | cut -d= -f2 | tr -d '\r')
+        DST_PASS=$(grep '^POSTGRES_PASSWORD=' "$DST_ENV" | cut -d= -f2 | tr -d '\r')
+        DST_DB=$(grep   '^POSTGRES_DB='       "$DST_ENV" | cut -d= -f2 | tr -d '\r')
+        DST_HOST=$(grep '^POSTGRES_HOST='     "$DST_ENV" | cut -d= -f2 | tr -d '\r')
+        DST_PORT=$(grep '^POSTGRES_PORT='     "$DST_ENV" | cut -d= -f2 | tr -d '\r')
+
+        echo "🔄 Database copy: [$SRC] $SRC_HOST:$SRC_PORT/$SRC_DB  →  [$DST] $DST_HOST:$DST_PORT/$DST_DB"
+        echo ""
+
+        # Dump source (custom format for pg_restore)
+        DUMP_FILE=$(mktemp /tmp/trades_db_copy_XXXXXX.dump)
+        echo "📤 Dumping $SRC database..."
+        PGPASSWORD="$SRC_PASS" pg_dump \
+          -h "$SRC_HOST" -p "$SRC_PORT" -U "$SRC_USER" \
+          --no-password -Fc "$SRC_DB" -f "$DUMP_FILE"
+        echo "   Dump size: $(du -sh "$DUMP_FILE" | cut -f1)"
+        echo ""
+
+        # Drop and recreate target database
+        echo "🗑️  Dropping target database ($DST_DB)..."
+        PGPASSWORD="$DST_PASS" psql \
+          -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+          --no-password -d postgres \
+          -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$DST_DB' AND pid <> pg_backend_pid();" \
+          -c "DROP DATABASE IF EXISTS \"$DST_DB\";" \
+          -c "CREATE DATABASE \"$DST_DB\" OWNER \"$DST_USER\";"
+        echo ""
+
+        # Restore into target
+        echo "📥 Restoring into $DST database..."
+        PGPASSWORD="$DST_PASS" pg_restore \
+          -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+          --no-password --no-owner --role="$DST_USER" \
+          -d "$DST_DB" "$DUMP_FILE"
+
+        # Cleanup
+        rm -f "$DUMP_FILE"
+
+        echo ""
+        echo "✅ Done — [$SRC] $SRC_DB  →  [$DST] $DST_DB"
+
+  # === Tag Cleanup ===
+
   cleanup-tags:dev:
     desc: "🧹 Clean up user tags from transactions (preserves system tags)"
     prompt: "This will remove user tags from transactions (system tags preserved). Continue?"

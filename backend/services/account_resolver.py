@@ -39,14 +39,15 @@ class AccountResolver:
         self._account_owned_cache: dict[int, bool] = {}
 
     def resolve_account(
-        self, source: str, label: str
+        self, source: str, label: str, network: str = ""
     ) -> Tuple[Optional[int], Optional[bool]]:
         """
-        Resolve a source/label pair to an account_id and owned status.
+        Resolve a source/label/network triple to an account_id and owned status.
 
         Args:
             source: The connector source (e.g., 'blockscout_base', 'binance')
             label: The address or account identifier
+            network: Normalized chain name (e.g. 'bsc', 'ethereum', '')
 
         Returns:
             Tuple of (account_id, is_owned) or (None, None) if not mapped
@@ -55,7 +56,7 @@ class AccountResolver:
             return None, None
 
         # Get or create raw_account entry
-        raw_account = self.raw_account_repo.get_or_create(source, label)
+        raw_account = self.raw_account_repo.get_or_create(source, label, network)
 
         if not raw_account.account_id:
             return None, None
@@ -73,6 +74,7 @@ class AccountResolver:
         source: str,
         source_from_account: Optional[str],
         source_to_account: Optional[str],
+        network: str = "",
     ) -> Tuple[Optional[int], Optional[int]]:
         """
         Resolve from and to account IDs for a transaction.
@@ -81,6 +83,7 @@ class AccountResolver:
             source: The connector source
             source_from_account: Raw from address/account
             source_to_account: Raw to address/account
+            network: Normalized chain name
 
         Returns:
             Tuple of (from_account_id, to_account_id)
@@ -90,11 +93,11 @@ class AccountResolver:
 
         # Resolve from account
         if source_from_account:
-            from_account_id, _ = self.resolve_account(source, source_from_account)
+            from_account_id, _ = self.resolve_account(source, source_from_account, network)
 
         # Resolve to account
         if source_to_account:
-            to_account_id, _ = self.resolve_account(source, source_to_account)
+            to_account_id, _ = self.resolve_account(source, source_to_account, network)
 
         if from_account_id or to_account_id:
             log.debug(
@@ -128,20 +131,23 @@ class AccountResolver:
         if not source_from and not source_to:
             return transaction
 
+        # Extract network from transaction for network-aware mapping
+        network = getattr(transaction, "network", None) or ""
+
         # Resolve accounts
         from_id, to_id = self.resolve_transaction_accounts(
-            source, source_from, source_to
+            source, source_from, source_to, network
         )
 
         # Auto-link RawAccounts when connector pre-set the account ID
         # (e.g., deposit connectors set to_account_id, withdrawal connectors set from_account_id)
         pre_set_to = getattr(transaction, "to_account_id", None)
         if source_to and pre_set_to and to_id is None:
-            self._auto_link_raw_account(source, source_to, pre_set_to)
+            self._auto_link_raw_account(source, source_to, pre_set_to, network)
 
         pre_set_from = getattr(transaction, "from_account_id", None)
         if source_from and pre_set_from and from_id is None:
-            self._auto_link_raw_account(source, source_from, pre_set_from)
+            self._auto_link_raw_account(source, source_from, pre_set_from, network)
 
         # Set account IDs
         if from_id is not None:
@@ -152,7 +158,7 @@ class AccountResolver:
         return transaction
 
     def _auto_link_raw_account(
-        self, source: str, label: str, account_id: int
+        self, source: str, label: str, account_id: int, network: str = ""
     ) -> None:
         """
         Auto-link a RawAccount to an account when the connector already knows
@@ -164,12 +170,13 @@ class AccountResolver:
             source: The connector source (e.g., 'binance-deposits')
             label: The raw address or identifier
             account_id: The account ID to link to
+            network: Normalized chain name
         """
-        raw_account = self.raw_account_repo.get(source, label)
+        raw_account = self.raw_account_repo.get(source, label, network)
         if raw_account and raw_account.account_id is None:
             raw_account.account_id = account_id
             self.session.add(raw_account)
             log.debug(
-                f"Auto-linked raw account '{label}' (source={source}) "
+                f"Auto-linked raw account '{label}' (source={source}, network={network}) "
                 f"to account_id={account_id}"
             )

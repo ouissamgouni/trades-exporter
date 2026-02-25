@@ -115,14 +115,25 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
     const getStatusBadge = (status?: string) => {
         switch (status) {
             case 'success':
-                return <Badge colorScheme="green">Success</Badge>;
+                return <Badge colorScheme="green" size="xs" fontSize="2xs">OK</Badge>;
             case 'failed':
-                return <Badge colorScheme="red">Failed</Badge>;
+                return <Badge colorScheme="red" size="xs" fontSize="2xs">Fail</Badge>;
             case 'running':
-                return <Badge colorScheme="blue">Running</Badge>;
+                return <Badge colorScheme="blue" size="xs" fontSize="2xs">Run</Badge>;
             default:
-                return <Badge colorScheme="gray">Pending</Badge>;
+                return <Badge colorScheme="gray" size="xs" fontSize="2xs">—</Badge>;
         }
+    };
+
+    const formatRelativeTime = (dateStr: string): string => {
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
     };
 
     const getCategoryBadge = (connectorType: string) => {
@@ -136,8 +147,8 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
         };
 
         return (
-            <Badge colorScheme={colors[info.category] || 'gray'} size="sm">
-                {info.category.toUpperCase()}
+            <Badge colorScheme={colors[info.category] || 'gray'} size="xs" fontSize="2xs">
+                {info.category}
             </Badge>
         );
     };
@@ -163,33 +174,33 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
             <VStack align="stretch" gap={4}>
                 {/* Header */}
                 <HStack justify="space-between">
-                    <Heading size="md">Connectors for {account.name}</Heading>
+                    <Heading size="sm">Connectors for {account.name}</Heading>
                     <HStack>
                         <IconButton
                             aria-label="Refresh"
-                            size="sm"
+                            size="xs"
                             variant="ghost"
                             onClick={fetchConnectors}
                         >
-                            <FiRefreshCw />
+                            <FiRefreshCw size={12} />
                         </IconButton>
                         <Button
-                            size="sm"
+                            size="xs"
                             colorScheme="blue"
                             onClick={handleCreate}
                             disabled={availableTypes.length === 0}
                         >
-                            <FiPlus /> Add Connector
+                            <FiPlus size={10} /> Add
                         </Button>
                     </HStack>
                 </HStack>
 
                 {/* Connectors Table */}
                 {connectors.length === 0 ? (
-                    <Box p={8} textAlign="center" borderWidth="1px" borderRadius="lg" bg="gray.50">
-                        <Text color="gray.600" mb={4}>No connectors configured for this account</Text>
-                        <Button colorScheme="blue" onClick={handleCreate}>
-                            <FiPlus /> Add First Connector
+                    <Box p={4} textAlign="center" borderWidth="1px" borderRadius="md" bg="gray.50">
+                        <Text color="gray.600" mb={2} fontSize="xs">No connectors configured</Text>
+                        <Button size="xs" colorScheme="blue" onClick={handleCreate}>
+                            <FiPlus size={10} /> Add Connector
                         </Button>
                     </Box>
                 ) : (
@@ -197,20 +208,19 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                         <Table.Root size="sm">
                             <Table.Header>
                                 <Table.Row>
-                                    <Table.ColumnHeader>Connector</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Config</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Status</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Last Sync</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                                    <Table.ColumnHeader textAlign="right">Actions</Table.ColumnHeader>
+                                    <Table.ColumnHeader fontSize="2xs">Connector</Table.ColumnHeader>
+                                    <Table.ColumnHeader fontSize="2xs">Config</Table.ColumnHeader>
+                                    <Table.ColumnHeader fontSize="2xs">Status</Table.ColumnHeader>
+                                    <Table.ColumnHeader fontSize="2xs">Enabled</Table.ColumnHeader>
+                                    <Table.ColumnHeader fontSize="2xs" textAlign="right">Actions</Table.ColumnHeader>
                                 </Table.Row>
                             </Table.Header>
                             <Table.Body>
                                 {connectors.map((connector) => (
                                     <Table.Row key={connector.id}>
                                         <Table.Cell>
-                                            <VStack align="start" gap={1}>
-                                                <Text fontWeight="medium">
+                                            <VStack align="start" gap={0.5}>
+                                                <Text fontWeight="medium" fontSize="xs">
                                                     {getConnectorDisplayName(connector.connector_type)}
                                                 </Text>
                                                 {getCategoryBadge(connector.connector_type)}
@@ -219,42 +229,47 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                                         <Table.Cell>
                                             <VStack align="start" gap={0}>
                                                 {connector.config?.chain && (
-                                                    <Text fontSize="sm">Chain: {connector.config.chain}</Text>
+                                                    <Text fontSize="2xs">{connector.config.chain}</Text>
                                                 )}
                                                 {connector.config?.address && (
-                                                    <Text fontSize="xs" color="gray.500" maxW="150px" truncate>
+                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate>
                                                         {connector.config.address}
                                                     </Text>
                                                 )}
                                                 {connector.config?.symbols && (
-                                                    <Text fontSize="sm">
+                                                    <Text fontSize="2xs">
                                                         {connector.config.symbols.slice(0, 3).join(', ')}
                                                         {connector.config.symbols.length > 3 && '...'}
                                                     </Text>
                                                 )}
-                                                {connector.config?.start_date && (
-                                                    <Text fontSize="xs" color="gray.500">
-                                                        Since: {connector.config.start_date}
+                                                {connector.config?.start_datetime && (
+                                                    <Text fontSize="2xs" color="gray.500">
+                                                        Since: {connector.config.start_datetime}
+                                                    </Text>
+                                                )}
+                                                {connector.config?.default_file_name && (
+                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.default_file_name}>
+                                                        📁 {connector.config.default_file_name}
                                                     </Text>
                                                 )}
                                             </VStack>
                                         </Table.Cell>
                                         <Table.Cell>
-                                            <VStack align="start" gap={1}>
-                                                {getStatusBadge(connector.last_sync_status)}
+                                            <VStack align="start" gap={0.5}>
+                                                <HStack gap={1}>
+                                                    {getStatusBadge(connector.last_sync_status)}
+                                                    <Text fontSize="2xs" color="gray.500">
+                                                        {connector.last_sync_at
+                                                            ? formatRelativeTime(connector.last_sync_at)
+                                                            : 'Never'}
+                                                    </Text>
+                                                </HStack>
                                                 {connector.last_error && (
-                                                    <Text fontSize="xs" color="red.500" maxW="150px" truncate>
+                                                    <Text fontSize="2xs" color="red.500" maxW="150px" truncate title={connector.last_error}>
                                                         {connector.last_error}
                                                     </Text>
                                                 )}
                                             </VStack>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Text fontSize="sm" color="gray.600">
-                                                {connector.last_sync_at
-                                                    ? new Date(connector.last_sync_at).toLocaleString()
-                                                    : 'Never'}
-                                            </Text>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Switch.Root
@@ -269,23 +284,23 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                                             </Switch.Root>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            <HStack justify="flex-end" gap={1}>
+                                            <HStack justify="flex-end" gap={0.5}>
                                                 <IconButton
                                                     aria-label="Edit"
-                                                    size="sm"
+                                                    size="2xs"
                                                     variant="ghost"
                                                     onClick={() => handleEdit(connector)}
                                                 >
-                                                    <FiEdit2 />
+                                                    <FiEdit2 size={10} />
                                                 </IconButton>
                                                 <IconButton
                                                     aria-label="Delete"
-                                                    size="sm"
+                                                    size="2xs"
                                                     variant="ghost"
                                                     colorScheme="red"
                                                     onClick={() => handleDelete(connector)}
                                                 >
-                                                    <FiTrash2 />
+                                                    <FiTrash2 size={10} />
                                                 </IconButton>
                                             </HStack>
                                         </Table.Cell>
@@ -297,8 +312,8 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                 )}
 
                 {/* Priority Note */}
-                <Text fontSize="xs" color="gray.500">
-                    Connectors are synced in order of priority (lower number = higher priority)
+                <Text fontSize="2xs" color="gray.500">
+                    Synced by priority (lower = first)
                 </Text>
             </VStack>
 
@@ -310,6 +325,7 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                 connector={editingConnector}
                 connectorTypes={connectorTypes}
                 existingConnectorTypes={existingConnectorTypes}
+                usedColors={connectors.map(c => c.color).filter((c): c is string => !!c)}
             />
 
             {/* Delete Confirmation Dialog */}

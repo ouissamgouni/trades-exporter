@@ -44,17 +44,17 @@ export interface UseBundleSuggestionMapReturn {
 
 export function useBundleSuggestionMap(
     enabled: boolean = true,
-    maxSuggestions: number = 20,
+    maxSuggestions: number = 100,
 ): UseBundleSuggestionMapReturn {
     const {
-        data: suggestions = [],
+        data: allSuggestions = [],
         isLoading,
         refetch,
     } = useQuery({
-        queryKey: ['bundleSuggestions', maxSuggestions],
+        queryKey: ['bundleSuggestions'],
         queryFn: async () => {
             const response = await fetch(
-                `${API_URL}/bundles/suggestions?max_suggestions=${maxSuggestions}`,
+                `${API_URL}/bundles/suggestions?max_suggestions=100`,
             );
             if (!response.ok) throw new Error('Failed to fetch suggestions');
             return response.json() as Promise<BundleSuggestion[]>;
@@ -62,6 +62,12 @@ export function useBundleSuggestionMap(
         enabled,
         staleTime: 60_000, // Cache for 1 minute to avoid excessive refetches
     });
+
+    // Slice client-side to the requested max
+    const suggestions = useMemo(
+        () => allSuggestions.slice(0, maxSuggestions),
+        [allSuggestions, maxSuggestions],
+    );
 
     const suggestionMap = useMemo(() => {
         const map = new Map<number, SuggestionEntry>();

@@ -69,7 +69,7 @@ const AppContent = () => {
     const { data: bundleSuggestions = [] } = useQuery({
         queryKey: ['bundleSuggestions'],
         queryFn: async () => {
-            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=10`);
+            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=100`);
             if (!response.ok) return [];
             return response.json() as Promise<BundleSuggestion[]>;
         },

@@ -83,6 +83,7 @@ class FileImportStatus(str, Enum):
     PROCESSING = "processing"  # Currently being processed by sync job
     COMPLETED = "completed"  # Successfully processed
     FAILED = "failed"  # Processing failed, file kept for retry
+    DEFAULT = "default"  # Saved as default file for connector (auto-used on sync start)
 
 
 class PriceType(str, Enum):
@@ -217,13 +218,19 @@ class AccountType(str, Enum):
     
     Values:
     - CEX: Centralized exchange account (Binance, Coinbase, etc.)
+    - DEX: Decentralized exchange (Hyperliquid, Uniswap, etc.)
     - BROKER: Traditional broker account (stocks, ETFs)
     - WALLET: On-chain wallet (MetaMask, hardware wallets)
+    - BANK: Traditional bank account (Revolut, N26, etc.)
+    - INVESTMENT: Tax-advantaged investment account (Assurance vie, PEA, etc.)
     """
     
     CEX = "cex"
+    DEX = "dex"
     BROKER = "broker"
     WALLET = "wallet"
+    BANK = "bank"
+    INVESTMENT = "investment"
 
 
 class ConnectorCategory(str, Enum):
@@ -279,12 +286,13 @@ class Account(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(nullable=False, index=True)
-    account_type: str = Field(nullable=False, index=True)  # 'cex', 'broker', 'wallet'
+    account_type: str = Field(nullable=False, index=True)  # 'cex', 'dex', 'broker', 'wallet', 'bank', 'investment'
     address_or_identifier: Optional[str] = Field(default=None, index=True)
     group: Optional[str] = Field(default=None, index=True)  # Grouping label (e.g. 'Tangem EVM', 'Trading')
     tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     owned: bool = Field(default=True)  # Whether this account is owned by the user
     enabled: bool = Field(default=True, index=True)  # Whether this account is enabled for sync
+    color: Optional[str] = Field(default=None)  # Badge color palette (e.g. 'purple', 'blue', 'green')
     created_at: datetime = Field(default_factory=utc_now)
 
     # Relationships
@@ -317,6 +325,7 @@ class AccountConnector(SQLModel, table=True):
     config: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     credentials_ref: Optional[str] = Field(default=None)
     sync_priority: int = Field(default=100, index=True)
+    color: Optional[str] = Field(default=None)  # Badge color palette (e.g. 'blue', 'teal', 'orange')
     last_sync_at: Optional[datetime] = Field(default=None)
     last_sync_status: Optional[str] = Field(default="pending")
     last_error: Optional[str] = Field(default=None)
@@ -957,19 +966,23 @@ class NormalizedTransaction(SQLModel, table=True):
 class RawAccount(SQLModel, table=True):
     """
     Raw account mapping table.
-    Maps (source, label) pairs to account_id in the accounts table.
+    Maps (source, label, network) triples to account_id in the accounts table.
     Similar to raw_assets but for accounts/addresses.
     Used to map source_account, source_from_account and source_to_account to resolved accounts.
+    The network dimension ensures the same address on different chains creates separate mappings.
     """
 
     __tablename__ = "raw_accounts"
-    __table_args__ = (UniqueConstraint("source", "label", name="uq_raw_account"),)
+    __table_args__ = (UniqueConstraint("source", "label", "network", name="uq_raw_account_network"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(
         nullable=False, index=True
     )  # e.g., 'binance', 'blockscout', 'manual'
     label: str = Field(nullable=False, index=True)  # Raw address or identifier
+    network: str = Field(
+        default="", nullable=False, index=True
+    )  # Normalized chain name (e.g. 'bsc', 'ethereum', '')
     account_id: Optional[int] = Field(
         default=None, foreign_key="accounts.id", index=True
     )

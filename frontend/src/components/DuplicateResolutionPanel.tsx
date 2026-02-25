@@ -156,7 +156,7 @@ const SmartSuggestion: React.FC<SmartSuggestionProps> = ({ breakdown, onSelectAl
 
 interface DuplicateGroupRowProps {
     group: DuplicateGroup;
-    onResolve: (groupHash: string, action: 'keep_selected' | 'dismiss_selected', txIds: number[]) => Promise<any>;
+    onResolve: (groupHash: string, action: 'keep_selected' | 'dismiss_selected', txIds: number[], allTxIds: number[]) => Promise<any>;
     onGroupUpdated: (updatedGroup: DuplicateGroup, allResolved: boolean) => void;
 }
 
@@ -202,7 +202,12 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
 
         setIsResolving(true);
         try {
-            const response = await onResolve(group.group_hash, action, Array.from(selectedIds));
+            const response = await onResolve(
+                group.group_hash,
+                action,
+                Array.from(selectedIds),
+                group.transactions.map(tx => tx.id)
+            );
 
             // Check if group is fully resolved
             const updatedGroup = response.updated_group;
@@ -542,7 +547,8 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
     const handleResolve = async (
         groupHash: string,
         action: 'keep_selected' | 'dismiss_selected',
-        selectedIds: number[]
+        selectedIds: number[],
+        allTransactionIds: number[]
     ) => {
         const res = await fetch(`${API_URL}/data-health/resolve-duplicate-group`, {
             method: 'POST',
@@ -551,6 +557,7 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
                 group_hash: groupHash,
                 action,
                 selected_transaction_ids: selectedIds,
+                all_transaction_ids: allTransactionIds,
             }),
         });
 
@@ -694,7 +701,12 @@ export const DuplicateResolutionPanel: React.FC<DuplicateResolutionPanelProps> =
                 if (txIdsToKeep.length === 0) continue;
 
                 try {
-                    const result = await handleResolve(groupHash, 'keep_selected', txIdsToKeep);
+                    const result = await handleResolve(
+                        groupHash,
+                        'keep_selected',
+                        txIdsToKeep,
+                        group.transactions.map(tx => tx.id)
+                    );
                     const updatedGroup = result.updated_group;
                     const allResolved = updatedGroup?.transactions.every((tx: TransactionSummary) => tx.dup_resolved) || false;
 

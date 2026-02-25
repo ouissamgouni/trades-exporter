@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     Box,
     Button,
+    Checkbox,
     Dialog,
     Flex,
     Text,
@@ -18,7 +19,8 @@ import { FileUploadDetailedPreview, API_URL } from '../types';
 interface FileUploadPreviewModalProps {
     open: boolean;
     onClose: () => void;
-    onConfirm: () => void;
+    onConfirm: (asDefault?: boolean) => void;
+    hasExistingDefault?: boolean;
     connectorId: number;
     fileName: string;
     fileSize: number;
@@ -39,12 +41,14 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
     open,
     onClose,
     onConfirm,
+    hasExistingDefault = false,
     connectorId,
     fileName,
     fileSize,
     quickPreview,
     file,
 }) => {
+    const [saveAsDefault, setSaveAsDefault] = useState(false);
     const [detailedPreview, setDetailedPreview] = useState<FileUploadDetailedPreview | null>(null);
     const [loadingDetailed, setLoadingDetailed] = useState(false);
     const [detailedError, setDetailedError] = useState<string | null>(null);
@@ -441,12 +445,31 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                         </Dialog.Body>
 
                         <Dialog.Footer>
-                            <Button variant="outline" onClick={onClose}>
-                                Cancel
-                            </Button>
-                            <Button colorPalette="blue" onClick={onConfirm}>
-                                Confirm Import
-                            </Button>
+                            <Flex align="center" gap={3} flex={1}>
+                                <Checkbox.Root
+                                    checked={saveAsDefault}
+                                    onCheckedChange={(e) => setSaveAsDefault(!!e.checked)}
+                                    size="sm"
+                                >
+                                    <Checkbox.HiddenInput />
+                                    <Checkbox.Control>
+                                        <Checkbox.Indicator />
+                                    </Checkbox.Control>
+                                    <Checkbox.Label>
+                                        <Text fontSize="xs" color="gray.600">
+                                            {hasExistingDefault ? 'Replace default file' : 'Save as default file'}
+                                        </Text>
+                                    </Checkbox.Label>
+                                </Checkbox.Root>
+                            </Flex>
+                            <Flex gap={2}>
+                                <Button variant="outline" onClick={onClose}>
+                                    Cancel
+                                </Button>
+                                <Button colorPalette="blue" onClick={() => onConfirm(saveAsDefault)}>
+                                    {saveAsDefault ? '📌 Import as Default' : 'Confirm Import'}
+                                </Button>
+                            </Flex>
                         </Dialog.Footer>
                     </Dialog.Content>
                 </Dialog.Positioner>

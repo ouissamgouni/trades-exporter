@@ -35,6 +35,7 @@ import { defaultFilterState } from '../TransactionFilters';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
 import { formatQuantity } from '../../utils/numberUtils';
+const formatQty = formatQuantity;
 import { ValueDisplay } from '../ValueDisplay';
 import { TablePagination } from '../TablePagination';
 import { usePagination } from '../../hooks/usePagination';
@@ -2303,6 +2304,7 @@ const TransactionsTab: React.FC<{
         directions: [],
         connectorRunIds: [],
         tagKeys: [],
+        networks: [],
         dateFrom: '',
         dateTo: '',
         pnlCalVersion: String(versionId),

@@ -99,6 +99,12 @@ class SuggestionResponse(BaseModel):
     transactions: List[TransactionSummary] = []
 
 
+class TransactionIdsRequest(BaseModel):
+    """Request model for adding/removing transactions from a bundle."""
+
+    transaction_ids: List[int] = Field(..., description="Transaction IDs to add/remove")
+
+
 class AcceptSuggestionRequest(BaseModel):
     """Request to accept a suggestion."""
 
@@ -150,7 +156,7 @@ def list_bundles(
 
 @router.get("/suggestions", response_model=List[SuggestionResponse])
 def get_suggestions(
-    max_suggestions: int = Query(50, ge=1, le=200),
+    max_suggestions: int = Query(200, ge=1, le=500),
     session: Session = Depends(get_db),
 ):
     """
@@ -414,7 +420,7 @@ def delete_bundle(
 @router.post("/{bundle_id}/add-transactions")
 def add_transactions_to_bundle(
     bundle_id: int,
-    transaction_ids: List[int],
+    request: TransactionIdsRequest,
     session: Session = Depends(get_db),
 ):
     """Add transactions to an existing bundle."""
@@ -424,7 +430,7 @@ def add_transactions_to_bundle(
 
     added = []
     skipped = []
-    for tx_id in transaction_ids:
+    for tx_id in request.transaction_ids:
         tx = session.get(NormalizedTransaction, tx_id)
         if not tx:
             continue
@@ -445,7 +451,7 @@ def add_transactions_to_bundle(
 @router.post("/{bundle_id}/remove-transactions")
 def remove_transactions_from_bundle(
     bundle_id: int,
-    transaction_ids: List[int],
+    request: TransactionIdsRequest,
     session: Session = Depends(get_db),
 ):
     """Remove transactions from a bundle."""
@@ -454,7 +460,7 @@ def remove_transactions_from_bundle(
         raise HTTPException(status_code=404, detail="Bundle not found")
 
     removed = 0
-    for tx_id in transaction_ids:
+    for tx_id in request.transaction_ids:
         tx = session.get(NormalizedTransaction, tx_id)
         if not tx:
             continue

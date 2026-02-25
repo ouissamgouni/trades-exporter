@@ -9,12 +9,15 @@ import {
     Text,
     Textarea,
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Account, API_URL } from '../types';
+import { ComboSelect } from './ComboSelect';
+import { ColorPaletteField } from './ColorPaletteField';
+import { getNextAvailableEntityColor } from '../hooks/useEntityColors';
 
 export interface AccountPrefill {
     name?: string;
-    account_type?: 'cex' | 'broker' | 'wallet';
+    account_type?: 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment';
     address_or_identifier?: string;
     group?: string;
 }
@@ -34,11 +37,12 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
 }) => {
     const [formData, setFormData] = useState({
         name: '',
-        account_type: 'cex' as 'cex' | 'broker' | 'wallet',
+        account_type: 'cex' as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
         address_or_identifier: '',
         group: '',
         tags: [] as Record<string, any>[],
         owned: true,
+        color: null as string | null,
     });
     const [tagsInput, setTagsInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -46,7 +50,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
     const [existingAccounts, setExistingAccounts] = useState<Account[]>([]);
 
-    // Fetch existing accounts for duplicate detection
+    // Fetch existing accounts for duplicate detection and group suggestions
     useEffect(() => {
         const fetchAccounts = async () => {
             try {
@@ -64,6 +68,21 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
         }
     }, [isOpen]);
 
+    // Derive distinct group names from existing accounts
+    const existingGroups = useMemo(() => {
+        const groups = new Set<string>();
+        for (const acc of existingAccounts) {
+            if (acc.group) groups.add(acc.group);
+        }
+        return Array.from(groups).sort();
+    }, [existingAccounts]);
+
+    // Derive used colors from existing accounts for dedup
+    const usedColors = useMemo(() =>
+        existingAccounts.map(a => a.color).filter((c): c is string => !!c),
+        [existingAccounts],
+    );
+
     useEffect(() => {
         if (account) {
             setFormData({
@@ -73,12 +92,14 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 group: account.group || '',
                 tags: account.tags || [],
                 owned: account.owned,
+                color: account.color || null,
             });
             // Convert [{key: val}, ...] to "key, key2, ..."
             const tagStrings = (account.tags || []).map(tagObj => Object.keys(tagObj)[0]).filter(Boolean);
             setTagsInput(tagStrings.join(', '));
         } else if (prefill) {
             // Use prefill data when creating from raw account
+            const suggestedColor = getNextAvailableEntityColor(usedColors);
             setFormData({
                 name: prefill.name || '',
                 account_type: prefill.account_type || 'cex',
@@ -86,9 +107,11 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 group: prefill.group || '',
                 tags: [],
                 owned: true,
+                color: suggestedColor,
             });
             setTagsInput('');
         } else {
+            const suggestedColor = getNextAvailableEntityColor(usedColors);
             setFormData({
                 name: '',
                 account_type: 'cex',
@@ -96,12 +119,13 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 group: '',
                 tags: [],
                 owned: true,
+                color: suggestedColor,
             });
             setTagsInput('');
         }
         setError('');
         setDuplicateWarning(null);
-    }, [account, prefill, isOpen]);
+    }, [account, prefill, isOpen, usedColors]);
 
     // Check for duplicate address_or_identifier
     useEffect(() => {
@@ -138,6 +162,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                 tags,
                 address_or_identifier: formData.address_or_identifier || null,
                 group: formData.group || null,
+                color: formData.color || null,
             };
 
             const url = account
@@ -219,13 +244,16 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                                 onChange={(e) =>
                                                     setFormData({
                                                         ...formData,
-                                                        account_type: e.target.value as 'cex' | 'broker' | 'wallet',
+                                                        account_type: e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
                                                     })
                                                 }
                                             >
                                                 <option value="cex">CEX (Centralized Exchange)</option>
+                                                <option value="dex">DEX (Decentralized Exchange)</option>
                                                 <option value="broker">Broker</option>
                                                 <option value="wallet">Wallet</option>
+                                                <option value="bank">Bank</option>
+                                                <option value="investment">Investment</option>
                                             </NativeSelect.Field>
                                         </NativeSelect.Root>
                                     </Box>
@@ -246,18 +274,21 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
 
                                     <Box>
                                         <Text fontWeight="medium" mb={1}>Group</Text>
-                                        <Input
+                                        <ComboSelect
                                             value={formData.group}
-                                            onChange={(e) =>
+                                            onChange={(value) =>
                                                 setFormData({
                                                     ...formData,
-                                                    group: e.target.value,
+                                                    group: value,
                                                 })
                                             }
-                                            placeholder="e.g. Tangem EVM, Metamask EVM"
+                                            options={existingGroups}
+                                            placeholder="Select or type new group..."
+                                            size="md"
+                                            width="100%"
                                         />
                                         <Text fontSize="sm" color="gray.500" mt={1}>
-                                            Optional label to group related accounts (e.g. same wallet on multiple chains)
+                                            Select an existing group or type a new one
                                         </Text>
                                     </Box>
 
@@ -292,6 +323,12 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                         />
                                         <Text fontSize="sm" color="gray.500" mt={1}>Comma-separated tags</Text>
                                     </Box>
+
+                                    <ColorPaletteField
+                                        value={formData.color}
+                                        onChange={(color) => setFormData({ ...formData, color })}
+                                        usedColors={usedColors}
+                                    />
                                 </Flex>
                             </Dialog.Body>
 

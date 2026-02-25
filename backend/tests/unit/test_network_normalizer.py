@@ -30,6 +30,22 @@ class TestNormalizeNetwork:
         ("SomeNewChain", "somenewchain"),
         # Whitespace trimming
         ("  eth  ", "ethereum"),
+        # MEXC raw values
+        ("Ethereum(ERC20)", "ethereum"),
+        ("Solana(SOL)", "solana"),
+        ("HYPEREVM", "hyperevm"),
+        ("SONIC", "sonic"),
+        # OKX raw values
+        ("ADA-Cardano", "cardano"),
+        ("ETH-ERC20", "ethereum"),
+        ("SUI-SUI", "sui"),
+        ("USDC-SUI", "sui"),
+        # HyperEVM aliases
+        ("hyperliquid", "hyperevm"),
+        ("hyperliquid evm", "hyperevm"),
+        ("hyper evm", "hyperevm"),
+        # Sonic aliases
+        ("S", "sonic"),
     ])
     def test_normalize(self, raw, expected):
         assert normalize_network(raw) == expected
@@ -41,6 +57,8 @@ class TestGetNetworkDisplayName:
     def test_known_network(self):
         assert get_network_display_name("ethereum") == "Ethereum"
         assert get_network_display_name("bsc") == "BNB Smart Chain"
+        assert get_network_display_name("hyperevm") == "HyperEVM"
+        assert get_network_display_name("sonic") == "Sonic"
 
     def test_unknown_falls_back_to_title(self):
         assert get_network_display_name("foochain") == "Foochain"

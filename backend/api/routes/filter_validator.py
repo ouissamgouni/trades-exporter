@@ -209,7 +209,7 @@ def validate_transaction_filters(
     validator = FilterValidator(session)
     
     # Validate enum fields
-    validated_review_status = validator.validate_enum(
+    validated_review_statuses = validator.validate_enum_list(
         review_status, VALID_REVIEW_STATUSES, "review_status"
     )
     validated_taxability = validator.validate_enum(
@@ -252,7 +252,7 @@ def validate_transaction_filters(
     
     # Build applied filters object
     applied_filters = AppliedFilters(
-        review_status=validated_review_status,
+        review_statuses=validated_review_statuses,
         taxability=validated_taxability,
         sources=validated_sources,
         account_ids=validated_account_ids,

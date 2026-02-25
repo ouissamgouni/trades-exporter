@@ -36,3 +36,26 @@ export {
     useBalance,
     type UseBalanceReturn,
 } from './useBalance';
+
+export {
+    useAccountSuggestions,
+    fetchAccountSuggestionsBatch,
+    type AccountSuggestion,
+    type BatchSuggestionItem,
+    type BatchSuggestionResult,
+} from './useAccountSuggestions';
+
+export {
+    useEntityColors,
+    ENTITY_COLOR_PALETTE,
+    DEFAULT_ENTITY_COLOR,
+    getNextAvailableEntityColor,
+    hexToRgba,
+    type EntityColor,
+    type UseEntityColorsReturn,
+} from './useEntityColors';
+
+export {
+    useSyncConfigStore,
+    type UseSyncConfigStoreReturn,
+} from './useSyncConfigStore';

@@ -8,10 +8,12 @@
 import React from 'react';
 import { Badge, Box, Flex, HStack, Text } from '@chakra-ui/react';
 import { Tooltip } from '@chakra-ui/react/tooltip';
-import { FiAlertTriangle } from 'react-icons/fi';
+import { FiAlertTriangle, FiPlusCircle } from 'react-icons/fi';
 import { Account } from '../types';
 import { AccountBadge } from './AccountBadge';
-import { getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import { getConfidenceColor, formatConfidence } from '../utils/similarity';
+import { useAccountSuggestions, AccountSuggestion } from '../hooks/useAccountSuggestions';
+import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
 
 export interface SourceInfoCellProps {
     sourceAccount?: string;      // Raw source_account field
@@ -22,16 +24,22 @@ export interface SourceInfoCellProps {
     sourceType?: string;
     sourceSymbol?: string;
     onClick?: () => void;
-    /** Account suggestions for quick linking */
-    accountSuggestions?: SuggestedMatch<Account>[];
+    /** 
+     * Account suggestions for quick linking.
+     * If not provided, the component self-fetches from the backend using
+     * source, sourceAccount, and network for network-aware disambiguation.
+     */
+    accountSuggestions?: AccountSuggestion[];
     /** Callback to accept a suggested account */
     onAcceptSuggestion?: (accountId: number) => void;
+    /** Callback to quick-create a new account (opens AccountFormDialog) */
+    onCreateAccount?: () => void;
     /** Connector metadata */
     connectorName?: string | null;
     runDatetime?: string | null;
     syncConnectorRunId?: number | null;
-    onConnectorRunClick?: (runId: number) => void;  // Callback to open connector run details
-    network?: string | null;  // Network information (e.g., blockchain network)
+    onConnectorRunClick?: (runId: number) => void;
+    network?: string | null;
 }
 
 export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
@@ -43,8 +51,9 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
     sourceType,
     sourceSymbol,
     onClick,
-    accountSuggestions = [],
+    accountSuggestions: externalSuggestions,
     onAcceptSuggestion,
+    onCreateAccount,
     connectorName,
     runDatetime,
     syncConnectorRunId,
@@ -53,6 +62,21 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
 }) => {
     // Determine if account is linked (resolved)
     const isAccountLinked = accountId != null;
+    const needsSuggestions = !isAccountLinked && !!sourceAccount && !externalSuggestions;
+
+    // Self-fetch suggestions when none provided externally (network-aware)
+    const { suggestions: fetchedSuggestions } = useAccountSuggestions({
+        label: sourceAccount,
+        source,
+        network,
+        maxResults: 2,
+        enabled: needsSuggestions,
+    });
+
+    const { getConnectorColor } = useEntityColors();
+    const sourceColor = getConnectorColor(connectorName || source);
+
+    const accountSuggestions = externalSuggestions ?? (needsSuggestions ? fetchedSuggestions : []);
 
     return (
         <Flex
@@ -94,6 +118,26 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
                             >
                                 {sourceAccount.length > 12 ? sourceAccount.slice(0, 12) + '...' : sourceAccount}
                             </Text>
+                            {onCreateAccount && (
+                                <Tooltip.Root>
+                                    <Tooltip.Trigger asChild>
+                                        <Box
+                                            as="button"
+                                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onCreateAccount(); }}
+                                            color="green.500"
+                                            cursor="pointer"
+                                            flexShrink={0}
+                                            _hover={{ color: 'green.700' }}
+                                            aria-label="Create new account"
+                                        >
+                                            <FiPlusCircle size={10} />
+                                        </Box>
+                                    </Tooltip.Trigger>
+                                    <Tooltip.Positioner>
+                                        <Tooltip.Content>Create new account</Tooltip.Content>
+                                    </Tooltip.Positioner>
+                                </Tooltip.Root>
+                            )}
                         </Flex>
                         {/* Show compact suggestion chips for unlinked accounts */}
                         {accountSuggestions.length > 0 && (
@@ -109,10 +153,10 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
                                                 style={{ fontSize: '7px' }}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    onAcceptSuggestion?.(s.item.id);
+                                                    onAcceptSuggestion?.(s.id);
                                                 }}
                                             >
-                                                {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}
+                                                {s.name.slice(0, 10)}{s.name.length > 10 ? '…' : ''}
                                                 {s.confidence >= 0.9 && ' ✓'}
                                             </Badge>
                                         </Tooltip.Trigger>
@@ -133,7 +177,8 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
                     <Tooltip.Trigger asChild>
                         <Badge
                             size="xs"
-                            colorPalette="blue"
+                            bg={hexToRgba(sourceColor, 0.18)}
+                            color={sourceColor}
                             variant="subtle"
                             style={{
                                 fontSize: '9px',

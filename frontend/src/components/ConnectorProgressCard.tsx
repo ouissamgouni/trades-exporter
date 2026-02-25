@@ -18,6 +18,7 @@ interface ConnectorProgressCardProps {
     onRetry?: (connectorId: number) => void;
     retryLoading?: boolean;
     renormalize?: boolean;
+    showAccountName?: boolean;
 }
 
 const getStatusIcon = (status: ConnectorSyncStatus): string => {
@@ -94,6 +95,7 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
     onRetry,
     retryLoading = false,
     renormalize = false,
+    showAccountName = false,
 }) => {
     const [expanded, setExpanded] = useState(initialExpanded);
     const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
@@ -147,12 +149,17 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                 onClick={() => setExpanded(!expanded)}
                 _hover={{ bg: 'gray.50' }}
             >
-                <Flex justify="space-between" align="center" mb={2}>
-                    <Flex align="center" gap={2}>
+                <Flex justify="space-between" align="center" mb={1}>
+                    <Flex align="center" gap={2} minW={0} flex={1}>
                         <Text fontSize="lg">{getStatusIcon(progress.status)}</Text>
-                        <Text fontWeight="medium">
+                        <Text fontWeight="medium" truncate>
                             {connectorName}
                         </Text>
+                        {showAccountName && (
+                            <Text fontSize="xs" color="gray.400" truncate>
+                                {progress.account_name}
+                            </Text>
+                        )}
                         {progress.test_mode && (
                             <Badge colorPalette="orange" size="sm">
                                 🧪 Test
@@ -164,7 +171,7 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                             </Badge>
                         )}
                     </Flex>
-                    <Flex align="center" gap={2}>
+                    <Flex align="center" gap={2} flexShrink={0}>
                         {(progress.status === 'completed' || progress.status === 'running') && (
                             <Text fontSize="xs" color="gray.500">
                                 {formatDuration(progress.started_at, progress.finished_at)}
@@ -179,9 +186,11 @@ export const ConnectorProgressCard: React.FC<ConnectorProgressCardProps> = ({
                     </Flex>
                 </Flex>
 
-                <Text fontSize="xs" color="gray.500">
-                    {progress.account_name}
-                </Text>
+                {!showAccountName && (
+                    <Text fontSize="xs" color="gray.500">
+                        {progress.account_name}
+                    </Text>
+                )}
                 <Text fontSize="xs" color="gray.400" mb={2}>
                     ID: {progress.connector_id}
                 </Text>

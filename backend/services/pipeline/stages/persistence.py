@@ -362,31 +362,8 @@ class PersistenceStage(PipelineStage):
         session = None,
     ) -> NormalizedTransaction:
         """Convert Pydantic model to SQLModel."""
-        # Import here to avoid circular dependency
-        from backend.services.duplicate_detection_service import compute_transaction_hash
-        
         # Handle tags
         tags = tx.tags if isinstance(tx.tags, list) else []
-        
-        # Compute transaction hash for duplicate detection
-        transaction_hash = None
-        if (tx.account_id and tx.date_time and 
-            tx.source_asset_symbol and tx.direction):
-            try:
-                transaction_hash = compute_transaction_hash(
-                    account_id=tx.account_id,
-                    datetime_obj=tx.date_time,
-                    source_asset_symbol=tx.source_asset_symbol,
-                    source_price_quote_asset_symbol=tx.source_price_quote_asset_symbol or "",
-                    direction=tx.direction,
-                    quantity=tx.quantity,
-                    price=tx.price,
-                    session=session,
-                    asset_id=tx.asset_id,
-                    price_quote_asset_id=tx.price_quote_asset_id,
-                )
-            except Exception as e:
-                log.warning(f"Failed to compute transaction hash: {e}")
 
         return NormalizedTransaction(
             source=tx.source,
@@ -422,7 +399,7 @@ class PersistenceStage(PipelineStage):
             synced_at=datetime.now(timezone.utc),
             tags=tags,
             content_hash=tx.content_hash,  # Include content_hash for cross-source deduplication
-            transaction_hash=transaction_hash,  # Hash for efficient duplicate detection
+            transaction_hash=None,  # No longer computed at persist time; fuzzy detection is view-time
             connector_id=tx.connector_id,  # Link to the connector that produced this
         )
 

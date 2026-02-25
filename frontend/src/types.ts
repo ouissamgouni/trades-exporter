@@ -41,7 +41,7 @@ export interface ValidationWarning {
 }
 
 export interface AppliedFilters {
-    review_status?: string;
+    review_statuses: string[];
     taxability?: string;
     sources: string[];
     account_ids: number[];
@@ -81,6 +81,7 @@ export interface Account {
     tags: Record<string, any>[];
     owned: boolean;
     enabled: boolean;
+    color?: string;
     created_at: string;
 }
 
@@ -92,6 +93,7 @@ export interface AccountConnector {
     config: Record<string, any>;
     credentials_ref?: string;
     sync_priority: number;
+    color?: string;
     last_sync_at?: string;
     last_sync_status?: `${SyncStatus}`;
     last_error?: string;
@@ -112,6 +114,7 @@ export interface ConnectorTypeInfo {
     required_config: string[];
     optional_config: string[];
     supports_balance?: boolean;
+    is_file_connector?: boolean;
 }
 
 /**
@@ -385,7 +388,9 @@ export interface RawAccount {
     id: number;
     source: string;
     label: string;
-    account_id?: number;
+    network?: string;
+    account_id?: number | null;
+    transaction_count?: number;
     dismissed?: boolean;
     dismissed_at?: string;
     dismissed_reason?: string;
@@ -415,6 +420,8 @@ export interface ConnectorProgress {
     connector_run_id?: number;
     connector_type: string;
     account_name: string;
+    account_type?: string;
+    account_group?: string;
     status: ConnectorSyncStatus;
     test_mode: boolean;
     processed: number;
@@ -636,6 +643,7 @@ export interface EnabledConnector {
     account_name: string;
     account_type: string;
     account_enabled?: boolean;
+    account_group?: string;
     enabled: boolean;
     test_mode: boolean;
     test_file_path?: string;
@@ -675,6 +683,8 @@ export interface EnabledConnector {
         qty: number | null;
         price: number | null;
     } | null;
+    // Start datetime from connector config (default since for sync)
+    start_datetime?: string | null;
 }
 
 export interface EnabledConnectorsResponse {
@@ -776,17 +786,6 @@ export interface RawAccountIssue {
     source: string;
     affected_count: number;
     suggestion?: SuggestionInfo | null;
-}
-
-/**
- * Raw Account - Maps source-specific account labels/addresses to normalized accounts
- */
-export interface RawAccount {
-    id: number;
-    source: string;
-    label: string;
-    account_id?: number | null;
-    transaction_count: number;
 }
 
 /**

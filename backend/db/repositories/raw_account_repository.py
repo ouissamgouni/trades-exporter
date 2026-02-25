@@ -5,6 +5,7 @@ Raw Account Repository - CRUD operations for raw accounts.
 from typing import Optional, List
 from sqlmodel import Session, select
 
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import RawAccount
 
 
@@ -22,11 +23,13 @@ class RawAccountRepository:
         self.session.commit()
         return raw_account
 
-    def get(self, source: str, label: str) -> Optional[RawAccount]:
-        """Get a raw account by composite key (source + label)."""
+    def get(self, source: str, label: str, network: str = "") -> Optional[RawAccount]:
+        """Get a raw account by composite key (source + label + network)."""
+        network = normalize_network(network) or ""
         statement = select(RawAccount).where(
             RawAccount.source == source,
             RawAccount.label == label,
+            RawAccount.network == network,
         )
         return self.session.exec(statement).first()
 
@@ -35,18 +38,19 @@ class RawAccountRepository:
         statement = select(RawAccount).where(RawAccount.id == raw_account_id)
         return self.session.exec(statement).first()
 
-    def get_account_id(self, source: str, label: str) -> Optional[int]:
-        """Get the account_id for a source/label pair."""
-        raw_account = self.get(source, label)
+    def get_account_id(self, source: str, label: str, network: str = "") -> Optional[int]:
+        """Get the account_id for a source/label/network triple."""
+        raw_account = self.get(source, label, network)
         return raw_account.account_id if raw_account else None
 
-    def get_or_create(self, source: str, label: str) -> RawAccount:
+    def get_or_create(self, source: str, label: str, network: str = "") -> RawAccount:
         """Get existing raw account or create a new one."""
-        existing = self.get(source, label)
+        network = normalize_network(network) or ""
+        existing = self.get(source, label, network)
         if existing:
             return existing
 
-        new_raw_account = RawAccount(source=source, label=label)
+        new_raw_account = RawAccount(source=source, label=label, network=network)
         return self.create(new_raw_account)
 
     def list_all(
@@ -104,9 +108,10 @@ class RawAccountRepository:
         self.session.commit()
         return raw_account
 
-    def update_account_id(self, source: str, label: str, account_id: int) -> bool:
-        """Update the account_id for a source/label pair."""
-        raw_account = self.get(source, label)
+    def update_account_id(self, source: str, label: str, account_id: int, network: str = "") -> bool:
+        """Update the account_id for a source/label/network triple."""
+        network = normalize_network(network) or ""
+        raw_account = self.get(source, label, network)
         if raw_account:
             raw_account.account_id = account_id
             self.session.add(raw_account)
@@ -114,9 +119,10 @@ class RawAccountRepository:
             return True
         return False
 
-    def clear_account_id(self, source: str, label: str) -> bool:
-        """Clear the account_id for a source/label pair (unmap)."""
-        raw_account = self.get(source, label)
+    def clear_account_id(self, source: str, label: str, network: str = "") -> bool:
+        """Clear the account_id for a source/label/network triple (unmap)."""
+        network = normalize_network(network) or ""
+        raw_account = self.get(source, label, network)
         if raw_account:
             raw_account.account_id = None
             self.session.add(raw_account)
@@ -124,9 +130,10 @@ class RawAccountRepository:
             return True
         return False
 
-    def delete(self, source: str, label: str) -> bool:
+    def delete(self, source: str, label: str, network: str = "") -> bool:
         """Delete a raw account by composite key."""
-        raw_account = self.get(source, label)
+        network = normalize_network(network) or ""
+        raw_account = self.get(source, label, network)
         if raw_account:
             self.session.delete(raw_account)
             self.session.commit()

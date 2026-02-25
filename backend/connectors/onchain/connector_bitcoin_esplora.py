@@ -27,6 +27,7 @@ from typing import Dict, Any, Generator, Optional, List, Set
 from backend.connectors.base.base_connector import BaseConnector
 from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("bitcoin_esplora")
@@ -677,6 +678,9 @@ class ConnectorBitcoinEsplora(BaseConnector):
 
                 yield NormalizedTransaction(
                     source="bitcoin_esplora",
+                    account_id=self.account_id,
+                    connector_id=self.connector_id,
+                    source_account=self.wallet_address,
                     source_transaction_id=f"{tx_hash}_in",
                     source_transaction_type="bitcoin-transfer",
                     source_asset_symbol="BTC",
@@ -689,7 +693,7 @@ class ConnectorBitcoinEsplora(BaseConnector):
                     include_fee=False,
                     source_from_account=from_address or "",
                     source_to_account=to_address,
-                    network="bitcoin",
+                    network=normalize_network("bitcoin"),
                     network_transaction_id=tx_hash,
                     token_contract_address="",
                     tags=[{
@@ -727,6 +731,9 @@ class ConnectorBitcoinEsplora(BaseConnector):
                 if net_outflow_sats > 0:
                     yield NormalizedTransaction(
                         source="bitcoin_esplora",
+                        account_id=self.account_id,
+                        connector_id=self.connector_id,
+                        source_account=self.wallet_address,
                         source_transaction_id=f"{tx_hash}_out",
                         source_transaction_type="bitcoin-transfer",
                         source_asset_symbol="BTC",
@@ -739,7 +746,7 @@ class ConnectorBitcoinEsplora(BaseConnector):
                         include_fee=True,  # Outflows include fee
                         source_from_account=from_address,
                         source_to_account=to_address or "",
-                        network="bitcoin",
+                        network=normalize_network("bitcoin"),
                         network_transaction_id=tx_hash,
                         token_contract_address="",
                         tags=[{

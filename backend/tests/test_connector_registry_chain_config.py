@@ -22,6 +22,7 @@ class TestConnectorRegistryChainConfig:
         assert registry.get_native_token("blockscout", "ethereum") == "ETH"
         # Verify different chains have different tokens
         assert registry.get_native_token("blockscout", "polygon") == "MATIC"
+        assert registry.get_native_token("blockscout", "hyperevm") == "HYPE"
 
     def test_get_native_token_non_evm_chains(self, registry):
         """Test getting native token for non-EVM chains."""
@@ -57,6 +58,7 @@ class TestConnectorRegistryChainConfig:
         """Test getting chain ID for EVM chains."""
         assert registry.get_chain_id("blockscout", "ethereum") == 1
         assert registry.get_chain_id("blockscout", "base") == 8453
+        assert registry.get_chain_id("blockscout", "hyperevm") == 998
         assert registry.get_chain_id("etherscan", "ethereum") == 1
 
     def test_get_chain_id_non_evm_chains(self, registry):
@@ -77,7 +79,7 @@ class TestConnectorRegistryChainConfig:
         config = registry.get_chain_config("blockscout", "ethereum")
         assert config is not None
         assert config.explorer_type == "blockscout"
-        assert config.base_url == "https://eth.blockscout.com/api"
+        assert config.base_url == "https://eth.blockscout.com/api/v2"
         assert config.chain_id == 1
         assert config.native_currency == "ETH"
         assert config.native_token_decimals == 18
@@ -97,7 +99,7 @@ class TestConnectorRegistryChainConfig:
         configs = registry.get_chain_configs("blockscout")
         assert "ethereum" in configs
         assert "base" in configs
-        assert len(configs) >= 5  # At least the main chains
+        assert len(configs) >= 6  # At least the main chains including hyperevm
 
     def test_get_chain_configs_unknown_connector(self, registry):
         """Test getting chain configs for unknown connector returns empty dict."""
