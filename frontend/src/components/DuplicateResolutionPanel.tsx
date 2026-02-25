@@ -21,11 +21,10 @@ import {
     IconButton,
     Portal,
     Spinner,
-    Table,
     Text,
     VStack,
-    Checkbox,
 } from '@chakra-ui/react';
+import { DuplicateGroupTransactionsTable } from './tables/wrappers/DuplicateGroupTransactionsTable';
 import {
     FiCheck,
     FiX,
@@ -162,6 +161,8 @@ interface DuplicateGroupRowProps {
 
 const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve, onGroupUpdated }) => {
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [preselectIds, setPreselectIds] = useState<number[] | undefined>(undefined);
+    const [tableKey, setTableKey] = useState(0);
     const [isResolving, setIsResolving] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -174,20 +175,9 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
         }
     }, [allResolved]);
 
-    const toggleSelection = (id: number) => {
-        setSelectedIds(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) {
-                next.delete(id);
-            } else {
-                next.add(id);
-            }
-            return next;
-        });
-    };
-
     const selectAllFromConnector = (breakdown: ConnectorBreakdown) => {
-        setSelectedIds(new Set(breakdown.transaction_ids));
+        setPreselectIds(breakdown.transaction_ids);
+        setTableKey(k => k + 1);
     };
 
     const handleResolve = async (action: 'keep_selected' | 'dismiss_selected') => {
@@ -226,6 +216,8 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
 
             // Clear selection
             setSelectedIds(new Set());
+            setPreselectIds(undefined);
+            setTableKey(0);
         } catch (error) {
             toaster.create({
                 title: 'Resolution failed',
@@ -329,146 +321,22 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
                         </Box>
                     )}
 
-                    {/* Transaction List - Always Expanded */}
-                    <VStack gap={2} align="stretch" mb={3}>
-                        {group.transactions.map(tx => (
-                            <Box
-                                key={tx.id}
-                                borderWidth="1px"
-                                borderColor={selectedIds.has(tx.id) ? 'blue.300' : 'gray.200'}
-                                borderRadius="md"
-                                p={2}
-                                bg={selectedIds.has(tx.id) ? 'blue.50' : 'white'}
-                            >
-                                <Flex gap={2} align="flex-start">
-                                    {/* Checkbox - FIXED with proper Chakra v3 children */}
-                                    <Box pt={0.5}>
-                                        <Checkbox.Root
-                                            checked={selectedIds.has(tx.id)}
-                                            onCheckedChange={() => toggleSelection(tx.id)}
-                                            disabled={tx.dup_resolved}
-                                            size="sm"
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control>
-                                                <Checkbox.Indicator />
-                                            </Checkbox.Control>
-                                        </Checkbox.Root>
-                                    </Box>
-
-                                    {/* Content */}
-                                    <Flex direction="column" flex="1" gap={1}>
-                                        {/* Connector Info with parent badge */}
-                                        <HStack gap={1} flexWrap="wrap">
-                                            <Box borderWidth="1px" borderColor="purple.200" borderRadius="md" px={2} py={1} bg="purple.50">
-                                                <HStack gap={1} flexWrap="wrap">
-                                                    <Badge colorPalette="purple" size="xs" variant="solid">
-                                                        {tx.connector_type || tx.source}
-                                                    </Badge>
-                                                    {tx.run_id && (
-                                                        <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                            run #{tx.run_id}
-                                                        </Badge>
-                                                    )}
-                                                    {tx.synced_at && (
-                                                        <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                            {formatDate(tx.synced_at)}
-                                                        </Badge>
-                                                    )}
-                                                </HStack>
-                                            </Box>
-                                            {tx.dup_resolved && tx.dup_resolution && (
-                                                <Badge
-                                                    colorPalette={
-                                                        tx.dup_resolution === 'kept'
-                                                            ? 'green'
-                                                            : tx.dup_resolution === 'merged'
-                                                                ? 'orange'
-                                                                : 'gray'
-                                                    }
-                                                    size="xs"
-                                                    variant="solid"
-                                                >
-                                                    {tx.dup_resolution.toUpperCase()}
-                                                </Badge>
-                                            )}
-                                        </HStack>
-
-                                        {/* Transaction Details - Compact with parent badge */}
-                                        <Box borderWidth="1px" borderColor="blue.200" borderRadius="md" px={2} py={1} bg="blue.50">
-                                            <Flex gap={1} flexWrap="wrap" align="center" fontSize="xs">
-                                                <Badge colorPalette="cyan" size="xs" variant="solid">
-                                                    {formatDate(tx.date_time)}
-                                                </Badge>
-                                                <Badge colorPalette="blue" size="xs" variant="solid">
-                                                    {tx.source_asset_symbol}/{tx.source_price_quote_asset_symbol}
-                                                </Badge>
-                                                <Badge colorPalette="teal" size="xs" variant="solid">
-                                                    {formatNumber(tx.quantity)} @ {formatNumber(tx.price)}
-                                                </Badge>
-                                                {tx.source_transaction_type && (
-                                                    <Badge colorPalette="cyan" size="xs" variant="solid">
-                                                        {tx.source_transaction_type}
-                                                    </Badge>
-                                                )}
-                                                {tx.source_transaction_id && (
-                                                    <Badge colorPalette="gray" size="xs" variant="solid">
-                                                        ID: {tx.source_transaction_id}
-                                                    </Badge>
-                                                )}
-                                                <Badge
-                                                    colorPalette={
-                                                        tx.review_status === 'pending'
-                                                            ? 'yellow'
-                                                            : tx.review_status === 'invalid'
-                                                                ? 'red'
-                                                                : 'green'
-                                                    }
-                                                    size="xs"
-                                                    variant="solid"
-                                                >
-                                                    {tx.review_status}
-                                                </Badge>
-                                            </Flex>
-                                        </Box>
-
-                                        {/* Resolution Status with Details */}
-                                        {tx.dup_resolved && tx.dup_resolution && (
-                                            <HStack gap={1}>
-                                                <Badge
-                                                    colorPalette={
-                                                        tx.dup_resolution === 'kept' ? 'green' :
-                                                            tx.dup_resolution === 'merged' ? 'orange' : 'gray'
-                                                    }
-                                                    size="xs"
-                                                    variant="solid"
-                                                >
-                                                    ✓ {tx.dup_resolution.toUpperCase()}
-                                                </Badge>
-                                                {tx.dup_resolved_at && (
-                                                    <Badge colorPalette="gray" size="xs" variant="outline">
-                                                        {formatDate(tx.dup_resolved_at)}
-                                                    </Badge>
-                                                )}
-                                                {tx.dup_resolution === 'merged' && tx.kept_tx_ids && tx.kept_tx_ids.length > 0 && (
-                                                    <Badge colorPalette="blue" size="xs" variant="outline">
-                                                        → IDs: {tx.kept_tx_ids.join(', ')}
-                                                    </Badge>
-                                                )}
-                                            </HStack>
-                                        )}
-                                    </Flex>
-                                </Flex>
-                            </Box>
-                        ))}
-                    </VStack>
+                    {/* Transaction List - Table-based UX with selection */}
+                    <Box mb={3}>
+                        <DuplicateGroupTransactionsTable
+                            key={tableKey}
+                            transactionIds={group.transactions.map(tx => tx.id)}
+                            onSelectionChange={setSelectedIds}
+                            preselectIds={preselectIds}
+                        />
+                    </Box>
 
                     {/* Action Buttons */}
                     {!allResolved && (
                         <Flex justify="flex-end" gap={2}>
                             <Button
                                 size="sm"
-                                colorScheme="green"
+                                colorPalette="green"
                                 onClick={() => handleResolve('keep_selected')}
                                 disabled={selectedIds.size === 0 || isResolving}
                                 loading={isResolving}
@@ -478,7 +346,7 @@ const DuplicateGroupRow: React.FC<DuplicateGroupRowProps> = ({ group, onResolve,
                             </Button>
                             <Button
                                 size="sm"
-                                colorScheme="gray"
+                                colorPalette="gray"
                                 onClick={() => handleResolve('dismiss_selected')}
                                 disabled={selectedIds.size === 0 || isResolving}
                                 loading={isResolving}

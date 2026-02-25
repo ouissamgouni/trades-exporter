@@ -567,6 +567,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     // ============================================================
 
     const applyTagsUpdate = (tags: Record<string, unknown>[]) => {
+        // Optimistic local update — reflect instantly without waiting for server round-trip
+        setTx(prev => ({ ...prev, tags }));
         if (onTagsChange) {
             onTagsChange(tx.id, tags);
         } else {

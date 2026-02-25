@@ -198,6 +198,14 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     emptyMessage?: string;
     /** Compact mode for embedded views (smaller fonts, tighter spacing) */
     compact?: boolean;
+    /** Embedded mode for popovers/cards: hides title, toolbar, pagination, legend, checkbox, status and actions columns (detail icon is kept) */
+    embeddedMode?: boolean;
+    /** When embeddedMode=true, also show checkboxes and status column (for duplicate resolution UX) */
+    showSelectionInEmbedded?: boolean;
+    /** Callback fired whenever the internal row selection changes (works both in normal and embedded+selection mode) */
+    onSelectionChange?: (ids: Set<number>) => void;
+    /** Pre-select these IDs when the table mounts – changing this (via `key`) can reset selection */
+    initialSelectedIds?: number[];
     /** Whether to show the filter bar */
     showFilters?: boolean;
     /** Whether to show the bundles section */
@@ -261,6 +269,10 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     resetFilters,
     emptyMessage,
     compact = false,
+    embeddedMode = false,
+    showSelectionInEmbedded = false,
+    onSelectionChange,
+    initialSelectedIds,
     showFilters = true,
     showBundles = true,
     showSuggestions = false,
@@ -407,7 +419,16 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         storageKey: 'transactions',
         initialPageSize: DEFAULT_PAGE_SIZE,
     });
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(
+        () => new Set<number>(initialSelectedIds ?? [])
+    );
+
+    // Notify parent of selection changes
+    const onSelectionChangeRef = React.useRef(onSelectionChange);
+    React.useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+    React.useEffect(() => {
+        onSelectionChangeRef.current?.(selectedIds);
+    }, [selectedIds]);
     // Transaction detail drawer state (replaces expandedRow)
     const [drawerTransactionId, setDrawerTransactionId] = useState<number | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -1496,48 +1517,50 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const totalInvalidCount = invalidTransactions.length;
 
     return (
-        <Box pb={selectedIds.size > 0 ? '72px' : '0'}>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>{title}</Heading>
-                    <Text color="gray.600" fontSize="sm">{subtitle}</Text>
-                </Box>
-                {/* Invalid row collapse indicator */}
-                {totalInvalidCount > 0 && (
-                    <HStack gap={2} fontSize="xs" color="gray.500">
-                        <Badge colorPalette="red" variant="subtle" size="sm">
-                            <LuX size={10} />
-                            {totalInvalidCount} invalid
-                        </Badge>
-                        {collapsedInvalidCount > 0 ? (
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                color="gray.500"
-                                _hover={{ color: 'red.600' }}
-                                onClick={expandAllInvalid}
-                                title="Expand all invalid rows"
-                            >
-                                <LuPlus size={12} /> Show
-                            </Button>
-                        ) : (
-                            <Button
-                                size="xs"
-                                variant="ghost"
-                                color="gray.500"
-                                _hover={{ color: 'red.600' }}
-                                onClick={collapseAllInvalid}
-                                title="Collapse all invalid rows"
-                            >
-                                <LuMinus size={12} /> Hide
-                            </Button>
-                        )}
-                    </HStack>
-                )}
-            </Flex>
+        <Box pb={selectedIds.size > 0 && !embeddedMode ? '72px' : '0'}>
+            {!embeddedMode && (
+                <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
+                    <Box>
+                        <Heading as="h2" size="md" mb={1}>{title}</Heading>
+                        <Text color="gray.600" fontSize="sm">{subtitle}</Text>
+                    </Box>
+                    {/* Invalid row collapse indicator */}
+                    {totalInvalidCount > 0 && (
+                        <HStack gap={2} fontSize="xs" color="gray.500">
+                            <Badge colorPalette="red" variant="subtle" size="sm">
+                                <LuX size={10} />
+                                {totalInvalidCount} invalid
+                            </Badge>
+                            {collapsedInvalidCount > 0 ? (
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    color="gray.500"
+                                    _hover={{ color: 'red.600' }}
+                                    onClick={expandAllInvalid}
+                                    title="Expand all invalid rows"
+                                >
+                                    <LuPlus size={12} /> Show
+                                </Button>
+                            ) : (
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    color="gray.500"
+                                    _hover={{ color: 'red.600' }}
+                                    onClick={collapseAllInvalid}
+                                    title="Collapse all invalid rows"
+                                >
+                                    <LuMinus size={12} /> Hide
+                                </Button>
+                            )}
+                        </HStack>
+                    )}
+                </Flex>
+            )}
 
             {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
-            {selectedIds.size > 0 && (
+            {selectedIds.size > 0 && !embeddedMode && (
                 <Portal>
                     <Box
                         position="fixed"
@@ -1682,35 +1705,37 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             {/* Transactions content */}
             <>
                 {/* Transactions tab header with actions */}
-                <Flex justify="flex-end" align="center" mb={4} gap={2}>
-                    {/* Column visibility picker */}
-                    <ColumnVisibilityPopover
-                        table={tanstackTable}
-                        onReset={() => {
-                            setColumnVisibility(presetToVisibility(
-                                tableConfig.columnPreset,
-                                tableConfig.hiddenColumns,
-                                tableConfig.shownColumns
-                            ));
-                        }}
-                        size="sm"
-                    />
-                    <Button
-                        onClick={error ? handleRetry : handleReset}
-                        variant="outline"
-                        colorPalette={error ? "red" : "gray"}
-                        size="sm"
-                    >
-                        {error ? "🔄 Retry" : "↺ Reset"}
-                    </Button>
-                    <Button
-                        onClick={() => handleRefresh()}
-                        variant="outline"
-                        size="sm"
-                    >
-                        🔄 Refresh
-                    </Button>
-                </Flex>
+                {!embeddedMode && (
+                    <Flex justify="flex-end" align="center" mb={4} gap={2}>
+                        {/* Column visibility picker */}
+                        <ColumnVisibilityPopover
+                            table={tanstackTable}
+                            onReset={() => {
+                                setColumnVisibility(presetToVisibility(
+                                    tableConfig.columnPreset,
+                                    tableConfig.hiddenColumns,
+                                    tableConfig.shownColumns
+                                ));
+                            }}
+                            size="sm"
+                        />
+                        <Button
+                            onClick={error ? handleRetry : handleReset}
+                            variant="outline"
+                            colorPalette={error ? "red" : "gray"}
+                            size="sm"
+                        >
+                            {error ? "🔄 Retry" : "↺ Reset"}
+                        </Button>
+                        <Button
+                            onClick={() => handleRefresh()}
+                            variant="outline"
+                            size="sm"
+                        >
+                            🔄 Refresh
+                        </Button>
+                    </Flex>
+                )}
 
                 {showFilters && (
                     <Box mb={4}>
@@ -1728,7 +1753,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 )}
 
                 {/* Top Pagination - show when more than 15 transactions */}
-                {!loading && !error && transactions.length > 15 && (
+                {!loading && !error && !embeddedMode && transactions.length > 15 && (
                     <Box mb={4}>
                         <TablePagination
                             pagination={pagination}
@@ -1757,7 +1782,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 )}
 
                 {/* Legend */}
-                {!loading && !error && (
+                {!loading && !error && !embeddedMode && (
                     <Flex mb={4} gap={3} align="center" flexWrap="wrap">
                         <Text fontSize="xs" color="gray.500">Dir:</Text>
                         <Flex align="center" gap={1}>
@@ -1795,13 +1820,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             <Table.Header css={{ fontSize: '9px' }}>
                                 <Table.Row>
                                     <Table.ColumnHeader position="sticky" left={0} bg="gray.100" zIndex={10} minW="50px" borderRight="2px solid" borderColor="gray.300">
-                                        <Checkbox.Root
-                                            checked={allCurrentPageSelected}
-                                            onCheckedChange={toggleSelectAll}
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control />
-                                        </Checkbox.Root>
+                                        {(!embeddedMode || showSelectionInEmbedded) && (
+                                            <Checkbox.Root
+                                                checked={allCurrentPageSelected}
+                                                onCheckedChange={toggleSelectAll}
+                                            >
+                                                <Checkbox.HiddenInput />
+                                                <Checkbox.Control />
+                                            </Checkbox.Root>
+                                        )}
                                     </Table.ColumnHeader>
                                     {showColumn('id') && renderSortableHeader('id', 'ID')}
                                     {showColumn('date') && renderSortableHeader('date', 'Date/Time')}
@@ -1823,8 +1850,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                     {additionalColumns.map(col => (
                                         <Table.ColumnHeader key={col.id} width={col.width}>{col.header}</Table.ColumnHeader>
                                     ))}
-                                    {showColumn('status') && renderSortableHeader('status', 'Status', undefined, { position: 'sticky', right: '50px', bg: 'gray.100', zIndex: 10, borderLeft: '2px solid', borderColor: 'gray.300', fontSize: '7px', px: 1 })}
-                                    <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="50px" px={0}></Table.ColumnHeader>
+                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, { position: 'sticky', right: '50px', bg: 'gray.100', zIndex: 10, borderLeft: '2px solid', borderColor: 'gray.300', fontSize: '7px', px: 1 })}
+                                    {!embeddedMode && <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="50px" px={0}></Table.ColumnHeader>}
                                 </Table.Row>
                             </Table.Header>
                             <Table.Body>
@@ -2063,13 +2090,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     <LuMinus size={11} />
                                                                 </Box>
                                                             )}
-                                                            <Checkbox.Root
-                                                                checked={selectedIds.has(tx.id)}
-                                                                onCheckedChange={() => toggleSelection(tx.id)}
-                                                            >
-                                                                <Checkbox.HiddenInput />
-                                                                <Checkbox.Control />
-                                                            </Checkbox.Root>
+                                                            {(!embeddedMode || showSelectionInEmbedded) && (
+                                                                <Checkbox.Root
+                                                                    checked={selectedIds.has(tx.id)}
+                                                                    onCheckedChange={() => toggleSelection(tx.id)}
+                                                                >
+                                                                    <Checkbox.HiddenInput />
+                                                                    <Checkbox.Control />
+                                                                </Checkbox.Root>
+                                                            )}
                                                             {/* Details button - opens drawer */}
                                                             <Button
                                                                 size="xs"
@@ -3198,7 +3227,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                         </Table.Cell>
                                                     ))}
                                                     {/* Status - click to edit */}
-                                                    {showColumn('status') && (
+                                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && (
                                                         <Table.Cell position="sticky" right="50px" bg={getRowBgColor(tx)} zIndex={5} borderLeft="2px solid" borderColor="gray.300" onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')} cursor="pointer" px={1} py={0}>
                                                             {isEditingCell(tx.id, 'review_status') ? (
                                                                 <NativeSelect.Root size="sm" width="55px">
@@ -3302,123 +3331,125 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                         </Table.Cell>
                                                     )}
                                                     {/* Actions - show cancel when editing */}
-                                                    <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="50px" px={0} py={0}>
-                                                        <Flex gap={0}>
-                                                            {/* Unbundle action — remove tx from bundle */}
-                                                            {!suggestionEntry && tx.user_calculation_unit_id && (
-                                                                <Button
-                                                                    size="2xs"
-                                                                    variant="ghost"
-                                                                    colorPalette="red"
-                                                                    onClick={async (e) => {
-                                                                        e.stopPropagation();
-                                                                        try {
-                                                                            const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}/remove-transactions`, {
-                                                                                method: 'POST',
-                                                                                headers: { 'Content-Type': 'application/json' },
-                                                                                body: JSON.stringify({ transaction_ids: [tx.id] }),
-                                                                            });
-                                                                            if (!response.ok) throw new Error('Failed to unbundle');
-                                                                            invalidateTransactionData();
-                                                                            queryClient.invalidateQueries({ queryKey: ['bundles'] });
-                                                                            toaster.success({ title: 'Unbundled', description: `Transaction #${tx.id} removed from bundle` });
-                                                                        } catch (err) {
-                                                                            toaster.error({ title: 'Error', description: 'Failed to remove from bundle' });
-                                                                        }
-                                                                    }}
-                                                                    onMouseEnter={() => setHoveredBundleId(tx.user_calculation_unit_id!)}
-                                                                    onMouseLeave={() => setHoveredBundleId(null)}
-                                                                    title={`Remove from bundle #${tx.user_calculation_unit_id}`}
-                                                                    p={0}
-                                                                    minW="16px"
-                                                                    h="16px"
-                                                                >
-                                                                    <LuPackageX size={10} />
-                                                                </Button>
-                                                            )}
-                                                            {/* Bundle suggestion icon in actions */}
-                                                            {suggestionEntry && (
-                                                                <Button
-                                                                    size="2xs"
-                                                                    variant="ghost"
-                                                                    colorPalette="teal"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        setOpenSuggestionTxId(openSuggestionTxId === tx.id ? null : tx.id);
-                                                                    }}
-                                                                    onMouseEnter={() => setHoveredSuggestionGroup(suggestionEntry.groupIndex)}
-                                                                    onMouseLeave={() => setHoveredSuggestionGroup(null)}
-                                                                    title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
-                                                                    p={0}
-                                                                    minW="16px"
-                                                                    h="16px"
-                                                                >
-                                                                    <BundleSuggestionIcon size={10} color={suggestionEntry.color} />
-                                                                </Button>
-                                                            )}
-                                                            {getEditingTxId() === tx.id ? (
-                                                                <Button size="2xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)" p={0} minW="16px" h="16px">
-                                                                    ✗
-                                                                </Button>
-                                                            ) : (
-                                                                <>
-                                                                    <Button
-                                                                        size="2xs"
-                                                                        variant="ghost"
-                                                                        colorPalette="blue"
-                                                                        onClick={() => {
-                                                                            setDrawerTransactionId(tx.id);
-                                                                            setIsDrawerOpen(true);
-                                                                        }}
-                                                                        title="Edit all fields"
-                                                                        p={0}
-                                                                        minW="16px"
-                                                                        h="16px"
-                                                                    >
-                                                                        <LuPencil size={10} />
-                                                                    </Button>
+                                                    {!embeddedMode && (
+                                                        <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="50px" px={0} py={0}>
+                                                            <Flex gap={0}>
+                                                                {/* Unbundle action — remove tx from bundle */}
+                                                                {!suggestionEntry && tx.user_calculation_unit_id && (
                                                                     <Button
                                                                         size="2xs"
                                                                         variant="ghost"
                                                                         colorPalette="red"
-                                                                        onClick={() => {
-                                                                            setTransactionToDelete(tx);
-                                                                            fetchDeletionImpact([tx.id]);
-                                                                            setShowDeleteDialog(true);
+                                                                        onClick={async (e) => {
+                                                                            e.stopPropagation();
+                                                                            try {
+                                                                                const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}/remove-transactions`, {
+                                                                                    method: 'POST',
+                                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                                    body: JSON.stringify({ transaction_ids: [tx.id] }),
+                                                                                });
+                                                                                if (!response.ok) throw new Error('Failed to unbundle');
+                                                                                invalidateTransactionData();
+                                                                                queryClient.invalidateQueries({ queryKey: ['bundles'] });
+                                                                                toaster.success({ title: 'Unbundled', description: `Transaction #${tx.id} removed from bundle` });
+                                                                            } catch (err) {
+                                                                                toaster.error({ title: 'Error', description: 'Failed to remove from bundle' });
+                                                                            }
                                                                         }}
-                                                                        title="Delete transaction"
+                                                                        onMouseEnter={() => setHoveredBundleId(tx.user_calculation_unit_id!)}
+                                                                        onMouseLeave={() => setHoveredBundleId(null)}
+                                                                        title={`Remove from bundle #${tx.user_calculation_unit_id}`}
                                                                         p={0}
                                                                         minW="16px"
                                                                         h="16px"
                                                                     >
-                                                                        🗑️
+                                                                        <LuPackageX size={10} />
                                                                     </Button>
-                                                                </>
-                                                            )}
-                                                            {/* Additional plugin row actions */}
-                                                            {additionalRowActions.map(action => {
-                                                                const isVisible = action.isVisible ? action.isVisible(tx as T) : true;
-                                                                const isDisabled = action.isDisabled ? action.isDisabled(tx as T) : false;
-                                                                if (!isVisible) return null;
-                                                                return (
+                                                                )}
+                                                                {/* Bundle suggestion icon in actions */}
+                                                                {suggestionEntry && (
                                                                     <Button
-                                                                        key={action.id}
                                                                         size="2xs"
                                                                         variant="ghost"
-                                                                        colorPalette={action.colorPalette || 'gray'}
-                                                                        onClick={() => action.onClick(tx as T)}
-                                                                        disabled={isDisabled}
-                                                                        title={action.label}
+                                                                        colorPalette="teal"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setOpenSuggestionTxId(openSuggestionTxId === tx.id ? null : tx.id);
+                                                                        }}
+                                                                        onMouseEnter={() => setHoveredSuggestionGroup(suggestionEntry.groupIndex)}
+                                                                        onMouseLeave={() => setHoveredSuggestionGroup(null)}
+                                                                        title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
                                                                         p={0}
                                                                         minW="16px"
                                                                         h="16px"
                                                                     >
-                                                                        {action.icon}
+                                                                        <BundleSuggestionIcon size={10} color={suggestionEntry.color} />
                                                                     </Button>
-                                                                );
-                                                            })}
-                                                        </Flex>
-                                                    </Table.Cell>
+                                                                )}
+                                                                {getEditingTxId() === tx.id ? (
+                                                                    <Button size="2xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)" p={0} minW="16px" h="16px">
+                                                                        ✗
+                                                                    </Button>
+                                                                ) : (
+                                                                    <>
+                                                                        <Button
+                                                                            size="2xs"
+                                                                            variant="ghost"
+                                                                            colorPalette="blue"
+                                                                            onClick={() => {
+                                                                                setDrawerTransactionId(tx.id);
+                                                                                setIsDrawerOpen(true);
+                                                                            }}
+                                                                            title="Edit all fields"
+                                                                            p={0}
+                                                                            minW="16px"
+                                                                            h="16px"
+                                                                        >
+                                                                            <LuPencil size={10} />
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="2xs"
+                                                                            variant="ghost"
+                                                                            colorPalette="red"
+                                                                            onClick={() => {
+                                                                                setTransactionToDelete(tx);
+                                                                                fetchDeletionImpact([tx.id]);
+                                                                                setShowDeleteDialog(true);
+                                                                            }}
+                                                                            title="Delete transaction"
+                                                                            p={0}
+                                                                            minW="16px"
+                                                                            h="16px"
+                                                                        >
+                                                                            🗑️
+                                                                        </Button>
+                                                                    </>
+                                                                )}
+                                                                {/* Additional plugin row actions */}
+                                                                {additionalRowActions.map(action => {
+                                                                    const isVisible = action.isVisible ? action.isVisible(tx as T) : true;
+                                                                    const isDisabled = action.isDisabled ? action.isDisabled(tx as T) : false;
+                                                                    if (!isVisible) return null;
+                                                                    return (
+                                                                        <Button
+                                                                            key={action.id}
+                                                                            size="2xs"
+                                                                            variant="ghost"
+                                                                            colorPalette={action.colorPalette || 'gray'}
+                                                                            onClick={() => action.onClick(tx as T)}
+                                                                            disabled={isDisabled}
+                                                                            title={action.label}
+                                                                            p={0}
+                                                                            minW="16px"
+                                                                            h="16px"
+                                                                        >
+                                                                            {action.icon}
+                                                                        </Button>
+                                                                    );
+                                                                })}
+                                                            </Flex>
+                                                        </Table.Cell>
+                                                    )}
                                                 </Table.Row>
                                             </React.Fragment>
                                         );
@@ -3430,7 +3461,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 )}
 
                 {/* Pagination Controls - show even when loading/error */}
-                {!loading && !error && (
+                {!loading && !error && !embeddedMode && (
                     <TablePagination
                         pagination={pagination}
                         total={transactions.length}
@@ -3967,12 +3998,21 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 onNotesChange={async (txId, notes) => {
                     try {
                         const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                            method: 'PUT',
+                            method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ review_notes: notes }),
                         });
                         if (response.ok) {
-                            invalidateTransactionData();
+                            const updated = await response.json();
+                            // Update the transaction in-place in all cached query results
+                            // to avoid triggering a storm of refetches across every mounted table
+                            queryClient.setQueriesData(
+                                { queryKey: ['transactions'], type: 'active' },
+                                (old: any) => {
+                                    if (!old?.results) return old;
+                                    return { ...old, results: old.results.map((t: any) => t.id === txId ? updated : t) };
+                                }
+                            );
                             onDataChange?.();
                         }
                     } catch (err) {
@@ -3982,12 +4022,21 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 onTagsChange={async (txId, tags) => {
                     try {
                         const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                            method: 'PUT',
+                            method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ tags }),
                         });
                         if (response.ok) {
-                            invalidateTransactionData();
+                            const updated = await response.json();
+                            // Update the transaction in-place in all cached query results
+                            // to avoid triggering a storm of refetches across every mounted table
+                            queryClient.setQueriesData(
+                                { queryKey: ['transactions'], type: 'active' },
+                                (old: any) => {
+                                    if (!old?.results) return old;
+                                    return { ...old, results: old.results.map((t: any) => t.id === txId ? updated : t) };
+                                }
+                            );
                             onDataChange?.();
                         }
                     } catch (err) {

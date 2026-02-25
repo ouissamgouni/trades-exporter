@@ -134,7 +134,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
             <Portal>
                 <Popover.Positioner>
                     <Popover.Content
-                        width="340px"
+                        width="680px"
                         shadow="lg"
                         borderWidth={1}
                         borderColor="teal.200"

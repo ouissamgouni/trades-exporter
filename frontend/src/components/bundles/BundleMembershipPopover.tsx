@@ -132,7 +132,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
             <Portal>
                 <Popover.Positioner>
                     <Popover.Content
-                        width="340px"
+                        width="680px"
                         shadow="lg"
                         borderWidth={1}
                         borderColor="purple.200"

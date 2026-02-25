@@ -23,7 +23,7 @@ import { FiCheck, FiX } from 'react-icons/fi';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, TransactionSummary } from '../../types';
 import { toaster } from '../ui/toaster';
-import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
+import { DuplicateGroupTransactionsTable } from '../tables/wrappers/DuplicateGroupTransactionsTable';
 
 /** Extended TransactionSummary with duplicate resolution fields from API */
 interface DuplicateTransactionSummary extends TransactionSummary {
@@ -90,6 +90,9 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
     const [loading, setLoading] = useState(false);
     const [resolving, setResolving] = useState(false);
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    // preselectIds + tableKey: changing tableKey remounts the table so smart suggestions take effect
+    const [preselectIds, setPreselectIds] = useState<number[] | undefined>(undefined);
+    const [tableKey, setTableKey] = useState(0);
 
     const fetchGroupDetail = useCallback(async () => {
         if (groupDetail) return; // already fetched
@@ -118,6 +121,8 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
             fetchGroupDetail();
         } else {
             setSelectedIds(new Set()); // reset selection on close
+            setPreselectIds(undefined);
+            setTableKey(0);
         }
     };
 
@@ -131,7 +136,9 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
     };
 
     const selectAllFromConnector = (breakdown: ConnectorBreakdown) => {
-        setSelectedIds(new Set(breakdown.transaction_ids));
+        const ids = breakdown.transaction_ids;
+        setPreselectIds(ids);
+        setTableKey(k => k + 1);
     };
 
     const handleResolve = async (action: 'keep_selected' | 'dismiss_selected') => {
@@ -174,6 +181,8 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
             onOpenChange(false);
             setGroupDetail(null);
             setSelectedIds(new Set());
+            setPreselectIds(undefined);
+            setTableKey(0);
         } catch (err) {
             console.error('Resolve error:', err);
             toaster.error({
@@ -206,7 +215,7 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
             <Portal>
                 <Popover.Positioner>
                     <Popover.Content
-                        width="420px"
+                        width="840px"
                         shadow="lg"
                         borderWidth={1}
                         borderColor={allResolved ? 'green.300' : 'orange.200'}
@@ -318,11 +327,14 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
                                         </Box>
                                     )}
 
-                                    {/* Transaction List via TransactionsTable */}
+                                    {/* Transaction List via TransactionsTable with selection */}
                                     <Box>
-                                        <BundleMemberTransactionsTable
+                                        <DuplicateGroupTransactionsTable
+                                            key={tableKey}
                                             transactionIds={transactions.map(tx => tx.id)}
                                             onTransactionClick={onTransactionClick}
+                                            onSelectionChange={setSelectedIds}
+                                            preselectIds={preselectIds}
                                         />
                                     </Box>
                                 </>
