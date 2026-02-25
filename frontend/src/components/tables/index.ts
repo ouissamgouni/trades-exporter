@@ -53,7 +53,9 @@ export { ColumnVisibilityPopover } from './ColumnVisibilityPopover';
 // export { TransactionTableRow } from './core/TransactionTableRow';
 
 // Wrapper components
-export { IssueTransactionsTable } from './wrappers/IssueTransactionsTable';
+export { MissingDataTable } from './wrappers/MissingDataTable';
+export { AccountsLinkageTable } from './wrappers/AccountsLinkageTable';
+export { BundleMemberTransactionsTable } from './wrappers/BundleMemberTransactionsTable';
 // export { JobTransactionsTable } from './wrappers/JobTransactionsTable';
 // export { PnLTransactionsTable } from './wrappers/PnLTransactionsTable';
 // export { AccountTransactionsTable } from './wrappers/AccountTransactionsTable';

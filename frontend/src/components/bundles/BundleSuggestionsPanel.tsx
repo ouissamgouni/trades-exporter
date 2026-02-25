@@ -26,7 +26,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL, BundleSuggestion, TaxabilityStatus } from '../../types';
 import { TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../../enums';
-import { BundleTransactionList } from '../BundleTransactionList';
+import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
 // ============================================================================
@@ -305,10 +305,8 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                                                     {suggestion.transactions.length} transaction
                                                     {suggestion.transactions.length !== 1 ? 's' : ''}:
                                                 </Text>
-                                                <BundleTransactionList
-                                                    transactions={suggestion.transactions}
-                                                    maxVisible={3}
-                                                    colorScheme="teal"
+                                                <BundleMemberTransactionsTable
+                                                    transactionIds={suggestion.transactions.map(t => t.id)}
                                                     onTransactionClick={onTransactionClick}
                                                 />
                                             </Box>

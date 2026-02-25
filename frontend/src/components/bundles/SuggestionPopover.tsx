@@ -29,7 +29,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, BundleSuggestion, TaxabilityStatus } from '../../types';
 import { TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../../enums';
-import { BundleTransactionList } from '../BundleTransactionList';
+import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
 // Pattern colors (same as BundleSuggestionsPanel)
@@ -175,10 +175,8 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                                 {suggestion.transactions.length} transaction
                                 {suggestion.transactions.length !== 1 ? 's' : ''}
                             </Text>
-                            <BundleTransactionList
-                                transactions={suggestion.transactions}
-                                maxVisible={4}
-                                colorScheme="teal"
+                            <BundleMemberTransactionsTable
+                                transactionIds={suggestion.transactions.map(t => t.id)}
                                 onTransactionClick={onTransactionClick}
                             />
                         </Box>

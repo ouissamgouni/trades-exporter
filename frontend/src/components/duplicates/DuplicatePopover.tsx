@@ -12,19 +12,18 @@ import {
     Badge,
     Box,
     Button,
-    Checkbox,
     Flex,
     HStack,
     Popover,
     Portal,
     Spinner,
     Text,
-    VStack,
 } from '@chakra-ui/react';
 import { FiCheck, FiX } from 'react-icons/fi';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, TransactionSummary } from '../../types';
 import { toaster } from '../ui/toaster';
+import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 
 /** Extended TransactionSummary with duplicate resolution fields from API */
 interface DuplicateTransactionSummary extends TransactionSummary {
@@ -74,33 +73,8 @@ interface DuplicateGroupDetail {
 }
 
 // ---------------------------------------------------------------------------
-// Utility helpers (same as DuplicateResolutionPanel)
+// Utility helpers
 // ---------------------------------------------------------------------------
-
-const formatDate = (dateStr: string | null): string => {
-    if (!dateStr) return 'N/A';
-    try {
-        const date = new Date(dateStr);
-        const month = date.toLocaleDateString('en-US', { month: 'short' });
-        const day = date.getDate();
-        const time = date.toLocaleTimeString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-        });
-        return `${month} ${day}, ${time}`;
-    } catch {
-        return dateStr.slice(0, 16);
-    }
-};
-
-const formatNumber = (num: number | null | undefined): string => {
-    if (num == null) return 'N/A';
-    if (Math.abs(num - Math.round(num)) < 0.000001) return Math.round(num).toString();
-    if (num >= 1) return num.toFixed(Math.min(2, 8 - Math.floor(Math.log10(num))));
-    if (num >= 0.0001) return num.toFixed(6);
-    return num.toExponential(2);
-};
 
 export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
     groupHash,
@@ -280,7 +254,7 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
                                                 </Badge>
                                             )}
                                             <Badge colorPalette="teal" variant="solid" fontSize="2xs">
-                                                {formatNumber(firstTx.quantity)} @ {formatNumber(firstTx.price)}
+                                                {firstTx.quantity} @ {firstTx.price}
                                             </Badge>
                                             {sourceCount > 0 && (
                                                 <Badge colorPalette="blue" variant="solid" fontSize="2xs">
@@ -344,139 +318,13 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
                                         </Box>
                                     )}
 
-                                    {/* Transaction List with checkboxes */}
-                                    <VStack gap={2} align="stretch">
-                                        {transactions.map(tx => (
-                                            <Box
-                                                key={tx.id}
-                                                borderWidth="1px"
-                                                borderColor={selectedIds.has(tx.id) ? 'blue.300' : 'gray.200'}
-                                                borderRadius="md"
-                                                p={2}
-                                                bg={selectedIds.has(tx.id) ? 'blue.50' : 'white'}
-                                            >
-                                                <Flex gap={2} align="flex-start">
-                                                    {/* Checkbox */}
-                                                    <Box pt={0.5}>
-                                                        <Checkbox.Root
-                                                            checked={selectedIds.has(tx.id)}
-                                                            onCheckedChange={() => toggleSelection(tx.id)}
-                                                            disabled={tx.dup_resolved}
-                                                            size="sm"
-                                                        >
-                                                            <Checkbox.HiddenInput />
-                                                            <Checkbox.Control>
-                                                                <Checkbox.Indicator />
-                                                            </Checkbox.Control>
-                                                        </Checkbox.Root>
-                                                    </Box>
-
-                                                    {/* Content */}
-                                                    <Flex direction="column" flex="1" gap={1}>
-                                                        {/* Connector Info – purple box */}
-                                                        <HStack gap={1} flexWrap="wrap">
-                                                            <Box borderWidth="1px" borderColor="purple.200" borderRadius="md" px={1.5} py={0.5} bg="purple.50">
-                                                                <HStack gap={1} flexWrap="wrap">
-                                                                    <Badge colorPalette="purple" size="xs" variant="solid">
-                                                                        {tx.connector_type || tx.source}
-                                                                    </Badge>
-                                                                    {tx.run_id && (
-                                                                        <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                            run #{tx.run_id}
-                                                                        </Badge>
-                                                                    )}
-                                                                    {tx.synced_at && (
-                                                                        <Badge colorPalette="purple" size="xs" variant="subtle">
-                                                                            {formatDate(tx.synced_at)}
-                                                                        </Badge>
-                                                                    )}
-                                                                </HStack>
-                                                            </Box>
-                                                            {tx.dup_resolved && tx.dup_resolution && (
-                                                                <Badge
-                                                                    colorPalette={
-                                                                        tx.dup_resolution === 'kept'
-                                                                            ? 'green'
-                                                                            : tx.dup_resolution === 'merged'
-                                                                                ? 'orange'
-                                                                                : 'gray'
-                                                                    }
-                                                                    size="xs"
-                                                                    variant="solid"
-                                                                >
-                                                                    {tx.dup_resolution.toUpperCase()}
-                                                                </Badge>
-                                                            )}
-                                                        </HStack>
-
-                                                        {/* Transaction Details – blue box */}
-                                                        <Box borderWidth="1px" borderColor="blue.200" borderRadius="md" px={1.5} py={0.5} bg="blue.50">
-                                                            <Flex gap={1} flexWrap="wrap" align="center" fontSize="xs">
-                                                                <Badge colorPalette="cyan" size="xs" variant="solid">
-                                                                    {formatDate(tx.date_time)}
-                                                                </Badge>
-                                                                <Badge colorPalette="blue" size="xs" variant="solid">
-                                                                    {tx.source_asset_symbol}/{tx.source_price_quote_asset_symbol}
-                                                                </Badge>
-                                                                <Badge colorPalette="teal" size="xs" variant="solid">
-                                                                    {formatNumber(tx.quantity)} @ {formatNumber(tx.price)}
-                                                                </Badge>
-                                                                {tx.source_transaction_type && (
-                                                                    <Badge colorPalette="cyan" size="xs" variant="solid">
-                                                                        {tx.source_transaction_type}
-                                                                    </Badge>
-                                                                )}
-                                                                {tx.source_transaction_id && (
-                                                                    <Badge colorPalette="gray" size="xs" variant="solid">
-                                                                        ID: {tx.source_transaction_id}
-                                                                    </Badge>
-                                                                )}
-                                                                <Badge
-                                                                    colorPalette={
-                                                                        tx.review_status === 'pending'
-                                                                            ? 'yellow'
-                                                                            : tx.review_status === 'invalid'
-                                                                                ? 'red'
-                                                                                : 'green'
-                                                                    }
-                                                                    size="xs"
-                                                                    variant="solid"
-                                                                >
-                                                                    {tx.review_status}
-                                                                </Badge>
-                                                            </Flex>
-                                                        </Box>
-
-                                                        {/* Resolution Status with Details */}
-                                                        {tx.dup_resolved && tx.dup_resolution && (
-                                                            <HStack gap={1}>
-                                                                <Badge
-                                                                    colorPalette={
-                                                                        tx.dup_resolution === 'kept' ? 'green' :
-                                                                            tx.dup_resolution === 'merged' ? 'orange' : 'gray'
-                                                                    }
-                                                                    size="xs"
-                                                                    variant="solid"
-                                                                >
-                                                                    ✓ {tx.dup_resolution.toUpperCase()}
-                                                                </Badge>
-                                                                {tx.dup_resolved_at && (
-                                                                    <Badge colorPalette="gray" size="xs" variant="outline">
-                                                                        {formatDate(tx.dup_resolved_at)}
-                                                                    </Badge>
-                                                                )}
-                                                                {tx.dup_resolution === 'merged' && tx.kept_tx_ids && tx.kept_tx_ids.length > 0 && (
-                                                                    <Badge colorPalette="blue" size="xs" variant="outline">
-                                                                        → IDs: {tx.kept_tx_ids.join(', ')}
-                                                                    </Badge>
-                                                                )}
-                                                            </HStack>
-                                                        )}
-                                                    </Flex>
-                                                </Flex>
-                                            </Box>
-                                        ))}
-                                    </VStack>
+                                    {/* Transaction List via TransactionsTable */}
+                                    <Box>
+                                        <BundleMemberTransactionsTable
+                                            transactionIds={transactions.map(tx => tx.id)}
+                                            onTransactionClick={onTransactionClick}
+                                        />
+                                    </Box>
                                 </>
                             ) : (
                                 <Text fontSize="xs" color="gray.500" fontStyle="italic">

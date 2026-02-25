@@ -26,7 +26,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, Bundle } from '../../types';
 import { UnitPattern } from '../../enums';
-import { BundleTransactionList } from '../BundleTransactionList';
+import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
 // Pattern colors - same as BundleTable / SuggestionPopover
@@ -191,10 +191,8 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                                         {bundle.transaction_count} transaction
                                         {bundle.transaction_count !== 1 ? 's' : ''}
                                     </Text>
-                                    <BundleTransactionList
-                                        transactions={bundle.transactions}
-                                        maxVisible={4}
-                                        colorScheme="purple"
+                                    <BundleMemberTransactionsTable
+                                        transactionIds={bundle.transactions.map(t => t.id)}
                                         onTransactionClick={onTransactionClick}
                                     />
                                 </>
