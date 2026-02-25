@@ -195,7 +195,7 @@ export function formatQuantityFullPrecision(
 
   // Use toPrecision for full accuracy, then clean up scientific notation if not needed
   const str = value.toString();
-  
+
   // If the string doesn't contain 'e' (not in scientific notation from toString),
   // it's already in the best format
   if (!str.includes('e')) {

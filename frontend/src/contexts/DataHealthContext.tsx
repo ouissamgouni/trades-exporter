@@ -23,19 +23,19 @@ export const DataHealthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         try {
             let url = `${API_URL}/transactions/data-health-check/status`;
             const params = new URLSearchParams();
-            
+
             if (accountIds && accountIds.length > 0) {
                 params.append('account_ids', accountIds.join(','));
             }
-            
+
             if (options?.includeDismissed !== undefined) {
                 params.append('include_dismissed', options.includeDismissed.toString());
             }
-            
+
             if (params.toString()) {
                 url += `?${params}`;
             }
-            
+
             const response = await fetch(url);
             if (response.ok) {
                 const data: ValidationSummary = await response.json();
