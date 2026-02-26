@@ -337,6 +337,45 @@ class ConnectorRegistry:
             )
         )
 
+        # ==================== DEX Connectors ====================
+
+        self._register(
+            ConnectorInfo(
+                type="hyperliquid-perps",
+                category="cex",
+                display_name="Hyperliquid Perps",
+                required_config=[],
+                optional_config=["start_datetime"],
+                supports_incremental_sync=True,
+                connector_family="hyperliquid",
+                supports_balance=True,
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
+                type="hyperliquid-funding",
+                category="cex",
+                display_name="Hyperliquid Funding",
+                required_config=[],
+                optional_config=["start_datetime"],
+                supports_incremental_sync=True,
+                connector_family="hyperliquid",
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
+                type="hyperliquid-transfers",
+                category="cex",
+                display_name="Hyperliquid Transfers",
+                required_config=[],
+                optional_config=["start_datetime"],
+                supports_incremental_sync=True,
+                connector_family="hyperliquid",
+            )
+        )
+
         # ==================== On-Chain Connectors ====================
 
         self._register(
@@ -536,7 +575,7 @@ class ConnectorRegistry:
             ),
             "hyperevm": ChainConfig(
                 explorer_type="blockscout",
-                base_url="https://hyperliquid.cloud.blockscout.com/api/v2",
+                base_url="https://www.hyperscan.com/api/v2",
                 chain_id=998,
                 native_currency="HYPE",
                 native_token_decimals=18,
@@ -668,6 +707,15 @@ class ConnectorRegistry:
         from backend.connectors.cex.connector_binance_withdrawals import (
             BinanceWithdrawalsConnector,
         )
+        from backend.connectors.cex.connector_hyperliquid_perps import (
+            HyperliquidPerpsConnector,
+        )
+        from backend.connectors.cex.connector_hyperliquid_funding import (
+            HyperliquidFundingConnector,
+        )
+        from backend.connectors.cex.connector_hyperliquid_transfers import (
+            HyperliquidTransfersConnector,
+        )
         from backend.connectors.onchain.blockscout.connector_blockscout_hub import (
             ConnectorBlockscoutHub,
         )
@@ -718,6 +766,10 @@ class ConnectorRegistry:
             "coinbase-transactions": ConnectorCoinbaseTrx,
             "coinbase-deposits": ConnectorCoinbaseDeposits,
             "coinbase-withdrawals": ConnectorCoinbaseWithdrawals,
+            # Hyperliquid DEX connectors
+            "hyperliquid-perps": HyperliquidPerpsConnector,
+            "hyperliquid-funding": HyperliquidFundingConnector,
+            "hyperliquid-transfers": HyperliquidTransfersConnector,
             # On-chain connectors mapped directly to their hub classes
             "solana": ConnectorSolanaHelius,
             "blockscout": ConnectorBlockscoutHub,

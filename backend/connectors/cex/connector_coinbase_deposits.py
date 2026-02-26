@@ -235,18 +235,30 @@ class ConnectorCoinbaseDeposits(BaseConnector):
         to_address = str(raw_item.get("addressTo"))
         from_address = str(raw_item.get("addressFrom"))
 
-        # Fee handling
+        # Fee handling - be defensive against null/None values returned by Coinbase
         fee_raw = raw_item.get("fee")
+        fee = 0
+        fee_quote = ""
+
         if isinstance(fee_raw, dict):
             fee_cost = fee_raw.get("cost")
-            fee = float(fee_cost) if fee_cost is not None else 0
-            fee_quote = str(fee_raw.get("currency", "")).upper()
+            if fee_cost is not None:
+                try:
+                    fee = float(fee_cost)
+                except (TypeError, ValueError):
+                    fee = 0
+
+            fee_currency = fee_raw.get("currency")
+            if fee_currency:
+                fee_quote = str(fee_currency).upper()
+            else:
+                fee_quote = ""
         elif fee_raw is not None:
-            fee = float(fee_raw)
-            fee_quote = currency
-        else:
-            fee = 0
-            fee_quote = currency
+            try:
+                fee = float(fee_raw)
+            except (TypeError, ValueError):
+                fee = 0
+            fee_quote = ""
 
         # Timestamp
         timestamp_ms = int(raw_item.get("timestamp", 0))

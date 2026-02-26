@@ -59,6 +59,7 @@ class SuggestionService:
         transactions: Optional[List[NormalizedTransaction]] = None,
         max_suggestions: int = 200,
         include_unknown: bool = False,
+        include_bundled: bool = False,
     ) -> List[GroupingSuggestion]:
         """
         Generate grouping suggestions for transactions.
@@ -67,12 +68,16 @@ class SuggestionService:
             transactions: Transactions to analyze. If None, fetches pending ones.
             max_suggestions: Maximum number of suggestions to return.
             include_unknown: Whether to include "unknown" pattern suggestions.
+            include_bundled: Whether to include transactions that already belong to a bundle.
 
         Returns:
             List of GroupingSuggestion objects (can be converted to CalculationUnit).
         """
         if transactions is None:
-            transactions = self._get_standalone_transactions()
+            if include_bundled:
+                transactions = self._get_all_transactions()
+            else:
+                transactions = self._get_standalone_transactions()
 
         if not transactions:
             return []
@@ -162,6 +167,14 @@ class SuggestionService:
         statement = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .order_by(NormalizedTransaction.date_time)
+        )
+        return list(self.session.exec(statement).all())
+
+    def _get_all_transactions(self) -> List[NormalizedTransaction]:
+        """Get all transactions (including those already in a bundle)."""
+        statement = (
+            select(NormalizedTransaction)
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())

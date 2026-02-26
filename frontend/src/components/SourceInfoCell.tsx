@@ -8,7 +8,7 @@
 import React from 'react';
 import { Badge, Box, Flex, HStack, Text } from '@chakra-ui/react';
 import { Tooltip } from '@chakra-ui/react/tooltip';
-import { FiAlertTriangle, FiPlusCircle } from 'react-icons/fi';
+import { FiAlertTriangle, FiPlusCircle, FiCopy, FiCheck } from 'react-icons/fi';
 import { Account } from '../types';
 import { AccountBadge } from './AccountBadge';
 import { getConfidenceColor, formatConfidence } from '../utils/similarity';
@@ -23,6 +23,7 @@ export interface SourceInfoCellProps {
     source: string;
     sourceType?: string;
     sourceSymbol?: string;
+    sourceTransactionId?: string; // Source transaction ID (displayed truncated at bottom)
     onClick?: () => void;
     /** 
      * Account suggestions for quick linking.
@@ -50,6 +51,7 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
     source,
     sourceType,
     sourceSymbol,
+    sourceTransactionId,
     onClick,
     accountSuggestions: externalSuggestions,
     onAcceptSuggestion,
@@ -73,6 +75,7 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
         enabled: needsSuggestions,
     });
 
+    const [copied, setCopied] = React.useState(false);
     const { getConnectorColor } = useEntityColors();
     const sourceColor = getConnectorColor(connectorName || source);
 
@@ -314,6 +317,50 @@ export const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
                     </Tooltip.Root>
                 )}
             </HStack>
+
+            {/* Third row: Source Transaction ID (truncated, copiable with confirmation) */}
+            {sourceTransactionId && (
+                <Tooltip.Root openDelay={200}>
+                    <Tooltip.Trigger asChild>
+                        <HStack
+                            gap={0.5}
+                            cursor="pointer"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(sourceTransactionId);
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 1500);
+                            }}
+                            _hover={{ color: 'blue.500' }}
+                            title="Click to copy source transaction ID"
+                        >
+                            <Text
+                                fontSize="7px"
+                                fontFamily="mono"
+                                color={copied ? 'green.500' : 'gray.400'}
+                                overflow="hidden"
+                                textOverflow="ellipsis"
+                                whiteSpace="nowrap"
+                                maxW="150px"
+                            >
+                                {copied
+                                    ? 'Copied!'
+                                    : sourceTransactionId.length > 24
+                                        ? sourceTransactionId.slice(0, 12) + '\u2026' + sourceTransactionId.slice(-8)
+                                        : sourceTransactionId}
+                            </Text>
+                            <Box color={copied ? 'green.500' : 'gray.300'} flexShrink={0}>
+                                {copied ? <FiCheck size={8} /> : <FiCopy size={8} />}
+                            </Box>
+                        </HStack>
+                    </Tooltip.Trigger>
+                    <Tooltip.Positioner>
+                        <Tooltip.Content>
+                            {sourceTransactionId}
+                        </Tooltip.Content>
+                    </Tooltip.Positioner>
+                </Tooltip.Root>
+            )}
         </Flex>
     );
 };

@@ -5,6 +5,7 @@ This engine analyzes ungrouped transactions and suggests CalculationUnit groupin
 - Rule 1: Network TX ID match (transfer with exact hash match)
 - Rule 2: Same asset transfer between owned accounts
 - Rule 3: Same source_transaction_id grouping (swap detection)
+- Rule 3b: On-chain swap grouping by network_transaction_id (e.g. Solana SWAP)
 - Rule 4: Swap detection (different assets, same account, short time window)
 - Rule 4b: Split detection (same asset, different quantities, same total value)
 - Rule 5: Bridge detection (same asset, different accounts)
@@ -113,6 +114,7 @@ class GroupingEngine:
         1. Network TX ID exact match (highest confidence)
         2. Same asset transfer between accounts
         3. Same source_transaction_id grouping
+        3b. On-chain swap by network_transaction_id (Solana DEX swaps, etc.)
         4. Swap detection (different assets, same account)
         4b. Split detection (same asset, different qty, same value)
         5. Bridge detection (same asset, different chains/accounts)
@@ -126,7 +128,14 @@ class GroupingEngine:
             List of GroupingSuggestion objects
         """
         self._used_tx_ids = set()
+        self._all_transactions = transactions  # Store for _collect_related helper
         suggestions: List[GroupingSuggestion] = []
+
+        # Build network_transaction_id → [tx] index for fast related-tx lookup
+        self._net_tx_index: Dict[str, List[NormalizedTransaction]] = {}
+        for tx in transactions:
+            if tx.network_transaction_id:
+                self._net_tx_index.setdefault(tx.network_transaction_id, []).append(tx)
 
         # Separate inflows and outflows
         inflows = [tx for tx in transactions if tx.direction == "inflow"]
@@ -141,10 +150,12 @@ class GroupingEngine:
         # Rule 3: Same source_transaction_id grouping
         suggestions.extend(self._rule3_same_source_tx_id(transactions))
 
+        # Rule 3b: On-chain swap by shared network_transaction_id
+        suggestions.extend(self._rule3b_onchain_swap_by_network_tx(transactions))
+
         # Rule 2: Same asset transfer between owned accounts
         suggestions.extend(self._rule2_same_asset_transfer(outflows, inflows))
 
-    
         # Rule 4: Swap detection
         suggestions.extend(self._rule4_swap_detection(outflows, inflows))
 
@@ -218,16 +229,20 @@ class GroupingEngine:
                 self._used_tx_ids.add(outflow.id)
                 self._used_tx_ids.add(matched_inflow.id)
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, matched_inflow]
+                group = self._collect_related_by_network_tx(seed)
+
                 symbol = outflow.source_asset_symbol or matched_inflow.source_asset_symbol
+                label = self._append_fee_suffix(f"{symbol} Transfer", seed, group)
                 suggestions.append(
                     GroupingSuggestion(
                         pattern=PATTERN_INTERNAL_TRANSFER,
-                        label=f"{symbol} Transfer",
+                        label=label,
                         reason=f"Exact network TX hash match: {match_reason}",
                         confidence=self.config.exact_match_confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(matched_inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -290,16 +305,20 @@ class GroupingEngine:
                 self._used_tx_ids.add(outflow.id)
                 self._used_tx_ids.add(inflow.id)
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, inflow]
+                group = self._collect_related_by_network_tx(seed)
+
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
+                label = self._append_fee_suffix(f"{symbol} Transfer", seed, group)
                 suggestions.append(
                     GroupingSuggestion(
                         pattern=PATTERN_INTERNAL_TRANSFER,
-                        label=f"{symbol} Transfer",
+                        label=label,
                         reason=f"Same asset transfer between owned accounts (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -333,11 +352,10 @@ class GroupingEngine:
             by_source_tx[tx.source_transaction_id].append(tx)
 
         for source_tx_id, group_txs in by_source_tx.items():
-            if len(group_txs) < 2:
-                continue
+            # Filter out already-used transactions (permissive: group remaining)
+            group_txs = [tx for tx in group_txs if tx.id not in self._used_tx_ids]
 
-            # Check if already used
-            if any(tx.id in self._used_tx_ids for tx in group_txs):
+            if len(group_txs) < 2:
                 continue
 
             inflows = [tx for tx in group_txs if tx.direction == "inflow"]
@@ -372,6 +390,116 @@ class GroupingEngine:
                         transactions=[self._make_tx_summary(tx) for tx in group_txs],
                     )
                 )
+
+        return suggestions
+
+    def _rule3b_onchain_swap_by_network_tx(
+        self, transactions: List[NormalizedTransaction]
+    ) -> List[GroupingSuggestion]:
+        """
+        Rule 3b: Group on-chain swap legs by shared network_transaction_id.
+
+        On-chain DEX swaps (e.g. Solana Orca/Jupiter, EVM Uniswap) produce
+        multiple normalized transfers from a single blockchain transaction.
+        Each leg gets a different source_transaction_id (e.g. {sig}_token_0,
+        {sig}_token_1, {sig}_fee) but they all share the same
+        network_transaction_id (the on-chain tx hash / signature).
+
+        This rule groups them when:
+        - source_transaction_type indicates a swap (SWAP, SWAP_* etc.)
+        - All legs share the same network_transaction_id
+        - The group has at least 1 inflow + 1 outflow of different assets
+        - All legs belong to the same account
+
+        Fee transactions (transaction_type == "technical") in the group are
+        included automatically.
+
+        Confidence: 0.95 (on-chain evidence is very strong)
+        """
+        suggestions = []
+
+        # Only consider unused transactions with a network_transaction_id
+        # and a swap-like or on-chain source_transaction_type.
+        # "SWAP" covers Helius (Solana); "NORMAL-TX" and "TOKEN-TRANSFER"
+        # cover Blockscout / EVM connectors where DEX swaps appear as
+        # a normal tx + multiple token transfers sharing the same on-chain hash.
+        swap_types = {
+            "SWAP",           # Helius (Solana)
+            "NORMAL-TX",      # Blockscout normal transactions
+            "TOKEN-TRANSFER", # Blockscout token transfers
+            "TRANSFER",       # Helius bridge/transfer legs
+        }
+
+        eligible = [
+            tx for tx in transactions
+            if tx.id not in self._used_tx_ids
+            and tx.network_transaction_id
+            and (tx.source_transaction_type or "").upper() in swap_types
+        ]
+
+        # Group by network_transaction_id
+        by_net_tx: Dict[str, List[NormalizedTransaction]] = {}
+        for tx in eligible:
+            by_net_tx.setdefault(tx.network_transaction_id, []).append(tx)
+
+        for net_tx_id, group_txs in by_net_tx.items():
+            if len(group_txs) < 2:
+                continue
+
+            # All must belong to the same account
+            account_ids = {tx.account_id for tx in group_txs if tx.account_id}
+            if len(account_ids) != 1:
+                continue
+
+            # Separate transfer legs and fee/technical legs
+            transfer_legs = [t for t in group_txs if t.transaction_type != "technical"]
+            fee_legs = [t for t in group_txs if t.transaction_type == "technical"]
+
+            inflows = [t for t in transfer_legs if t.direction == "inflow"]
+            outflows = [t for t in transfer_legs if t.direction == "outflow"]
+
+            # Must have at least 1 inflow and 1 outflow with different assets
+            if not inflows or not outflows:
+                continue
+
+            # At least one pair must have different assets
+            has_different_assets = any(
+                not self._assets_match(out, inf)
+                for out in outflows
+                for inf in inflows
+            )
+            if not has_different_assets:
+                continue
+
+            # Mark all as used
+            for tx in group_txs:
+                self._used_tx_ids.add(tx.id)
+
+            # Build label from the main swap pair (largest outflow → largest inflow)
+            main_out = max(outflows, key=lambda t: t.quantity or 0)
+            main_in = max(inflows, key=lambda t: t.quantity or 0)
+            out_symbol = main_out.source_asset_symbol or "?"
+            in_symbol = main_in.source_asset_symbol or "?"
+
+            extra_parts = []
+            if len(transfer_legs) > 2:
+                extra_parts.append(f"{len(transfer_legs)} legs")
+            if fee_legs:
+                extra_parts.append(f"{len(fee_legs)} fee(s)")
+            extra = f" ({', '.join(extra_parts)})" if extra_parts else ""
+
+            suggestions.append(
+                GroupingSuggestion(
+                    pattern=PATTERN_SWAP,
+                    label=f"{out_symbol} → {in_symbol} Swap{extra}",
+                    reason=(
+                        f"On-chain swap: {len(outflows)} outflow(s) + {len(inflows)} inflow(s) "
+                        f"share network_transaction_id {net_tx_id[:20]}…"
+                    ),
+                    confidence=self.config.high_confidence,  # 0.95
+                    transactions=[self._make_tx_summary(tx) for tx in group_txs],
+                )
+            )
 
         return suggestions
 
@@ -419,15 +547,22 @@ class GroupingEngine:
                 self._used_tx_ids.add(outflow.id)
                 self._used_tx_ids.add(inflow.id)
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, inflow]
+                group = self._collect_related_by_network_tx(seed)
+
+                label = self._append_fee_suffix(
+                    f"{outflow.source_asset_symbol} → {inflow.source_asset_symbol} Swap",
+                    seed, group,
+                )
                 suggestions.append(
                     GroupingSuggestion(
                         pattern=PATTERN_SWAP,
-                        label=f"{outflow.source_asset_symbol} → {inflow.source_asset_symbol} Swap",
+                        label=label,
                         reason=f"Different assets exchanged on same account within {time_diff:.0f}s",
                         confidence=confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -516,6 +651,11 @@ class GroupingEngine:
                 else:
                     label = f"{outflow.source_asset_symbol} Split"
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, inflow]
+                group = self._collect_related_by_network_tx(seed)
+                label = self._append_fee_suffix(label, seed, group)
+
                 suggestions.append(
                     GroupingSuggestion(
                         pattern=PATTERN_SWAP,  # Reuse swap pattern for P&L compatibility
@@ -523,8 +663,7 @@ class GroupingEngine:
                         reason=f"Same asset with different quantities but same total value (qty: {out_qty:.4g} → {in_qty:.4g}, value diff: {value_diff:.2%})",
                         confidence=confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -595,6 +734,10 @@ class GroupingEngine:
                 self._used_tx_ids.add(outflow.id)
                 self._used_tx_ids.add(inflow.id)
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, inflow]
+                group = self._collect_related_by_network_tx(seed)
+
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
 
                 # Check if different networks (case-insensitive comparison)
@@ -615,6 +758,8 @@ class GroupingEngine:
                     label = f"{symbol} Transfer"
                     reason = f"Same asset transfer between accounts (no explicit link)"
 
+                label = self._append_fee_suffix(label, seed, group)
+
                 # Bridges/transfers are internal transfers (same asset, non-taxable)
                 suggestions.append(
                     GroupingSuggestion(
@@ -623,8 +768,7 @@ class GroupingEngine:
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -693,8 +837,13 @@ class GroupingEngine:
                 self._used_tx_ids.add(outflow.id)
                 self._used_tx_ids.add(inflow.id)
 
+                # Expand: pull in related transactions (fees, etc.)
+                seed = [outflow, inflow]
+                group = self._collect_related_by_network_tx(seed)
+
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
                 label = f"{symbol} Bridge ({outflow.network} \u2192 {inflow.network})"
+                label = self._append_fee_suffix(label, seed, group)
                 reason = f"Same asset bridged across networks on same account ({outflow.network} \u2192 {inflow.network})"
 
                 suggestions.append(
@@ -704,8 +853,7 @@ class GroupingEngine:
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
                         transactions=[
-                            self._make_tx_summary(outflow),
-                            self._make_tx_summary(inflow),
+                            self._make_tx_summary(tx) for tx in group
                         ],
                     )
                 )
@@ -735,6 +883,63 @@ class GroupingEngine:
     # =========================================================================
     # Helper methods
     # =========================================================================
+
+    def _collect_related_by_network_tx(
+        self, seed_txs: List[NormalizedTransaction]
+    ) -> List[NormalizedTransaction]:
+        """
+        Expand a matched group by pulling in unused transactions that share a
+        network_transaction_id with any seed transaction.
+
+        This captures fees, tips, and additional legs from the same on-chain
+        transaction without requiring each rule to handle them explicitly.
+
+        Args:
+            seed_txs: The core matched transactions (already marked as used).
+
+        Returns:
+            Combined list of seed + related transactions (deduplicated, ordered
+            by id).
+        """
+        seed_ids = {tx.id for tx in seed_txs}
+        related: Dict[int, NormalizedTransaction] = {tx.id: tx for tx in seed_txs}
+
+        # Collect network_transaction_ids from seeds
+        net_tx_ids = {
+            tx.network_transaction_id
+            for tx in seed_txs
+            if tx.network_transaction_id
+        }
+
+        # Find all unused transactions sharing those network_transaction_ids
+        for net_tx_id in net_tx_ids:
+            for tx in self._net_tx_index.get(net_tx_id, []):
+                if tx.id not in self._used_tx_ids and tx.id not in related:
+                    related[tx.id] = tx
+
+        # Mark all newly collected transactions as used
+        for tx_id in related:
+            self._used_tx_ids.add(tx_id)
+
+        return sorted(related.values(), key=lambda t: t.id)
+
+    def _append_fee_suffix(self, label: str, seed_txs: List[NormalizedTransaction], all_txs: List[NormalizedTransaction]) -> str:
+        """
+        Append a fee count suffix to a label if the expanded group contains
+        more transactions than the seed (i.e. collected related fees/legs).
+        """
+        extra = len(all_txs) - len(seed_txs)
+        if extra > 0:
+            fee_count = sum(1 for t in all_txs if t.transaction_type == "technical")
+            non_fee_extra = extra - fee_count
+            parts = []
+            if fee_count:
+                parts.append(f"{fee_count} fee{'s' if fee_count > 1 else ''}")
+            if non_fee_extra:
+                parts.append(f"{non_fee_extra} related")
+            if parts:
+                label = f"{label} (+{', '.join(parts)})"
+        return label
 
     def _assets_match(self, tx1: NormalizedTransaction, tx2: NormalizedTransaction) -> bool:
         """Check if two transactions have matching assets."""

@@ -299,6 +299,41 @@ accounts:
   #     label: "Pepe"
   #     asset_type: "crypto"
 
+  # =========================================================================
+  # DEX Accounts
+  # =========================================================================
+
+  # Hyperliquid (Perps DEX — uses wallet address, no API key needed)
+  - name: "Hyperliquid"
+    account_type: "dex"
+    group: "Trading"
+    color: "#50C878"
+    address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+    tags:
+      - trading: true
+      - perps: true
+    connectors:
+      - connector_type: "hyperliquid-perps"
+        color: "#3A7D44"
+        enabled: true
+        sync_priority: 10
+        config:
+          start_datetime: "2025-10-01T00:00:00"
+
+      - connector_type: "hyperliquid-funding"
+        color: "#1E7A6D"
+        enabled: true
+        sync_priority: 20
+        config:
+          start_datetime: "2025-10-01T00:00:00"
+
+      - connector_type: "hyperliquid-transfers"
+        color: "#4A90D9"
+        enabled: true
+        sync_priority: 30
+        config:
+          start_datetime: "2025-10-01T00:00:00"
+
   # Metamask EVM Wallets (split per chain, grouped)
   - name: "Metamask Arbitrum"
     account_type: "wallet"

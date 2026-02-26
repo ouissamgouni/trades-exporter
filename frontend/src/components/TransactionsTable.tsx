@@ -2099,23 +2099,21 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     <Checkbox.Control />
                                                                 </Checkbox.Root>
                                                             )}
-                                                            {/* Details button - opens drawer */}
-                                                            <Button
-                                                                size="xs"
-                                                                variant="ghost"
+                                                            {/* TX ID - clickable to open drawer */}
+                                                            <Text
+                                                                fontSize="8px"
+                                                                fontFamily="mono"
+                                                                color="gray.400"
+                                                                cursor="pointer"
+                                                                _hover={{ color: 'blue.500', textDecoration: 'underline' }}
                                                                 onClick={() => {
                                                                     setDrawerTransactionId(tx.id);
                                                                     setIsDrawerOpen(true);
                                                                 }}
-                                                                p={0}
-                                                                minW="16px"
-                                                                h="16px"
-                                                                color="gray.400"
-                                                                _hover={{ color: 'blue.500' }}
-                                                                title="View transaction details"
+                                                                title={`TX #${tx.id} — Click to view details`}
                                                             >
-                                                                <FiFileText size={12} />
-                                                            </Button>
+                                                                #{tx.id}
+                                                            </Text>
                                                         </Flex>
                                                     </Table.Cell>
                                                     {showColumn('id') && (
@@ -2192,6 +2190,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                     source={tx.source}
                                                                     sourceType={tx.source_transaction_type}
                                                                     sourceSymbol={tx.source_asset_symbol}
+                                                                    sourceTransactionId={tx.source_transaction_id}
                                                                     connectorName={tx.connector_name}
                                                                     runDatetime={tx.run_datetime}
                                                                     syncConnectorRunId={tx.sync_connector_run_id}

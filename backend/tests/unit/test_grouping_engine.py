@@ -61,6 +61,8 @@ def make_tx(
     quantity: Decimal = Decimal("1.0"),
     total_in_base: Decimal = None,
     network: str = None,
+    source_transaction_type: str = None,
+    transaction_type: str = None,
 ) -> NormalizedTransaction:
     """Helper to create test transaction data."""
     tx = NormalizedTransaction(
@@ -68,9 +70,10 @@ def make_tx(
         source=source,
         source_transaction_id=source_transaction_id,
         network_transaction_id=network_transaction_id,
+        source_transaction_type=source_transaction_type,
         date_time=dt or datetime.now(),
         direction=direction,
-        transaction_type="disposal" if direction == "outflow" else "acquisition",
+        transaction_type=transaction_type or ("disposal" if direction == "outflow" else "acquisition"),
         asset_id=asset_id,
         source_asset_symbol=symbol,
         quantity=quantity,
@@ -468,6 +471,304 @@ class TestRule3SameSourceTxId:
         assert swap_suggestions[0].confidence == 0.8  # Lower confidence for multi-leg
         assert set(swap_suggestions[0].transaction_ids) == {1, 2, 3}
         assert "Multi-leg" in swap_suggestions[0].label
+
+
+# =============================================================================
+# Rule 3b: On-chain Swap by network_transaction_id Tests
+# =============================================================================
+
+
+class TestRule3bOnchainSwapByNetworkTx:
+    """Tests for Rule 3b: On-chain swap grouping by network_transaction_id."""
+
+    def test_solana_swap_grouped_by_network_tx(self, engine):
+        """Should group Solana SWAP legs sharing the same network_transaction_id."""
+        now = datetime.now()
+        sig = "4zBe3FcgABC123"  # single on-chain signature
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_0",  # wSOL leg
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("0.5"),
+            account_id=10,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="AVO",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_1",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("19424.5"),
+            account_id=10,
+            dt=now,
+        )
+        fee = make_tx(
+            id=3,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_fee",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("0.000005"),
+            account_id=10,
+            transaction_type="technical",
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow, fee])
+
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+        sg = swap_suggestions[0]
+        assert sg.confidence == 0.95
+        assert set(sg.transaction_ids) == {1, 2, 3}
+        assert "SOL" in sg.label
+        assert "AVO" in sg.label
+        assert "Swap" in sg.label
+
+    def test_non_swap_type_not_grouped(self, engine):
+        """TRANSFER type is now eligible for Rule 3b.
+        
+        With TRANSFER in the eligible types, two TRANSFER-typed legs with
+        different assets on the same account should be grouped as a swap by
+        Rule 3b (confidence 0.95).
+        """
+        now = datetime.now()
+        sig = "0xdef456"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_0",
+            network_transaction_id=sig,
+            source_transaction_type="TRANSFER",
+            quantity=Decimal("1.0"),
+            account_id=10,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_1",
+            network_transaction_id=sig,
+            source_transaction_type="TRANSFER",
+            quantity=Decimal("100"),
+            account_id=10,
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Rule 3b should NOW match (TRANSFER is eligible)
+        rule3b_swap = [
+            s for s in suggestions
+            if s.pattern == PATTERN_SWAP and s.confidence == 0.95
+        ]
+        assert len(rule3b_swap) == 1
+        assert set(rule3b_swap[0].transaction_ids) == {1, 2}
+
+    def test_non_eligible_type_not_grouped(self, engine):
+        """Should NOT group transactions whose source_transaction_type is not eligible."""
+        now = datetime.now()
+        sig = "0xdef456"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_0",
+            network_transaction_id=sig,
+            source_transaction_type="STAKE",  # Not eligible for Rule 3b
+            quantity=Decimal("1.0"),
+            account_id=10,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_1",
+            network_transaction_id=sig,
+            source_transaction_type="STAKE",  # Not eligible for Rule 3b
+            quantity=Decimal("100"),
+            account_id=10,
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        rule3b_swap = [
+            s for s in suggestions
+            if s.pattern == PATTERN_SWAP and s.confidence == 0.95
+        ]
+        assert len(rule3b_swap) == 0
+
+    def test_different_accounts_not_grouped(self, engine):
+        """Should NOT group legs from different accounts."""
+        now = datetime.now()
+        sig = "sigABC"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_0",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("1.0"),
+            account_id=10,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_1",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("100"),
+            account_id=20,  # Different account
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        rule3b_swap = [
+            s for s in suggestions
+            if s.pattern == PATTERN_SWAP and s.confidence == 0.95
+        ]
+        assert len(rule3b_swap) == 0
+
+    def test_same_asset_both_directions_not_grouped(self, engine):
+        """Should NOT group when all inflows and outflows have the same asset."""
+        now = datetime.now()
+        sig = "sigDEF"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="SOL",
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_0",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("1.0"),
+            account_id=10,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="SOL",  # Same asset — not a swap
+            source="solana_helius",
+            source_transaction_id=f"{sig}_token_1",
+            network_transaction_id=sig,
+            source_transaction_type="SWAP",
+            quantity=Decimal("1.0"),
+            account_id=10,
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        rule3b_swap = [
+            s for s in suggestions
+            if s.pattern == PATTERN_SWAP and s.confidence == 0.95
+        ]
+        assert len(rule3b_swap) == 0
+
+    def test_multi_leg_swap_with_extras(self, engine):
+        """Should label multi-leg swaps correctly (tip + fee + swap legs)."""
+        now = datetime.now()
+        sig = "sig_multi"
+
+        txs = [
+            # Swap outflow (wSOL)
+            make_tx(
+                id=1, direction="outflow", symbol="SOL", account_id=10,
+                source_transaction_id=f"{sig}_token_0",
+                network_transaction_id=sig, source_transaction_type="SWAP",
+                quantity=Decimal("0.5"), dt=now,
+            ),
+            # Swap inflow (token)
+            make_tx(
+                id=2, direction="inflow", symbol="BONK", account_id=10,
+                source_transaction_id=f"{sig}_token_1",
+                network_transaction_id=sig, source_transaction_type="SWAP",
+                quantity=Decimal("500000"), dt=now,
+            ),
+            # Tip (native outflow, not technical)
+            make_tx(
+                id=3, direction="outflow", symbol="SOL", account_id=10,
+                source_transaction_id=f"{sig}_native_0",
+                network_transaction_id=sig, source_transaction_type="SWAP",
+                quantity=Decimal("0.000003"), dt=now,
+            ),
+            # Fee (technical)
+            make_tx(
+                id=4, direction="outflow", symbol="SOL", account_id=10,
+                source_transaction_id=f"{sig}_fee",
+                network_transaction_id=sig, source_transaction_type="SWAP",
+                quantity=Decimal("0.000005"), transaction_type="technical",
+                dt=now,
+            ),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+        sg = swap_suggestions[0]
+        assert set(sg.transaction_ids) == {1, 2, 3, 4}
+        assert "SOL" in sg.label and "BONK" in sg.label
+        assert "Swap" in sg.label
+        assert "3 legs" in sg.label  # 3 transfer legs (ids 1,2,3) — fee excluded from leg count
+        assert "1 fee" in sg.label
+
+    def test_already_used_transactions_excluded(self, engine):
+        """Transactions already consumed by an earlier rule should not appear in 3b."""
+        now = datetime.now()
+        sig = "sig_already_used"
+
+        # These share the same source_transaction_id → Rule 3 will consume them first
+        tx_id_shared = f"{sig}_token_0"  # Give them the SAME source_transaction_id
+        outflow = make_tx(
+            id=1, direction="outflow", symbol="SOL", account_id=10,
+            source_transaction_id=tx_id_shared,
+            network_transaction_id=sig, source_transaction_type="SWAP",
+            quantity=Decimal("0.5"), dt=now,
+        )
+        inflow = make_tx(
+            id=2, direction="inflow", symbol="BONK", account_id=10,
+            source_transaction_id=tx_id_shared,
+            network_transaction_id=sig, source_transaction_type="SWAP",
+            quantity=Decimal("500000"), dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow])
+
+        # Rule 3 should consume them (same source_transaction_id)
+        rule3 = [s for s in suggestions if s.confidence == 0.9 and s.pattern == PATTERN_SWAP]
+        rule3b = [s for s in suggestions if s.confidence == 0.95 and s.pattern == PATTERN_SWAP]
+        assert len(rule3) == 1
+        assert len(rule3b) == 0  # Already consumed by Rule 3
 
 
 # =============================================================================
@@ -1207,3 +1508,367 @@ class TestPriorityAndEdgeCases:
 
         confidences = [s.confidence for s in suggestions]
         assert confidences == sorted(confidences, reverse=True)
+
+
+# =============================================================================
+# Multi-Collect Related Transactions Tests
+# =============================================================================
+
+
+class TestMultiCollectRelated:
+    """Tests for _collect_related_by_network_tx: pulling fees and related
+    transactions into a matched group by shared network_transaction_id."""
+
+    def test_bridge_with_fee_all_grouped(self, engine):
+        """Bridge (outflow Solana + inflow Base) + SOL fee sharing
+        network_transaction_id with the outflow → all 3 in one group.
+
+        This is the exact scenario from TX #5565, #5573, #5574.
+        """
+        now = datetime.now()
+        solana_sig = "5HCZ66XeoLCnYAd5KZE9hXrvKSrwDNcwjmBHykCstbDLhYBWW1Sff98TMoxAd6UjnfYkqAQzTxEKzkh8iY6DrfXS"
+        base_hash = "0x98bc62c106a133ef7072412e46d1fe2c107413cab87eeb073a356f47e1eb368c"
+
+        # USDC outflow on Solana
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="USDC",
+            asset_id=226,
+            account_id=321,
+            source_transaction_id=f"{solana_sig}_token_0",
+            network_transaction_id=solana_sig,
+            source_transaction_type="TRANSFER",
+            transaction_type="transfer",
+            quantity=Decimal("289.3"),
+            network="solana",
+            dt=now,
+        )
+
+        # SOL fee on Solana (same network_transaction_id as outflow)
+        fee = make_tx(
+            id=2,
+            direction="outflow",
+            symbol="SOL",
+            asset_id=253,
+            account_id=321,
+            source_transaction_id=f"{solana_sig}_fee",
+            network_transaction_id=solana_sig,
+            source_transaction_type="TRANSFER",
+            transaction_type="technical",
+            quantity=Decimal("0.000005"),
+            network="solana",
+            dt=now,
+        )
+
+        # USDC inflow on Base (different network_transaction_id)
+        inflow = make_tx(
+            id=3,
+            direction="inflow",
+            symbol="USDC",
+            asset_id=226,
+            account_id=316,
+            source_transaction_id=f"{base_hash}_451",
+            network_transaction_id=base_hash,
+            source_transaction_type="token-transfer",
+            transaction_type="transfer",
+            quantity=Decimal("288.9"),
+            network="base",
+            dt=now + timedelta(seconds=95),
+        )
+
+        config = GroupingConfig(
+            bridge_time_window=300,
+            quantity_tolerance=0.10,
+        )
+        eng = GroupingEngine(config)
+        suggestions = eng.suggest_groups([outflow, fee, inflow])
+
+        # Should produce a bridge suggestion containing all 3 transactions
+        bridge = [
+            s for s in suggestions
+            if s.pattern == PATTERN_INTERNAL_TRANSFER and "Bridge" in s.label
+        ]
+        assert len(bridge) == 1
+        assert set(bridge[0].transaction_ids) == {1, 2, 3}
+        assert "fee" in bridge[0].label.lower()
+
+    def test_transfer_with_fee_grouped(self, engine):
+        """Rule 1 transfer match + technical fee sharing network_tx_id → 3-tx group."""
+        now = datetime.now()
+        tx_hash = "0xabc_transfer_hash"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id=tx_hash,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            account_id=2,
+            source_transaction_id=tx_hash,
+            dt=now,
+        )
+        fee = make_tx(
+            id=3,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id=tx_hash,
+            transaction_type="technical",
+            quantity=Decimal("0.001"),
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow, fee])
+
+        transfer = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfer) == 1
+        assert set(transfer[0].transaction_ids) == {1, 2, 3}
+        assert transfer[0].confidence == 1.0
+
+    def test_swap_with_fee_grouped(self, engine):
+        """Rule 4 swap + fee sharing network_tx_id → 3-tx group."""
+        now = datetime.now()
+        net_hash = "sol_swap_sig_123"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            asset_id=1,
+            account_id=5,
+            network_transaction_id=net_hash,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            asset_id=2,
+            account_id=5,
+            dt=now + timedelta(seconds=10),
+        )
+        fee = make_tx(
+            id=3,
+            direction="outflow",
+            symbol="SOL",
+            asset_id=3,
+            account_id=5,
+            network_transaction_id=net_hash,
+            transaction_type="technical",
+            quantity=Decimal("0.00001"),
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow, fee])
+
+        swap = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap) == 1
+        assert set(swap[0].transaction_ids) == {1, 2, 3}
+        assert "fee" in swap[0].label.lower()
+
+    def test_no_false_expansion_different_net_tx_id(self, engine):
+        """Transactions with different network_transaction_id should NOT be pulled in."""
+        now = datetime.now()
+        tx_hash = "0xabc"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id=tx_hash,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            account_id=2,
+            source_transaction_id=tx_hash,
+            dt=now,
+        )
+        unrelated = make_tx(
+            id=3,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id="0xdifferent",
+            transaction_type="technical",
+            quantity=Decimal("0.001"),
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow, unrelated])
+
+        transfer = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfer) == 1
+        # Only the matching pair, not the unrelated tx
+        assert set(transfer[0].transaction_ids) == {1, 2}
+
+    def test_no_expansion_on_empty_network_tx_id(self, engine):
+        """Helper should NOT match on empty/None network_transaction_id."""
+        now = datetime.now()
+        tx_hash = "0xabc"
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id=tx_hash,
+            dt=now,
+        )
+        inflow = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="ETH",
+            account_id=2,
+            source_transaction_id=tx_hash,
+            dt=now,
+        )
+        # This tx has no network_transaction_id
+        orphan = make_tx(
+            id=3,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            network_transaction_id=None,
+            transaction_type="technical",
+            quantity=Decimal("0.001"),
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow, orphan])
+
+        transfer = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfer) == 1
+        assert set(transfer[0].transaction_ids) == {1, 2}
+
+
+class TestRule3PartialGrouping:
+    """Tests for Rule 3's relaxed bail-out: remaining unused txs should
+    still be grouped when some were consumed by earlier rules."""
+
+    def test_partial_grouping_after_rule1_consumes_one(self, engine):
+        """If Rule 1 consumes one tx from a source_transaction_id group,
+        the remaining unused txs should still be grouped by Rule 3."""
+        now = datetime.now()
+        shared_source_tx_id = "shared_source_123"
+        net_hash = "0xnet_hash_match"
+
+        # tx1: will be consumed by Rule 1 (network_tx match with tx4)
+        tx1 = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            source_transaction_id=shared_source_tx_id,
+            network_transaction_id=net_hash,
+            dt=now,
+        )
+        # tx2 and tx3: share same source_transaction_id as tx1
+        tx2 = make_tx(
+            id=2,
+            direction="outflow",
+            symbol="BTC",
+            asset_id=10,
+            account_id=1,
+            source_transaction_id=shared_source_tx_id,
+            dt=now,
+        )
+        tx3 = make_tx(
+            id=3,
+            direction="inflow",
+            symbol="USDC",
+            asset_id=20,
+            account_id=1,
+            source_transaction_id=shared_source_tx_id,
+            dt=now,
+        )
+        # tx4: matches tx1 via Rule 1 (network_tx_id match)
+        tx4 = make_tx(
+            id=4,
+            direction="inflow",
+            symbol="ETH",
+            account_id=2,
+            source_transaction_id=net_hash,  # matches tx1.network_transaction_id
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([tx1, tx2, tx3, tx4])
+
+        # Rule 1 should consume tx1 + tx4 as a transfer
+        transfers = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfers) == 1
+        assert 1 in transfers[0].transaction_ids
+        assert 4 in transfers[0].transaction_ids
+
+        # Rule 3 should group remaining tx2 + tx3 (same source_tx_id, 1 in + 1 out)
+        swaps = [
+            s for s in suggestions if s.pattern == PATTERN_SWAP
+        ]
+        assert len(swaps) == 1
+        assert set(swaps[0].transaction_ids) == {2, 3}
+
+    def test_partial_group_too_small_goes_to_catchall(self, engine):
+        """If only 1 tx remains after filtering, it should go to catch-all."""
+        now = datetime.now()
+        shared_source = "shared_source_456"
+        net_hash = "0xhash_for_rule1"
+
+        # tx1: consumed by Rule 1
+        tx1 = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="ETH",
+            account_id=1,
+            source_transaction_id=shared_source,
+            network_transaction_id=net_hash,
+            dt=now,
+        )
+        # tx2: will be left alone (only 1 remaining after tx1 consumed)
+        tx2 = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="USDC",
+            account_id=1,
+            source_transaction_id=shared_source,
+            dt=now,
+        )
+        # tx3: matches tx1 via Rule 1
+        tx3 = make_tx(
+            id=3,
+            direction="inflow",
+            symbol="ETH",
+            account_id=2,
+            source_transaction_id=net_hash,
+            dt=now,
+        )
+
+        suggestions = engine.suggest_groups([tx1, tx2, tx3])
+
+        # Rule 1 consumes tx1 + tx3
+        transfers = [
+            s for s in suggestions if s.pattern == PATTERN_INTERNAL_TRANSFER
+        ]
+        assert len(transfers) == 1
+
+        # tx2 alone goes to catch-all (< 2 for Rule 3)
+        unknown = [s for s in suggestions if s.pattern == PATTERN_UNKNOWN]
+        assert len(unknown) == 1
+        assert set(unknown[0].transaction_ids) == {2}

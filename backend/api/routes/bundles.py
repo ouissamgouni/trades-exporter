@@ -157,6 +157,7 @@ def list_bundles(
 @router.get("/suggestions", response_model=List[SuggestionResponse])
 def get_suggestions(
     max_suggestions: int = Query(200, ge=1, le=500),
+    include_bundled: bool = Query(False, description="Include transactions that already belong to a bundle"),
     session: Session = Depends(get_db),
 ):
     """
@@ -166,7 +167,10 @@ def get_suggestions(
     Use POST /units or POST /units/accept-suggestion to create units.
     """
     service = SuggestionService(session)
-    suggestions = service.get_suggestions(max_suggestions=max_suggestions)
+    suggestions = service.get_suggestions(
+        max_suggestions=max_suggestions,
+        include_bundled=include_bundled,
+    )
     
     # Load config for taxability suggestion (uses same logic as P&L engine)
     config = PnLConfig()

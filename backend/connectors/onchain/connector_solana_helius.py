@@ -26,6 +26,13 @@ class ConnectorSolanaHelius(BaseConnector):
     SOL_DECIMALS = 9
     SOL_DIVISOR = Decimal(10 ** SOL_DECIMALS)
     
+    # Wrapped SOL mint address — used to detect native<>token double-counting
+    WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
+    
+    # Minimum lamport threshold for native transfers — skip dust/spam below this
+    # 1000 lamports = 0.000001 SOL ≈ $0.0002 at $200/SOL
+    DUST_THRESHOLD_LAMPORTS = 1000
+    
     # Default decimals for unknown tokens
     DEFAULT_TOKEN_DECIMALS = 8
 
@@ -390,6 +397,22 @@ class ConnectorSolanaHelius(BaseConnector):
             # Determine if this wallet paid the fee
             wallet_paid_fee = fee_payer.lower() == self.wallet_address.lower()
             
+            # Build set of token account addresses involved in Wrapped SOL
+            # (wSOL) transfers. Native SOL transfers to/from these accounts are
+            # the funding/defunding of temporary wSOL token accounts and represent
+            # the SAME economic flow as the corresponding tokenTransfer — emitting
+            # both would double-count the SOL movement.
+            token_transfers = tx.get("tokenTransfers", [])
+            wsol_token_accounts: set = set()
+            for tt in token_transfers:
+                if tt.get("mint") == self.WRAPPED_SOL_MINT:
+                    from_tok = tt.get("fromTokenAccount", "")
+                    to_tok = tt.get("toTokenAccount", "")
+                    if from_tok:
+                        wsol_token_accounts.add(from_tok)
+                    if to_tok:
+                        wsol_token_accounts.add(to_tok)
+
             # Process native transfers
             native_transfers = tx.get("nativeTransfers", [])
             for idx, transfer in enumerate(native_transfers):
@@ -400,6 +423,29 @@ class ConnectorSolanaHelius(BaseConnector):
                 # Filter: only include transfers where wallet is sender or receiver
                 if (from_address.lower() != self.wallet_address.lower() and 
                     to_address.lower() != self.wallet_address.lower()):
+                    continue
+                
+                # Skip native transfers to/from Wrapped SOL token accounts.
+                # These are SOL funding/defunding temporary wSOL accounts and
+                # the actual value movement is already captured in tokenTransfers.
+                if wsol_token_accounts and (
+                    to_address in wsol_token_accounts or
+                    from_address in wsol_token_accounts
+                ):
+                    log.debug(
+                        f"Skipping native transfer {idx} (wSOL account): "
+                        f"{from_address[:10]}→{to_address[:10]} {amount_lamports} lamports"
+                    )
+                    continue
+                
+                # Skip dust/spam transfers below the threshold.
+                # Common spam pattern: 1-lamport transfers from known spam programs.
+                if amount_lamports < self.DUST_THRESHOLD_LAMPORTS:
+                    log.debug(
+                        f"Skipping dust native transfer {idx}: "
+                        f"{from_address[:10]}→{to_address[:10]} {amount_lamports} lamports "
+                        f"(below threshold {self.DUST_THRESHOLD_LAMPORTS})"
+                    )
                     continue
                 
                 # Determine direction
@@ -441,8 +487,7 @@ class ConnectorSolanaHelius(BaseConnector):
                     token_contract_address=None,
                 )
             
-            # Process token transfers
-            token_transfers = tx.get("tokenTransfers", [])
+            # Process token transfers (token_transfers already read above for wSOL detection)
             for idx, transfer in enumerate(token_transfers):
                 from_address = transfer.get("fromUserAccount", "")
                 to_address = transfer.get("toUserAccount", "")

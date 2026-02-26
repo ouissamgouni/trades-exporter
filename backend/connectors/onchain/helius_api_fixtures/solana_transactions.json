@@ -82,5 +82,55 @@
                 "tokenAmount": 50
             }
         ]
+    },
+    {
+        "signature": "4zBe3Fcg11bChNVAMpgwqWAH2FpJUAW1HcuQ42mr7vjMycggtmTwg8wjUVtVdNoQpfQNLZwTBU3atWzbswSCewuB",
+        "timestamp": 1760482145,
+        "type": "SWAP",
+        "source": "ORCA",
+        "fee": 11774,
+        "feePayer": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+        "nativeTransfers": [
+            {
+                "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "toUserAccount": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+                "amount": 3021
+            },
+            {
+                "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "toUserAccount": "5QDiCtMj4R3Cz1TTPhPongkBYLosN4wyHnh4w3QEqcye",
+                "amount": 502039280
+            },
+            {
+                "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "toUserAccount": "85aKqfS8gsRQ3hFXQgp3Q8rvjC6UhEM68RbvpsQGQoWe",
+                "amount": 2039280
+            },
+            {
+                "fromUserAccount": "5QDiCtMj4R3Cz1TTPhPongkBYLosN4wyHnh4w3QEqcye",
+                "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "amount": 2039280
+            }
+        ],
+        "tokenTransfers": [
+            {
+                "fromTokenAccount": "5QDiCtMj4R3Cz1TTPhPongkBYLosN4wyHnh4w3QEqcye",
+                "toTokenAccount": "GTLMHjZs9rVsxE6T6Gpa2hSmWZyXGLn9fhkQL8D5B9xb",
+                "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "toUserAccount": "DoHo8sYbKeThpwj1XwUj8fv8bPk5QoNJZ7uaDUdoURfE",
+                "tokenAmount": 0.5,
+                "mint": "So11111111111111111111111111111111111111112",
+                "tokenStandard": "Fungible"
+            },
+            {
+                "fromTokenAccount": "CMmd7jLmxLdXvDy6qrCNwMmb25WQ6Jiukxfyk6DpKG7V",
+                "toTokenAccount": "85aKqfS8gsRQ3hFXQgp3Q8rvjC6UhEM68RbvpsQGQoWe",
+                "fromUserAccount": "DoHo8sYbKeThpwj1XwUj8fv8bPk5QoNJZ7uaDUdoURfE",
+                "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                "tokenAmount": 4949.877725022,
+                "mint": "GdZ9rwHyKcriLdbSzhtEFLe5MLs7Vk6AY1aE5ei7nsmP",
+                "tokenStandard": "Fungible"
+            }
+        ]
     }
 ]
