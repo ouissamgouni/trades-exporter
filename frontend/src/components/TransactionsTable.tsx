@@ -21,6 +21,7 @@ import {
 import { API_URL, Account, Asset, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus, TransactionListResponse, FilterMetadata, AppliedFilters, ValidationWarning } from '../types';
 import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
 import { useDataHealth } from '../contexts/DataHealthContext';
+import { useAssets } from '../hooks/useAssets';
 import { AssetSelector } from './AssetSelector';
 import { AccountSelector } from './AccountSelector';
 import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
@@ -367,7 +368,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         return keys.filter(k => columnVisibility[k] !== false).length + 2;
     }, [columnVisibility]);
 
-    const [assets, setAssets] = useState<Asset[]>([]);
+    const { assets, refetchAssets } = useAssets();
     const [accounts, setAccounts] = useState<Account[]>([]);
     // Cell-level editing: "txId:field" format, e.g., "123:account"
     const [editingCell, setEditingCell] = useState<string | null>(null);
@@ -571,6 +572,12 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (filters.accountIds.length > 0) {
                 params.append('account_id', filters.accountIds.join(','));
             }
+            if (filters.fromAccountIds && filters.fromAccountIds.length > 0) {
+                params.append('from_account_id', filters.fromAccountIds.join(','));
+            }
+            if (filters.toAccountIds && filters.toAccountIds.length > 0) {
+                params.append('to_account_id', filters.toAccountIds.join(','));
+            }
             if (filters.assetIds.length > 0) {
                 params.append('asset_id', filters.assetIds.join(','));
             }
@@ -685,24 +692,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // Fetch static data once on mount
     useEffect(() => {
-        fetchAssets();
         fetchAccounts();
     }, []);
 
     // Keep editValuesRef in sync with editValues state
     useEffect(() => { editValuesRef.current = editValues; }, [editValues]);
-
-    const fetchAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-    };
 
     const fetchAccounts = async () => {
         try {
@@ -756,7 +750,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 });
                 if (!response.ok) throw new Error('Failed to link asset');
                 invalidateTransactionData();
-                fetchAssets();
+                refetchAssets();
             } catch (err) {
                 toaster.error({ title: 'Error', description: 'Failed to link new asset' });
             }
@@ -2663,7 +2657,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                             }
                                                                         }}
                                                                         assets={assets}
-                                                                        onAssetCreated={fetchAssets}
+                                                                        onAssetCreated={refetchAssets}
                                                                         defaultSymbol={tx.source_asset_symbol || ''}
                                                                         placeholder="Link..."
                                                                         rawAssetSource={tx.source}
@@ -2855,7 +2849,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                 }
                                                                             }}
                                                                             assets={assets}
-                                                                            onAssetCreated={fetchAssets}
+                                                                            onAssetCreated={refetchAssets}
                                                                             defaultSymbol={tx.source_price_quote_asset_symbol || ''}
                                                                             placeholder="Quote..."
                                                                             rawAssetSource={tx.source}
@@ -3020,7 +3014,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                                                 }
                                                                             }}
                                                                             assets={assets}
-                                                                            onAssetCreated={fetchAssets}
+                                                                            onAssetCreated={refetchAssets}
                                                                             defaultSymbol={tx.source_fee_quote_asset_symbol || ''}
                                                                             placeholder="Fee..."
                                                                             rawAssetSource={tx.source}

@@ -305,6 +305,8 @@ class FilterOptionsResponse(BaseModel):
     """Response model for filter options endpoint."""
     sources: List[FilterOption]
     accounts: List[FilterOption]
+    from_accounts: List[FilterOption]
+    to_accounts: List[FilterOption]
     assets: List[FilterOption]
     categories: List[FilterOption]  # Flat list for backward compat
     categories_by_dimension: List[DimensionWithCategories]  # Grouped by dimension
@@ -325,6 +327,8 @@ def get_filter_options(
     taxability: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     account_id: Optional[str] = Query(None),
+    from_account_id: Optional[str] = Query(None),
+    to_account_id: Optional[str] = Query(None),
     asset_id: Optional[str] = Query(None),
     category_id: Optional[str] = Query(None),
     transaction_type: Optional[str] = Query(None),
@@ -344,8 +348,22 @@ def get_filter_options(
     This ensures filters always show values that actually exist in the data.
     """
     from backend.db.models import Category, Dimension, AssetCategory
-    from sqlalchemy import func, distinct
+    from sqlalchemy import func, distinct, or_
     from datetime import datetime
+
+    def _build_account_filter_condition(param_str, column):
+        """Build a WHERE condition for account ID filter with 'unmapped' support."""
+        parts = [p.strip() for p in param_str.split(',')]
+        has_unmapped = any(p.lower() == 'unmapped' for p in parts)
+        numeric_ids = [int(p) for p in parts if p.isdigit()]
+        conditions = []
+        if numeric_ids:
+            conditions.append(column.in_(numeric_ids))
+        if has_unmapped:
+            conditions.append(column.is_(None))
+        if len(conditions) == 1:
+            return conditions[0]
+        return or_(*conditions)
     
     def build_base_query():
         """Build base query with all active filters applied."""
@@ -364,10 +382,17 @@ def get_filter_options(
             sources_list = [s.strip() for s in source.split(',')]
             query = query.where(NormalizedTransaction.source.in_(sources_list))
         
-        # Account filter
+        # Account filter (with unmapped support)
         if account_id:
-            account_ids_list = [int(a.strip()) for a in account_id.split(',')]
-            query = query.where(NormalizedTransaction.account_id.in_(account_ids_list))
+            query = query.where(_build_account_filter_condition(account_id, NormalizedTransaction.account_id))
+        
+        # From account filter (with unmapped support)
+        if from_account_id:
+            query = query.where(_build_account_filter_condition(from_account_id, NormalizedTransaction.from_account_id))
+        
+        # To account filter (with unmapped support)
+        if to_account_id:
+            query = query.where(_build_account_filter_condition(to_account_id, NormalizedTransaction.to_account_id))
         
         # Asset filter
         if asset_id:
@@ -468,7 +493,7 @@ def get_filter_options(
             for s in sources if s[0]
         ]
         
-        # Get accounts with counts (filtered)
+        # Get accounts with counts (filtered) + unmapped entry
         account_query = (
             select(
                 Account.id,
@@ -485,6 +510,70 @@ def get_filter_options(
             FilterOption(value=str(a[0]), label=a[1], count=a[2] or 0)
             for a in accounts
         ]
+        # Add "Unmapped" entry for transactions with account_id IS NULL
+        unmapped_account_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.account_id.is_(None))
+        ).one()
+        if unmapped_account_count > 0:
+            account_options.append(
+                FilterOption(value='unmapped', label='Unmapped', count=unmapped_account_count)
+            )
+        
+        # Get from_accounts with counts (filtered) + unmapped entry
+        from_account_query = (
+            select(
+                Account.id,
+                Account.name,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.from_account_id == Account.id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(Account.id, Account.name)
+            .order_by(Account.name)
+        )
+        from_accounts = session.exec(from_account_query).all()
+        from_account_options = [
+            FilterOption(value=str(a[0]), label=a[1], count=a[2] or 0)
+            for a in from_accounts
+        ]
+        unmapped_from_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.from_account_id.is_(None))
+        ).one()
+        if unmapped_from_count > 0:
+            from_account_options.append(
+                FilterOption(value='unmapped', label='Unmapped', count=unmapped_from_count)
+            )
+        
+        # Get to_accounts with counts (filtered) + unmapped entry
+        to_account_query = (
+            select(
+                Account.id,
+                Account.name,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.to_account_id == Account.id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(Account.id, Account.name)
+            .order_by(Account.name)
+        )
+        to_accounts = session.exec(to_account_query).all()
+        to_account_options = [
+            FilterOption(value=str(a[0]), label=a[1], count=a[2] or 0)
+            for a in to_accounts
+        ]
+        unmapped_to_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.to_account_id.is_(None))
+        ).one()
+        if unmapped_to_count > 0:
+            to_account_options.append(
+                FilterOption(value='unmapped', label='Unmapped', count=unmapped_to_count)
+            )
         
         # Get assets that have transactions (filtered)
         asset_query = (
@@ -706,6 +795,8 @@ def get_filter_options(
         return FilterOptionsResponse(
             sources=source_options,
             accounts=account_options,
+            from_accounts=from_account_options,
+            to_accounts=to_account_options,
             assets=asset_options,
             categories=category_options,
             categories_by_dimension=categories_by_dimension,
@@ -1276,7 +1367,9 @@ def list_transactions(
         None, description="Filter by taxability status (taxable/non_taxable/unknown)"
     ),
     source: Optional[str] = Query(None, description="Filter by source (comma-separated for multiple)"),
-    account_id: Optional[str] = Query(None, description="Filter by account IDs (comma-separated for multiple)"),
+    account_id: Optional[str] = Query(None, description="Filter by account IDs (comma-separated, 'unmapped' for NULL)"),
+    from_account_id: Optional[str] = Query(None, description="Filter by from account IDs (comma-separated, 'unmapped' for NULL)"),
+    to_account_id: Optional[str] = Query(None, description="Filter by to account IDs (comma-separated, 'unmapped' for NULL)"),
     unit_id: Optional[int] = Query(None, description="Filter by unit ID"),
     ids: Optional[str] = Query(None, description="Filter by transaction IDs (comma-separated for multiple)"),
     # New filter parameters
@@ -1295,6 +1388,8 @@ def list_transactions(
     pnl_cal_inclusions_status: Optional[str] = Query(None, description="Filter by inclusion status in P&L version (included/excluded)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
+    sort_by: Optional[str] = Query("date_time", description="Column to sort by (date_time, id, source, direction, transaction_type, quantity, price, total, fee, review_status, disposal_taxable)"),
+    sort_dir: Optional[str] = Query("desc", description="Sort direction: asc or desc"),
     session: Session = Depends(get_db),
 ):
     """
@@ -1331,6 +1426,8 @@ def list_transactions(
             taxability=taxability,
             source=source,
             account_id=account_id,
+            from_account_id=from_account_id,
+            to_account_id=to_account_id,
             asset_id=asset_id,
             category_id=category_id,
             transaction_type=transaction_type,
@@ -1393,14 +1490,40 @@ def list_transactions(
                 )
 
         if applied_filters.account_ids:
-            if len(applied_filters.account_ids) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.account_id == applied_filters.account_ids[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.account_id.in_(applied_filters.account_ids)
-                )
+            from sqlalchemy import or_ as sa_or
+            numeric_ids = [x for x in applied_filters.account_ids if isinstance(x, int)]
+            has_unmapped = 'unmapped' in applied_filters.account_ids
+            conditions = []
+            if numeric_ids:
+                conditions.append(NormalizedTransaction.account_id.in_(numeric_ids))
+            if has_unmapped:
+                conditions.append(NormalizedTransaction.account_id.is_(None))
+            if conditions:
+                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
+
+        if applied_filters.from_account_ids:
+            from sqlalchemy import or_ as sa_or
+            numeric_ids = [x for x in applied_filters.from_account_ids if isinstance(x, int)]
+            has_unmapped = 'unmapped' in applied_filters.from_account_ids
+            conditions = []
+            if numeric_ids:
+                conditions.append(NormalizedTransaction.from_account_id.in_(numeric_ids))
+            if has_unmapped:
+                conditions.append(NormalizedTransaction.from_account_id.is_(None))
+            if conditions:
+                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
+
+        if applied_filters.to_account_ids:
+            from sqlalchemy import or_ as sa_or
+            numeric_ids = [x for x in applied_filters.to_account_ids if isinstance(x, int)]
+            has_unmapped = 'unmapped' in applied_filters.to_account_ids
+            conditions = []
+            if numeric_ids:
+                conditions.append(NormalizedTransaction.to_account_id.in_(numeric_ids))
+            if has_unmapped:
+                conditions.append(NormalizedTransaction.to_account_id.is_(None))
+            if conditions:
+                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
 
         if unit_id is not None:
             statement = statement.where(
@@ -1559,9 +1682,36 @@ def list_transactions(
         filtered_count_statement = select(func.count()).select_from(statement.subquery())
         filtered_count = session.exec(filtered_count_statement).one()
 
+        # Apply sorting
+        SORTABLE_COLUMNS = {
+            'date_time': NormalizedTransaction.date_time,
+            'date': NormalizedTransaction.date_time,  # alias
+            'id': NormalizedTransaction.id,
+            'source': NormalizedTransaction.source,
+            'direction': NormalizedTransaction.direction,
+            'transaction_type': NormalizedTransaction.transaction_type,
+            'type': NormalizedTransaction.transaction_type,  # alias
+            'quantity': NormalizedTransaction.quantity,
+            'qty': NormalizedTransaction.quantity,  # alias
+            'price': NormalizedTransaction.price,
+            'total': (NormalizedTransaction.quantity * NormalizedTransaction.price),
+            'fee': NormalizedTransaction.fee,
+            'review_status': NormalizedTransaction.review_status,
+            'status': NormalizedTransaction.review_status,  # alias
+            'disposal_taxable': NormalizedTransaction.disposal_taxable,
+            'taxability': NormalizedTransaction.disposal_taxable,  # alias
+            'include_fee': NormalizedTransaction.include_fee,
+            'source_transaction_id': NormalizedTransaction.source_transaction_id,
+        }
+        sort_column = SORTABLE_COLUMNS.get(sort_by or 'date_time', NormalizedTransaction.date_time)
+        if sort_dir and sort_dir.lower() == 'asc':
+            statement = statement.order_by(sort_column.asc())
+        else:
+            statement = statement.order_by(sort_column.desc())
+
         # Apply pagination
         statement = (
-            statement.order_by(NormalizedTransaction.date_time.desc())
+            statement
             .offset(offset)
             .limit(limit)
         )

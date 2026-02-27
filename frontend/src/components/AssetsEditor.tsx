@@ -4,7 +4,7 @@ import {
     Heading, Icon, IconButton, Input, NativeSelect, Portal, Spinner,
     Table, Tabs, Tag, Text, Textarea, Progress
 } from '@chakra-ui/react';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { LuTags, LuSettings } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
@@ -64,7 +64,6 @@ interface ImportResult {
 type BulkCategoryMode = 'add' | 'replace' | 'remove';
 
 export const AssetsEditor: React.FC = () => {
-    const [assets, setAssets] = useState<Asset[]>([]);
     const [allAssets, setAllAssets] = useState<Asset[]>([]); // Full dataset for client-side filtering
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -147,9 +146,9 @@ export const AssetsEditor: React.FC = () => {
         fetchCategories();
     }, []);
 
-    // Client-side filtering effect
-    useEffect(() => {
-        const filtered = allAssets.filter(asset => {
+    // Client-side filtering derived from allAssets (no separate state copy)
+    const assets = useMemo(() => {
+        return allAssets.filter(asset => {
             // Search filter (symbol + label)
             if (searchFilter) {
                 const search = searchFilter.toLowerCase();
@@ -190,10 +189,12 @@ export const AssetsEditor: React.FC = () => {
 
             return true;
         });
-        setAssets(filtered);
-        // Clear selection when filters change
-        setSelectedIds(new Set());
     }, [allAssets, searchFilter, statusFilter, typeFilter, categoryFilter, priceGetterFilter]);
+
+    // Clear selection when filters change
+    useEffect(() => {
+        setSelectedIds(new Set());
+    }, [searchFilter, statusFilter, typeFilter, categoryFilter, priceGetterFilter]);
 
     const fetchCategories = async () => {
         try {

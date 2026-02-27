@@ -185,6 +185,8 @@ class PnLEngine:
                 selectinload(NormalizedTransaction.price_quote_asset),
                 selectinload(NormalizedTransaction.fee_quote_asset),
                 selectinload(NormalizedTransaction.user_calculation_unit),
+                selectinload(NormalizedTransaction.from_account),
+                selectinload(NormalizedTransaction.to_account),
             )
         )
         

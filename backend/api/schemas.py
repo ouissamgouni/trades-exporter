@@ -100,7 +100,9 @@ class AppliedFilters(BaseModel):
     review_statuses: List[str] = Field(default_factory=list)
     taxability: Optional[str] = None
     sources: List[str] = Field(default_factory=list)
-    account_ids: List[int] = Field(default_factory=list)
+    account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
+    from_account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
+    to_account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
     asset_ids: List[int] = Field(default_factory=list)
     category_ids: List[int] = Field(default_factory=list)
     transaction_types: List[str] = Field(default_factory=list)

@@ -131,6 +131,17 @@ class GroupingEngine:
         self._all_transactions = transactions  # Store for _collect_related helper
         suggestions: List[GroupingSuggestion] = []
 
+        # Build set of owned account IDs for transfer pattern detection.
+        # Only accounts explicitly marked as non-owned are excluded.
+        # If account_rel is not loaded (e.g. standalone use), defaults to owned.
+        self._owned_account_ids: Set[int] = set()
+        for tx in transactions:
+            if tx.account_id is not None:
+                acct = getattr(tx, 'account_rel', None)
+                if acct is not None and hasattr(acct, 'owned') and not acct.owned:
+                    continue  # Explicitly non-owned — exclude
+                self._owned_account_ids.add(tx.account_id)
+
         # Build network_transaction_id → [tx] index for fast related-tx lookup
         self._net_tx_index: Dict[str, List[NormalizedTransaction]] = {}
         for tx in transactions:
@@ -233,11 +244,18 @@ class GroupingEngine:
                 seed = [outflow, matched_inflow]
                 group = self._collect_related_by_network_tx(seed)
 
+                # Pattern depends on whether both accounts are owned
+                both_owned = (
+                    outflow.account_id in self._owned_account_ids
+                    and matched_inflow.account_id in self._owned_account_ids
+                )
+                pattern = PATTERN_INTERNAL_TRANSFER if both_owned else PATTERN_UNKNOWN
+
                 symbol = outflow.source_asset_symbol or matched_inflow.source_asset_symbol
                 label = self._append_fee_suffix(f"{symbol} Transfer", seed, group)
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        pattern=pattern,
                         label=label,
                         reason=f"Exact network TX hash match: {match_reason}",
                         confidence=self.config.exact_match_confidence,
@@ -309,11 +327,18 @@ class GroupingEngine:
                 seed = [outflow, inflow]
                 group = self._collect_related_by_network_tx(seed)
 
+                # Pattern depends on whether both accounts are owned
+                both_owned = (
+                    outflow.account_id in self._owned_account_ids
+                    and inflow.account_id in self._owned_account_ids
+                )
+                pattern = PATTERN_INTERNAL_TRANSFER if both_owned else PATTERN_UNKNOWN
+
                 symbol = outflow.source_asset_symbol or inflow.source_asset_symbol
                 label = self._append_fee_suffix(f"{symbol} Transfer", seed, group)
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        pattern=pattern,
                         label=label,
                         reason=f"Same asset transfer between owned accounts (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
@@ -760,10 +785,16 @@ class GroupingEngine:
 
                 label = self._append_fee_suffix(label, seed, group)
 
-                # Bridges/transfers are internal transfers (same asset, non-taxable)
+                # Pattern depends on whether both accounts are owned
+                both_owned = (
+                    outflow.account_id in self._owned_account_ids
+                    and inflow.account_id in self._owned_account_ids
+                )
+                pattern = PATTERN_INTERNAL_TRANSFER if both_owned else PATTERN_UNKNOWN
+
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        pattern=pattern,
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,
@@ -846,9 +877,13 @@ class GroupingEngine:
                 label = self._append_fee_suffix(label, seed, group)
                 reason = f"Same asset bridged across networks on same account ({outflow.network} \u2192 {inflow.network})"
 
+                # Pattern depends on whether account is owned
+                is_owned = outflow.account_id in self._owned_account_ids
+                pattern = PATTERN_INTERNAL_TRANSFER if is_owned else PATTERN_UNKNOWN
+
                 suggestions.append(
                     GroupingSuggestion(
-                        pattern=PATTERN_INTERNAL_TRANSFER,
+                        pattern=pattern,
                         label=label,
                         reason=f"{reason} (qty diff: {qty_ratio:.2%}, time: {time_diff:.0f}s)",
                         confidence=confidence,

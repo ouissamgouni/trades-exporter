@@ -18,6 +18,7 @@ Returns CalculationUnit objects directly (the unified grouping concept).
 from decimal import Decimal
 from typing import List, Optional
 from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
 from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern
@@ -158,6 +159,7 @@ class SuggestionService:
             select(NormalizedTransaction)
             .where(NormalizedTransaction.review_status == "pending")
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())
@@ -167,6 +169,7 @@ class SuggestionService:
         statement = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())
@@ -175,6 +178,7 @@ class SuggestionService:
         """Get all transactions (including those already in a bundle)."""
         statement = (
             select(NormalizedTransaction)
+            .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())

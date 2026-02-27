@@ -87,7 +87,7 @@ def handle_unit(
         disposal_legs = outflows + fees
 
         # 2. Process disposals (outflows + fees) - consume lots and compute P&L
-        consumed_slices = _process_disposals(
+        consumed_slices, absorbed_fee_cost = _process_disposals(
             disposals=disposal_legs,
             inflows=inflows,
             unit=unit,
@@ -100,6 +100,7 @@ def handle_unit(
         _process_inflows(
             unit=unit,
             consumed_slices=consumed_slices,
+            absorbed_fee_cost=absorbed_fee_cost,
             lot_manager=lot_manager,
             fmv_service=fmv_service,
             config=config,
@@ -160,9 +161,12 @@ def _process_disposals(
     - Cost basis is preserved and transferred to new lots
 
     Returns:
-        List of all consumed slices (for inflow processing)
+        Tuple of (consumed_slices, absorbed_fee_cost) where absorbed_fee_cost
+        is the total cost basis of non-taxable fee slices on cost-basis transfers
+        that should be rolled into the transferred asset's cost basis.
     """
     all_consumed_slices: List[ConsumedLotSlice] = []
+    absorbed_fee_cost: Decimal = Decimal(0)
     taxability_calculator = TaxabilityCalculator(config)
     is_unmatched_internal_transfer = unit.pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
     is_cost_basis_transfer = unit.is_cost_basis_transfer
@@ -200,7 +204,6 @@ def _process_disposals(
             config=config,
             unit=unit,
         )
-        all_consumed_slices.extend(slices)
 
         if negative_lot:
             if unit.cost_lots is None:
@@ -212,22 +215,46 @@ def _process_disposals(
             continue
 
         # ═══════════════════════════════════════════════════════════════
-        # UNIFIED FEE HANDLING - Process fees BEFORE pattern checks
-        # Fees are always processed regardless of unit pattern (transfer,
-        # pending transfer, etc.) since they represent separate disposal
-        # events even when the main transaction is non-taxable.
+        # FEE HANDLING - Fees are processed BEFORE pattern checks.
+        # On cost-basis transfers, fee treatment depends on config:
+        #   - fee_taxable_by_default=False: fee cost is ABSORBED into the
+        #     transferred asset's cost basis (no RealizedPnl, no phantom lots).
+        #   - fee_taxable_by_default=True: fee creates a separate RealizedPnl
+        #     and its slices are excluded from cost basis transfer.
+        # On non-transfer units, fees always create RealizedPnl.
         # ═══════════════════════════════════════════════════════════════
         if disposal.is_fee:
-            _proceeds_and_pnl_entry(
-                disposal=disposal,
-                slices=slices,
-                inflows=inflows,
-                non_fee_outflows=[d for d in disposals if not d.is_fee],
-                fmv_service=fmv_service,
-                config=config,
-                unit=unit,
-            )
+            if is_cost_basis_transfer and not config.fee_taxable_by_default:
+                # Absorb fee cost into transfer: accumulate cost basis from
+                # fee slices, but do NOT add them to all_consumed_slices
+                # (they would create phantom lots in _handle_cost_basis_transfer).
+                absorbed_fee_cost += sum(s.total_cost_in_base for s in slices)
+                log.debug(
+                    "fee_absorbed_into_transfer",
+                    asset_id=disposal.asset_id,
+                    asset_symbol=disposal.asset_symbol,
+                    qty=float(qty),
+                    absorbed_cost=float(sum(s.total_cost_in_base for s in slices)),
+                )
+            else:
+                # Fee creates a separate RealizedPnl disposal event.
+                # Do NOT add fee slices to all_consumed_slices when on a
+                # cost-basis transfer — they would create phantom lots.
+                if not is_cost_basis_transfer:
+                    all_consumed_slices.extend(slices)
+                _proceeds_and_pnl_entry(
+                    disposal=disposal,
+                    slices=slices,
+                    inflows=inflows,
+                    non_fee_outflows=[d for d in disposals if not d.is_fee],
+                    fmv_service=fmv_service,
+                    config=config,
+                    unit=unit,
+                )
             continue  # Skip pattern checks for fees
+
+        # Non-fee legs always contribute to all_consumed_slices
+        all_consumed_slices.extend(slices)
 
         # ═══════════════════════════════════════════════════════════════
         # PATTERN-BASED HANDLING - Only for non-fee disposals
@@ -260,7 +287,7 @@ def _process_disposals(
             )
        
 
-    return all_consumed_slices
+    return all_consumed_slices, absorbed_fee_cost
 
 
 def _create_unmatched_internal_transfer_warning(
@@ -570,6 +597,7 @@ def _proceeds_and_pnl_entry(
 def _process_inflows(
     unit: CalculationUnit,
     consumed_slices: List[ConsumedLotSlice],
+    absorbed_fee_cost: Decimal,
     lot_manager: LotManager,
     fmv_service: FMVService,
     config: PnLConfig,
@@ -586,7 +614,8 @@ def _process_inflows(
     
     Args:
         unit: The calculation unit being processed
-        consumed_slices: All consumed slices from disposals (outflows + fees)
+        consumed_slices: All consumed slices from disposals (non-fee outflows only)
+        absorbed_fee_cost: Fee cost basis to absorb into transfer lots (0 when not applicable)
         lot_manager: For creating new lots
         fmv_service: For FMV lookups
         config: P&L configuration
@@ -612,6 +641,7 @@ def _process_inflows(
         _handle_cost_basis_transfer(
             inflows=inflows,
             consumed_slices=consumed_slices,
+            absorbed_fee_cost=absorbed_fee_cost,
             lot_manager=lot_manager,
             unit=unit,
         )
@@ -874,6 +904,7 @@ def _compute_proceeds(
 def _handle_cost_basis_transfer(
     inflows: List[CalculationUnitLeg],
     consumed_slices: List[ConsumedLotSlice],
+    absorbed_fee_cost: Decimal,
     lot_manager: LotManager,
     unit: CalculationUnit,
 ) -> None:
@@ -882,6 +913,11 @@ def _handle_cost_basis_transfer(
 
     For transfers: each consumed slice becomes a new lot (preserves holding period per-lot)
     For same-asset swaps (splits/reverse splits): qty scales proportionally, cost preserved per-slice
+    
+    When absorbed_fee_cost > 0, the fee's cost basis is distributed proportionally
+    across the new lots (by each slice's share of total cost), increasing their
+    unit_cost_in_base. This implements the "fee absorbed into transfer cost" approach
+    for jurisdictions where crypto fees are non-taxable (e.g., France).
     """
     if not inflows or not consumed_slices:
         return
@@ -898,6 +934,9 @@ def _handle_cost_basis_transfer(
     # For transfers, ratio should be 1.0 (qty unchanged)
     qty_ratio = total_inflow_qty / total_outflow_qty
 
+    # Total cost from transfer slices (used to distribute absorbed_fee_cost proportionally)
+    total_transfer_cost = sum(s.total_cost_in_base for s in consumed_slices)
+
     log.debug(
         "cost_basis_transfer",
         asset_id=inflows[0].asset_id,
@@ -906,6 +945,7 @@ def _handle_cost_basis_transfer(
         outflow_qty=float(total_outflow_qty),
         inflow_qty=float(total_inflow_qty),
         qty_ratio=float(qty_ratio),
+        absorbed_fee_cost=float(absorbed_fee_cost),
     )
 
     # Get inflow metadata (use first inflow for now - typically there's one)
@@ -915,7 +955,16 @@ def _handle_cost_basis_transfer(
     for slice in consumed_slices:
         # Scale qty for splits, preserve cost basis
         new_qty = slice.quantity * qty_ratio
-        unit_cost = slice.total_cost_in_base / new_qty
+        
+        # Base cost from the consumed slice
+        slice_cost = slice.total_cost_in_base
+        
+        # Distribute absorbed fee cost proportionally by each slice's share of total cost
+        if absorbed_fee_cost > 0 and total_transfer_cost > 0:
+            fee_share = (slice.total_cost_in_base / total_transfer_cost) * absorbed_fee_cost
+            slice_cost += fee_share
+        
+        unit_cost = slice_cost / new_qty if new_qty > 0 else Decimal(0)
         
         # Preserve original holding period from the source lot
         original_acquired_at = None
@@ -989,10 +1038,15 @@ def _handle_acquisition(
     - Create adjustment P&L entries to correct provisional entries
     """
     # Determine total cost to allocate
+    # Bug #2 fix: Exclude fee RealizedPnl entries from total_cost to avoid
+    # double-counting fees (they already have their own RealizedPnl disposal event).
     realized_entries = unit.realized_pnl_records or []
-    if realized_entries:
-        # Taxable disposals: new asset cost = proceeds realized
-        total_cost = sum(e.proceeds_in_base for e in realized_entries)
+    fee_origin_tx_ids = {leg.origin_transaction_id for leg in unit.fee_legs}
+    non_fee_entries = [e for e in realized_entries if e.transaction_id not in fee_origin_tx_ids]
+    
+    if non_fee_entries:
+        # Taxable disposals: new asset cost = proceeds from non-fee disposals only
+        total_cost = sum(e.proceeds_in_base for e in non_fee_entries)
         cost_source = "realized_proceeds"
     elif consumed_slices:
         # Non-taxable disposals: new asset inherits cost basis from all consumed slices
@@ -1006,8 +1060,21 @@ def _handle_acquisition(
             total_cost += fmv_result.value
         cost_source = "fmv_at_acquisition"
 
-    # Calculate total inflow quantity for proportional allocation
-    # All inflows should be the same asset, so we allocate by quantity
+    # Bug #3 fix: Use FMV-based allocation when inflows contain different assets.
+    # When all inflows are the same asset, quantity-based allocation is used (backward compat).
+    inflow_asset_ids = {i.asset_id for i in inflows if i.asset_id}
+    multi_asset_inflows = len(inflow_asset_ids) > 1
+    
+    if multi_asset_inflows:
+        # Compute FMV for each inflow to allocate cost proportionally by value
+        inflow_fmvs: dict[int, Decimal] = {}
+        total_inflow_fmv = Decimal(0)
+        for idx, inf in enumerate(inflows):
+            fmv_result = fmv_service.get_fmv_in_base(inf, skip_on_error=True)
+            inflow_fmvs[idx] = fmv_result.value
+            total_inflow_fmv += fmv_result.value
+    
+    # For single-asset inflows, use quantity-based allocation (original behavior)
     total_inflow_qty = sum(
         Decimal(i.quantity) if i.quantity else Decimal(0)
         for i in inflows
@@ -1021,11 +1088,12 @@ def _handle_acquisition(
         total_cost=float(total_cost),
         total_inflow_qty=float(total_inflow_qty),
         cost_source=cost_source,
-        realized_entries=len(realized_entries),
+        realized_entries=len(non_fee_entries),
+        multi_asset_inflows=multi_asset_inflows,
     )
 
     # Create lots (and handle negative lot settlement)
-    for inflow in inflows:
+    for idx, inflow in enumerate(inflows):
         inflow_qty = Decimal(inflow.quantity) if inflow.quantity else Decimal(0)
         if inflow_qty <= 0:
             continue
@@ -1034,12 +1102,20 @@ def _handle_acquisition(
         if inflow.asset_id == config.base_currency_id:
             unit_cost = Decimal(1)
         else:
-            # Proportional allocation by quantity (all inflows are same asset)
-            if total_inflow_qty > 0:
-                proportion = inflow_qty / total_inflow_qty
-                allocated_cost = total_cost * proportion
+            if multi_asset_inflows:
+                # Allocate cost proportionally by FMV (handles different asset units correctly)
+                if total_inflow_fmv > 0:
+                    proportion = inflow_fmvs[idx] / total_inflow_fmv
+                    allocated_cost = total_cost * proportion
+                else:
+                    allocated_cost = Decimal(0)
             else:
-                allocated_cost = Decimal(0)
+                # Single-asset: allocate proportionally by quantity (backward compatible)
+                if total_inflow_qty > 0:
+                    proportion = inflow_qty / total_inflow_qty
+                    allocated_cost = total_cost * proportion
+                else:
+                    allocated_cost = Decimal(0)
 
             unit_cost = allocated_cost / inflow_qty if inflow_qty > 0 else Decimal(0)
 

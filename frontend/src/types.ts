@@ -44,7 +44,9 @@ export interface AppliedFilters {
     review_statuses: string[];
     taxability?: string;
     sources: string[];
-    account_ids: number[];
+    account_ids: (number | string)[];
+    from_account_ids: (number | string)[];
+    to_account_ids: (number | string)[];
     asset_ids: number[];
     category_ids: number[];
     transaction_types: string[];

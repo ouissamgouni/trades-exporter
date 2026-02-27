@@ -78,6 +78,42 @@ class FilterValidator:
             ))
         
         return list(existing_ids)
+
+    def validate_ids_with_unmapped(
+        self,
+        ids_str: Optional[str],
+        model_class,
+        id_field_name: str,
+        filter_name: str
+    ) -> list:
+        """
+        Validate comma-separated IDs against a database model,
+        allowing the special sentinel value 'unmapped' to pass through.
+        
+        Returns list of valid int IDs + 'unmapped' string if present.
+        """
+        if not ids_str:
+            return []
+        
+        has_unmapped = False
+        numeric_parts = []
+        
+        for id_str in ids_str.split(','):
+            id_str = id_str.strip()
+            if id_str.lower() == 'unmapped':
+                has_unmapped = True
+            elif id_str:
+                numeric_parts.append(id_str)
+        
+        # Validate numeric IDs via the standard method
+        numeric_csv = ','.join(numeric_parts) if numeric_parts else None
+        valid_ids = self.validate_ids(numeric_csv, model_class, id_field_name, filter_name)
+        
+        result: list = list(valid_ids)
+        if has_unmapped:
+            result.append('unmapped')
+        
+        return result
     
     def validate_enum(
         self,
@@ -191,6 +227,8 @@ def validate_transaction_filters(
     taxability: Optional[str] = None,
     source: Optional[str] = None,
     account_id: Optional[str] = None,
+    from_account_id: Optional[str] = None,
+    to_account_id: Optional[str] = None,
     asset_id: Optional[str] = None,
     category_id: Optional[str] = None,
     transaction_type: Optional[str] = None,
@@ -216,9 +254,15 @@ def validate_transaction_filters(
         taxability, VALID_TAXABILITY_STATUSES, "taxability"
     )
     
-    # Validate ID fields
-    validated_account_ids = validator.validate_ids(
+    # Validate ID fields (with unmapped support for account filters)
+    validated_account_ids = validator.validate_ids_with_unmapped(
         account_id, Account, "id", "account_id"
+    )
+    validated_from_account_ids = validator.validate_ids_with_unmapped(
+        from_account_id, Account, "id", "from_account_id"
+    )
+    validated_to_account_ids = validator.validate_ids_with_unmapped(
+        to_account_id, Account, "id", "to_account_id"
     )
     validated_asset_ids = validator.validate_ids(
         asset_id, Asset, "asset_id", "asset_id"
@@ -256,6 +300,8 @@ def validate_transaction_filters(
         taxability=validated_taxability,
         sources=validated_sources,
         account_ids=validated_account_ids,
+        from_account_ids=validated_from_account_ids,
+        to_account_ids=validated_to_account_ids,
         asset_ids=validated_asset_ids,
         category_ids=validated_category_ids,
         transaction_types=validated_transaction_types,

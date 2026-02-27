@@ -82,20 +82,15 @@ export const PnLFilterBar: React.FC<PnLFilterBarProps> = ({
 
     // Filter to only show dimensions/categories present in results
     const relevantDimensions = useMemo(() => {
-        console.log('PnLFilterBar - availableCategoryIds:', [...availableCategoryIds]);
-        console.log('PnLFilterBar - dimensions:', dimensions.map(d => ({ id: d.id, label: d.label, categories: d.categories.map(c => ({ id: c.id, label: c.label })) })));
         if (availableCategoryIds.size === 0) {
-            console.log('PnLFilterBar - No available category IDs, returning empty');
             return [];
         }
-        const result = dimensions
+        return dimensions
             .map(dim => ({
                 ...dim,
                 categories: dim.categories.filter(cat => availableCategoryIds.has(cat.id)),
             }))
             .filter(dim => dim.categories.length > 0);
-        console.log('PnLFilterBar - relevantDimensions:', result.map(d => ({ id: d.id, label: d.label, categoryCount: d.categories.length })));
-        return result;
     }, [dimensions, availableCategoryIds]);
 
     // Count active filters

@@ -19,9 +19,8 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from unittest.mock import Mock, MagicMock
 
-from backend.db.models import CalculationUnit, CalculationUnitLeg, UnitPattern
-
 from backend.db.models import (
+    Account,
     CalculationUnit,
     CalculationUnitLeg,
     UnitPattern,
@@ -35,64 +34,144 @@ from backend.services.pnl.taxability import TaxabilityCalculator
 
 
 class TestUnmatchedInternalTransferPatternDetection:
-    """Tests for pattern detection of unmatched internal transfers."""
+    """Tests for pattern detection of unmatched internal transfers.
+    
+    Internal transfers are distinguished from external flows by checking
+    whether the counterparty account (from_account / to_account) is
+    mapped to an owned account (Account.owned == True).
+    Having from_account_id/to_account_id set alone is NOT sufficient:
+    the referenced Account must also have owned=True.
+    """
 
-    def test_outflow_only_internal_transfer_gets_unmatched_pattern(self):
-        """Outflow-only internal transfer should be detected as unmatched_internal_transfer, not unknown."""
-        unit = CalculationUnit(
-            version_id=1,
-            unit_origin="tx:1",
-            unit_label="Transfer out",
-            timestamp=datetime.now(timezone.utc),
-        )
-        
-        # Create outflow leg with internal_transfer transaction type
-        outflow_leg = CalculationUnitLeg(
-            leg_type="outflow",
+    @staticmethod
+    def _make_account(id, owned=True, name="test"):
+        """Create an Account with the given owned status."""
+        return Account(id=id, name=name, account_type="wallet", owned=owned)
+
+    @staticmethod
+    def _make_tx(**kwargs):
+        """Create a NormalizedTransaction with sensible defaults."""
+        defaults = dict(
+            id=1,
+            transaction_type="transfer",
+            direction="outflow",
             asset_id=2,
             quantity=Decimal("1.0"),
+            account_id=1,
+            from_account_id=None,
+            to_account_id=None,
+            from_account=None,
+            to_account=None,
         )
-        # Simulate transaction_type = "internal_transfer" via the transaction
-        outflow_leg._transaction_type = "internal_transfer"
-        
-        unit.legs = [outflow_leg]
-        
-        # Mock the _is_incomplete_transfer check
-        # The unit should detect this as an unmatched internal transfer
-        pattern, _ = unit._compute_pattern_from_legs()
-        
-        # Since we can't easily mock the transaction lookup, test the enum exists
-        assert UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value == "unmatched_internal_transfer"
+        defaults.update(kwargs)
+        return NormalizedTransaction(**defaults)
 
-    def test_inflow_only_internal_transfer_gets_unmatched_pattern(self):
-        """Inflow-only internal transfer should be detected as unmatched_internal_transfer, not unknown."""
+    @staticmethod
+    def _make_unit_with_leg(leg_type, tx):
+        """Create a CalculationUnit with one leg backed by a transaction."""
         unit = CalculationUnit(
             version_id=1,
-            unit_origin="tx:2",
-            unit_label="Transfer in",
+            unit_origin=f"tx:{tx.id}",
             timestamp=datetime.now(timezone.utc),
         )
-        
-        inflow_leg = CalculationUnitLeg(
-            leg_type="inflow",
-            asset_id=2,
-            quantity=Decimal("1.0"),
+        leg = CalculationUnitLeg(
+            leg_type=leg_type,
+            asset_id=tx.asset_id,
+            quantity=tx.quantity,
+            transaction=tx,
         )
-        
-        unit.legs = [inflow_leg]
-        
-        # The pattern enum should exist
-        assert UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value == "unmatched_internal_transfer"
+        unit.legs = [leg]
+        return unit
+
+    # --- Internal (unmatched) cases ---
+
+    def test_outflow_to_owned_account_is_unmatched_internal(self):
+        """Outflow with to_account.owned=True → UNMATCHED_INTERNAL_TRANSFER."""
+        owned_acct = self._make_account(id=2, owned=True)
+        tx = self._make_tx(direction="outflow", to_account_id=2, to_account=owned_acct)
+        unit = self._make_unit_with_leg("outflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+        assert "outflow" in reason
+
+    def test_inflow_from_owned_account_is_unmatched_internal(self):
+        """Inflow with from_account.owned=True → UNMATCHED_INTERNAL_TRANSFER."""
+        owned_acct = self._make_account(id=1, owned=True)
+        tx = self._make_tx(id=2, direction="inflow", from_account_id=1, from_account=owned_acct)
+        unit = self._make_unit_with_leg("inflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+        assert "inflow" in reason
+
+    # --- External (FLOW) cases ---
+
+    def test_outflow_to_unknown_address_is_flow(self):
+        """Outflow with to_account_id=None → FLOW (external payment/disposal)."""
+        tx = self._make_tx(direction="outflow", to_account_id=None)
+        unit = self._make_unit_with_leg("outflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+        assert "external" in reason
+
+    def test_inflow_from_unknown_address_is_flow(self):
+        """Inflow with from_account_id=None → FLOW (external deposit/airdrop)."""
+        tx = self._make_tx(id=3, direction="inflow", from_account_id=None)
+        unit = self._make_unit_with_leg("inflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+        assert "external" in reason
+
+    def test_outflow_to_non_owned_account_is_flow(self):
+        """Outflow with to_account_id set but to_account.owned=False → FLOW."""
+        counterparty = self._make_account(id=5, owned=False, name="counterparty")
+        tx = self._make_tx(direction="outflow", to_account_id=5, to_account=counterparty)
+        unit = self._make_unit_with_leg("outflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+        assert "external" in reason
+
+    def test_inflow_from_non_owned_account_is_flow(self):
+        """Inflow with from_account_id set but from_account.owned=False → FLOW."""
+        counterparty = self._make_account(id=5, owned=False, name="counterparty")
+        tx = self._make_tx(id=4, direction="inflow", from_account_id=5, from_account=counterparty)
+        unit = self._make_unit_with_leg("inflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+        assert "external" in reason
+
+    def test_outflow_with_account_id_but_no_relationship_is_flow(self):
+        """Outflow with to_account_id set but to_account=None (dangling FK) → FLOW."""
+        tx = self._make_tx(direction="outflow", to_account_id=99, to_account=None)
+        unit = self._make_unit_with_leg("outflow", tx)
+
+        pattern, reason = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+        assert "external" in reason
+
+    # --- Complete internal transfer ---
 
     def test_complete_internal_transfer_gets_internal_transfer_pattern(self):
-        """Internal transfer with both legs should get INTERNAL_TRANSFER pattern, not unmatched."""
+        """Internal transfer with both legs should get INTERNAL_TRANSFER pattern."""
         unit = CalculationUnit(
             version_id=1,
             unit_origin="tx:3",
             unit_label="Complete transfer",
             timestamp=datetime.now(timezone.utc),
         )
-        
+
         outflow_leg = CalculationUnitLeg(
             leg_type="outflow",
             asset_id=2,
@@ -103,13 +182,43 @@ class TestUnmatchedInternalTransferPatternDetection:
             asset_id=2,
             quantity=Decimal("1.0"),
         )
-        
+
         unit.legs = [outflow_leg, inflow_leg]
-        
+
         pattern, _ = unit._compute_pattern_from_legs()
-        
-        # Same asset, same qty, different accounts = INTERNAL_TRANSFER
+
+        # Same asset in/out = INTERNAL_TRANSFER
         assert pattern == UnitPattern.INTERNAL_TRANSFER.value
+
+    # --- Edge cases ---
+
+    def test_trade_type_single_leg_is_flow_not_unmatched(self):
+        """Single-leg trade (shouldn't normally happen) with no counterparty → FLOW."""
+        tx = self._make_tx(transaction_type="trade", direction="outflow", to_account_id=None)
+        unit = self._make_unit_with_leg("outflow", tx)
+
+        pattern, _ = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
+
+    def test_leg_without_transaction_falls_through_to_flow(self):
+        """Leg with no transaction relationship → FLOW (conservative fallback)."""
+        unit = CalculationUnit(
+            version_id=1,
+            unit_origin="tx:99",
+            timestamp=datetime.now(timezone.utc),
+        )
+        leg = CalculationUnitLeg(
+            leg_type="outflow",
+            asset_id=2,
+            quantity=Decimal("1.0"),
+            transaction=None,
+        )
+        unit.legs = [leg]
+
+        pattern, _ = unit._compute_pattern_from_legs()
+
+        assert pattern == UnitPattern.FLOW.value
 
 
 class TestUnmatchedInternalTransferWarningType:
@@ -158,7 +267,7 @@ class TestUnmatchedInternalTransferTaxability:
         leg.asset_id = 2
         leg.unit = unit  # compute() accesses leg.unit
         leg.transaction = Mock()
-        leg.transaction.transaction_type = "internal_transfer"
+        leg.transaction.transaction_type = "transfer"
         leg.transaction.disposal_taxable = False
         
         result = calculator.compute(leg)

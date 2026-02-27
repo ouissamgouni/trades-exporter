@@ -7,6 +7,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_URL, Asset, PaginatedPriceSnapshotsResponse, PriceSnapshot } from '../types';
+import { useAssets } from '../hooks/useAssets';
 import { AssetBadge } from './AssetBadge';
 import { AssetSelector } from './AssetSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
@@ -17,7 +18,7 @@ import { TablePagination } from './TablePagination';
 export const PricesViewer: React.FC = () => {
     const [prices, setPrices] = useState<PriceSnapshot[]>([]);
     const [totalItems, setTotalItems] = useState(0);
-    const [assets, setAssets] = useState<Asset[]>([]);
+    const { assets } = useAssets();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -44,10 +45,6 @@ export const PricesViewer: React.FC = () => {
     useEffect(() => {
         fetchPrices();
     }, [assetIdFilter, quoteAssetIdFilter, sourceFilter, snapshotTimeFrom, snapshotTimeTo, pagination.page, pagination.pageSize]);
-
-    useEffect(() => {
-        fetchAssets();
-    }, []);
 
     // Extract unique sources from fetched prices for filter dropdown
     const availableSources = useMemo(() => {
@@ -80,18 +77,6 @@ export const PricesViewer: React.FC = () => {
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const fetchAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
         }
     };
 

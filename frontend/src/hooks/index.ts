@@ -59,3 +59,9 @@ export {
     useSyncConfigStore,
     type UseSyncConfigStoreReturn,
 } from './useSyncConfigStore';
+
+export {
+    useAssets,
+    ASSETS_QUERY_KEY,
+    type UseAssetsReturn,
+} from './useAssets';

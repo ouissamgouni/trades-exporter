@@ -31,7 +31,7 @@ import { AssetBadge } from '../AssetBadge';
 import { CompactTransactionBadgeRow } from '../CompactTransactionBadgeRow';
 import { TransactionRow } from '../TransactionRow';
 import { TransactionsTable } from '../TransactionsTable';
-import { defaultFilterState } from '../TransactionFilters';
+import { defaultFilterState, TransactionFilterState } from '../TransactionFilters';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
 import { formatQuantity } from '../../utils/numberUtils';
@@ -2298,6 +2298,8 @@ const TransactionsTab: React.FC<{
         taxability: [],
         sources: [],
         accountIds: [],
+        fromAccountIds: [],
+        toAccountIds: [],
         assetIds: [],
         categoryIds: [],
         transactionTypes: [],
@@ -2307,15 +2309,15 @@ const TransactionsTab: React.FC<{
         networks: [],
         dateFrom: '',
         dateTo: '',
-        pnlCalVersion: String(versionId),
-        pnlCalInclusionsStatus: 'included',
+        versionId: String(versionId),
+        inclusionStatus: 'included',
     });
 
     // Update filters when view changes
     useEffect(() => {
         setFilters(prev => ({
             ...prev,
-            pnlCalInclusionsStatus: view,
+            inclusionStatus: view,
         }));
     }, [view]);
 
@@ -2354,16 +2356,19 @@ const TransactionsTab: React.FC<{
         taxability: [],
         sources: [],
         accountIds: [],
+        fromAccountIds: [],
+        toAccountIds: [],
         assetIds: [],
         categoryIds: [],
         transactionTypes: [],
         directions: [],
         connectorRunIds: [],
         tagKeys: [],
+        networks: [],
         dateFrom: '',
         dateTo: '',
-        pnlCalVersion: String(versionId),
-        pnlCalInclusionsStatus: view,
+        versionId: String(versionId),
+        inclusionStatus: view,
     }), [versionId, view]);
 
     return (

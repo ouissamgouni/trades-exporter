@@ -16,6 +16,8 @@ const EMPTY_FILTERS: TransactionFilterState = {
     taxability: [],
     sources: [],
     accountIds: [],
+    fromAccountIds: [],
+    toAccountIds: [],
     assetIds: [],
     categoryIds: [],
     transactionTypes: [],

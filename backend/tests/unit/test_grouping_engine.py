@@ -21,7 +21,7 @@ from backend.services.grouping_engine import (
     PATTERN_SWAP,
     PATTERN_UNKNOWN,
 )
-from backend.db.models import NormalizedTransaction
+from backend.db.models import Account, NormalizedTransaction
 
 
 # =============================================================================
@@ -88,6 +88,9 @@ def make_tx(
     # The grouping engine uses total property for value matching
     if total_in_base is not None:
         tx.total = total_in_base
+    # Set account_rel for owned check in grouping engine
+    if account_id is not None:
+        tx.account_rel = Account(id=account_id, name=f"Account{account_id}", account_type="cex", owned=True)
     return tx
 
 
@@ -109,6 +112,7 @@ class TestRule1NetworkTxMatch:
             direction="outflow",
             symbol="ETH",
             dt=now,
+            account_id=1,
             network_transaction_id=tx_hash,
         )
         inflow = make_tx(
@@ -116,6 +120,7 @@ class TestRule1NetworkTxMatch:
             direction="inflow",
             symbol="ETH",
             dt=now + timedelta(minutes=1),
+            account_id=2,
             source_transaction_id=tx_hash,
         )
 

@@ -416,7 +416,7 @@ def create_transfer_group(
         fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, account_id=from_account_id)
         legs.append(make_leg(asset_id=asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx))
 
-    return make_unit(legs=legs, pattern="transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
+    return make_unit(legs=legs, pattern="internal_transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
 
 
 def create_split_group(

@@ -41,6 +41,8 @@ export interface DimensionWithCategories {
 export interface FilterOptions {
     sources: FilterOption[];
     accounts: FilterOption[];
+    from_accounts: FilterOption[];
+    to_accounts: FilterOption[];
     assets: FilterOption[];
     categories: FilterOption[];
     categories_by_dimension: DimensionWithCategories[];
@@ -60,6 +62,8 @@ export interface TransactionFilterState {
     taxability: string[];
     sources: string[];
     accountIds: string[];
+    fromAccountIds: string[];
+    toAccountIds: string[];
     assetIds: string[];
     categoryIds: string[];
     transactionTypes: string[];
@@ -84,6 +88,8 @@ export const defaultFilterState: TransactionFilterState = {
     inclusionStatus: undefined,
     sources: [],
     accountIds: [],
+    fromAccountIds: [],
+    toAccountIds: [],
     assetIds: [],
     categoryIds: [],
     transactionTypes: [],
@@ -133,6 +139,8 @@ interface FilterChipData {
 // Order: account, source, type, direction, taxability, status (open) | assets, category, connector run (dropdown)
 const FILTER_DEFS: FilterDef[] = [
     { key: 'accountIds', label: 'Account', icon: '👤', type: 'multi', optionsKey: 'accounts', color: 'cyan' },
+    { key: 'fromAccountIds', label: 'From Account', icon: '⬅️', type: 'multi', optionsKey: 'from_accounts', color: 'teal', isDropdown: true },
+    { key: 'toAccountIds', label: 'To Account', icon: '➡️', type: 'multi', optionsKey: 'to_accounts', color: 'cyan', isDropdown: true },
     { key: 'sources', label: 'Source', icon: '🔌', type: 'multi', optionsKey: 'sources', color: 'blue', searchable: true },
     { key: 'transactionTypes', label: 'Type', icon: '🏷️', type: 'multi', optionsKey: 'transaction_types', color: 'teal' },
     { key: 'directions', label: 'Direction', icon: '↔️', type: 'multi', optionsKey: 'directions', color: 'yellow' },
@@ -1016,6 +1024,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             taxability: localFilters.taxability[0],
             sources: localFilters.sources,
             account_ids: localFilters.accountIds,
+            from_account_ids: localFilters.fromAccountIds,
+            to_account_ids: localFilters.toAccountIds,
             asset_ids: localFilters.assetIds,
             category_ids: localFilters.categoryIds,
             transaction_types: localFilters.transactionTypes,
@@ -1086,6 +1096,10 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                 values = sourceFilters.sources || [];
             } else if (def.key === 'accountIds') {
                 values = sourceFilters.account_ids || [];
+            } else if (def.key === 'fromAccountIds') {
+                values = sourceFilters.from_account_ids || [];
+            } else if (def.key === 'toAccountIds') {
+                values = sourceFilters.to_account_ids || [];
             } else if (def.key === 'assetIds') {
                 values = sourceFilters.asset_ids || [];
             } else if (def.key === 'categoryIds') {
@@ -1342,6 +1356,32 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                 color="orange"
                                 isOpen={openDropdown === 'assetIds'}
                                 onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* From Account Dropdown Card */}
+                            <DropdownCard
+                                label="From Account"
+                                icon="⬅️"
+                                options={filterOptions?.from_accounts || []}
+                                selected={localFilters.fromAccountIds || []}
+                                onChange={(v) => updateLocalFilter('fromAccountIds', v)}
+                                color="teal"
+                                isOpen={openDropdown === 'fromAccountIds'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'fromAccountIds' ? null : 'fromAccountIds')}
+                                onClose={() => setOpenDropdown(null)}
+                            />
+
+                            {/* To Account Dropdown Card */}
+                            <DropdownCard
+                                label="To Account"
+                                icon="➡️"
+                                options={filterOptions?.to_accounts || []}
+                                selected={localFilters.toAccountIds || []}
+                                onChange={(v) => updateLocalFilter('toAccountIds', v)}
+                                color="cyan"
+                                isOpen={openDropdown === 'toAccountIds'}
+                                onToggle={() => setOpenDropdown(openDropdown === 'toAccountIds' ? null : 'toAccountIds')}
                                 onClose={() => setOpenDropdown(null)}
                             />
 

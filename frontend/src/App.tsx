@@ -8,6 +8,7 @@ import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext'
 import { defaultFilterState } from './components/TransactionFilters';
 import { FiActivity, FiCheckCircle } from 'react-icons/fi';
 import { DataHealthCheckDrawer } from './components/DataHealthCheckDrawer';
+import { useAssets } from './hooks/useAssets';
 
 // Setup status interface
 interface SetupStatus {
@@ -28,6 +29,7 @@ const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
             staleTime: 30_000, // Data considered fresh for 30 seconds
+            gcTime: 60_000, // Garbage-collect unused cache entries after 1 minute
             refetchOnWindowFocus: false, // Don't refetch on tab focus
             retry: 1, // Only retry once on failure
         },
@@ -62,7 +64,7 @@ const AppContent = () => {
     // Data health drawer state
     const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
     const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
-    const [assets, setAssets] = useState<Asset[]>([]);
+    const { assets, refetchAssets } = useAssets();
     const [accounts, setAccounts] = useState<Account[]>([]);
 
     // Fetch bundle suggestions count for Inbox tab badge
@@ -94,19 +96,6 @@ const AppContent = () => {
         return () => clearInterval(interval);
     }, []);
 
-    // Fetch assets for health check drawer
-    const fetchAssets = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-    }, []);
-
     // Fetch accounts for health check drawer
     const fetchAccounts = useCallback(async () => {
         try {
@@ -120,13 +109,12 @@ const AppContent = () => {
         }
     }, []);
 
-    // Fetch assets and accounts when health check opens
+    // Fetch accounts when health check opens
     useEffect(() => {
         if (isHealthCheckOpen) {
-            fetchAssets();
             fetchAccounts();
         }
-    }, [isHealthCheckOpen, fetchAssets, fetchAccounts]);
+    }, [isHealthCheckOpen, fetchAccounts]);
 
     // Fetch sync job status for Sync tab badge
     useEffect(() => {
@@ -182,7 +170,7 @@ const AppContent = () => {
                     <Badge colorScheme="green" px={2} py={1}>4. P&L</Badge>
                 </HStack>
 
-                <Tabs.Root defaultValue="setup">
+                <Tabs.Root defaultValue="setup" lazyMount unmountOnExit>
                     <Tabs.List>
                         <Box flex="1" display="flex" alignItems="center">
                             {/* Step 1: Configuration */}
@@ -334,7 +322,7 @@ const AppContent = () => {
                     refreshTrigger={healthCheckRefreshTrigger}
                     assets={assets}
                     accounts={accounts}
-                    onAssetsUpdated={fetchAssets}
+                    onAssetsUpdated={refetchAssets}
                     onAccountsUpdated={fetchAccounts}
                     onIssueFixed={() => {
                         refreshHealthData();

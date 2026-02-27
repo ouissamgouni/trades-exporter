@@ -6,6 +6,7 @@ import {
 import React, { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Account, API_URL, Asset } from '../types';
+import { useAssets } from '../hooks/useAssets';
 import { Direction, ReviewStatus, TransactionType } from '../enums';
 import { AssetSelector } from './AssetSelector';
 import { AccountSelector } from './AccountSelector';
@@ -128,8 +129,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     onSuccess,
 }) => {
     const queryClient = useQueryClient();
+    const { assets, refetchAssets } = useAssets();
     const [formData, setFormData] = useState<FormData>(initialFormData);
-    const [assets, setAssets] = useState<Asset[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [availableTags, setAvailableTags] = useState<Tag[]>([]);
     const [newTagKey, setNewTagKey] = useState('');
@@ -145,8 +146,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
     useEffect(() => {
         const initForm = async () => {
-            // Fetch assets and accounts
-            const assetsList = await fetchAssets();
+            // Fetch accounts and tags (assets come from useAssets hook)
             await fetchAccounts();
             await fetchTags();
 
@@ -154,7 +154,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             const now = new Date();
 
             // Find EUR asset to set as default for price/fee quote
-            const eurAsset = assetsList?.find((a: Asset) => a.symbol === 'EUR');
+            const eurAsset = assets?.find((a: Asset) => a.symbol === 'EUR');
             const eurAssetId = eurAsset?.asset_id || null;
 
             setFormData(prev => ({
@@ -165,7 +165,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             }));
         };
         initForm();
-    }, []);
+    }, [assets.length]);
 
     // Update from_account_id and to_account_id based on direction and account_id for transfers
     useEffect(() => {
@@ -209,20 +209,6 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             setFormData(prev => ({ ...prev, disposal_taxable: true }));
         }
     }, [formData.simplified_type, formData.direction, formData.price, formData.price_quote_asset_id, assets]);
-
-    const fetchAssets = async (): Promise<Asset[] | null> => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-                return data;
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-        return null;
-    };
 
     const fetchAccounts = async (): Promise<Account[] | null> => {
         try {
@@ -765,7 +751,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     value={formData.asset_id}
                                                     onChange={(id) => handleInputChange('asset_id', id)}
                                                     assets={assets}
-                                                    onAssetCreated={fetchAssets}
+                                                    onAssetCreated={refetchAssets}
                                                     defaultSymbol=""
                                                     placeholder="Select or create asset..."
                                                     rawAssetSource="manual"
@@ -971,7 +957,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 value={formData.price_quote_asset_id}
                                                 onChange={(id) => handleInputChange('price_quote_asset_id', id)}
                                                 assets={assets}
-                                                onAssetCreated={fetchAssets}
+                                                onAssetCreated={refetchAssets}
                                                 defaultSymbol=""
                                                 placeholder="e.g., EUR"
                                                 rawAssetSource="manual"
@@ -1042,7 +1028,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 value={formData.fee_quote_asset_id}
                                                 onChange={(id) => handleInputChange('fee_quote_asset_id', id)}
                                                 assets={assets}
-                                                onAssetCreated={fetchAssets}
+                                                onAssetCreated={refetchAssets}
                                                 defaultSymbol=""
                                                 placeholder="e.g., EUR"
                                                 rawAssetSource="manual"

@@ -79,7 +79,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
     // Confirmation dialog state for data health issues
     const [showHealthConfirm, setShowHealthConfirm] = useState(false);
     const [healthCheckIssueCount, setHealthCheckIssueCount] = useState(0);
-    
+
     // Refs to track state without causing closure issues
     const isCalculatingRef = useRef(false);
     const skipHealthCheckRef = useRef(false);  // Flag to skip health check after user confirms
@@ -319,10 +319,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
     const availableCategoryIds = useMemo(() => {
         const ids = new Set<number>();
         assets.forEach(asset => {
-            console.log(`Asset ${asset.asset.symbol}: category_ids =`, asset.category_ids);
             asset.category_ids.forEach(catId => ids.add(catId));
         });
-        console.log('availableCategoryIds:', [...ids]);
         return ids;
     }, [assets]);
 
@@ -504,7 +502,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
     useEffect(() => {
         // Skip if calculation is in progress to prevent duplicate API calls
         if (isCalculatingRef.current) return;
-        
+
         if (currentVersionId) {
             // Re-fetch balances with new filter setting
             loadBalances(currentVersionId, showUnsettledNegative).then(balances => {
@@ -800,7 +798,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
                     healthUrl += `?account_ids=${config.account_ids.join(',')}`;
                 }
                 const healthResponse = await fetch(healthUrl);
-                
+
                 if (!healthResponse.ok) {
                     // Health check API failed - show modal to let user decide
                     toaster.create({
@@ -813,13 +811,13 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
                     setShowHealthConfirm(true);
                     return;
                 }
-                
+
                 const healthData = await healthResponse.json();
-                
+
                 // Check if there are data health issues
                 if (healthData && healthData.has_issues) {
                     const issueCount = healthData.total_issues;
-                    
+
                     // Store issue count for dialog display
                     setHealthCheckIssueCount(issueCount);
 
@@ -852,7 +850,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
 
         // Reset skip flag for next calculation
         skipHealthCheckRef.current = false;
-        
+
         // Mark calculation as in progress
         isCalculatingRef.current = true;
 

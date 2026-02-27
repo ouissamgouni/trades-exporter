@@ -148,7 +148,7 @@ export const SyncJobPanel: React.FC = () => {
     // Poll for status updates when job is running (covers both full jobs and retries)
     useEffect(() => {
         if (jobStatus?.status === 'running') {
-            const interval = setInterval(fetchJobStatus, 500);
+            const interval = setInterval(fetchJobStatus, 2000);
             return () => clearInterval(interval);
         }
     }, [jobStatus?.status, fetchJobStatus]);

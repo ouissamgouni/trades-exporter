@@ -1791,8 +1791,8 @@ class CalculationUnit(SQLModel, table=True):
         Pattern detection priority:
         1. Same single asset in/out = INTERNAL_TRANSFER (complete)
         2. Different assets with both in/out = SWAP
-        3. Single-leg with transaction_type="internal_transfer" = UNMATCHED_INTERNAL_TRANSFER
-        4. Single-leg with transaction_type="transfer" (external) = FLOW
+        3. Single-leg with counterparty mapped to owned account = UNMATCHED_INTERNAL_TRANSFER
+        4. Single-leg external (counterparty not owned) = FLOW
         5. Unknown
         """
         if not self.legs:
@@ -1810,14 +1810,14 @@ class CalculationUnit(SQLModel, table=True):
         if outflow_assets and inflow_assets:
             return (UnitPattern.SWAP.value, "different assets")
         
-        # Single leg + transaction_type="internal_transfer" = UNMATCHED_INTERNAL_TRANSFER
+        # Single leg with counterparty mapped to owned account = UNMATCHED_INTERNAL_TRANSFER
         if self._is_incomplete_transfer():
             if outflow_assets:
                 return (UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value, "outflow-only internal transfer")
             else:
                 return (UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value, "inflow-only internal transfer")
         
-        # Single leg + transaction_type="transfer" (external) = FLOW
+        # Single leg external (counterparty not owned) = FLOW
         # This catches airdrops, external deposits/withdrawals, payments
         if self.is_outflow_only or self.is_inflow_only:
             return (UnitPattern.FLOW.value, "external single-leg transaction")
@@ -1826,19 +1826,41 @@ class CalculationUnit(SQLModel, table=True):
         return (UnitPattern.UNKNOWN.value, "unable to determine pattern")
     
     def _is_incomplete_transfer(self) -> bool:
-        """Check if this is an incomplete INTERNAL transfer (single leg with internal_transfer tx_type).
+        """Check if this is an incomplete INTERNAL transfer (single leg whose counterparty is an owned account).
+        
+        Internal transfers are detected using from_account/to_account on the transaction:
+        - Outflow with to_account.owned == True → destination is an owned account (internal)
+        - Inflow with from_account.owned == True → source is an owned account (internal)
+        
+        Having from_account_id/to_account_id set is NOT sufficient: the account
+        may exist but not be owned (e.g. a counterparty / external address the user
+        tracks but does not own).  We must check the Account.owned flag.
+        
+        If neither counterparty is an owned account, this is an external flow
+        (airdrop, payment, external deposit/withdrawal), not an unmatched
+        internal transfer.
         
         Returns:
-            True if this is an internal transfer missing its counterpart (inflow or outflow).
+            True if this is an internal transfer missing its counterpart leg.
         """
         # Must be single-direction (outflow-only or inflow-only)
         if not (self.is_outflow_only or self.is_inflow_only):
             return False
         
-        # Only check for internal_transfer type (not external "transfer")
+        # Check if counterparty resolves to an *owned* account.
+        # Only transfers where the other side is a known, owned account are "internal".
         for leg in self.legs:
-            if leg.transaction and leg.transaction.transaction_type == TransactionType.INTERNAL_TRANSFER.value:
-                return True
+            tx = leg.transaction
+            if not tx:
+                continue
+            if self.is_outflow_only and tx.to_account_id is not None:
+                # to_account relationship must exist AND be owned
+                if tx.to_account is not None and tx.to_account.owned:
+                    return True
+            if self.is_inflow_only and tx.from_account_id is not None:
+                # from_account relationship must exist AND be owned
+                if tx.from_account is not None and tx.from_account.owned:
+                    return True
         
         return False
     

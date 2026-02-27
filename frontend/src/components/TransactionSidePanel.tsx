@@ -53,6 +53,7 @@ import {
 } from '../utils/dateUtils';
 import { useTransactionPatch } from '../hooks/useTransactionPatch';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
+import { useAssets } from '../hooks/useAssets';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
@@ -254,15 +255,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     const queryClient = useQueryClient();
 
     // ------- Assets query -------
-    const { data: assets = [] } = useQuery<Asset[]>({
-        queryKey: ['assets'],
-        queryFn: async () => {
-            const r = await fetch(`${API_URL}/assets?limit=10000`);
-            if (!r.ok) throw new Error('Failed to fetch assets');
-            return r.json();
-        },
-        staleTime: 60_000,
-    });
+    const { assets, refetchAssets } = useAssets();
 
     // ------- Available tags query -------
     const { data: availableTags = [] } = useQuery<{ key: string; value: string }[]>({

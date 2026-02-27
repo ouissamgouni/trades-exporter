@@ -21,6 +21,7 @@ import {
 } from '@chakra-ui/react';
 import { FiX, FiPieChart, FiRefreshCw, FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { useBalance } from '../hooks/useBalance';
+import { useAssets } from '../hooks/useAssets';
 import { AssetBadge } from './AssetBadge';
 import { AccountBadge } from './AccountBadge';
 import { API_URL } from '../types';
@@ -426,28 +427,21 @@ export const BalanceDrawer: React.FC<BalanceDrawerProps> = ({
         clear,
     } = useBalance();
 
-    // Asset map for symbol → label lookups
-    const [assetMap, setAssetMap] = useState<Map<string, AssetRef>>(new Map());
-
-    useEffect(() => {
-        if (!isOpen) return;
-        fetch(`${API_URL}/assets?limit=10000`)
-            .then((res) => (res.ok ? res.json() : []))
-            .then((assets: Array<{ asset_id?: number; symbol?: string; label?: string }>) => {
-                const map = new Map<string, AssetRef>();
-                for (const a of assets) {
-                    if (a.symbol) {
-                        map.set(a.symbol.toUpperCase(), {
-                            id: a.asset_id ?? null,
-                            symbol: a.symbol,
-                            label: a.label ?? null,
-                        });
-                    }
-                }
-                setAssetMap(map);
-            })
-            .catch(() => { });
-    }, [isOpen]);
+    // Asset map for symbol → label lookups (derived from shared cache)
+    const { assets: allAssets } = useAssets(isOpen);
+    const assetMap = useMemo(() => {
+        const map = new Map<string, AssetRef>();
+        for (const a of allAssets) {
+            if (a.symbol) {
+                map.set(a.symbol.toUpperCase(), {
+                    id: a.asset_id ?? null,
+                    symbol: a.symbol,
+                    label: a.label ?? null,
+                });
+            }
+        }
+        return map;
+    }, [allAssets]);
 
     // Fetch transaction counts for sorting
     const [txCounts, setTxCounts] = useState<Map<string, number>>(new Map());
