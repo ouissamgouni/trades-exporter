@@ -9,7 +9,7 @@ These tests verify that the GET /transactions endpoint:
 """
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from backend.api.main import app
 from backend.db.database import get_session_dependency
@@ -28,7 +28,9 @@ def client():
     session.exec.return_value = mock_result
 
     app.dependency_overrides[get_session_dependency] = lambda: session
-    yield TestClient(app)
+    with patch("backend.api.main.init_db"), \
+         patch("backend.api.main.get_database_url", return_value="postgresql://test@localhost/test"):
+        yield TestClient(app)
     app.dependency_overrides.clear()
 
 
