@@ -43,10 +43,9 @@ COMPARABLE_FIELDS = [
     "network_transaction_id",
     "token_contract_address",
     
-    # Tax and review settings
-    "include_fee",            # Fee treatment in P&L
-    "disposal_taxable",       # Tax treatment flag
-    "review_status",          # Transaction review status
+    # NOTE: include_fee, taxability_status, and review_status are intentionally
+    # excluded — these are user-editable settings that should NOT be overwritten
+    # by a connector resync. They are only set on initial insert.
 ]
 
 

@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func
+from sqlalchemy import func, or_, literal_column
+from sqlalchemy.sql.functions import count as sa_count
+from sqlalchemy import distinct
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import OperationalError
 
@@ -151,7 +153,6 @@ class TransactionCreate(BaseModel):
         None, description="Fee quote asset symbol"
     )
     include_fee: bool = Field(False, description="Include fee in cost basis/proceeds")
-    disposal_taxable: bool = Field(False, description="Is disposal taxable event")
     source_from_account: Optional[str] = Field(
         None, description="Source account/address"
     )
@@ -318,6 +319,7 @@ class FilterOptionsResponse(BaseModel):
     connector_runs: List[FilterOption]
     tags: List[FilterOption]
     networks: List[FilterOption]
+    non_owned_count: int = 0
 
 
 @router.get("/filter-options", response_model=FilterOptionsResponse)
@@ -351,130 +353,32 @@ def get_filter_options(
     from sqlalchemy import func, distinct, or_
     from datetime import datetime
 
-    def _build_account_filter_condition(param_str, column):
-        """Build a WHERE condition for account ID filter with 'unmapped' support."""
-        parts = [p.strip() for p in param_str.split(',')]
-        has_unmapped = any(p.lower() == 'unmapped' for p in parts)
-        numeric_ids = [int(p) for p in parts if p.isdigit()]
-        conditions = []
-        if numeric_ids:
-            conditions.append(column.in_(numeric_ids))
-        if has_unmapped:
-            conditions.append(column.is_(None))
-        if len(conditions) == 1:
-            return conditions[0]
-        return or_(*conditions)
-    
-    def build_base_query():
-        """Build base query with all active filters applied."""
-        query = select(NormalizedTransaction.id)
-        
-        # Review status filter
-        if review_status:
-            query = query.where(NormalizedTransaction.review_status == review_status)
-        
-        # Taxability filter
-        if taxability:
-            query = query.where(NormalizedTransaction.taxability_status == taxability)
-        
-        # Source filter
-        if source:
-            sources_list = [s.strip() for s in source.split(',')]
-            query = query.where(NormalizedTransaction.source.in_(sources_list))
-        
-        # Account filter (with unmapped support)
-        if account_id:
-            query = query.where(_build_account_filter_condition(account_id, NormalizedTransaction.account_id))
-        
-        # From account filter (with unmapped support)
-        if from_account_id:
-            query = query.where(_build_account_filter_condition(from_account_id, NormalizedTransaction.from_account_id))
-        
-        # To account filter (with unmapped support)
-        if to_account_id:
-            query = query.where(_build_account_filter_condition(to_account_id, NormalizedTransaction.to_account_id))
-        
-        # Asset filter
-        if asset_id:
-            asset_ids_list = [int(a.strip()) for a in asset_id.split(',')]
-            query = query.where(NormalizedTransaction.asset_id.in_(asset_ids_list))
-        
-        # Category filter
-        if category_id:
-            category_ids_list = [int(c.strip()) for c in category_id.split(',')]
-            query = query.where(NormalizedTransaction.category_id.in_(category_ids_list))
-        
-        # Transaction type filter
-        if transaction_type:
-            types_list = [t.strip() for t in transaction_type.split(',')]
-            query = query.where(NormalizedTransaction.transaction_type.in_(types_list))
-        
-        # Direction filter
-        if direction:
-            directions_list = [d.strip() for d in direction.split(',')]
-            query = query.where(NormalizedTransaction.direction.in_(directions_list))
-        
-        # Connector run filter
-        if connector_run_id:
-            run_ids_list = [int(r.strip()) for r in connector_run_id.split(',')]
-            query = query.where(NormalizedTransaction.sync_connector_run_id.in_(run_ids_list))
-        
-        # Date range filter (using centralized helpers)
-        if date_from:
-            try:
-                from backend.core.utils import parse_date_from
-                from_dt = parse_date_from(date_from)
-                query = query.where(NormalizedTransaction.date_time >= from_dt)
-            except ValueError:
-                pass
-        
-        if date_to:
-            try:
-                from backend.core.utils import parse_date_to
-                to_dt = parse_date_to(date_to)
-                query = query.where(NormalizedTransaction.date_time <= to_dt)
-            except ValueError:
-                pass
-        
-        # Tag filter using JSONB operators for performance
-        if tag_key:
-            from sqlalchemy import cast, String
-            from sqlalchemy.dialects.postgresql import JSONB
-            
-            tag_filters = [k.strip() for k in tag_key.split(',') if k.strip()]
-            
-            # Build JSONB query conditions
-            tag_conditions = []
-            for tag_filter in tag_filters:
-                if ':' in tag_filter:
-                    # Exact key:value match - check if tags contains {"key": "value"}
-                    key, value = tag_filter.split(':', 1)
-                    # Check if any element in tags array has this key:value pair
-                    tag_conditions.append(
-                        NormalizedTransaction.tags.op('@>')([{key: value}])
-                    )
-                else:
-                    # Just key - check if any tag has this key (any value)
-                    # This requires checking if any array element contains the key
-                    tag_conditions.append(
-                        cast(NormalizedTransaction.tags, String).like(f'%"{tag_filter}"%')
-                    )
-            
-            # OR all tag conditions together
-            if tag_conditions:
-                from sqlalchemy import or_
-                query = query.where(or_(*tag_conditions))
-        
-        # Network filter
-        if network:
-            networks_list = [n.strip() for n in network.split(',')]
-            query = query.where(NormalizedTransaction.network.in_(networks_list))
-        
-        return query
-    
+    from backend.api.routes.filter_validator import validate_transaction_filters
+    from backend.services.filters.transaction_filter import build_filtered_transaction_query
+
+    # Re-use the shared validation + filter builder for the base CTE
+    applied, _ = validate_transaction_filters(
+        session=session,
+        review_status=review_status,
+        taxability=taxability,
+        source=source,
+        account_id=account_id,
+        from_account_id=from_account_id,
+        to_account_id=to_account_id,
+        asset_id=asset_id,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        direction=direction,
+        connector_run_id=connector_run_id,
+        tag_key=tag_key,
+        network=network,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
     try:
-        # Build base CTE for filtered transactions (now includes tag filtering via JSONB)
-        base_query = build_base_query()
+        # Build base CTE from the shared filter builder
+        base_query = build_filtered_transaction_query(applied)
         base_cte = base_query.cte("filtered_txs")
         
         # Get distinct sources with counts (filtered)
@@ -510,7 +414,7 @@ def get_filter_options(
             FilterOption(value=str(a[0]), label=a[1], count=a[2] or 0)
             for a in accounts
         ]
-        # Add "Unmapped" entry for transactions with account_id IS NULL
+        # Add "Undefined" entry for transactions with account_id IS NULL
         unmapped_account_count = session.exec(
             select(func.count(NormalizedTransaction.id))
             .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
@@ -518,7 +422,7 @@ def get_filter_options(
         ).one()
         if unmapped_account_count > 0:
             account_options.append(
-                FilterOption(value='unmapped', label='Unmapped', count=unmapped_account_count)
+                FilterOption(value='undefined', label='\u2753 Undefined', count=unmapped_account_count)
             )
         
         # Get from_accounts with counts (filtered) + unmapped entry
@@ -544,8 +448,8 @@ def get_filter_options(
             .where(NormalizedTransaction.from_account_id.is_(None))
         ).one()
         if unmapped_from_count > 0:
-            from_account_options.append(
-                FilterOption(value='unmapped', label='Unmapped', count=unmapped_from_count)
+            from_account_options.insert(
+                0, FilterOption(value='undefined', label='\u2753 Undefined', count=unmapped_from_count)
             )
         
         # Get to_accounts with counts (filtered) + unmapped entry
@@ -571,8 +475,8 @@ def get_filter_options(
             .where(NormalizedTransaction.to_account_id.is_(None))
         ).one()
         if unmapped_to_count > 0:
-            to_account_options.append(
-                FilterOption(value='unmapped', label='Unmapped', count=unmapped_to_count)
+            to_account_options.insert(
+                0, FilterOption(value='undefined', label='\u2753 Undefined', count=unmapped_to_count)
             )
         
         # Get assets that have transactions (filtered)
@@ -792,6 +696,21 @@ def get_filter_options(
             for n in networks if n[0]
         ]
         
+        # Non-owned count: transactions where from/to account is non-owned or NULL
+        non_owned_subq = select(Account.id).where(Account.owned == False)  # noqa: E712
+        non_owned_count = session.exec(
+            select(func.count(distinct(NormalizedTransaction.id)))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(
+                or_(
+                    NormalizedTransaction.from_account_id.in_(non_owned_subq),
+                    NormalizedTransaction.to_account_id.in_(non_owned_subq),
+                    NormalizedTransaction.from_account_id.is_(None),
+                    NormalizedTransaction.to_account_id.is_(None),
+                )
+            )
+        ).one() or 0
+
         return FilterOptionsResponse(
             sources=source_options,
             accounts=account_options,
@@ -808,6 +727,7 @@ def get_filter_options(
             connector_runs=connector_run_options,
             tags=tag_options,
             networks=network_options,
+            non_owned_count=non_owned_count,
         )
         
     except Exception as e:
@@ -1380,15 +1300,18 @@ def list_transactions(
     transaction_type: Optional[str] = Query(None, description="Filter by transaction type (comma-separated for multiple)"),
     direction: Optional[str] = Query(None, description="Filter by direction (comma-separated for multiple)"),
     connector_run_id: Optional[str] = Query(None, description="Filter by connector run IDs (comma-separated for multiple)"),
+    connector_run_outcome: Optional[str] = Query(None, description="Filter by outcome within connector run: synced, updated, or skipped. Requires connector_run_id."),
     source_transaction_id: Optional[str] = Query(None, description="Filter by source transaction IDs (comma-separated for multiple)"),
     tag_key: Optional[str] = Query(None, description="Filter by tag keys (comma-separated for multiple)"),
     network: Optional[str] = Query(None, description="Filter by network/chain (comma-separated for multiple)"),
     # P&L audit filters
     pnl_cal_version: Optional[int] = Query(None, description="Filter by P&L calculation version ID"),
     pnl_cal_inclusions_status: Optional[str] = Query(None, description="Filter by inclusion status in P&L version (included/excluded)"),
+    # Counterparty filter
+    non_owned: bool = Query(False, description="Filter to transactions with non-owned or unmapped counterparties"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
-    sort_by: Optional[str] = Query("date_time", description="Column to sort by (date_time, id, source, direction, transaction_type, quantity, price, total, fee, review_status, disposal_taxable)"),
+    sort_by: Optional[str] = Query("date_time", description="Column to sort by (date_time, id, source, direction, transaction_type, quantity, price, total, fee, review_status, taxability_status)"),
     sort_dir: Optional[str] = Query("desc", description="Sort direction: asc or desc"),
     session: Session = Depends(get_db),
 ):
@@ -1419,6 +1342,15 @@ def list_transactions(
     try:
         from backend.api.routes.filter_validator import validate_transaction_filters
         
+        # When connector_run_outcome is specified, don't pass connector_run_id
+        # to the shared filter builder — sync_connector_run_id tracks the LAST
+        # run that touched a transaction, which may differ from the run we're
+        # inspecting.  The outcome filter handles the correct filtering via
+        # source_transaction_id resolved from the run's JSON columns.
+        effective_connector_run_id = (
+            None if connector_run_outcome else connector_run_id
+        )
+
         # Validate filters
         applied_filters, warnings = validate_transaction_filters(
             session=session,
@@ -1432,7 +1364,7 @@ def list_transactions(
             category_id=category_id,
             transaction_type=transaction_type,
             direction=direction,
-            connector_run_id=connector_run_id,
+            connector_run_id=effective_connector_run_id,
             tag_key=tag_key,
             network=network,
             date_from=date_from,
@@ -1464,66 +1396,12 @@ def list_transactions(
             joinedload(NormalizedTransaction.sync_connector_run),
         )
 
-        if applied_filters.review_statuses:
-            if len(applied_filters.review_statuses) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.review_status == applied_filters.review_statuses[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.review_status.in_(applied_filters.review_statuses)
-                )
-
-        if applied_filters.taxability:
-            statement = statement.where(
-                NormalizedTransaction.taxability_status == applied_filters.taxability
-            )
-
-        if applied_filters.sources:
-            if len(applied_filters.sources) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.source == applied_filters.sources[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.source.in_(applied_filters.sources)
-                )
-
-        if applied_filters.account_ids:
-            from sqlalchemy import or_ as sa_or
-            numeric_ids = [x for x in applied_filters.account_ids if isinstance(x, int)]
-            has_unmapped = 'unmapped' in applied_filters.account_ids
-            conditions = []
-            if numeric_ids:
-                conditions.append(NormalizedTransaction.account_id.in_(numeric_ids))
-            if has_unmapped:
-                conditions.append(NormalizedTransaction.account_id.is_(None))
-            if conditions:
-                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
-
-        if applied_filters.from_account_ids:
-            from sqlalchemy import or_ as sa_or
-            numeric_ids = [x for x in applied_filters.from_account_ids if isinstance(x, int)]
-            has_unmapped = 'unmapped' in applied_filters.from_account_ids
-            conditions = []
-            if numeric_ids:
-                conditions.append(NormalizedTransaction.from_account_id.in_(numeric_ids))
-            if has_unmapped:
-                conditions.append(NormalizedTransaction.from_account_id.is_(None))
-            if conditions:
-                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
-
-        if applied_filters.to_account_ids:
-            from sqlalchemy import or_ as sa_or
-            numeric_ids = [x for x in applied_filters.to_account_ids if isinstance(x, int)]
-            has_unmapped = 'unmapped' in applied_filters.to_account_ids
-            conditions = []
-            if numeric_ids:
-                conditions.append(NormalizedTransaction.to_account_id.in_(numeric_ids))
-            if has_unmapped:
-                conditions.append(NormalizedTransaction.to_account_id.is_(None))
-            if conditions:
-                statement = statement.where(sa_or(*conditions) if len(conditions) > 1 else conditions[0])
+        # Apply shared transaction filter predicates (handles all standard filters:
+        # review_statuses, taxability, sources, accounts, assets, categories,
+        # transaction_types, directions, connector_runs, dates, tags, networks)
+        from backend.services.filters.transaction_filter import build_transaction_filter_predicates
+        for predicate in build_transaction_filter_predicates(applied_filters, non_owned=non_owned):
+            statement = statement.where(predicate)
 
         if unit_id is not None:
             statement = statement.where(
@@ -1562,78 +1440,10 @@ def list_transactions(
                     ~NormalizedTransaction.id.in_(version_tx_subquery)
                 )
 
-        # Date range filters (using centralized helpers for date-only support)
-        if applied_filters.date_from:
-            try:
-                from backend.core.utils import parse_date_from
-                from_dt = parse_date_from(applied_filters.date_from)
-                statement = statement.where(NormalizedTransaction.date_time >= from_dt)
-            except ValueError:
-                pass
+        # Date range, asset, category, transaction_type, direction, connector_run,
+        # tag, and network filters are already applied by build_transaction_filter_predicates above.
 
-        if applied_filters.date_to:
-            try:
-                from backend.core.utils import parse_date_to
-                to_dt = parse_date_to(applied_filters.date_to)
-                statement = statement.where(NormalizedTransaction.date_time <= to_dt)
-            except ValueError:
-                pass
-
-        # Asset filter
-        if applied_filters.asset_ids:
-            if len(applied_filters.asset_ids) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.asset_id == applied_filters.asset_ids[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.asset_id.in_(applied_filters.asset_ids)
-                )
-
-        # Category filter - filter by assets that belong to the category
-        if applied_filters.category_ids:
-            from backend.db.models import AssetCategory
-            asset_subquery = select(AssetCategory.asset_id).where(
-                AssetCategory.category_id.in_(applied_filters.category_ids)
-            ).distinct()
-            statement = statement.where(
-                NormalizedTransaction.asset_id.in_(asset_subquery)
-            )
-
-        # Transaction type filter
-        if applied_filters.transaction_types:
-            if len(applied_filters.transaction_types) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.transaction_type == applied_filters.transaction_types[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.transaction_type.in_(applied_filters.transaction_types)
-                )
-
-        # Direction filter
-        if applied_filters.directions:
-            if len(applied_filters.directions) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.direction == applied_filters.directions[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.direction.in_(applied_filters.directions)
-                )
-        
-        # Connector run filter
-        if applied_filters.connector_run_ids:
-            if len(applied_filters.connector_run_ids) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.sync_connector_run_id == applied_filters.connector_run_ids[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.sync_connector_run_id.in_(applied_filters.connector_run_ids)
-                )
-        
-        # Source transaction ID filter (for synced/updated/skipped transactions)
+        # Source transaction ID filter (not part of shared builder — transaction-table-specific)
         if source_transaction_id:
             source_ids = [sid.strip() for sid in source_transaction_id.split(',') if sid.strip()]
             if source_ids:
@@ -1645,38 +1455,40 @@ def list_transactions(
                     statement = statement.where(
                         NormalizedTransaction.source_transaction_id.in_(source_ids)
                     )
-        
-        # Tag filter using JSONB operators
-        if applied_filters.tag_keys:
-            from sqlalchemy import cast, String, or_
-            
-            tag_conditions = []
-            for tag_filter in applied_filters.tag_keys:
-                if ':' in tag_filter:
-                    # Exact key:value match
-                    key, value = tag_filter.split(':', 1)
-                    tag_conditions.append(
-                        NormalizedTransaction.tags.op('@>')([{key: value}])
-                    )
-                else:
-                    # Just key - check if any tag has this key
-                    tag_conditions.append(
-                        cast(NormalizedTransaction.tags, String).like(f'%"{tag_filter}"%')
-                    )
-            
-            if tag_conditions:
-                statement = statement.where(or_(*tag_conditions))
 
-        # Network filter
-        if applied_filters.networks:
-            if len(applied_filters.networks) == 1:
-                statement = statement.where(
-                    NormalizedTransaction.network == applied_filters.networks[0]
-                )
-            else:
-                statement = statement.where(
-                    NormalizedTransaction.network.in_(applied_filters.networks)
-                )
+        # Connector run outcome filter — resolves IDs server-side from the
+        # SyncJobConnectorRun JSON columns (synced_ids / updated_ids / skipped_ids)
+        # so the frontend doesn't need to send potentially hundreds of IDs in the URL.
+        if connector_run_outcome and connector_run_id:
+            outcome = connector_run_outcome.strip().lower()
+            if outcome in ('synced', 'updated', 'skipped'):
+                run_id_list = [int(r.strip()) for r in connector_run_id.split(',') if r.strip().isdigit()]
+                if run_id_list:
+                    run = session.get(SyncJobConnectorRun, run_id_list[0])
+                    if run:
+                        outcome_ids: List[str] = []
+                        if outcome == 'synced':
+                            outcome_ids = run.synced_ids or []
+                        elif outcome == 'updated':
+                            outcome_ids = run.updated_ids or []
+                        elif outcome == 'skipped':
+                            outcome_ids = run.skipped_ids or []
+
+                        if outcome_ids:
+                            if len(outcome_ids) == 1:
+                                statement = statement.where(
+                                    NormalizedTransaction.source_transaction_id == outcome_ids[0]
+                                )
+                            else:
+                                statement = statement.where(
+                                    NormalizedTransaction.source_transaction_id.in_(outcome_ids)
+                                )
+                        else:
+                            # Empty outcome list → no results
+                            statement = statement.where(literal_column('1') == literal_column('0'))
+                    else:
+                        # Connector run not found → no results
+                        statement = statement.where(literal_column('1') == literal_column('0'))
 
         # Get filtered count (before pagination)
         filtered_count_statement = select(func.count()).select_from(statement.subquery())
@@ -1698,8 +1510,9 @@ def list_transactions(
             'fee': NormalizedTransaction.fee,
             'review_status': NormalizedTransaction.review_status,
             'status': NormalizedTransaction.review_status,  # alias
-            'disposal_taxable': NormalizedTransaction.disposal_taxable,
-            'taxability': NormalizedTransaction.disposal_taxable,  # alias
+            'disposal_taxable': NormalizedTransaction.taxability_status,
+            'taxability': NormalizedTransaction.taxability_status,  # alias
+            'taxability_status': NormalizedTransaction.taxability_status,
             'include_fee': NormalizedTransaction.include_fee,
             'source_transaction_id': NormalizedTransaction.source_transaction_id,
         }
@@ -2177,7 +1990,7 @@ def create_transaction(
             total=transaction.total,
             fee=transaction.fee,
             include_fee=transaction.include_fee,
-            disposal_taxable=transaction.disposal_taxable,
+            taxability_status=transaction.taxability_status,
             source_from_account=transaction.source_from_account,
             source_to_account=transaction.source_to_account,
             from_account_id=transaction.from_account_id,

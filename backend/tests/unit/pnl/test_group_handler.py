@@ -69,8 +69,11 @@ class TestBuyScenarios:
 
         result = handle_unit(group, lot_manager, fmv_service, fifo_config)
 
-        # Should NOT be taxable (buying is not taxable)
-        assert len(result.realized_pnl_records) == 0
+        # Now creates RealizedPnl for all disposals, but non-taxable ones are flagged
+        assert len(result.realized_pnl_records) == 1
+        entry = result.realized_pnl_records[0]
+        assert entry.disposal_taxable is False
+        assert entry.pnl_in_base == Decimal("0")  # Base currency disposal: no P&L
 
         # Should create lot for AAPL
         assert len(result.cost_lots) == 1
@@ -204,8 +207,10 @@ class TestSwapScenarios:
 
         result = handle_unit(group, lot_manager, fmv_service, fifo_config)
 
-        # Should NOT be taxable (default)
-        assert len(result.realized_pnl_records) == 0
+        # Now creates RealizedPnl for all disposals, but non-taxable ones are flagged
+        assert len(result.realized_pnl_records) == 1
+        entry = result.realized_pnl_records[0]
+        assert entry.disposal_taxable is False
 
         # ETH lot should inherit original cost basis
         eth_lot = [l for l in result.cost_lots if l.asset_id == 3][0]

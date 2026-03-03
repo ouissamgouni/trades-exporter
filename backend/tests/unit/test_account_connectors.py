@@ -83,7 +83,7 @@ class TestAvailableConnectors:
         available = get_available_connectors()
         blockscout = available["blockscout"]
         assert blockscout.supported_chains is not None
-        assert "bnb" in blockscout.supported_chains
+        assert "polygon" in blockscout.supported_chains
         assert "base" in blockscout.supported_chains
         assert "ethereum" in blockscout.supported_chains
 
@@ -274,7 +274,7 @@ class TestConnectorLoaderService:
 
         registry = get_connector_registry()
         # Blockscout should have chain config for supported chains
-        chain_config = registry.get_chain_config("blockscout", "bnb")
+        chain_config = registry.get_chain_config("blockscout", "polygon")
         assert chain_config is not None
         chain_config = registry.get_chain_config("blockscout", "base")
         assert chain_config is not None
@@ -335,10 +335,10 @@ class TestValidation:
         blockscout = available["blockscout"]
         valid_chains = blockscout.supported_chains
 
-        assert "bnb" in valid_chains
         assert "base" in valid_chains
         assert "ethereum" in valid_chains
         assert "polygon" in valid_chains
+        assert "arbitrum" in valid_chains
         assert "invalid_chain" not in valid_chains
 
     def test_required_config_fields(self):

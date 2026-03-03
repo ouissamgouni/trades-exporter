@@ -389,4 +389,4 @@ class TestBlockscoutTokenTransfersConnector:
             assert normalized.direction == "inflow"
             assert normalized.transaction_type == "transfer"
             assert normalized.network == "hyperevm"
-            assert normalized.source_asset_symbol == "USDC_0xHYPE_TOKEN"
+            assert normalized.source_asset_symbol == "USDC"

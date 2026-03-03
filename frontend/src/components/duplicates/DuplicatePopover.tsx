@@ -177,6 +177,7 @@ export const DuplicatePopover: React.FC<DuplicatePopoverProps> = ({
             // Invalidate related queries
             queryClient.invalidateQueries({ queryKey: ['duplicateSuspicions'] });
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
 
             onOpenChange(false);
             setGroupDetail(null);

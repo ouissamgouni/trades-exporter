@@ -44,7 +44,7 @@ def make_tx(**kwargs) -> NormalizedTransaction:
         "price_quote_asset_id": 2,  # USDT
         "fee_quote_asset_id": 2,  # USDT
         "include_fee": True,
-        "disposal_taxable": True,
+        "taxability_status": "taxable",
     }
     defaults.update(kwargs)
     return NormalizedTransaction(**defaults)
@@ -277,7 +277,7 @@ class TestExpandTrade:
         tx = make_tx(
             source="coinbase",
             account_id=5,
-            disposal_taxable=True,
+            taxability_status="taxable",
             include_fee=True,
             date_time=datetime(2024, 6, 15, 10, 30),
         )
@@ -285,7 +285,7 @@ class TestExpandTrade:
         result = expand_transaction(tx)
 
         assert result.outflow.account_id == 5
-        assert result.outflow.tx_disposal_taxable is True  # Access via property from transaction
+        assert result.outflow.tx_taxability_status == "taxable"  # Access via property from transaction
         assert result.outflow.date_time == datetime(2024, 6, 15, 10, 30)
 
 

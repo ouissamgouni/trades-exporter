@@ -12,6 +12,7 @@ from backend.db.models import Account, AccountConnector
 from backend.db.database import get_session_dependency
 from backend.db.repositories import AccountConnectorRepository
 from backend.connectors.connector_registry import get_connector_registry
+from backend.services.data_cleanup_service import DataCleanupService
 
 router = APIRouter(
     prefix="/accounts/{account_id}/connectors", tags=["account-connectors"]
@@ -391,8 +392,8 @@ def delete_account_connector(
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Delete a connector from an account.
-    Also deletes any associated test fixture file.
+    Delete a connector from an account and all its associated data.
+    Uses DataCleanupService to handle the full FK dependency tree.
     """
     get_account_or_404(session, account_id)
     repo = get_repo(session)
@@ -405,11 +406,8 @@ def delete_account_connector(
             detail=f"Connector '{connector_type}' not found for account {account_id}",
         )
 
-    # Delete associated test fixture file if it exists
-    from backend.api.routes.fixtures import delete_fixture_file
-    delete_fixture_file(connector.id)
-
-    repo.delete(connector.id)
+    service = DataCleanupService(session)
+    service.execute_connector_cleanup([connector.id], delete_connectors=True)
     session.commit()
 
     return None

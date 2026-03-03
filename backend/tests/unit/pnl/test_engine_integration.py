@@ -2,23 +2,6 @@
 Integration tests for P&L Engine.
 
 Tests cover end-to-end scenarios with multiple groups processed in sequence.
-
-NOTE: These tests are currently skipped because they use Mock objects that don't
-properly support SQLAlchemy/SQLModel bidirectional relationships. When entities
-are created with relationship objects (e.g., unit=version), SQLAlchemy normally
-auto-populates the back-reference (version.calculation_units), but Mock objects
-don't support this behavior.
-
-The engine logic itself works correctly (as evidenced by debug logs showing proper
-P&L calculation), but test assertions fail because result.calculation_units
-returns empty lists.
-
-To run these tests properly, they need either:
-1. A real database fixture with SQLAlchemy session
-2. A custom Mock implementation that simulates bidirectional relationships
-3. Direct assertions on LotManager state rather than PnLResult properties
-
-For now, these are skipped with @pytest.mark.skip.
 """
 
 import pytest
@@ -40,12 +23,6 @@ from tests.unit.pnl.conftest import (
     make_leg,
     make_transaction,
     create_lot,
-)
-
-# Skip reason for all tests that depend on SQLAlchemy relationship behavior
-SKIP_REASON = (
-    "Test requires SQLAlchemy relationship back-population which Mock objects don't support. "
-    "Engine logic works correctly but PnLResult.calculation_units returns empty with Mocks."
 )
 
 
@@ -83,7 +60,6 @@ def mock_version():
     return version
 
 
-@pytest.mark.skip(reason=SKIP_REASON)
 class TestPnLEngineIntegration:
     """Integration tests for full P&L calculation flows."""
 
@@ -137,7 +113,7 @@ class TestPnLEngineIntegration:
         result = engine.process_calculation_units(groups, version=mock_version)
 
         # Should have one realized P&L entry (from sell)
-        taxable_entries = [e for e in result.realized_pnl_entries if e.taxable]
+        taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
@@ -184,7 +160,7 @@ class TestPnLEngineIntegration:
 
         result = engine.process_calculation_units(groups, version=mock_version)
 
-        taxable_entries = [e for e in result.realized_pnl_entries if e.taxable]
+        taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
@@ -243,7 +219,7 @@ class TestPnLEngineIntegration:
         result = engine.process_calculation_units(groups, version=mock_version)
 
         # Should have one taxable P&L (the sell)
-        taxable_entries = [e for e in result.realized_pnl_entries if e.taxable]
+        taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
@@ -299,7 +275,7 @@ class TestPnLEngineIntegration:
         # Proceeds = 6000
         # P&L = 1000
 
-        taxable_entries = [e for e in result.realized_pnl_entries if e.taxable]
+        taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
@@ -364,7 +340,6 @@ class TestPnLEngineIntegration:
         assert result.total_realized_pnl == Decimal("18000")
 
 
-@pytest.mark.skip(reason=SKIP_REASON)
 class TestPnLEngineEdgeCases:
     """Test edge cases in integration scenarios."""
 
@@ -375,7 +350,7 @@ class TestPnLEngineEdgeCases:
 
         result = engine.process_calculation_units([], version=mock_version)
 
-        assert result.units_processed == 0
+        assert len(result.calculation_units) == 0
         assert result.total_realized_pnl == Decimal("0")
 
     def test_reset_clears_state(self, mock_session, mock_price_service, base_datetime):
@@ -397,7 +372,6 @@ class TestPnLEngineEdgeCases:
 
         assert engine.lot_manager.get_balance(account_id=1, asset_id=2) == Decimal("0")
 
-@pytest.mark.skip(reason=SKIP_REASON)
 class TestNegativeLotSettlementIntegration:
     """Integration tests for negative lot settlement flow."""
 
@@ -427,7 +401,7 @@ class TestNegativeLotSettlementIntegration:
         result = engine.process_calculation_units([sell_group], version=mock_version)
 
         # Should have realized P&L with zero cost basis (provisional)
-        taxable_entries = [e for e in result.realized_pnl_entries if e.taxable]
+        taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
@@ -492,10 +466,10 @@ class TestNegativeLotSettlementIntegration:
         balance = engine.lot_manager.get_balance(account_id=1, asset_id=2)
         assert balance == Decimal("1")
 
-        # Should have adjustment P&L entries
+        # Should have adjustment P&L entries (identified by settlement notes)
         adjustment_entries = [
             e for e in result.realized_pnl_entries 
-            if getattr(e, 'adjustment_type', None) == "cost_update"
+            if e.notes and "Cost basis settlement" in e.notes
         ]
         assert len(adjustment_entries) == 1
 
@@ -559,7 +533,7 @@ class TestNegativeLotSettlementIntegration:
         # Check adjustments: should have 2 (one per buy)
         adjustment_entries = [
             e for e in result.realized_pnl_entries 
-            if getattr(e, 'adjustment_type', None) == "cost_update"
+            if e.notes and "Cost basis settlement" in e.notes
         ]
         assert len(adjustment_entries) == 2
 

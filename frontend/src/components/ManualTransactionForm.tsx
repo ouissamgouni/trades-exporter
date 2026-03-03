@@ -56,7 +56,7 @@ interface FormData {
     source_fee_quote_asset_symbol: string;
     fee_quote_asset_id: number | null;
     include_fee: boolean;
-    disposal_taxable: boolean;
+    taxability_status: string;
     from_address: string;
     to_address: string;
     network: string;
@@ -90,7 +90,7 @@ const initialFormData: FormData = {
     source_fee_quote_asset_symbol: '',
     fee_quote_asset_id: null,
     include_fee: true,
-    disposal_taxable: false,
+    taxability_status: 'unknown',
     from_address: '',
     to_address: '',
     network: '',
@@ -205,8 +205,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             eurAssetId &&
             formData.price_quote_asset_id === eurAssetId;
 
-        if (shouldBeChecked && !formData.disposal_taxable) {
-            setFormData(prev => ({ ...prev, disposal_taxable: true }));
+        if (shouldBeChecked && formData.taxability_status === 'unknown') {
+            setFormData(prev => ({ ...prev, taxability_status: 'taxable' }));
         }
     }, [formData.simplified_type, formData.direction, formData.price, formData.price_quote_asset_id, assets]);
 
@@ -330,7 +330,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                 price_quote_asset_id: formData.price_quote_asset_id,
                 review_status: formData.review_status,
                 include_fee: formData.include_fee,
-                disposal_taxable: formData.disposal_taxable,
+                taxability_status: formData.taxability_status,
             };
 
             // Only include fee_quote_asset_id if it has a value (don't send null to avoid overwriting)
@@ -1075,14 +1075,16 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                     <Checkbox.Control />
                                     <Checkbox.Label fontSize="sm">Include Fee in P&L</Checkbox.Label>
                                 </Checkbox.Root>
-                                <Checkbox.Root
-                                    checked={formData.disposal_taxable}
-                                    onCheckedChange={(e) => handleInputChange('disposal_taxable', !!e.checked)}
-                                >
-                                    <Checkbox.HiddenInput />
-                                    <Checkbox.Control />
-                                    <Checkbox.Label fontSize="sm">Taxable Event</Checkbox.Label>
-                                </Checkbox.Root>
+                                <NativeSelect.Root size="sm" maxW="160px">
+                                    <NativeSelect.Field
+                                        value={formData.taxability_status}
+                                        onChange={(e) => handleInputChange('taxability_status', e.target.value)}
+                                    >
+                                        <option value="unknown">Unknown</option>
+                                        <option value="taxable">Taxable</option>
+                                        <option value="non_taxable">Non-Taxable</option>
+                                    </NativeSelect.Field>
+                                </NativeSelect.Root>
                             </Flex>
                         </Card.Body>
                     </Card.Root>

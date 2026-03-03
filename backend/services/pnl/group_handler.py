@@ -542,46 +542,53 @@ def _proceeds_and_pnl_entry(
     min_acquired = min(s.cost_lot.acquired_at for s in slices)
     holding_days = (ensure_utc(disposal_dt) - ensure_utc(min_acquired)).days
     
-    if disposal.disposal_taxable or (disposal.is_fee and disposal.asset_id != config.base_currency_id):
-        entry = RealizedPnl(
-            # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
-            # relationship objects needed for persistence when objects aren't yet persisted)
-            asset_id=asset_id,  # FK for runtime access
-            asset=disposal.asset,  # Relationship object for persistence
-            qty=qty,
-            proceeds_in_base=proceeds,
-            cost_basis_in_base=cost_basis,
-            pnl_in_base=pnl,
-            disposal_taxable=disposal.disposal_taxable,
-            transaction_id=origin_tx_id,  # FK for runtime access
-            transaction=disposal.origin_transaction,  # Relationship object for persistence
-            origin_unit=unit,  # FK to calculation_units
-            realized_at=disposal_dt,
-            holding_period_days=holding_days,
-            slices=slices,
-            # Store proceeds metadata for transparency
-            proceeds_source=proceeds_metadata.get("source"),
-            proceeds_price=proceeds_metadata.get("price"),
-            proceeds_price_source=proceeds_metadata.get("price_source"),
-            proceeds_price_timestamp=proceeds_metadata.get("timestamp"),
-        )
+    # Always create RealizedPnl for all real disposals.
+    # The disposal_taxable flag is preserved on each entry for downstream filtering
+    # (e.g. total_realized_pnl sums only taxable, total_all_pnl sums everything).
+    entry = RealizedPnl(
+        # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
+        # relationship objects needed for persistence when objects aren't yet persisted)
+        asset_id=asset_id,  # FK for runtime access
+        asset=disposal.asset,  # Relationship object for persistence
+        qty=qty,
+        proceeds_in_base=proceeds,
+        cost_basis_in_base=cost_basis,
+        pnl_in_base=pnl,
+        disposal_taxable=disposal.disposal_taxable,
+        transaction_id=origin_tx_id,  # FK for runtime access
+        transaction=disposal.origin_transaction,  # Relationship object for persistence
+        origin_unit=unit,  # FK to calculation_units
+        realized_at=disposal_dt,
+        holding_period_days=holding_days,
+        slices=slices,
+        # Store proceeds metadata for transparency
+        proceeds_source=proceeds_metadata.get("source"),
+        proceeds_price=proceeds_metadata.get("price"),
+        proceeds_price_source=proceeds_metadata.get("price_source"),
+        proceeds_price_timestamp=proceeds_metadata.get("timestamp"),
+    )
 
-        log.info(
-            "pnl_realized",
-            tx_id=tx_id,
-            unit_id=unit.id,
-            asset_id=asset_id,
-            asset_symbol=asset_symbol,
-            qty=float(qty),
-            proceeds=float(proceeds),
-            cost_basis=float(cost_basis),
-            pnl=float(pnl),
-            holding_days=holding_days,
-            slices_used=len(slices),
-        )
+    log.info(
+        "pnl_realized",
+        tx_id=tx_id,
+        unit_id=unit.id,
+        asset_id=asset_id,
+        asset_symbol=asset_symbol,
+        qty=float(qty),
+        proceeds=float(proceeds),
+        cost_basis=float(cost_basis),
+        pnl=float(pnl),
+        holding_days=holding_days,
+        slices_used=len(slices),
+        disposal_taxable=disposal.disposal_taxable,
+    )
 
-        # Note: origin_unit=unit relationship auto-populates realized_pnl_records
-        # No manual append needed
+    # Manual append needed - SQLAlchemy back-population doesn't work reliably
+    # for transient objects (not yet in a session)
+    if unit.realized_pnl_records is None:
+        unit.realized_pnl_records = []
+    if entry not in unit.realized_pnl_records:
+        unit.realized_pnl_records.append(entry)
 
     # Create FeeEntry index for fee disposals (links to RealizedPnl)
     if disposal.is_fee:
@@ -1044,9 +1051,14 @@ def _handle_acquisition(
     fee_origin_tx_ids = {leg.origin_transaction_id for leg in unit.fee_legs}
     non_fee_entries = [e for e in realized_entries if e.transaction_id not in fee_origin_tx_ids]
     
-    if non_fee_entries:
+    # Only use proceeds from taxable disposals for cost basis of new lots.
+    # Non-taxable entries (e.g. derivative settlements, non-taxable swaps) should
+    # still inherit cost basis from consumed slices.
+    taxable_non_fee_entries = [e for e in non_fee_entries if e.disposal_taxable]
+    
+    if taxable_non_fee_entries:
         # Taxable disposals: new asset cost = proceeds from non-fee disposals only
-        total_cost = sum(e.proceeds_in_base for e in non_fee_entries)
+        total_cost = sum(e.proceeds_in_base for e in taxable_non_fee_entries)
         cost_source = "realized_proceeds"
     elif consumed_slices:
         # Non-taxable disposals: new asset inherits cost basis from all consumed slices
@@ -1207,7 +1219,6 @@ def _handle_acquisition(
                 continue
                 
             # Create adjustment entry to correct provisional P&L for non-base currencies
-            # Note: unit=unit relationship auto-populates realized_pnl_records
             cost_applied = settlement.cost_basis_applied or Decimal(0)
             adjustment_entry = RealizedPnl(
                 # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
@@ -1217,12 +1228,17 @@ def _handle_acquisition(
                 proceeds_in_base=Decimal(0),  # Adjustment only affects cost
                 cost_basis_in_base=cost_applied,
                 pnl_in_base=-cost_applied,  # Reduces P&L (cost was 0, now has real cost)
-                taxable=True,  # Non-base currency adjustments are taxable
+                disposal_taxable=True,  # Non-base currency adjustments are taxable
                 transaction=inflow.origin_transaction,  # Use relationship object
-                unit=unit,  # FK to calculation_units - auto-populates realized_pnl_records
+                origin_unit=unit,  # FK to calculation_units
                 realized_at=inflow_date,
                 notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id}",
             )
+            # Manual append - back-population unreliable for transient objects
+            if unit.realized_pnl_records is None:
+                unit.realized_pnl_records = []
+            if adjustment_entry not in unit.realized_pnl_records:
+                unit.realized_pnl_records.append(adjustment_entry)
             log.info(
                 "pnl_adjustment_created",
                 cost_applied=float(cost_applied),

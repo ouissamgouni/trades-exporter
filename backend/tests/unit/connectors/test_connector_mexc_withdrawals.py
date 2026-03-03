@@ -89,7 +89,7 @@ class TestMEXCWithdrawalsConnector:
         assert result.fee == 1.0
         assert result.source_fee_quote_asset_symbol == "USDT"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "TRC20"
+        assert result.network == "tron"
 
     def test_raw_to_normalized_with_non_ok_status(self, mock_ccxt_mexc, mock_mexc_credentials):
         """Test that non-ok status withdrawals raise ValueError."""

@@ -7,6 +7,7 @@ Modeled as transfer transactions for bundling with on-chain EVM transactions.
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Any, List, Generator, Optional
+import time as _time
 
 from backend.connectors.base.base_connector import BaseConnector
 from backend.connectors.base.connector_exceptions import (
@@ -21,6 +22,11 @@ log = configure_logging("hyperliquid_transfers")
 # Time window for pagination (30 days)
 WINDOW_DAYS = 30
 MS_PER_DAY = 86_400_000
+
+# Rate-limit / retry settings
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 2.0   # seconds, doubles each retry
+REQUEST_DELAY = 0.3     # polite delay between every request
 
 
 class HyperliquidTransfersConnector(BaseConnector):
@@ -60,7 +66,8 @@ class HyperliquidTransfersConnector(BaseConnector):
             return
 
         self._wallet_address = (config or {}).get(
-            "_account_address_or_identifier", ""
+            "wallet_address",
+            (config or {}).get("_account_address_or_identifier", ""),
         )
         if not self._wallet_address:
             raise ValueError(
@@ -81,6 +88,34 @@ class HyperliquidTransfersConnector(BaseConnector):
             raise
 
     # ------------------------------------------------------------------
+    # Retry helper
+    # ------------------------------------------------------------------
+
+    def _call_with_retry(self, operation: str, func, *args, **kwargs):
+        """Call *func* with exponential back-off on HTTP 429."""
+        backoff = INITIAL_BACKOFF
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if "429" in str(e):
+                    if attempt < MAX_RETRIES:
+                        log.warning(
+                            f"⚠️ Rate limited (429) on {operation}, "
+                            f"retrying in {backoff:.0f}s "
+                            f"(attempt {attempt}/{MAX_RETRIES})"
+                        )
+                        _time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    else:
+                        log.error(
+                            f"❌ Rate limited on {operation} "
+                            f"after {MAX_RETRIES} retries"
+                        )
+                raise
+
+    # ------------------------------------------------------------------
     # Raw data fetching
     # ------------------------------------------------------------------
 
@@ -93,8 +128,6 @@ class HyperliquidTransfersConnector(BaseConnector):
             for item in self._load_test_data():
                 yield item
             return
-
-        import time as _time
 
         start_ms = self.since_timestamp_ms or 0
         now_ms = int(_time.time() * 1000)
@@ -117,8 +150,13 @@ class HyperliquidTransfersConnector(BaseConnector):
             window_end = min(window_start + WINDOW_DAYS * MS_PER_DAY, now_ms)
 
             try:
-                entries = self._info.user_non_funding_ledger_updates(
-                    self._wallet_address, window_start, window_end
+                _time.sleep(REQUEST_DELAY)
+                entries = self._call_with_retry(
+                    "user_non_funding_ledger_updates",
+                    self._info.user_non_funding_ledger_updates,
+                    self._wallet_address,
+                    window_start,
+                    window_end,
                 )
             except Exception as e:
                 log.error(f"❌ API error fetching transfers: {e}")
@@ -206,14 +244,19 @@ class HyperliquidTransfersConnector(BaseConnector):
                 network="arbitrum",  # Hyperliquid L1 bridges via Arbitrum
             )
 
-            # Set from/to account for transfer matching
+            # Set the known side of from/to with both account ID and address.
+            # Pipeline enrichment (OnChainAddressEnrichmentStage →
+            # AccountResolutionStage) will fill the other side from the
+            # on-chain transaction.
             wallet = self._wallet_address or self._get_account_identifier()
             if is_deposit:
-                tx.source_to_account = wallet
+                # Deposit into HL: current account is the destination
                 tx.to_account_id = self.account_id
+                tx.source_to_account = wallet
             else:
-                tx.source_from_account = wallet
+                # Withdrawal from HL: current account is the source
                 tx.from_account_id = self.account_id
+                tx.source_from_account = wallet
 
             return tx
         except Exception as e:

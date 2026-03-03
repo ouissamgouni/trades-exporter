@@ -133,10 +133,9 @@ class LotManager:
             timestamp=event_timestamp,
         )
         
-        # Explicitly add event to lot's events collection for cascade persistence
-        if lot.events is None:
-            lot.events = []
-        lot.events.append(event)
+        # Note: event is automatically added to lot.events via the SQLAlchemy
+        # back_populates relationship when lot=lot is set in CostLotEvent().
+        # No explicit lot.events.append() needed.
         
         log.debug(
             "lot_event_emitted",

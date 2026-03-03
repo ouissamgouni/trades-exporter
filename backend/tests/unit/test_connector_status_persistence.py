@@ -11,10 +11,25 @@ from datetime import datetime
 from backend.services.sync_job_service import SyncJobService
 
 
+@pytest.fixture(autouse=True)
+def _reset_singleton():
+    """Reset SyncJobService singleton between tests."""
+    SyncJobService._instance = None
+    yield
+    SyncJobService._instance = None
+
+
+@pytest.fixture(autouse=True)
+def _mock_load_settings():
+    """Mock load_settings so constructor doesn't read settings.yaml."""
+    with patch('backend.services.sync_job_service.load_settings', return_value={}):
+        yield
+
+
 class TestConnectorStatusPersistence:
     """Tests for _persist_connector_status method and status transitions."""
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_connector_status_uses_fresh_session(self, mock_get_session):
         """Ensure status persistence uses fresh sessions for thread-safety."""
         # Setup
@@ -35,7 +50,7 @@ class TestConnectorStatusPersistence:
         mock_session.add.assert_called_once_with(mock_connector)
         mock_session.commit.assert_called_once()
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_running_status(self, mock_get_session):
         """Test persisting RUNNING status."""
         # Setup
@@ -44,6 +59,7 @@ class TestConnectorStatusPersistence:
         
         mock_connector = MagicMock()
         mock_connector.last_sync_status = "pending"
+        mock_connector.last_sync_at = None
         mock_session.get.return_value = mock_connector
         
         service = SyncJobService()
@@ -54,9 +70,9 @@ class TestConnectorStatusPersistence:
         # Assert
         assert mock_connector.last_sync_status == "running"
         # last_sync_at should NOT be updated for "running" status
-        assert not hasattr(mock_connector, 'last_sync_at') or mock_connector.last_sync_at is None
+        assert mock_connector.last_sync_at is None
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_pending_status(self, mock_get_session):
         """Test persisting PENDING (QUEUED) status."""
         # Setup
@@ -76,7 +92,7 @@ class TestConnectorStatusPersistence:
         assert mock_connector.last_sync_status == "pending"
         # last_sync_at should NOT be updated for "pending" status
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_success_status_updates_timestamp(self, mock_get_session):
         """Test persisting SUCCESS status updates last_sync_at."""
         # Setup
@@ -99,7 +115,7 @@ class TestConnectorStatusPersistence:
         assert mock_connector.last_sync_at is not None  # Timestamp updated
         assert mock_connector.last_error is None  # Error cleared
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_failed_status_with_error(self, mock_get_session):
         """Test persisting FAILED status with error message."""
         # Setup
@@ -122,7 +138,7 @@ class TestConnectorStatusPersistence:
         assert mock_connector.last_sync_at is not None  # Timestamp updated
         assert mock_connector.last_error == error_msg
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_handles_missing_connector(self, mock_get_session):
         """Test graceful handling when connector doesn't exist."""
         # Setup
@@ -139,7 +155,7 @@ class TestConnectorStatusPersistence:
         mock_session.add.assert_not_called()
         mock_session.commit.assert_not_called()
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_persist_handles_database_error(self, mock_get_session):
         """Test graceful handling of database errors."""
         # Setup
@@ -157,7 +173,7 @@ class TestConnectorStatusPersistence:
         
         # Assert - exception was caught and handled
 
-    @patch('backend.services.sync_job_service.get_session')
+    @patch('backend.db.database.get_session')
     def test_concurrent_persistence_uses_separate_sessions(self, mock_get_session):
         """Test that concurrent status updates use separate sessions."""
         # Setup

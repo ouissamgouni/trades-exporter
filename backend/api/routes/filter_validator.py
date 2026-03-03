@@ -79,41 +79,65 @@ class FilterValidator:
         
         return list(existing_ids)
 
+    # Recognized sentinel values for account filters
+    ACCOUNT_SENTINELS = {"unmapped", "undefined", "non-owned"}
+
+    def validate_ids_with_sentinels(
+        self,
+        ids_str: Optional[str],
+        model_class,
+        id_field_name: str,
+        filter_name: str,
+    ) -> list:
+        """
+        Validate comma-separated IDs against a database model,
+        allowing special sentinel values to pass through.
+
+        Supported sentinels:
+        - 'unmapped' / 'undefined': maps to column IS NULL
+        - 'non-owned': maps to accounts with owned=False + NULL
+
+        Returns list of valid int IDs + sentinel strings.
+        """
+        if not ids_str:
+            return []
+
+        sentinels_found: list[str] = []
+        numeric_parts: list[str] = []
+
+        for id_str in ids_str.split(","):
+            id_str = id_str.strip()
+            lower = id_str.lower()
+            if lower in self.ACCOUNT_SENTINELS:
+                # Normalize 'unmapped' → 'undefined' for consistency
+                sentinel = "undefined" if lower == "unmapped" else lower
+                if sentinel not in sentinels_found:
+                    sentinels_found.append(sentinel)
+            elif id_str:
+                numeric_parts.append(id_str)
+
+        # Validate numeric IDs via the standard method
+        numeric_csv = ",".join(numeric_parts) if numeric_parts else None
+        valid_ids = self.validate_ids(
+            numeric_csv, model_class, id_field_name, filter_name
+        )
+
+        result: list = list(valid_ids)
+        result.extend(sentinels_found)
+        return result
+
+    # Backward-compatible alias
     def validate_ids_with_unmapped(
         self,
         ids_str: Optional[str],
         model_class,
         id_field_name: str,
-        filter_name: str
+        filter_name: str,
     ) -> list:
-        """
-        Validate comma-separated IDs against a database model,
-        allowing the special sentinel value 'unmapped' to pass through.
-        
-        Returns list of valid int IDs + 'unmapped' string if present.
-        """
-        if not ids_str:
-            return []
-        
-        has_unmapped = False
-        numeric_parts = []
-        
-        for id_str in ids_str.split(','):
-            id_str = id_str.strip()
-            if id_str.lower() == 'unmapped':
-                has_unmapped = True
-            elif id_str:
-                numeric_parts.append(id_str)
-        
-        # Validate numeric IDs via the standard method
-        numeric_csv = ','.join(numeric_parts) if numeric_parts else None
-        valid_ids = self.validate_ids(numeric_csv, model_class, id_field_name, filter_name)
-        
-        result: list = list(valid_ids)
-        if has_unmapped:
-            result.append('unmapped')
-        
-        return result
+        """Alias for validate_ids_with_sentinels (backward compat)."""
+        return self.validate_ids_with_sentinels(
+            ids_str, model_class, id_field_name, filter_name
+        )
     
     def validate_enum(
         self,
@@ -254,14 +278,14 @@ def validate_transaction_filters(
         taxability, VALID_TAXABILITY_STATUSES, "taxability"
     )
     
-    # Validate ID fields (with unmapped support for account filters)
-    validated_account_ids = validator.validate_ids_with_unmapped(
+    # Validate ID fields (with sentinel support for account filters)
+    validated_account_ids = validator.validate_ids_with_sentinels(
         account_id, Account, "id", "account_id"
     )
-    validated_from_account_ids = validator.validate_ids_with_unmapped(
+    validated_from_account_ids = validator.validate_ids_with_sentinels(
         from_account_id, Account, "id", "from_account_id"
     )
-    validated_to_account_ids = validator.validate_ids_with_unmapped(
+    validated_to_account_ids = validator.validate_ids_with_sentinels(
         to_account_id, Account, "id", "to_account_id"
     )
     validated_asset_ids = validator.validate_ids(

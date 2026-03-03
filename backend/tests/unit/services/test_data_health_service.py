@@ -24,6 +24,16 @@ from backend.services.data_health.detectors import (
 )
 
 
+# Always patch MissingDataDetector to avoid real DB calls during tests
+@pytest.fixture(autouse=True)
+def _patch_missing_data_detector():
+    """Auto-patch MissingDataDetector for all tests in this module."""
+    with patch('backend.services.data_health.issue_service.MissingDataDetector') as mock_cls:
+        mock_cls.return_value.count.return_value = 0
+        mock_cls.return_value.fetch.return_value = ([], 0)
+        yield mock_cls
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================

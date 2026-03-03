@@ -241,5 +241,14 @@ class PnLResult:
                 total += entry.pnl_in_base
         return total
     
+    @property
+    def total_all_pnl(self) -> Decimal:
+        """Sum of ALL realized P&L (taxable + non-taxable, e.g. derivative settlements)."""
+        total = Decimal("0")
+        for entry in self.realized_pnl_entries:
+            if entry.pnl_in_base:
+                total += entry.pnl_in_base
+        return total
+    
 
         

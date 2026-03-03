@@ -268,7 +268,7 @@ class TestUnmatchedInternalTransferTaxability:
         leg.unit = unit  # compute() accesses leg.unit
         leg.transaction = Mock()
         leg.transaction.transaction_type = "transfer"
-        leg.transaction.disposal_taxable = False
+        leg.transaction.taxability_status = "unknown"
         
         result = calculator.compute(leg)
         
@@ -288,7 +288,7 @@ class TestUnmatchedInternalTransferTaxability:
         leg.leg_type = "outflow"
         leg.asset_id = 2  # Not base currency (base_currency_id=1)
         leg.unit = unit  # compute() accesses leg.unit
-        leg.tx_disposal_taxable = False  # No override
+        leg.tx_taxability_status = "unknown"  # No override
         leg.is_fee = False
         
         result = calculator.compute(leg)

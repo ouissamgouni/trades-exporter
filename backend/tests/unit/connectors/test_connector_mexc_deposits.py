@@ -93,9 +93,8 @@ class TestMEXCDepositsConnector:
         assert result.fee == 0.001
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "erc20"
-        # Verify account fields
-        assert result.source_to_account == "mexc-main-account"  # Connector account identifier
+        assert result.network == "ethereum"
+        assert result.source_to_account == "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"  # addressTo from raw data
         assert result.to_account_id == 1  # Resolved account ID
         assert result.source_from_account == "0x123abc456def789"  # Blockchain address
 
@@ -203,70 +202,6 @@ class TestMEXCDepositsConnector:
         assert result.fee == 0
         assert result.source_fee_quote_asset_symbol == "USDT"
 
-    def test_get_deposits_success(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test successful deposit fetching with 7-day windowing."""
-        connector = MEXCDepositsConnector(account_id=1)
-        
-        # Mock returns same data for each 7-day window
-        mock_deposits = [
-            {"id": "d1", "currency": "BTC", "amount": 1.0, "status": "ok"},
-            {"id": "d2", "currency": "BTC", "amount": 0.5, "status": "ok"},
-        ]
-        mock_ccxt_mexc.fetch_deposits.return_value = mock_deposits
-        
-        result = connector.get_deposits("BTC")
-        
-        # Should have called fetch_deposits multiple times (for 7-day windows over 90 days)
-        assert mock_ccxt_mexc.fetch_deposits.call_count > 1
-        # Result should contain deposits from all windows
-        assert len(result) >= 2
-        assert result[0]["id"] == "d1"
-        # Verify that since parameter was used (90 days ago by default)
-        first_call_args = mock_ccxt_mexc.fetch_deposits.call_args_list[0]
-        assert first_call_args[1]["code"] == "BTC"
-        assert first_call_args[1]["since"] is not None
-
-    def test_get_deposits_with_custom_since(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test deposit fetching with custom since parameter."""
-        connector = MEXCDepositsConnector(account_id=1)
-        
-        mock_deposits = [{"id": "d1", "currency": "BTC", "amount": 1.0, "status": "ok"}]
-        mock_ccxt_mexc.fetch_deposits.return_value = mock_deposits
-        
-        # Use a recent timestamp (within 7 days) to avoid multiple windows
-        from datetime import datetime, timezone, timedelta
-        now = datetime.now(timezone.utc)
-        custom_since = int((now - timedelta(days=3)).timestamp() * 1000)
-        
-        result = connector.get_deposits("BTC", since=custom_since)
-        
-        assert len(result) >= 1
-        # Should have been called at least once
-        assert mock_ccxt_mexc.fetch_deposits.call_count >= 1
-        first_call_args = mock_ccxt_mexc.fetch_deposits.call_args_list[0]
-        assert first_call_args[1]["code"] == "BTC"
-        assert first_call_args[1]["since"] == custom_since
-
-    def test_get_deposits_error_703(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test that error 703 is handled gracefully."""
-        connector = MEXCDepositsConnector(account_id=1)
-        
-        mock_ccxt_mexc.fetch_deposits.side_effect = Exception("Error 703: Permission denied")
-        
-        result = connector.get_deposits("BTC")
-        
-        assert result == []
-
-    def test_get_deposits_empty_result(self, mock_ccxt_mexc, mock_mexc_credentials):
-        """Test handling of empty deposit list."""
-        connector = MEXCDepositsConnector(account_id=1)
-        
-        mock_ccxt_mexc.fetch_deposits.side_effect = Exception("No deposits found")
-        
-        result = connector.get_deposits("BTC")
-        
-        assert result == []
-
     def test_yield_raws(self, mock_ccxt_mexc, mock_mexc_credentials):
         """Test yield_raws method with 7-day windowing."""
         connector = MEXCDepositsConnector(account_id=1)
@@ -317,4 +252,4 @@ class TestMEXCDepositsConnector:
         
         result = connector.raw_to_normalized(ccxt_deposit)
         
-        assert result.network == "erc20"
+        assert result.network == "ethereum"

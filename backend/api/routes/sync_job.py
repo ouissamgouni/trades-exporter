@@ -122,12 +122,19 @@ def start_sync_job(request: Optional[SyncJobStartRequest] = None):
         if request and request.connector_overrides:
             connector_overrides = []
             for o in request.connector_overrides:
-                # Parse since_datetime if provided
-                since_dt = None
-                if o.since_datetime:
-                    since_dt = datetime.fromisoformat(
-                        o.since_datetime.replace('Z', '+00:00')
-                    )
+                # Parse since_datetime if explicitly provided in the request.
+                # Use _UNSET (the default) when the field was not sent at all,
+                # and None when the field was explicitly set to null (= full sync).
+                from backend.services.sync_job_service import _UNSET
+                since_dt = _UNSET  # default: not provided
+                if 'since_datetime' in o.model_fields_set:
+                    # Field was explicitly included in the JSON payload
+                    if o.since_datetime:
+                        since_dt = datetime.fromisoformat(
+                            o.since_datetime.replace('Z', '+00:00')
+                        )
+                    else:
+                        since_dt = None  # Explicit null → full sync
                 
                 connector_overrides.append(
                     ConnectorOverride(

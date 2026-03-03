@@ -25,6 +25,11 @@ def create_default_pipeline(
     3. AssetEnrichmentStage - Resolve symbols to asset IDs
     4. PersistenceStage - Save to database
 
+    NOTE: DerivativePositionStage is NOT included here. It runs as a batch
+    post-processing step after all workers finish (see sync_job_service.py).
+    This avoids race conditions with multi-threaded workers processing
+    perp fills out of chronological order.
+
     NOTE: Leg expansion (outflow/inflow/fee legs) is now done at P&L time
     via leg_expander.prepare_transactions_for_pnl(). This keeps the
     transaction table clean and atomic.

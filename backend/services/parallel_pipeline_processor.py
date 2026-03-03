@@ -107,6 +107,11 @@ class ParallelPipelineProcessor:
         log.debug(f"🏃 Worker {worker_id} started")
         
         while True:
+            # Check for abort before pulling next item
+            if self.abort_event.is_set():
+                log.debug(f"🛑 Worker {worker_id} aborting (abort event set)")
+                break
+
             try:
                 # Get item from queue with timeout
                 try:
@@ -227,6 +232,9 @@ class ParallelPipelineProcessor:
         """
         Stop the processor and wait for workers to finish.
         
+        Sends poison pills to signal workers to exit after draining the queue.
+        If abort_event was set externally, workers exit immediately.
+        
         Args:
             timeout: Maximum time to wait for workers (seconds)
         """
@@ -235,17 +243,27 @@ class ParallelPipelineProcessor:
         
         log.info("⏹️ Stopping parallel processor...")
         
-        # Send poison pills to stop workers
+        # Send poison pills to stop workers (workers will finish current item first)
         for _ in range(self.num_workers):
-            self.input_queue.put(None)
+            try:
+                self.input_queue.put(None, timeout=2)
+            except Exception:
+                pass
         
-        # Wait for queue to be processed
-        self.input_queue.join()
+        # Shutdown executor with timeout
+        self.executor.shutdown(wait=False)
         
-        # Shutdown executor
-        # Note: ThreadPoolExecutor.shutdown() does not support timeout parameter
-        # The queue.join() above ensures all queued work is completed
-        self.executor.shutdown(wait=True)
+        # Wait for executor threads with bounded timeout
+        deadline = time.monotonic() + timeout
+        for t in list(self.executor._threads):
+            remaining = max(0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            t.join(timeout=remaining)
+        
+        # If threads are still alive after timeout, force abort
+        if any(t.is_alive() for t in self.executor._threads):
+            self.abort_event.set()
         
         log.info(
             f"✅ Processor stopped. Processed: {self.items_processed}, "

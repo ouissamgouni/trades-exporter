@@ -23,6 +23,11 @@ from backend.services.pipeline import (
 from backend.services.parallel_pipeline_processor import ParallelPipelineProcessor, PipelineStage
 
 
+# Sentinel value to distinguish "not provided" from "explicitly set to None".
+# None means "full sync" (user cleared the field), _UNSET means "use default".
+_UNSET = object()
+
+
 class JobStatus(str, Enum):
     """Possible states for a sync job."""
 
@@ -87,17 +92,20 @@ class ConnectorOverride:
     enabled: Optional[bool] = None
     test_mode: Optional[bool] = None
     test_file_path: Optional[str] = None
-    since_datetime: Optional[datetime] = None
+    since_datetime: Any = field(default_factory=lambda: _UNSET)  # _UNSET = not provided, None = full sync
     symbols: Optional[List[str]] = None
     currencies: Optional[List[str]] = None
     
     def to_dict(self) -> Dict[str, Any]:
+        since_val = None
+        if self.since_datetime is not _UNSET and self.since_datetime is not None:
+            since_val = self.since_datetime.isoformat()
         return {
             "connector_id": self.connector_id,
             "enabled": self.enabled,
             "test_mode": self.test_mode,
             "test_file_path": self.test_file_path,
-            "since_datetime": self.since_datetime.isoformat() if self.since_datetime else None,
+            "since_datetime": since_val,
             "symbols": self.symbols,
             "currencies": self.currencies,
         }
@@ -1167,15 +1175,25 @@ class SyncJobService:
             # Create progress callback 
             connector_progress_callback = self._create_progress_callback()
             
-            # Build a single-connector override to ensure only this connector runs
-            single_override = [ConnectorOverride(connector_id=connector_id, enabled=True)]
+            # Build override list that explicitly enables ONLY this connector
+            # and disables ALL others. Without this, the hub falls back to
+            # account_connector.enabled from the database, which would cause
+            # every DB-enabled connector to run during a retry.
+            all_connectors_list = acct_repo.get_all()
+            retry_overrides = [
+                ConnectorOverride(
+                    connector_id=ac.id,
+                    enabled=(ac.id == connector_id),
+                )
+                for ac, _ in all_connectors_list
+            ]
             
             # Create single-connector hub
             connector_hub = DatabaseConnectorHub(
                 session,
                 parent_output_path=sync_output_path,
                 connector_since_map=connector_since_map,
-                connector_overrides=single_override,
+                connector_overrides=retry_overrides,
                 progress_callback=connector_progress_callback,
                 renormalize_mode=False,
             )
@@ -1279,7 +1297,17 @@ class SyncJobService:
             finally:
                 # Stop processor and wait for workers
                 processor.stop(timeout=60)
-            
+
+                # --- Batch derivative position processing ---
+                try:
+                    from backend.services.pipeline.stages.derivative_position_stage import DerivativePositionStage
+                    dp_stage = DerivativePositionStage()
+                    dp_count = dp_stage.process_batch(session, connector_ids=[connector_id])
+                    if dp_count > 0:
+                        self.logger.info(f"📊 Derivative positions batch (retry): {dp_count} positions created/updated")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Derivative position batch processing failed (non-fatal): {e}")
+
             # Finalize connector if still running (completion callback may have already handled it)
             self._finalize_connector(connector_id, db_connector_runs, sync_job_repo)
             
@@ -1406,8 +1434,10 @@ class SyncJobService:
                     override_test_mode[o.connector_id] = o.test_mode
                 if o.test_file_path is not None:
                     override_test_file[o.connector_id] = o.test_file_path
-                # Track since_datetime override (can be explicitly None for full sync)
-                if hasattr(o, 'since_datetime'):
+                # Track since_datetime override (only when explicitly provided).
+                # `since_datetime=None` is a valid override meaning "full sync".
+                # `since_datetime=_UNSET` means "not provided, use default".
+                if o.since_datetime is not _UNSET:
                     has_since_override.add(o.connector_id)
                     override_since[o.connector_id] = o.since_datetime
 
@@ -1808,7 +1838,21 @@ class SyncJobService:
                 # Stop processor and wait for workers to finish
                 processor.stop(timeout=60)
                 self.logger.info(f"📊 Processor stats: {processor.get_stats()}")
-            
+
+                # --- Batch derivative position processing ---
+                # Run after all workers finish so fills are processed in
+                # chronological order with full idempotency (safe for resync).
+                try:
+                    from backend.services.pipeline.stages.derivative_position_stage import DerivativePositionStage
+                    dp_stage = DerivativePositionStage()
+                    # Scope to connectors being synced in this job
+                    synced_connector_ids = list(self.progress.connector_statuses.keys())
+                    dp_count = dp_stage.process_batch(session, connector_ids=synced_connector_ids)
+                    if dp_count > 0:
+                        self.logger.info(f"📊 Derivative positions batch: {dp_count} positions created/updated")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Derivative position batch processing failed (non-fatal): {e}")
+
             # Mark job as complete (if not aborted)
             if self.progress.status == JobStatus.RUNNING:
                 # Finalize any connectors still in RUNNING state (skip actively retrying ones)

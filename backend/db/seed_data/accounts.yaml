@@ -26,6 +26,7 @@ accounts:
   # Binance Main Account
   - name: "Binance"
     account_type: "cex"
+    owned: true
     group: "Trading"
     color: "#1F6F9F"
     address_or_identifier: "binance_main"
@@ -60,6 +61,7 @@ accounts:
   # MEXC Account
   - name: "MEXC"
     account_type: "cex"
+    owned: true
     group: "Trading"
     color: "#2B5C8A"
     address_or_identifier: "mexc_main"
@@ -115,6 +117,7 @@ accounts:
   # OKX Account
   - name: "OKX"
     account_type: "cex"
+    owned: true
     group: "Trading"
     color: "#565EB8"
     address_or_identifier: "okx_main"
@@ -171,6 +174,7 @@ accounts:
   # Coinbase Account
   - name: "Coinbase"
     account_type: "cex"
+    owned: true
     group: "On-Ramp"
     color: "#37A13C"
     address_or_identifier: "coinbase_main"
@@ -209,6 +213,7 @@ accounts:
   # Degiro Broker Account
   - name: "Degiro"
     account_type: "broker"
+    owned: true
     group: "Stock Brokers"
     color: "#C56A00"
     address_or_identifier: "degiro_main"
@@ -224,6 +229,7 @@ accounts:
   # Tangem EVM Wallets (split per chain, grouped)
   - name: "Tangem Ethereum"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#6C3483"
     address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
@@ -248,6 +254,7 @@ accounts:
 
   - name: "Tangem Base"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#1E7A6D"
     address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
@@ -263,6 +270,7 @@ accounts:
 
   - name: "Tangem BSC"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#C0392B"
     address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
@@ -277,6 +285,7 @@ accounts:
 
   - name: "Tangem HyperEVM"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#4A90D9"
     address_or_identifier: "0x347681ec529f767dafB3703486570Bc3Da136993"
@@ -304,11 +313,14 @@ accounts:
   # =========================================================================
 
   # Hyperliquid (Perps DEX — uses wallet address, no API key needed)
+  # address_or_identifier is the HL bridge address (for transfer matching with Arbitrum)
+  # wallet_address in connector config is the actual wallet used for API queries
   - name: "Hyperliquid"
     account_type: "dex"
+    owned: true
     group: "Trading"
     color: "#50C878"
-    address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+    address_or_identifier: "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7"
     tags:
       - trading: true
       - perps: true
@@ -319,6 +331,7 @@ accounts:
         sync_priority: 10
         config:
           start_datetime: "2025-10-01T00:00:00"
+          wallet_address: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
 
       - connector_type: "hyperliquid-funding"
         color: "#1E7A6D"
@@ -326,6 +339,7 @@ accounts:
         sync_priority: 20
         config:
           start_datetime: "2025-10-01T00:00:00"
+          wallet_address: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
 
       - connector_type: "hyperliquid-transfers"
         color: "#4A90D9"
@@ -333,10 +347,12 @@ accounts:
         sync_priority: 30
         config:
           start_datetime: "2025-10-01T00:00:00"
+          wallet_address: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
 
   # Metamask EVM Wallets (split per chain, grouped)
   - name: "Metamask Arbitrum"
     account_type: "wallet"
+    owned: true
     group: "Metamask"
     color: "#B36B14"
     address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
@@ -351,6 +367,7 @@ accounts:
 
   - name: "Metamask Ethereum"
     account_type: "wallet"
+    owned: true
     group: "Metamask"
     color: "#B55A00"
     address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
@@ -365,6 +382,7 @@ accounts:
           include_token_transfers: true
   - name: "Metamask BSC"
     account_type: "wallet"
+    owned: true
     group: "Metamask"
     color: "#922B21"
     address_or_identifier: "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
@@ -376,9 +394,24 @@ accounts:
         sync_priority: 10
         config:
           chain: "bsc"
+
+  - name: "Polymarket"
+    account_type: "wallet"
+    owned: true
+    group: "Polymarket"
+    color: "#7D6608"
+    address_or_identifier: "0x6f5E6579Cd9F9eaB734674e33dE4f41A33ae27DE"
+    connectors:
+      - connector_type: "polymarket"
+        color: "#4A90D9"
+        enabled: true
+        sync_priority: 10
+        config:
+          chain: "polygon"
   # XRP Ledger Wallet
   - name: "Tangem XRP"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#1A4971"
     address_or_identifier: "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6"
@@ -393,6 +426,7 @@ accounts:
   # Solana Wallet
   - name: "Tangem Solana"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#1B7D72"
     address_or_identifier: "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8"
@@ -408,6 +442,7 @@ accounts:
   # Cardano Wallet
   - name: "Tangem Cardano"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#3A7D44"
     address_or_identifier: "addr1qx478mhvuvlu2wfufdfem7a0truw3zjj7mrtxcdhytyjazkd4rpkpyue5qayv2spsznjn43q4phsldkptpthw3u5teasar990w"
@@ -424,6 +459,7 @@ accounts:
   # SUI Wallet
   - name: "Tangem SUI"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#8B7A00"
     address_or_identifier: "0x0ccab2011b80a41bbff8b22340aab9a026c974f127044d296dafa2367ee48284"
@@ -440,6 +476,7 @@ accounts:
   # Note: Tangem doesn't expose zpub for SegWit, so using direct address
   - name: "Tangem BTC"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#D46B08"
     address_or_identifier: "bc1q3srpjynzg96gx5prgct9d0p6sddp85cfx7krff"
@@ -456,6 +493,7 @@ accounts:
   # NEAR Protocol Wallet (NearBlocks API)
   - name: "Tangem Near"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#1A6B60"
     address_or_identifier: "c12744ecf665963725e4a23ee5f6655d23e92db740826a7cd2e22266d2dee88f"
@@ -472,6 +510,7 @@ accounts:
   # Bittensor (TAO) Wallet (Taostats API)
   - name: "Tangem TAO"
     account_type: "wallet"
+    owned: true
     group: "Tangem"
     color: "#76448A"
     address_or_identifier: "5FE7xRXFJWQbep1JrS8JyjmZJRycdskeVummEWp525LxBKud"

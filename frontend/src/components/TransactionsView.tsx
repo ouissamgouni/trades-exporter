@@ -27,6 +27,7 @@ const EMPTY_FILTERS: TransactionFilterState = {
     networks: [],
     dateFrom: '',
     dateTo: '',
+    nonOwned: false,
 };
 
 interface ViewPreset {
@@ -115,7 +116,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                 </Box>
             )}
 
-            <Tabs.Root defaultValue="transactions">
+            <Tabs.Root defaultValue="transactions" lazyMount>
                 <Tabs.List mb={4}>
                     <Tabs.Trigger value="transactions">
                         📋 Transactions

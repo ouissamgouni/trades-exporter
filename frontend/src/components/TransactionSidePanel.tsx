@@ -36,7 +36,7 @@ import {
     FiArrowUp,
 } from 'react-icons/fi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Transaction, Account, Asset, API_URL } from '../types';
+import { Transaction, Account, Asset, API_URL, DerivativePosition } from '../types';
 import { Direction, ReviewStatus, TransactionType } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { AccountBadge } from './AccountBadge';
@@ -54,6 +54,7 @@ import {
 import { useTransactionPatch } from '../hooks/useTransactionPatch';
 import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
 import { useAssets } from '../hooks/useAssets';
+import { usePositions } from '../hooks/usePositions';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
@@ -404,39 +405,6 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         }
 
         await saveFields(updates);
-
-        // Auto-check disposal_taxable after type/direction change
-        autoCheckDisposalTaxable(
-            field === 'transaction_type' ? newValue as SimplifiedType : simplifiedType,
-            field === 'direction' ? newValue : direction,
-        );
-    };
-
-    /**
-     * Auto-select disposal_taxable when conditions are met:
-     * trade + outflow + price > 0 + price_quote_asset is EUR
-     * Only auto-sets to true, never auto-clears.
-     */
-    const autoCheckDisposalTaxable = async (
-        simplifiedType?: SimplifiedType,
-        direction?: string,
-    ) => {
-        const sType = simplifiedType ?? deriveSimplifiedType(tx.transaction_type);
-        const dir = direction ?? tx.direction;
-        const eurAsset = assets.find(a => a.symbol === 'EUR');
-        const eurAssetId = eurAsset?.asset_id;
-
-        const shouldBeChecked =
-            sType === 'trade' &&
-            dir === 'outflow' &&
-            tx.price != null &&
-            tx.price > 0 &&
-            eurAssetId != null &&
-            tx.price_quote_asset_id === eurAssetId;
-
-        if (shouldBeChecked && !tx.disposal_taxable) {
-            await saveField('disposal_taxable', 'true');
-        }
     };
 
     /**
@@ -462,22 +430,10 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     };
 
     /**
-     * When price_quote_asset_id changes, check disposal_taxable auto-set.
+     * When price_quote_asset_id changes.
      */
     const savePriceQuoteAsset = async (newAssetId: string) => {
         await saveField('price_quote_asset_id', newAssetId || null);
-        // After save, check disposal_taxable
-        const eurAsset = assets.find(a => a.symbol === 'EUR');
-        const id = newAssetId ? parseInt(newAssetId, 10) : null;
-        if (
-            deriveSimplifiedType(tx.transaction_type) === 'trade' &&
-            tx.direction === 'outflow' &&
-            tx.price != null && tx.price > 0 &&
-            eurAsset?.asset_id != null && id === eurAsset.asset_id &&
-            !tx.disposal_taxable
-        ) {
-            await saveField('disposal_taxable', 'true');
-        }
     };
 
     // ============================================================
@@ -1068,22 +1024,15 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         onSave={async (v) => { await saveField('include_fee', v); }}
                     />
                     <EditableField
-                        label="Disposal Taxable"
-                        value={String(tx.disposal_taxable ?? false)}
-                        type="checkbox"
-                        onSave={async (v) => { await saveField('disposal_taxable', v); }}
-                    />
-                    <InfoRow
                         label="Taxability"
-                        value={
-                            <Badge
-                                size="xs"
-                                colorPalette={tx.taxability_status === 'taxable' ? 'orange' : tx.taxability_status === 'non_taxable' ? 'green' : 'yellow'}
-                                fontSize="9px"
-                            >
-                                {(tx.taxability_status || 'unknown').toUpperCase()}
-                            </Badge>
-                        }
+                        value={tx.taxability_status || 'unknown'}
+                        type="select"
+                        options={[
+                            { value: 'unknown', label: 'Unknown' },
+                            { value: 'taxable', label: 'Taxable' },
+                            { value: 'non_taxable', label: 'Non-Taxable' },
+                        ]}
+                        onSave={async (v) => { await saveField('taxability_status', v); }}
                     />
                 </Section>
 
@@ -1148,6 +1097,13 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                             {unbundling ? 'Removing...' : '🔗 Remove from Bundle'}
                         </Button>
                     </Section>
+                )}
+
+                {/* ============================================================ */}
+                {/* 🎯 Position (for perp_open / perp_close transactions) */}
+                {/* ============================================================ */}
+                {(tx.source_transaction_type === 'perp_open' || tx.source_transaction_type === 'perp_close') && (
+                    <PositionCard transactionId={tx.id} />
                 )}
 
                 {/* Spam/Phishing Alert */}
@@ -1576,3 +1532,101 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
 };
 
 export default TransactionSidePanel;
+
+
+// ============================================================================
+// PositionCard — Shows linked derivative position for perp transactions
+// ============================================================================
+
+const PositionCard: React.FC<{ transactionId: number }> = ({ transactionId }) => {
+    const { positions, isLoading } = usePositions({
+        transaction_id: transactionId,
+        limit: 1,
+        enabled: true,
+    });
+
+    const pos = positions[0] as DerivativePosition | undefined;
+
+    if (isLoading) {
+        return (
+            <Box mt={2} p={2} bg="gray.800" borderRadius="md" borderWidth="1px" borderColor="gray.600">
+                <Flex align="center" gap={1.5} mb={1}>
+                    <Text fontSize="10px" fontWeight="bold" color="gray.300">🎯 Position</Text>
+                </Flex>
+                <Text fontSize="9px" color="gray.400">Loading...</Text>
+            </Box>
+        );
+    }
+
+    if (!pos) return null;
+
+    const sideColor = pos.side === 'long' ? 'green' : 'red';
+    const statusColor = pos.status === 'open' ? 'blue' : 'gray';
+    const pnlColor = pos.net_pnl >= 0 ? 'green.300' : 'red.300';
+
+    return (
+        <Box mt={2} p={2} bg="gray.800" borderRadius="md" borderWidth="1px" borderColor="gray.600">
+            {/* Header */}
+            <Flex align="center" gap={1.5} mb={2}>
+                <Text fontSize="10px" fontWeight="bold" color="gray.300">🎯 Position</Text>
+                <Badge size="xs" colorPalette="purple" fontSize="9px">{pos.coin}</Badge>
+                <Badge size="xs" colorPalette={sideColor} fontSize="9px" variant="solid">
+                    {pos.side.toUpperCase()}
+                </Badge>
+                <Badge size="xs" colorPalette={statusColor} fontSize="9px" variant="subtle">
+                    {pos.status}
+                </Badge>
+            </Flex>
+
+            {/* Body */}
+            <Flex direction="column" gap={0.5} fontSize="9px">
+                <Flex justify="space-between">
+                    <Text color="gray.400">Entry Price</Text>
+                    <Text color="gray.200">${pos.entry_price?.toFixed(2)}</Text>
+                </Flex>
+                {pos.exit_price != null && (
+                    <Flex justify="space-between">
+                        <Text color="gray.400">Exit Price</Text>
+                        <Text color="gray.200">${pos.exit_price.toFixed(2)}</Text>
+                    </Flex>
+                )}
+                <Flex justify="space-between">
+                    <Text color="gray.400">Size</Text>
+                    <Text color="gray.200">{pos.size} {pos.coin}</Text>
+                </Flex>
+                <Flex justify="space-between">
+                    <Text color="gray.400">Realized P&L</Text>
+                    <Text color={pnlColor} fontWeight="bold">
+                        {pos.realized_pnl >= 0 ? '+' : ''}{pos.realized_pnl?.toFixed(2)} {pos.margin_currency}
+                    </Text>
+                </Flex>
+                <Flex justify="space-between">
+                    <Text color="gray.400">Fees</Text>
+                    <Text color="gray.200">{pos.total_fees?.toFixed(2)} {pos.margin_currency}</Text>
+                </Flex>
+                <Flex justify="space-between">
+                    <Text color="gray.400">Net P&L</Text>
+                    <Text color={pnlColor} fontWeight="bold">
+                        {pos.net_pnl >= 0 ? '+' : ''}{pos.net_pnl?.toFixed(2)} {pos.margin_currency}
+                    </Text>
+                </Flex>
+                {pos.duration_hours != null && (
+                    <Flex justify="space-between">
+                        <Text color="gray.400">Duration</Text>
+                        <Text color="gray.200">
+                            {pos.duration_hours < 24
+                                ? `${pos.duration_hours.toFixed(1)}h`
+                                : `${(pos.duration_hours / 24).toFixed(1)}d`}
+                        </Text>
+                    </Flex>
+                )}
+                {pos.return_pct != null && (
+                    <Flex justify="space-between">
+                        <Text color="gray.400">Return</Text>
+                        <Text color={pnlColor}>{pos.return_pct >= 0 ? '+' : ''}{pos.return_pct.toFixed(2)}%</Text>
+                    </Flex>
+                )}
+            </Flex>
+        </Box>
+    );
+};

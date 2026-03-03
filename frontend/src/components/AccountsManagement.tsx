@@ -5,11 +5,13 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { FiChevronDown, FiChevronRight, FiPieChart, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
+import { LuEraser } from 'react-icons/lu';
 import { BalanceDrawer } from './BalanceDrawer';
 import { Account, API_URL } from '../types';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { DeleteAccountDialog } from './DeleteAccountDialog';
+import { CleanupDialog } from './CleanupDialog';
 import { toaster } from './ui/toaster';
 
 const AccountsManagement: React.FC = () => {
@@ -21,13 +23,19 @@ const AccountsManagement: React.FC = () => {
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
 
-    const deleteConfirm = useConfirmDialog<number>();
+    // Delete dialog state
+    const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+    const isDeleteOpen = deleteTarget !== null;
 
     // Balance drawer state
     const [balanceDrawerOpen, setBalanceDrawerOpen] = useState(false);
     const [balanceMode, setBalanceMode] = useState<'global' | 'account'>('global');
     const [balanceAccountId, setBalanceAccountId] = useState<number | undefined>();
     const [balanceTitle, setBalanceTitle] = useState<string>('');
+
+    // Cleanup dialog state
+    const [cleanupTarget, setCleanupTarget] = useState<{ accountId: number; title: string } | null>(null);
+    const isCleanupOpen = cleanupTarget !== null;
 
     const handleBalanceClick = (account: Account) => {
         setBalanceMode('account');
@@ -41,6 +49,22 @@ const AccountsManagement: React.FC = () => {
         setBalanceAccountId(undefined);
         setBalanceTitle('Global Balance');
         setBalanceDrawerOpen(true);
+    };
+
+    const handlePurgeAccount = (account: Account) => {
+        setCleanupTarget({
+            accountId: account.id,
+            title: `Purge All Data: ${account.name}`,
+        });
+    };
+
+    const handleCleanupClose = () => {
+        setCleanupTarget(null);
+    };
+
+    const handleCleanupCompleted = () => {
+        setCleanupTarget(null);
+        fetchAccounts();
     };
 
     const fetchAccounts = async () => {
@@ -66,24 +90,17 @@ const AccountsManagement: React.FC = () => {
         fetchAccounts();
     }, [searchText]);
 
-    const handleDelete = (accountId: number) => {
-        deleteConfirm.open(accountId);
+    const handleDelete = (account: Account) => {
+        setDeleteTarget({ id: account.id, name: account.name });
     };
 
-    const executeDelete = async () => {
-        if (!deleteConfirm.data) return;
-        const accountId = deleteConfirm.data;
-        try {
-            const response = await fetch(`${API_URL}/accounts/${accountId}`, {
-                method: 'DELETE',
-            });
-            if (!response.ok) throw new Error('Failed to delete account');
+    const handleDeleteClose = () => {
+        setDeleteTarget(null);
+    };
 
-            fetchAccounts();
-        } catch (error) {
-            console.error('Error deleting account:', error);
-            toaster.error({ title: 'Error', description: 'Failed to delete account' });
-        }
+    const handleDeleted = () => {
+        setDeleteTarget(null);
+        fetchAccounts();
     };
 
     const handleEdit = (account: Account) => {
@@ -374,6 +391,15 @@ const AccountsManagement: React.FC = () => {
                                                                                                             <FiPieChart />
                                                                                                         </IconButton>
                                                                                                         <IconButton
+                                                                                                            aria-label="Purge data"
+                                                                                                            size="xs"
+                                                                                                            variant="ghost"
+                                                                                                            onClick={() => handlePurgeAccount(account)}
+                                                                                                            title="Purge all account data"
+                                                                                                        >
+                                                                                                            <LuEraser />
+                                                                                                        </IconButton>
+                                                                                                        <IconButton
                                                                                                             aria-label="Edit"
                                                                                                             size="xs"
                                                                                                             variant="ghost"
@@ -386,7 +412,7 @@ const AccountsManagement: React.FC = () => {
                                                                                                             size="xs"
                                                                                                             variant="ghost"
                                                                                                             colorScheme="red"
-                                                                                                            onClick={() => handleDelete(account.id)}
+                                                                                                            onClick={() => handleDelete(account)}
                                                                                                         >
                                                                                                             <FiTrash2 />
                                                                                                         </IconButton>
@@ -429,14 +455,12 @@ const AccountsManagement: React.FC = () => {
             />
 
             {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteConfirm.isOpen}
-                onClose={deleteConfirm.close}
-                onConfirm={executeDelete}
-                title="Delete Account"
-                message="Are you sure you want to delete this account?"
-                confirmLabel="Delete"
-                isDestructive
+            <DeleteAccountDialog
+                isOpen={isDeleteOpen}
+                onClose={handleDeleteClose}
+                accountId={deleteTarget?.id ?? null}
+                accountName={deleteTarget?.name ?? ''}
+                onDeleted={handleDeleted}
             />
 
             <BalanceDrawer
@@ -445,6 +469,16 @@ const AccountsManagement: React.FC = () => {
                 mode={balanceMode}
                 accountId={balanceAccountId}
                 title={balanceTitle}
+            />
+
+            <CleanupDialog
+                isOpen={isCleanupOpen}
+                onClose={handleCleanupClose}
+                connectorIds={[]}
+                accountId={cleanupTarget?.accountId}
+                defaultMode="purge"
+                title={cleanupTarget?.title ?? ''}
+                onCompleted={handleCleanupCompleted}
             />
         </Box>
     );

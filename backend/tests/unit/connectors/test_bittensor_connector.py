@@ -32,7 +32,7 @@ def bittensor_connector():
 def sample_transfers():
     """Load sample transfer data from fixtures."""
     fixture_path = (
-        Path(__file__).parent
+        Path(__file__).parents[2]
         / "fixtures"
         / "bittensor"
         / "bittensor_transactions.json"

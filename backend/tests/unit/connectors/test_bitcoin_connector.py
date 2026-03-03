@@ -49,10 +49,10 @@ def test_bitcoin_connector_invalid_address():
 
 def test_bitcoin_connector_test_mode():
     """Test that Bitcoin connector loads test fixture in test mode."""
-    # Get the fixture path - tests are in backend/tests/, fixtures are in backend/tests/fixtures/
+    # Get the fixture path - fixtures are in backend/tests/fixtures/
     test_dir = os.path.dirname(os.path.abspath(__file__))
     fixture_path = os.path.join(
-        test_dir, "fixtures", "bitcoin", "blockstream_transactions.json"
+        test_dir, "..", "..", "fixtures", "bitcoin", "blockstream_transactions.json"
     )
     
     connector = ConnectorBitcoinEsplora(
@@ -73,7 +73,7 @@ def test_bitcoin_connector_normalization():
     """Test that Bitcoin connector normalizes transactions correctly."""
     test_dir = os.path.dirname(os.path.abspath(__file__))
     fixture_path = os.path.join(
-        test_dir, "fixtures", "bitcoin", "blockstream_transactions.json"
+        test_dir, "..", "..", "fixtures", "bitcoin", "blockstream_transactions.json"
     )
     
     connector = ConnectorBitcoinEsplora(

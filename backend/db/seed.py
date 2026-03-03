@@ -712,9 +712,6 @@ class DatabaseSeeder:
                 existing.taxability_status = tx_data.get(
                     "taxability_status", existing.taxability_status
                 )
-                existing.disposal_taxable = tx_data.get(
-                    "disposal_taxable", existing.disposal_taxable
-                )
                 existing.from_account_id = from_account_id or existing.from_account_id
                 existing.to_account_id = to_account_id or existing.to_account_id
                 existing.user_calculation_unit_id = tx_data.get(
@@ -758,7 +755,6 @@ class DatabaseSeeder:
                     ),
                     review_status=tx_data.get("review_status", "pending"),
                     taxability_status=tx_data.get("taxability_status", "unknown"),
-                    disposal_taxable=tx_data.get("disposal_taxable", False),
                     from_account_id=from_account_id,
                     to_account_id=to_account_id,
                     user_calculation_unit_id=tx_data.get("bundle_id"),
@@ -1051,7 +1047,6 @@ class DatabaseSeeder:
             # Status fields
             data["review_status"] = tx.review_status
             data["taxability_status"] = tx.taxability_status
-            data["disposal_taxable"] = tx.disposal_taxable
 
             # Transfer accounts
             data["source_from_account"] = tx.source_from_account

@@ -31,7 +31,8 @@ import { AssetBadge } from '../AssetBadge';
 import { CompactTransactionBadgeRow } from '../CompactTransactionBadgeRow';
 import { TransactionRow } from '../TransactionRow';
 import { TransactionsTable } from '../TransactionsTable';
-import { defaultFilterState, TransactionFilterState } from '../TransactionFilters';
+import { defaultFilterState, TransactionFilterState, TransactionFilters } from '../TransactionFilters';
+import { buildPnLFilterParams } from '../../utils/pnlFilterParams';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
 import { formatQuantity } from '../../utils/numberUtils';
@@ -2309,6 +2310,7 @@ const TransactionsTab: React.FC<{
         networks: [],
         dateFrom: '',
         dateTo: '',
+        nonOwned: false,
         versionId: String(versionId),
         inclusionStatus: 'included',
     });
@@ -2369,6 +2371,7 @@ const TransactionsTab: React.FC<{
         dateTo: '',
         versionId: String(versionId),
         inclusionStatus: view,
+        nonOwned: false,
     }), [versionId, view]);
 
     return (
@@ -2518,6 +2521,26 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
         onTabChange?.(tab);
     };
 
+    // ── Transaction-level filters for P&L audit ──
+    const defaultPnlFilterState: TransactionFilterState = useMemo(() => ({
+        ...defaultFilterState,
+        reviewStatus: [],  // not relevant for P&L
+        taxability: [],    // not relevant for P&L
+    }), []);
+
+    const [txFilters, setTxFilters] = useState<TransactionFilterState>(defaultPnlFilterState);
+    const [txFilterExpanded, setTxFilterExpanded] = useState(false);
+
+    const txFilterParams = useMemo(
+        () => buildPnLFilterParams(txFilters),
+        [txFilters],
+    );
+
+    const pnlHiddenFilters: (keyof TransactionFilterState)[] = useMemo(
+        () => ['reviewStatus', 'taxability', 'connectorRunIds'],
+        [],
+    );
+
     // Use provided data directly - no fallback derivation
     const costLots = propCostLots || [];
     const consumedSlices = propConsumedSlices || [];
@@ -2539,6 +2562,23 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
 
     return (
         <Box mt={4}>
+            {/* Transaction-level filters for P&L audit data */}
+            {versionId && (
+                <Box mb={4}>
+                    <TransactionFilters
+                        filters={txFilters}
+                        onChange={setTxFilters}
+                        onClear={() => { setTxFilters(defaultPnlFilterState); }}
+                        expanded={txFilterExpanded}
+                        onExpandedChange={setTxFilterExpanded}
+                        resetFilters={defaultPnlFilterState}
+                        filterOptionsUrl={`${API_URL}/pnl/versions/${versionId}/filter-options`}
+                        filterOptionsQueryKey={['pnlFilterOptions', String(versionId)]}
+                        hiddenFilters={pnlHiddenFilters}
+                    />
+                </Box>
+            )}
+
             <Tabs.Root value={activeTab} onValueChange={(e) => handleTabChange(e.value)}>
                 <Tabs.List mb={4}>
                     <Tabs.Trigger value="units">
@@ -2578,6 +2618,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'units'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ units, baseCurrency, versionId, onTransactionClick }) => (
                                 <UnitsTab
                                     units={units}
@@ -2604,6 +2645,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'lots'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ lots, baseCurrency, onTransactionClick }) => (
                                 <CostLotsTab
                                     lots={lots}
@@ -2627,6 +2669,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'realized'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ entries, baseCurrency, onTransactionClick }) => (
                                 <RealizedPnLTab
                                     entries={entries}
@@ -2651,6 +2694,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onUnitClick={onUnitClick}
                             lazy={true}
                             enabled={activeTab === 'fees'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ fees, baseCurrency, onTransactionClick, onUnitClick }) => (
                                 <FeesTab
                                     fees={fees}
@@ -2689,6 +2733,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'transactions'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ versionId, baseCurrency, onTransactionClick }) => (
                                 <TransactionsTab
                                     versionId={versionId}
@@ -2715,6 +2760,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             assets={assets}
                             lazy={true}
                             enabled={activeTab === 'warnings'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ warnings, baseCurrency, onTransactionClick, quoteAssetId, onPriceAdded, assets }) => (
                                 <WarningsTab
                                     warnings={warnings}

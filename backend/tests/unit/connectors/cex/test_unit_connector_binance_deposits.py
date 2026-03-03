@@ -64,9 +64,9 @@ class TestBinanceDepositsConnector:
         assert result.fee == 0.001
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "eth"
-        # Verify account fields: destination (to) is connector account, source (from) is blockchain address
-        assert result.source_to_account == "binance-main-account"  # Connector account identifier
+        assert result.network == "ethereum"
+        # Verify account fields: destination (to) is blockchain address, source (from) is blockchain address
+        assert result.source_to_account == "0xmyaddress"  # Blockchain to-address
         assert result.to_account_id == 1  # Resolved account ID
         assert result.source_from_account == "0xsenderaddress"  # Blockchain address
         assert result.date_time == datetime(2022, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -103,7 +103,7 @@ class TestBinanceDepositsConnector:
         assert result.quantity == 0.05
         assert result.fee == 0.0001
         assert result.source_fee_quote_asset_symbol == "BTC"
-        assert result.network == "btc"
+        assert result.network == "bitcoin"
 
     @patch("backend.connectors.cex.connector_binance_deposits.load_credentials")
     @patch("ccxt.binance")

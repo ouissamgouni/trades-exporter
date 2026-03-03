@@ -175,7 +175,7 @@ class TestAccountsYamlSeed:
 
     @pytest.fixture
     def accounts_yaml(self):
-        yaml_path = Path(__file__).parent.parent / "db" / "seed_data" / "accounts.yaml"
+        yaml_path = Path(__file__).parents[3] / "db" / "seed_data" / "accounts.yaml"
         with open(yaml_path) as f:
             return yaml.safe_load(f)
 

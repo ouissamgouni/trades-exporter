@@ -9,7 +9,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
@@ -31,16 +31,12 @@ def client():
 @pytest.fixture
 def mock_session():
     """Create mock database session and override dependency."""
-    from backend.api.routes.pnl import get_session_dependency
+    from backend.db.database import get_session_dependency
     from backend.api.main import app
-    from fastapi.testclient import TestClient
     
     session = MagicMock()
     
-    def override_get_session():
-        return session
-    
-    app.dependency_overrides[get_session_dependency] = override_get_session
+    app.dependency_overrides[get_session_dependency] = lambda: session
     yield session
     app.dependency_overrides.clear()
 
@@ -51,7 +47,7 @@ def mock_version():
     version = MagicMock()
     version.version_id = 123
     version.status = "draft"
-    version.expires_at = datetime.utcnow() + timedelta(hours=24)
+    version.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
     return version
 
 
@@ -139,7 +135,7 @@ class TestCleanupExpiredDrafts:
         expired_version = MagicMock()
         expired_version.version_id = 100
         expired_version.status = "draft"
-        expired_version.expires_at = datetime.utcnow() - timedelta(hours=1)
+        expired_version.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
         
         # First call returns expired versions, subsequent calls return empty lists
         mock_session.exec.return_value.all.side_effect = [

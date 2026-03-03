@@ -219,7 +219,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
         const isWalletAccount = account.account_type === 'wallet';
         const accountAddress = account.address_or_identifier;
         const detectedChain = isWalletAccount ? detectChainFromAddress(accountAddress) : null;
-        const shouldInheritAddress = isWalletAccount && accountAddress;
+        const shouldInheritAddress = !!(isWalletAccount && accountAddress);
 
         // Chain selector for on-chain connectors
         if (selectedTypeInfo.supported_chains?.length) {
@@ -227,7 +227,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             const chainValue = detectedChain || formData.config.chain || '';
             // Only lock chain for unambiguous address formats (XRP, Solana)
             // EVM addresses (0x) are valid on multiple chains, so pre-select but don't lock
-            const isChainInherited = isWalletAccount && detectedChain && detectedChain !== 'ethereum';
+            const isChainInherited = !!(isWalletAccount && detectedChain && detectedChain !== 'ethereum');
 
             fields.push(
                 <Box key="chain">
@@ -312,6 +312,38 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                     <Text fontSize="sm" color="gray.500" mt={1}>
                         Comma-separated trading pairs
                     </Text>
+                </Box>
+            );
+        }
+
+        // Wallet address for connectors that need an explicit on-chain address
+        // (e.g. Hyperliquid which queries by wallet address)
+        if (selectedTypeInfo.required_config.includes('wallet_address') ||
+            selectedTypeInfo.optional_config.includes('wallet_address')) {
+            const isRequired = selectedTypeInfo.required_config.includes('wallet_address');
+            // For wallet accounts, pre-fill from account address
+            const inheritAddress = isWalletAccount && accountAddress;
+            const walletValue = inheritAddress
+                ? accountAddress
+                : (formData.config.wallet_address || '');
+
+            fields.push(
+                <Box key="wallet_address">
+                    <Text fontWeight="medium" mb={1}>
+                        Wallet Address {isRequired && <Text as="span" color="red.500">*</Text>}
+                    </Text>
+                    <Input
+                        value={walletValue}
+                        onChange={(e) => updateConfig('wallet_address', e.target.value)}
+                        placeholder="0x..."
+                        required={isRequired}
+                        disabled={!!inheritAddress}
+                    />
+                    {inheritAddress && (
+                        <Text fontSize="xs" color="gray.500" mt={1}>
+                            Inherited from account
+                        </Text>
+                    )}
                 </Box>
             );
         }

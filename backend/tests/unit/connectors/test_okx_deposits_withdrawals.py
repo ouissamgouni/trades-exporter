@@ -77,6 +77,7 @@ class TestOKXDepositsConnector:
             "addressTo": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
             "addressFrom": "0x123abc456def789",
             "network": "erc20",
+            "info": {"chain": "erc20"},
             "fee": {
                 "cost": 0.001,
                 "currency": "ETH"
@@ -97,7 +98,7 @@ class TestOKXDepositsConnector:
         assert result.fee == 0.001
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "erc20"
+        assert result.network == "ethereum"
 
     def test_raw_to_normalized_with_non_ok_status(self, mock_ccxt_okx, mock_okx_credentials):
         """Test that non-ok status deposits raise ValueError."""
@@ -174,7 +175,8 @@ class TestOKXDepositsConnector:
             "status": "ok",
             "addressTo": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
             "fee": 0.0001,
-            "network": "bitcoin"
+            "network": "bitcoin",
+            "info": {"chain": "btc"}
         }
         
         result = connector.raw_to_normalized(ccxt_deposit)
@@ -227,6 +229,7 @@ class TestOKXWithdrawalsConnector:
             "addressTo": "0x123abc456def789",
             "addressFrom": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
             "network": "erc20",
+            "info": {"chain": "erc20"},
             "fee": {
                 "cost": 0.001,
                 "currency": "ETH"
@@ -247,7 +250,7 @@ class TestOKXWithdrawalsConnector:
         assert result.fee == 0.001
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "erc20"
+        assert result.network == "ethereum"
 
     def test_raw_to_normalized_with_non_ok_status(self, mock_ccxt_okx, mock_okx_credentials):
         """Test that non-ok status withdrawals raise ValueError."""
@@ -339,7 +342,8 @@ class TestOKXWithdrawalsConnector:
             "status": "ok",
             "addressTo": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
             "fee": 0.0001,
-            "network": "bitcoin"
+            "network": "bitcoin",
+            "info": {"chain": "btc"}
         }
         
         result = connector.raw_to_normalized(ccxt_withdrawal)
@@ -383,7 +387,7 @@ class TestConnectorRegistry:
         assert info.display_name == "OKX Deposits"
         assert info.supports_incremental_sync is True
         assert "currencies" in info.optional_config
-        assert "start_date" in info.optional_config
+        assert "start_datetime" in info.optional_config
 
     def test_okx_withdrawals_registered(self):
         """Test that okx-withdrawals is registered in connector registry."""
@@ -398,7 +402,7 @@ class TestConnectorRegistry:
         assert info.display_name == "OKX Withdrawals"
         assert info.supports_incremental_sync is True
         assert "currencies" in info.optional_config
-        assert "start_date" in info.optional_config
+        assert "start_datetime" in info.optional_config
 
     def test_okx_deposits_class_mapping(self):
         """Test that okx-deposits maps to OKXDepositsConnector class."""

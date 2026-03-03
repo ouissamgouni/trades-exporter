@@ -30,7 +30,7 @@ model_tables = {
     'normalized_transactions': {'id', 'raw_transaction_id', 'source', 'source_asset_symbol', 'source_transaction_type', 'source_transaction_id', 
         'account_id', 'date_time', 'direction', 'transaction_type', 'asset_id', 'quantity', 'price', 'price_snapshot_id', 
         'source_price_quote_asset_symbol', 'price_quote_asset_id', 'fee', 'source_fee_quote_asset_symbol', 'fee_quote_asset_id', 
-        'include_fee', 'disposal_taxable', 'from_account_id', 'to_account_id', 'source_from_account', 'source_to_account', 
+        'include_fee', 'from_account_id', 'to_account_id', 'source_from_account', 'source_to_account', 
         'network', 'network_transaction_id', 'token_contract_address', 'tags', 'synced_at', 'review_status', 'taxability_status',
         'user_calculation_unit_id', 'total', 'review_notes', 'created_at', 'updated_at'},
     'raw_accounts': {'id', 'source', 'label', 'account_id', 'created_at'},

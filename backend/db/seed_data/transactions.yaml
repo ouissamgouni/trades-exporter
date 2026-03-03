@@ -14,7 +14,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     total: "1725.000000000000000000"
     tags:
       - goal: test
@@ -33,7 +32,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     total: "450.000000000000000000"
     tags:
       - goal: test
@@ -52,7 +50,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "600.000000000000000000"
     tags:
       - goal: test
@@ -73,7 +70,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "900.000000000000000000"
     tags:
       - goal: test
@@ -94,7 +90,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "875.000000000000000000"
     tags:
       - goal: test
@@ -113,7 +108,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     source_from_account: Binance
     source_to_account: MEXC
     bundle_id: 1
@@ -132,7 +126,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     source_from_account: Binance
     source_to_account: MEXC
     bundle_id: 1
@@ -152,7 +145,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "625.000000000000000000"
     tags:
       - goal: test
@@ -173,7 +165,6 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: true
     total: "750.000000000000000000"
     tags:
       - goal: test

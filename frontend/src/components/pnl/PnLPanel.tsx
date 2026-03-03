@@ -64,10 +64,11 @@ import {
 } from './types';
 
 interface PnLPanelProps {
+    isActive?: boolean;
     onOpenHealthCheck?: () => void;
 }
 
-export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
+export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => {
 
     // Base currency from settings
     const { baseCurrency, baseCurrencyId } = useBaseCurrency();
@@ -172,8 +173,9 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
         window.history.replaceState({}, '', newUrl);
     }, [config.account_ids]);
 
-    // Fetch accounts on mount
+    // Fetch accounts on mount and when tab becomes active
     useEffect(() => {
+        if (!isActive) return;
         const fetchAccounts = async () => {
             setIsLoadingAccounts(true);
             try {
@@ -189,10 +191,11 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
             }
         };
         fetchAccounts();
-    }, []);
+    }, [isActive]);
 
-    // Fetch categories on mount (for filter bar)
+    // Fetch categories when tab becomes active (for filter bar)
     useEffect(() => {
+        if (!isActive) return;
         const fetchCategories = async () => {
             setIsLoadingCategories(true);
             try {
@@ -208,7 +211,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
             }
         };
         fetchCategories();
-    }, []);
+    }, [isActive]);
 
     // Read category_ids from URL on init (for shareable links)
     useEffect(() => {
@@ -977,10 +980,11 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ onOpenHealthCheck }) => {
         }
     }, []);
 
-    // Load versions on mount
+    // Load versions when tab becomes active
     useEffect(() => {
+        if (!isActive) return;
         fetchAvailableVersions();
-    }, [fetchAvailableVersions]);
+    }, [isActive, fetchAvailableVersions]);
 
     // Handle continuing calculation despite health issues
     const handleContinueAnyway = useCallback(() => {

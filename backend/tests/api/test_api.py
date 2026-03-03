@@ -6,22 +6,29 @@ These tests are intentionally simple and focused on:
 - Verifying endpoints exist and respond
 - Testing Pydantic validation (422 errors)
 - Checking error handling (404/500 errors)
-
-Note: Tests accept 500 errors when database is not initialized,
-as they focus on endpoint structure and validation rather than
-full integration testing. For full integration tests with real
-database operations, see the e2e tests.
 """
 
 import pytest
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from backend.api.main import app
+from backend.db.database import get_session_dependency
 
 
 @pytest.fixture
 def client():
-    """Create a test client."""
-    return TestClient(app)
+    """Create a test client with mocked DB session."""
+    session = MagicMock()
+    mock_result = MagicMock()
+    mock_result.all.return_value = []
+    mock_result.one.return_value = 0
+    mock_result.first.return_value = None
+    session.exec.return_value = mock_result
+    session.get.return_value = None
+
+    app.dependency_overrides[get_session_dependency] = lambda: session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
 # ============================================================================
@@ -47,23 +54,19 @@ def test_root_endpoint(client):
 def test_list_transactions(client):
     """Test listing transactions endpoint returns wrapped response with metadata."""
     response = client.get("/transactions")
-    # Should return 200 or 500 (if no DB), but endpoint exists
-    assert response.status_code in [200, 500]
-    
-    # If successful, check response structure
-    if response.status_code == 200:
-        data = response.json()
-        assert "results" in data, "Response should have 'results' array"
-        assert "metadata" in data, "Response should have 'metadata' object"
-        assert isinstance(data["results"], list), "Results should be a list"
-        assert isinstance(data["metadata"], dict), "Metadata should be an object"
+    assert response.status_code == 200
+
+    data = response.json()
+    assert "results" in data, "Response should have 'results' array"
+    assert "metadata" in data, "Response should have 'metadata' object"
+    assert isinstance(data["results"], list), "Results should be a list"
+    assert isinstance(data["metadata"], dict), "Metadata should be an object"
 
 
 def test_get_transaction_not_found(client):
     """Test getting non-existent transaction."""
     response = client.get("/transactions/99999")
-    # Should return 404 or 500 (if DB error)
-    assert response.status_code in [404, 500]
+    assert response.status_code == 404
 
 
 def test_update_transaction_validation(client):

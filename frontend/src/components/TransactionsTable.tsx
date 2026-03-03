@@ -1,60 +1,46 @@
 import {
     Badge, Box,
     Button, Checkbox, Dialog, Flex,
-    Heading, HStack, Input, NativeSelect, Portal, Spinner,
-    Switch, Table, Text, Progress, VStack
+    Heading, HStack, Portal, Spinner,
+    Switch, Table, Text
 } from '@chakra-ui/react';
-import { BiTransfer } from 'react-icons/bi';
-import { RiExchangeFundsLine } from 'react-icons/ri';
-import { FaQuestion } from 'react-icons/fa';
-import { LuPencil, LuUpload, LuArrowUp, LuArrowDown, LuArrowUpDown, LuPackageX, LuCheck, LuPlus, LuMinus, LuX } from 'react-icons/lu';
-import { FiActivity, FiFileText, FiCopy, FiPlusCircle } from 'react-icons/fi';
+import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuPlus, LuMinus, LuX } from 'react-icons/lu';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     useReactTable,
     getCoreRowModel,
-    getSortedRowModel,
     SortingState,
     VisibilityState,
 } from '@tanstack/react-table';
-import { API_URL, Account, Asset, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus, TransactionListResponse, FilterMetadata, AppliedFilters, ValidationWarning } from '../types';
-import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
+import { API_URL, Account, Asset, Transaction, TransactionStatus, TransactionListResponse, FilterMetadata, AppliedFilters } from '../types';
+import { Direction, ReviewStatus, UnitPattern } from '../enums';
 import { useDataHealth } from '../contexts/DataHealthContext';
 import { useAssets } from '../hooks/useAssets';
-import { AssetSelector } from './AssetSelector';
-import { AccountSelector } from './AccountSelector';
-import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
+import { useAccounts } from '../hooks/useAccounts';
+import { useAccountSuggestionsBatch, BatchItem } from '../hooks/useAccountSuggestionsBatch';
+import { ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
 
 
 import { TransactionDetailDrawer } from './TransactionDetailDrawer';
 import { TransactionFilters, TransactionFilterState, defaultFilterState } from './TransactionFilters';
 import { toaster } from './ui/toaster';
-import { Tooltip } from './ui/tooltip';
-import { AssetBadge } from './AssetBadge';
-import { AccountBadge } from './AccountBadge';
-import { SourceInfoCell } from './SourceInfoCell';
-import { getAssetSuggestions, getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import { getAssetSuggestions } from '../utils/similarity';
 import { linkRawAccount } from '../utils/rawAccountApi';
-import { fetchAccountSuggestionsBatch, useAccountSuggestions, AccountSuggestion } from '../hooks/useAccountSuggestions';
-import { AccountSuggestionBadges } from './AccountSuggestionBadges';
+import { fetchAccountSuggestionsBatch, AccountSuggestion } from '../hooks/useAccountSuggestions';
 import {
     formatDateTimeCompact,
-    toDateTimeLocalString,
     dateTimeLocalToISO,
 } from '../utils/dateUtils';
-import { usePagination, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
+import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
 import { useBundleSuggestionMap } from '../hooks/useBundleSuggestionMap';
 import { useBundleColorMap } from '../hooks/useBundleColorMap';
 import { TablePagination } from './TablePagination';
-import { ValueDisplay } from './ValueDisplay';
 import { TableConfig, ColumnPlugin, RowAction, BulkAction, TransactionColumnKey, resolveTableConfig, presetToVisibility, ColumnVisibilityPopover } from './tables';
-import { BundleSuggestionIcon, SuggestionPopover, BundleMembershipPopover } from './bundles';
-import { DuplicateIcon, DuplicatePopover } from './duplicates';
-import { LuPackage2 } from 'react-icons/lu';
 import { useDuplicateMap } from '../hooks/useDuplicateMap';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
+import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
 
 // Types for CSV import
 interface TradesImportPreviewTransaction {
@@ -98,87 +84,6 @@ const directionRowColors: Record<string, string> = {
     [Direction.INFLOW]: 'green.50',
     [Direction.OUTFLOW]: 'red.50',
     internal: 'gray.50',
-};
-
-// Status badge color mapping (for review_status column display)
-const statusBadgeColors: Record<TransactionStatus, string> = {
-    [ReviewStatus.VALID]: 'green',
-    [ReviewStatus.PENDING]: 'yellow',
-    [ReviewStatus.INVALID]: 'red',
-};
-
-// Review status options for filter dropdown (same as TransactionStatus)
-const reviewStatusOptions = [
-    { value: '', label: 'All Status' },
-    { value: ReviewStatus.PENDING, label: 'Pending' },
-    { value: ReviewStatus.VALID, label: 'Valid' },
-    { value: ReviewStatus.INVALID, label: 'Invalid' },
-];
-
-// Taxability colors
-const taxabilityColors: Record<TaxabilityStatus, string> = {
-    [TaxabilityStatusEnum.TAXABLE]: 'orange',
-    [TaxabilityStatusEnum.NON_TAXABLE]: 'green',
-    [TaxabilityStatusEnum.UNKNOWN]: 'yellow',
-};
-
-// Helper functions for duplicate detection tags
-const getDuplicateTags = (tx: Transaction): any[] => {
-    if (!tx.tags || typeof tx.tags !== 'object') return [];
-
-    // Tags can be an array or an object with array values
-    if (Array.isArray(tx.tags)) {
-        return tx.tags;
-    }
-
-    // If tags is an object, it might have a 'tags' property or be keyed
-    const tagArray = tx.tags.tags || Object.values(tx.tags);
-    return Array.isArray(tagArray) ? tagArray : [];
-};
-
-const hasPotentialDuplicateTag = (tx: Transaction): boolean => {
-    const tags = getDuplicateTags(tx);
-    return tags.some((tag: any) =>
-        tag && typeof tag === 'object' && (tag.dup_group || tag.sys_group)
-    );
-};
-
-const getDuplicateResolutionTag = (tx: Transaction): any | null => {
-    const tags = getDuplicateTags(tx);
-
-    // Check for sys_resolution (new format) or dup_resolution (legacy)
-    const resolutionTag = tags.find((tag: any) =>
-        tag && typeof tag === 'object' && (tag.sys_resolution || tag.dup_resolution)
-    );
-    if (resolutionTag) {
-        return {
-            dup_resolution: resolutionTag.sys_resolution || resolutionTag.dup_resolution,
-            group_hash: tags.find((t: any) => t?.sys_group || t?.dup_group)?.sys_group
-                || tags.find((t: any) => t?.dup_group)?.dup_group,
-            dup_resolved_at: tags.find((t: any) => t?.sys_resolved_at || t?.dup_resolved_at)?.sys_resolved_at
-                || tags.find((t: any) => t?.dup_resolved_at)?.dup_resolved_at,
-        };
-    }
-
-    return null;
-};
-
-const getDuplicateGroupHash = (tx: Transaction): string | null => {
-    const tags = getDuplicateTags(tx);
-
-    // Check for sys_group (new) or dup_group (legacy)
-    const groupTag = tags.find((tag: any) =>
-        tag && typeof tag === 'object' && (tag.sys_group || tag.dup_group)
-    );
-    return groupTag?.sys_group || groupTag?.dup_group || null;
-};
-
-// Pattern colors for suggestions (simplified to swap and transfer)
-const patternColors: Record<string, string> = {
-    [UnitPattern.INTERNAL_TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-    [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.FLOW]: 'cyan',
 };
 
 // Props interface for configurable behavior
@@ -258,8 +163,7 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     additionalBulkActions?: BulkAction<T>[];
 }
 
-// Editable cell types
-type EditableField = 'account_id' | 'from_account_id' | 'to_account_id' | 'source_transaction_type' | 'direction' | 'transaction_type' | 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id' | 'review_status' | 'review_notes' | 'date_time' | 'source' | 'source_asset_symbol' | 'quantity' | 'price' | 'fee' | 'user_calculation_unit_id';
+// EditableField type is imported from './TransactionTableRow'
 
 export const TransactionsTable = <T extends Transaction = Transaction>({
     title = 'Transactions',
@@ -296,6 +200,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const invalidateTransactionData = () => {
         queryClient.invalidateQueries({ queryKey: ['transactions'], refetchType: 'active' });
         queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'], refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['filterOptions'], refetchType: 'active' });
     };
 
     // Resolve table configuration with defaults
@@ -338,6 +243,23 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         return [{ id: 'date', desc: true }];
     });
 
+    // Map TanStack column IDs to backend sort_by values
+    const SORT_COLUMN_MAP: Record<string, string> = {
+        id: 'id',
+        date: 'date',
+        source: 'source',
+        direction: 'direction',
+        type: 'type',
+        qty: 'qty',
+        price: 'price',
+        total: 'total',
+        fee: 'fee',
+        feeInBase: 'include_fee',
+        taxability: 'taxability',
+        status: 'status',
+        sourceTransactionId: 'source_transaction_id',
+    };
+
     // Persist column visibility to localStorage
     useEffect(() => {
         try {
@@ -369,7 +291,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     }, [columnVisibility]);
 
     const { assets, refetchAssets } = useAssets();
-    const [accounts, setAccounts] = useState<Account[]>([]);
+    const { accounts, refetchAccounts } = useAccounts();
     // Cell-level editing: "txId:field" format, e.g., "123:account"
     const [editingCell, setEditingCell] = useState<string | null>(null);
     const [editValues, setEditValues] = useState<Partial<Transaction>>({});
@@ -417,7 +339,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     const [filterMetadata, setFilterMetadata] = useState<FilterMetadata | null>(null);
     // Pagination via unified hook (client-side pagination for transactions table)
     const pagination = usePagination({
-        storageKey: 'transactions',
+        storageKey: tableId || 'transactions',
         initialPageSize: DEFAULT_PAGE_SIZE,
     });
     const [selectedIds, setSelectedIds] = useState<Set<number>>(
@@ -554,9 +476,21 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         pagination.firstPage();
     }
 
+    // Reset to page 1 when sorting changes
+    const prevSortingRef = useRef(JSON.stringify(sorting));
+    const sortingKey = JSON.stringify(sorting);
+    if (sortingKey !== prevSortingRef.current) {
+        prevSortingRef.current = sortingKey;
+        pagination.firstPage();
+    }
+
+    // Compute sorting params for the API
+    const sortBy = sorting[0] ? (SORT_COLUMN_MAP[sorting[0].id] || 'date') : 'date';
+    const sortDir = sorting[0] ? (sorting[0].desc ? 'desc' : 'asc') : 'desc';
+
     // TanStack Query for transactions - use stable string key to avoid reference issues
     const { data: transactionResponse, isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
-        queryKey: ['transactions', 'with-metadata', filterKey],
+        queryKey: ['transactions', 'with-metadata', filterKey, pagination.page, pagination.pageSize, sortBy, sortDir],
         queryFn: async () => {
             const params = new URLSearchParams();
             // Apply review status filter (support multiple via comma-separated)
@@ -586,6 +520,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             }
             if (filters.connectorRunIds.length > 0) {
                 params.append('connector_run_id', filters.connectorRunIds.join(','));
+            }
+            if (filters.connectorRunOutcome) {
+                params.append('connector_run_outcome', filters.connectorRunOutcome);
             }
             if (filters.tagKeys.length > 0) {
                 params.append('tag_key', filters.tagKeys.join(','));
@@ -617,6 +554,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 params.append('ids', filters.transactionIds.join(','));
             }
 
+            // Server-side pagination
+            params.append('limit', String(pagination.pageSize));
+            params.append('offset', String((pagination.page - 1) * pagination.pageSize));
+
+            // Server-side sorting
+            params.append('sort_by', sortBy);
+            params.append('sort_dir', sortDir);
+
             // Use custom API URL if provided, otherwise default to /transactions
             const baseUrl = customApiUrl || `${API_URL}/transactions`;
             // Check if baseUrl already has query params, use & instead of ?
@@ -630,6 +575,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             // Store applied filters and metadata
             setAppliedFilters(data.metadata.applied_filters);
             setFilterMetadata(data.metadata);
+
+            // Update pagination total from server response
+            pagination.setTotal(data.metadata.filtered_count);
 
             return data;
         },
@@ -654,18 +602,18 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         { id: 'id', accessorKey: 'id' },
         { id: 'date', accessorFn: (row: Transaction) => new Date(row.date_time).getTime() },
         { id: 'source', accessorKey: 'source' },
-        { id: 'accounts', accessorFn: (row: Transaction) => row.from_account_id || row.to_account_id || '' },
+        { id: 'accounts', accessorFn: (row: Transaction) => row.from_account_id || row.to_account_id || '', enableSorting: false },
         { id: 'direction', accessorKey: 'direction' },
         { id: 'type', accessorKey: 'transaction_type' },
-        { id: 'asset', accessorFn: (row: Transaction) => row.linked_asset?.symbol || row.source_asset_symbol || '' },
+        { id: 'asset', accessorFn: (row: Transaction) => row.linked_asset?.symbol || row.source_asset_symbol || '', enableSorting: false },
         { id: 'qty', accessorKey: 'quantity' },
         { id: 'price', accessorKey: 'price' },
         { id: 'total', accessorKey: 'total' },
         { id: 'fee', accessorKey: 'fee' },
         { id: 'feeInBase', accessorKey: 'include_fee' },
         { id: 'taxability', accessorKey: 'disposal_taxable' },
-        { id: 'bundle', accessorKey: 'user_calculation_unit_id' },
-        { id: 'tags', accessorKey: 'tags' },
+        { id: 'bundle', accessorKey: 'user_calculation_unit_id', enableSorting: false },
+        { id: 'tags', accessorKey: 'tags', enableSorting: false },
         { id: 'sourceTransactionId', accessorKey: 'source_transaction_id' },
         { id: 'status', accessorKey: 'review_status' },
     ], []);
@@ -680,35 +628,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         onSortingChange: setSorting,
         onColumnVisibilityChange: setColumnVisibility,
         getCoreRowModel: getCoreRowModel(),
-        getSortedRowModel: getSortedRowModel(),
+        manualSorting: true,
         getRowId: (row) => String(row.id),
     });
 
-    // Get sorted transactions from TanStack
-    // Use transactions + sorting as deps (not getRowModel().rows which is a new ref every render)
-    const sortedTransactions = useMemo(() => {
-        return tanstackTable.getRowModel().rows.map(row => row.original);
-    }, [transactions, sorting]);
-
-    // Fetch static data once on mount
-    useEffect(() => {
-        fetchAccounts();
-    }, []);
+    // Backend handles sorting — sortedTransactions is just the server-ordered list
+    const sortedTransactions = transactions;
 
     // Keep editValuesRef in sync with editValues state
     useEffect(() => { editValuesRef.current = editValues; }, [editValues]);
-
-    const fetchAccounts = async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                const data = await response.json();
-                setAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    };
 
     // Quick-create handlers: link newly created account/asset to the originating transaction
     const handleQuickAccountCreated = async (accountId?: number) => {
@@ -732,7 +660,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     } catch { }
                 }
                 invalidateTransactionData();
-                fetchAccounts();
+                refetchAccounts();
             } catch (err) {
                 toaster.error({ title: 'Error', description: 'Failed to link new account' });
             }
@@ -793,8 +721,36 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
-    // Pagination calculations (uses sorted transactions)
-    const paginatedTransactions = pagination.paginate(sortedTransactions);
+    // Backend handles pagination — transactions are already the current page
+    const paginatedTransactions = transactions;
+
+    // Batch account suggestions: collect all unlinked labels for the current page
+    const batchSuggestionItems = useMemo<BatchItem[]>(() => {
+        const seen = new Set<string>();
+        const items: BatchItem[] = [];
+        for (const tx of transactions) {
+            const labels = [
+                { label: tx.source_account, cond: !tx.account_id },
+                { label: tx.source_from_account, cond: !tx.from_account_id },
+                { label: tx.source_to_account, cond: !tx.to_account_id },
+            ];
+            for (const { label, cond } of labels) {
+                if (cond && label) {
+                    const key = `${label}|${tx.source ?? ''}|${tx.network ?? ''}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        items.push({ label, source: tx.source, network: tx.network });
+                    }
+                }
+            }
+        }
+        return items;
+    }, [transactions]);
+
+    const { suggestionsMap: batchSuggestionsMap } = useAccountSuggestionsBatch(batchSuggestionItems);
+
+    // Pre-compute account lookup map for O(1) access per row
+    const accountsById = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
 
     // Build bundle color map from visible transactions
     const { bundleColorMap } = useBundleColorMap(paginatedTransactions);
@@ -815,7 +771,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             direction: tx.direction,
             review_status: tx.review_status,
             review_notes: tx.review_notes || '',
-            disposal_taxable: tx.disposal_taxable ?? false,
+            taxability_status: tx.taxability_status ?? 'unknown',
             include_fee: tx.include_fee ?? false,
             date_time: tx.date_time,
             source: tx.source,
@@ -922,7 +878,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     };
 
     // Quick toggle for taxable/include_fee (saves immediately)
-    const quickToggle = async (tx: Transaction, field: 'disposal_taxable' | 'include_fee') => {
+    const quickToggle = async (tx: Transaction, field: 'include_fee') => {
         try {
             const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
                 method: 'PATCH',
@@ -947,6 +903,23 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             return next;
         });
     };
+
+    // ===== Stable callbacks ref for TransactionTableRow (avoids re-render on callback identity change) =====
+    const rowCallbacksRef = useRef({} as TransactionRowCallbacks);
+    Object.assign(rowCallbacksRef.current, {
+        startCellEdit, saveAndClose, updateEditValues, handleEditKeyDown,
+        saveFieldDirectly, invalidateTransactionData, refetchAccounts,
+        setEditingCell, setEditValues, setSelectedIds,
+        setDrawerTransactionId, setIsDrawerOpen,
+        setQuickCreateAccount, setQuickCreateAsset,
+        setOpenSuggestionTxId, setHoveredSuggestionGroup,
+        setOpenDuplicateTxId, setHoveredDuplicateGroup,
+        setHoveredBundleId, setOpenBundleTxId,
+        toggleInvalidRow, refetchAssets, isEditingCell,
+        toggleSelection, cancelEdit, quickToggle, getEditingTxId,
+        setTransactionToDelete, fetchDeletionImpact, setShowDeleteDialog,
+        invalidateBundleQueries: () => queryClient.invalidateQueries({ queryKey: ['bundles'] }),
+    } satisfies TransactionRowCallbacks);
 
     const toggleSelectAll = () => {
         // Select/deselect only items on current page
@@ -1501,8 +1474,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // ============== Invalid Row Collapse Counts ==============
     const invalidTransactions = useMemo(
-        () => sortedTransactions.filter(tx => tx.review_status === 'invalid'),
-        [sortedTransactions]
+        () => transactions.filter(tx => tx.review_status === 'invalid'),
+        [transactions]
     );
     const collapsedInvalidCount = useMemo(
         () => invalidTransactions.filter(tx => !expandedInvalidIds.has(tx.id)).length,
@@ -1747,11 +1720,11 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 )}
 
                 {/* Top Pagination - show when more than 15 transactions */}
-                {!loading && !error && !embeddedMode && transactions.length > 15 && (
+                {!loading && !error && !embeddedMode && (filterMetadata?.filtered_count ?? 0) > 15 && (
                     <Box mb={4}>
                         <TablePagination
                             pagination={pagination}
-                            total={transactions.length}
+                            total={filterMetadata?.filtered_count ?? 0}
                         />
                     </Box>
                 )}
@@ -1858,1595 +1831,43 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         </Table.Cell>
                                     </Table.Row>
                                 ) : (
-                                    paginatedTransactions.map(tx => {
-                                        const suggestionEntry = showSuggestions ? suggestionMap.get(tx.id) : undefined;
-                                        const duplicateEntry = duplicateMap.get(tx.id);
-
-                                        // ============== Collapsed Invalid Row ==============
-                                        if (isInvalidCollapsed(tx)) {
-                                            return (
-                                                <Table.Row
-                                                    key={tx.id}
-                                                    bg="gray.200"
-                                                    _hover={{ bg: 'gray.300' }}
-                                                    cursor="pointer"
-                                                    onClick={() => toggleInvalidRow(tx.id)}
-                                                    height="20px"
-                                                >
-                                                    <Table.Cell
-                                                        colSpan={visibleColumnCount}
-                                                        py={0}
-                                                        px={0}
-                                                        position="relative"
-                                                    >
-                                                        {/* Red status band on far left */}
-                                                        <Box
-                                                            position="absolute"
-                                                            left={0}
-                                                            top={0}
-                                                            bottom={0}
-                                                            width="4px"
-                                                            bg="red.500"
-                                                        />
-                                                        <Flex align="center" gap={2} pl="10px" pr={2} minH="20px">
-                                                            <Box
-                                                                as="button"
-                                                                display="flex"
-                                                                alignItems="center"
-                                                                color="gray.400"
-                                                                _hover={{ color: 'red.500' }}
-                                                                onClick={(e: React.MouseEvent) => {
-                                                                    e.stopPropagation();
-                                                                    toggleInvalidRow(tx.id);
-                                                                }}
-                                                                title="Expand invalid row"
-                                                                flexShrink={0}
-                                                            >
-                                                                <LuPlus size={11} />
-                                                            </Box>
-                                                            <Badge colorPalette="red" variant="subtle" size="xs" fontSize="7px" px={1}>
-                                                                <LuX size={8} /> Invalid
-                                                            </Badge>
-                                                            <Text fontSize="7px" color="gray.400" truncate maxW="200px">
-                                                                {formatDateTimeCompact(tx.date_time)} · {tx.source_asset_symbol || tx.linked_asset?.symbol || '—'}
-                                                                {tx.source ? ` · ${tx.source}` : ''}
-                                                            </Text>
-                                                        </Flex>
-                                                    </Table.Cell>
-                                                </Table.Row>
-                                            );
-                                        }
-
-                                        // ============== Normal / Expanded Row ==============
-                                        return (
-                                            <React.Fragment key={tx.id}>
-                                                <Table.Row
-                                                    bg={getRowBgColor(tx)}
-                                                    _hover={{ bg: 'blue.50' }}
-                                                    onMouseEnter={() => {
-                                                        if (suggestionEntry) setHoveredSuggestionGroup(suggestionEntry.groupIndex);
-                                                        if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(tx.user_calculation_unit_id);
-                                                        if (duplicateEntry) setHoveredDuplicateGroup(duplicateEntry.groupIndex);
-                                                    }}
-                                                    onMouseLeave={() => {
-                                                        if (suggestionEntry) setHoveredSuggestionGroup(null);
-                                                        if (tx.user_calculation_unit_id && !suggestionEntry) setHoveredBundleId(null);
-                                                        if (duplicateEntry) setHoveredDuplicateGroup(null);
-                                                    }}
-                                                >
-                                                    <Table.Cell position="sticky" left={0} bg={getRowBgColor(tx)} zIndex={5} borderRight="2px solid" borderColor="gray.300" p={0}>
-                                                        {/* Review status band — full cell height */}
-                                                        <Box
-                                                            position="absolute"
-                                                            left={0}
-                                                            top={0}
-                                                            bottom={0}
-                                                            width="4px"
-                                                            bg={getRowBorderColor(tx)}
-                                                        />
-                                                        {/* Suggestion / Bundle color band — right next to review status (mutually exclusive) */}
-                                                        {suggestionEntry ? (
-                                                            <Box
-                                                                position="absolute"
-                                                                left="5px"
-                                                                top={0}
-                                                                bottom={0}
-                                                                width="4px"
-                                                                bg={suggestionEntry.color}
-                                                                borderRadius="2px"
-                                                                zIndex={1}
-                                                            />
-                                                        ) : (tx.user_calculation_unit_id != null) ? (
-                                                            <Box
-                                                                position="absolute"
-                                                                left="5px"
-                                                                top={0}
-                                                                bottom={0}
-                                                                width="4px"
-                                                                bg={bundleColorMap.get(tx.user_calculation_unit_id) || 'purple.400'}
-                                                                borderRadius="2px"
-                                                                zIndex={1}
-                                                            />
-                                                        ) : null}
-                                                        {/* Duplicate band (Band 3) — right of suggestion/bundle band */}
-                                                        {duplicateEntry && (
-                                                            <Box
-                                                                position="absolute"
-                                                                left="10px"
-                                                                top={0}
-                                                                bottom={0}
-                                                                width="4px"
-                                                                bg={duplicateEntry.color}
-                                                                borderRadius="2px"
-                                                                zIndex={1}
-                                                            />
-                                                        )}
-                                                        <Flex gap={1} align="center" pl={duplicateEntry ? '17px' : (suggestionEntry || tx.user_calculation_unit_id) ? '12px' : '7px'} pr={1} minH="28px">
-                                                            {/* Duplicate icon — clickable, opens popover */}
-                                                            {duplicateEntry && (
-                                                                <DuplicatePopover
-                                                                    groupHash={duplicateEntry.groupHash}
-                                                                    transactionIds={duplicateEntry.transactionIds}
-                                                                    matchCriteria={duplicateEntry.matchCriteria}
-                                                                    open={openDuplicateTxId === tx.id}
-                                                                    onOpenChange={(open) => setOpenDuplicateTxId(open ? tx.id : null)}
-                                                                    onTransactionClick={(txId) => {
-                                                                        setDrawerTransactionId(txId);
-                                                                        setIsDrawerOpen(true);
-                                                                    }}
-                                                                >
-                                                                    <Box
-                                                                        as="button"
-                                                                        display="flex"
-                                                                        alignItems="center"
-                                                                        p={0}
-                                                                        cursor="pointer"
-                                                                        color={duplicateEntry.color}
-                                                                        _hover={{ opacity: 0.7 }}
-                                                                        title={`Duplicate suspicion: ${duplicateEntry.matchCriteria}`}
-                                                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                                    >
-                                                                        <DuplicateIcon size={11} />
-                                                                    </Box>
-                                                                </DuplicatePopover>
-                                                            )}
-                                                            {/* Suggestion band icon — clickable, opens popover */}
-                                                            {suggestionEntry && (
-                                                                <SuggestionPopover
-                                                                    suggestion={suggestionEntry.suggestion}
-                                                                    open={openSuggestionTxId === tx.id}
-                                                                    onOpenChange={(open) => setOpenSuggestionTxId(open ? tx.id : null)}
-                                                                    onAccepted={() => setOpenSuggestionTxId(null)}
-                                                                    onDismissed={() => setOpenSuggestionTxId(null)}
-                                                                    onTransactionClick={(txId) => {
-                                                                        setDrawerTransactionId(txId);
-                                                                        setIsDrawerOpen(true);
-                                                                    }}
-                                                                >
-                                                                    <Box
-                                                                        as="button"
-                                                                        display="flex"
-                                                                        alignItems="center"
-                                                                        p={0}
-                                                                        cursor="pointer"
-                                                                        color={suggestionEntry.color}
-                                                                        _hover={{ opacity: 0.7 }}
-                                                                        title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
-                                                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                                    >
-                                                                        <BundleSuggestionIcon size={12} />
-                                                                    </Box>
-                                                                </SuggestionPopover>
-                                                            )}
-                                                            {/* Bundle membership badge — clickable, opens popover */}
-                                                            {!suggestionEntry && tx.user_calculation_unit_id && (
-                                                                <BundleMembershipPopover
-                                                                    bundleId={tx.user_calculation_unit_id}
-                                                                    color={bundleColorMap.get(tx.user_calculation_unit_id) || 'purple.400'}
-                                                                    open={openBundleTxId === tx.id}
-                                                                    onOpenChange={(open) => setOpenBundleTxId(open ? tx.id : null)}
-                                                                    onTransactionClick={(txId) => {
-                                                                        setDrawerTransactionId(txId);
-                                                                        setIsDrawerOpen(true);
-                                                                    }}
-                                                                >
-                                                                    <Badge
-                                                                        as="button"
-                                                                        size="xs"
-                                                                        fontSize="7px"
-                                                                        colorPalette="purple"
-                                                                        variant="subtle"
-                                                                        cursor="pointer"
-                                                                        _hover={{ opacity: 0.7 }}
-                                                                        title={`Bundle #${tx.user_calculation_unit_id}`}
-                                                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                                                                    >
-                                                                        📦 #{tx.user_calculation_unit_id}
-                                                                    </Badge>
-                                                                </BundleMembershipPopover>
-                                                            )}
-                                                            {/* Collapse toggle for expanded invalid rows */}
-                                                            {tx.review_status === 'invalid' && expandedInvalidIds.has(tx.id) && (
-                                                                <Box
-                                                                    as="button"
-                                                                    display="flex"
-                                                                    alignItems="center"
-                                                                    color="red.400"
-                                                                    _hover={{ color: 'red.600' }}
-                                                                    onClick={(e: React.MouseEvent) => {
-                                                                        e.stopPropagation();
-                                                                        toggleInvalidRow(tx.id);
-                                                                    }}
-                                                                    title="Collapse invalid row"
-                                                                    p={0}
-                                                                    flexShrink={0}
-                                                                >
-                                                                    <LuMinus size={11} />
-                                                                </Box>
-                                                            )}
-                                                            {(!embeddedMode || showSelectionInEmbedded) && (
-                                                                <Checkbox.Root
-                                                                    checked={selectedIds.has(tx.id)}
-                                                                    onCheckedChange={() => toggleSelection(tx.id)}
-                                                                >
-                                                                    <Checkbox.HiddenInput />
-                                                                    <Checkbox.Control />
-                                                                </Checkbox.Root>
-                                                            )}
-                                                            {/* TX ID - clickable to open drawer */}
-                                                            <Text
-                                                                fontSize="8px"
-                                                                fontFamily="mono"
-                                                                color="gray.400"
-                                                                cursor="pointer"
-                                                                _hover={{ color: 'blue.500', textDecoration: 'underline' }}
-                                                                onClick={() => {
-                                                                    setDrawerTransactionId(tx.id);
-                                                                    setIsDrawerOpen(true);
-                                                                }}
-                                                                title={`TX #${tx.id} — Click to view details`}
-                                                            >
-                                                                #{tx.id}
-                                                            </Text>
-                                                        </Flex>
-                                                    </Table.Cell>
-                                                    {showColumn('id') && (
-                                                        <Table.Cell py={1}>
-                                                            <Text fontSize="8px" fontFamily="mono" color="gray.500">{tx.id}</Text>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Date/Time - click to edit */}
-                                                    {showColumn('date') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'date_time') ? (
-                                                                <Input
-                                                                    ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                    size="xs"
-                                                                    type="datetime-local"
-                                                                    value={toDateTimeLocalString(editValues.date_time)}
-                                                                    onChange={e => updateEditValues({ date_time: e.target.value })}
-                                                                    onKeyDown={handleEditKeyDown}
-                                                                    onBlur={saveAndClose}
-                                                                    width="130px"
-                                                                    fontSize="8px"
-                                                                    px={1}
-                                                                />
-                                                            ) : (
-                                                                <Text fontSize="8px">{formatDateTimeCompact(tx.date_time)}</Text>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Source Info - merged column with Source Account, Source, Source Type, Source Symbol */}
-                                                    {showColumn('source') && (
-                                                        <Table.Cell py={1} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'account_id') ? (
-                                                                <Flex direction="column" gap={1} minW="120px">
-                                                                    <AccountSelector
-                                                                        value={editValues.account_id ?? null}
-                                                                        onChange={(accountId) => {
-                                                                            if (!escapePressedRef.current) {
-                                                                                updateEditValues({ account_id: accountId ?? undefined });
-                                                                                saveAndClose();
-                                                                            }
-                                                                        }}
-                                                                        accounts={accounts}
-                                                                        onAccountCreated={fetchAccounts}
-                                                                        defaultName={tx.source_account || ''}
-                                                                        placeholder="Link account..."
-                                                                        rawAccountSource={tx.source}
-                                                                        rawAccountLabel={tx.source_account}
-                                                                        rawAccountNetwork={tx.network || undefined}
-                                                                    />
-                                                                    {/* Show account suggestions below the selector when editing */}
-                                                                    {tx.source_account && !tx.account_id && (
-                                                                        <AccountSuggestionBadges
-                                                                            label={tx.source_account}
-                                                                            source={tx.source}
-                                                                            network={tx.network}
-                                                                            showLabel
-                                                                            onAccept={(s) => {
-                                                                                updateEditValues({ account_id: s.id });
-                                                                                saveAndClose();
-                                                                            }}
-                                                                        />
-                                                                    )}
-                                                                    {/* Secondary info shown when editing */}
-                                                                    <Text fontSize="7px" color="gray.400">
-                                                                        {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
-                                                                    </Text>
-                                                                </Flex>
-                                                            ) : (
-                                                                <SourceInfoCell
-                                                                    sourceAccount={tx.source_account}
-                                                                    accountId={tx.account_id}
-                                                                    resolvedAccount={accounts.find(a => a.id === tx.account_id)}
-                                                                    resolvedAccountName={accounts.find(a => a.id === tx.account_id)?.name}
-                                                                    source={tx.source}
-                                                                    sourceType={tx.source_transaction_type}
-                                                                    sourceSymbol={tx.source_asset_symbol}
-                                                                    sourceTransactionId={tx.source_transaction_id}
-                                                                    connectorName={tx.connector_name}
-                                                                    runDatetime={tx.run_datetime}
-                                                                    syncConnectorRunId={tx.sync_connector_run_id}
-                                                                    network={tx.network}
-                                                                    onClick={() => startCellEdit(tx, 'account_id')}
-                                                                    onCreateAccount={!tx.account_id && tx.source_account ? () => {
-                                                                        setQuickCreateAccount({
-                                                                            txId: tx.id,
-                                                                            field: 'account_id',
-                                                                            prefill: {
-                                                                                name: tx.source_account || '',
-                                                                                account_type: tx.source_account?.startsWith('0x') ? 'wallet' : 'cex',
-                                                                                address_or_identifier: tx.source_account || '',
-                                                                            },
-                                                                            rawSource: tx.source,
-                                                                            rawLabel: tx.source_account || undefined,
-                                                                            rawNetwork: tx.network || undefined,
-                                                                        });
-                                                                    } : undefined}
-                                                                    onAcceptSuggestion={async (accountId) => {
-                                                                        try {
-                                                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                method: 'PATCH',
-                                                                                headers: { 'Content-Type': 'application/json' },
-                                                                                body: JSON.stringify({ account_id: accountId })
-                                                                            });
-                                                                            if (!response.ok) throw new Error('Failed to update');
-                                                                            // Also link the raw_account with network
-                                                                            if (tx.source_account) {
-                                                                                try {
-                                                                                    await linkRawAccount({
-                                                                                        source: tx.source,
-                                                                                        label: tx.source_account,
-                                                                                        network: tx.network || undefined,
-                                                                                        accountId,
-                                                                                    });
-                                                                                } catch (linkErr) {
-                                                                                    console.warn('Failed to link raw account:', linkErr);
-                                                                                }
-                                                                            }
-                                                                            invalidateTransactionData();
-                                                                        } catch (err) {
-                                                                            toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                        }
-                                                                    }}
-                                                                />
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* From / To Accounts - merged column showing both in 2 lines with inline editing */}
-                                                    {showColumn('accounts') && (
-                                                        <Table.Cell py={1}>
-                                                            <VStack gap={0.5} align="center">
-                                                                {/* From Account - editable */}
-                                                                {isEditingCell(tx.id, 'from_account_id') ? (
-                                                                    <Flex direction="column" gap={1} minW="100px">
-                                                                        <AccountSelector
-                                                                            value={editValues.from_account_id ?? null}
-                                                                            onChange={async (accountId) => {
-                                                                                if (!escapePressedRef.current) {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ from_account_id: accountId })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        invalidateTransactionData();
-                                                                                        setEditingCell(null);
-                                                                                        setEditValues({});
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }
-                                                                            }}
-                                                                            accounts={accounts}
-                                                                            onAccountCreated={fetchAccounts}
-                                                                            defaultName={tx.source_from_account || ''}
-                                                                            placeholder="From..."
-                                                                            size="sm"
-                                                                            rawAccountSource={tx.source}
-                                                                            rawAccountLabel={tx.source_from_account}
-                                                                            rawAccountNetwork={tx.network || undefined}
-                                                                        />
-                                                                        {/* Suggestion badges when editing */}
-                                                                        {tx.source_from_account && !tx.from_account_id && (
-                                                                            <AccountSuggestionBadges
-                                                                                label={tx.source_from_account}
-                                                                                source={tx.source}
-                                                                                network={tx.network}
-                                                                                fontSize="6px"
-                                                                                onAccept={async (s) => {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ from_account_id: s.id })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        invalidateTransactionData();
-                                                                                        setEditingCell(null);
-                                                                                        setEditValues({});
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }}
-                                                                            />
-                                                                        )}
-                                                                    </Flex>
-                                                                ) : (tx.from_account_id || tx.source_from_account) ? (
-                                                                    <Flex direction="column" gap={0.5} align="start">
-                                                                        <Flex align="center" gap={0.5}>
-                                                                            <Tooltip
-                                                                                content={
-                                                                                    tx.from_account_id
-                                                                                        ? `From: ${tx.from_account_name || 'Account'}${tx.source_from_account ? ` — Source: ${tx.source_from_account}` : ''} — Click to edit`
-                                                                                        : `From: ${tx.source_from_account} - Click to link`
-                                                                                }
-                                                                                openDelay={200}
-                                                                            >
-                                                                                <Badge
-                                                                                    size="xs"
-                                                                                    colorPalette={tx.from_account_id ? 'cyan' : 'orange'}
-                                                                                    variant="subtle"
-                                                                                    cursor="pointer"
-                                                                                    onClick={() => startCellEdit(tx, 'from_account_id')}
-                                                                                >
-                                                                                    {tx.from_account_id ? (
-                                                                                        (tx.from_account_name || `#${tx.from_account_id}`).slice(0, 10)
-                                                                                    ) : (
-                                                                                        <>⚠ {(tx.source_from_account || '').slice(0, 8)}{(tx.source_from_account || '').length > 8 && '…'}</>
-                                                                                    )}
-                                                                                </Badge>
-                                                                            </Tooltip>
-                                                                            {!tx.from_account_id && tx.source_from_account && (
-                                                                                <Tooltip content="Create new account" openDelay={100}>
-                                                                                    <Box
-                                                                                        as="button"
-                                                                                        onClick={(e: React.MouseEvent) => {
-                                                                                            e.stopPropagation();
-                                                                                            setQuickCreateAccount({
-                                                                                                txId: tx.id,
-                                                                                                field: 'from_account_id',
-                                                                                                prefill: {
-                                                                                                    name: tx.source_from_account || '',
-                                                                                                    account_type: tx.source_from_account?.startsWith('0x') ? 'wallet' : 'cex',
-                                                                                                    address_or_identifier: tx.source_from_account || '',
-                                                                                                },
-                                                                                                rawSource: tx.source,
-                                                                                                rawLabel: tx.source_from_account || undefined,
-                                                                                                rawNetwork: tx.network || undefined,
-                                                                                            });
-                                                                                        }}
-                                                                                        color="green.500"
-                                                                                        cursor="pointer"
-                                                                                        flexShrink={0}
-                                                                                        _hover={{ color: 'green.700' }}
-                                                                                    >
-                                                                                        <FiPlusCircle size={10} />
-                                                                                    </Box>
-                                                                                </Tooltip>
-                                                                            )}
-                                                                        </Flex>
-                                                                        {/* Always-visible suggestion badges for unlinked from_account */}
-                                                                        {tx.source_from_account && !tx.from_account_id && (
-                                                                            <AccountSuggestionBadges
-                                                                                label={tx.source_from_account}
-                                                                                source={tx.source}
-                                                                                network={tx.network}
-                                                                                maxResults={2}
-                                                                                fontSize="6px"
-                                                                                onAccept={async (s) => {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ from_account_id: s.id })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        // Also link the raw_account
-                                                                                        if (tx.source_from_account) {
-                                                                                            try {
-                                                                                                await linkRawAccount({ source: tx.source, label: tx.source_from_account, network: tx.network, accountId: s.id });
-                                                                                            } catch { }
-                                                                                        }
-                                                                                        invalidateTransactionData();
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }}
-                                                                            />
-                                                                        )}
-                                                                    </Flex>
-                                                                ) : (
-                                                                    <Badge
-                                                                        size="xs"
-                                                                        colorPalette="gray"
-                                                                        variant="outline"
-                                                                        cursor="pointer"
-                                                                        onClick={() => startCellEdit(tx, 'from_account_id')}
-                                                                    >
-                                                                        + From
-                                                                    </Badge>
-                                                                )}
-                                                                {/* Arrow separator between from and to */}
-                                                                <Text fontSize="10px" color="gray.400" lineHeight="1">↓</Text>
-                                                                {/* To Account - editable */}
-                                                                {isEditingCell(tx.id, 'to_account_id') ? (
-                                                                    <Flex direction="column" gap={1} minW="100px">
-                                                                        <AccountSelector
-                                                                            value={editValues.to_account_id ?? null}
-                                                                            onChange={async (accountId) => {
-                                                                                if (!escapePressedRef.current) {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ to_account_id: accountId })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        invalidateTransactionData();
-                                                                                        setEditingCell(null);
-                                                                                        setEditValues({});
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }
-                                                                            }}
-                                                                            accounts={accounts}
-                                                                            onAccountCreated={fetchAccounts}
-                                                                            defaultName={tx.source_to_account || ''}
-                                                                            placeholder="To..."
-                                                                            size="sm"
-                                                                            rawAccountSource={tx.source}
-                                                                            rawAccountLabel={tx.source_to_account}
-                                                                            rawAccountNetwork={tx.network || undefined}
-                                                                        />
-                                                                        {/* Suggestion badges when editing */}
-                                                                        {tx.source_to_account && !tx.to_account_id && (
-                                                                            <AccountSuggestionBadges
-                                                                                label={tx.source_to_account}
-                                                                                source={tx.source}
-                                                                                network={tx.network}
-                                                                                fontSize="6px"
-                                                                                onAccept={async (s) => {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ to_account_id: s.id })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        invalidateTransactionData();
-                                                                                        setEditingCell(null);
-                                                                                        setEditValues({});
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }}
-                                                                            />
-                                                                        )}
-                                                                    </Flex>
-                                                                ) : (tx.to_account_id || tx.source_to_account) ? (
-                                                                    <Flex direction="column" gap={0.5} align="start">
-                                                                        <Flex align="center" gap={0.5}>
-                                                                            <Tooltip
-                                                                                content={
-                                                                                    tx.to_account_id
-                                                                                        ? `To: ${tx.to_account_name || 'Account'}${tx.source_to_account ? ` — Source: ${tx.source_to_account}` : ''} — Click to edit`
-                                                                                        : `To: ${tx.source_to_account} - Click to link`
-                                                                                }
-                                                                                openDelay={200}
-                                                                            >
-                                                                                <Badge
-                                                                                    size="xs"
-                                                                                    colorPalette={tx.to_account_id ? 'cyan' : 'orange'}
-                                                                                    variant="subtle"
-                                                                                    cursor="pointer"
-                                                                                    onClick={() => startCellEdit(tx, 'to_account_id')}
-                                                                                >
-                                                                                    {tx.to_account_id ? (
-                                                                                        (tx.to_account_name || `#${tx.to_account_id}`).slice(0, 10)
-                                                                                    ) : (
-                                                                                        <>⚠ {(tx.source_to_account || '').slice(0, 8)}{(tx.source_to_account || '').length > 8 && '…'}</>
-                                                                                    )}
-                                                                                </Badge>
-                                                                            </Tooltip>
-                                                                            {!tx.to_account_id && tx.source_to_account && (
-                                                                                <Tooltip content="Create new account" openDelay={100}>
-                                                                                    <Box
-                                                                                        as="button"
-                                                                                        onClick={(e: React.MouseEvent) => {
-                                                                                            e.stopPropagation();
-                                                                                            setQuickCreateAccount({
-                                                                                                txId: tx.id,
-                                                                                                field: 'to_account_id',
-                                                                                                prefill: {
-                                                                                                    name: tx.source_to_account || '',
-                                                                                                    account_type: tx.source_to_account?.startsWith('0x') ? 'wallet' : 'cex',
-                                                                                                    address_or_identifier: tx.source_to_account || '',
-                                                                                                },
-                                                                                                rawSource: tx.source,
-                                                                                                rawLabel: tx.source_to_account || undefined,
-                                                                                                rawNetwork: tx.network || undefined,
-                                                                                            });
-                                                                                        }}
-                                                                                        color="green.500"
-                                                                                        cursor="pointer"
-                                                                                        flexShrink={0}
-                                                                                        _hover={{ color: 'green.700' }}
-                                                                                    >
-                                                                                        <FiPlusCircle size={10} />
-                                                                                    </Box>
-                                                                                </Tooltip>
-                                                                            )}
-                                                                        </Flex>
-                                                                        {/* Always-visible suggestion badges for unlinked to_account */}
-                                                                        {tx.source_to_account && !tx.to_account_id && (
-                                                                            <AccountSuggestionBadges
-                                                                                label={tx.source_to_account}
-                                                                                source={tx.source}
-                                                                                network={tx.network}
-                                                                                maxResults={2}
-                                                                                fontSize="6px"
-                                                                                onAccept={async (s) => {
-                                                                                    try {
-                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                            method: 'PATCH',
-                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                            body: JSON.stringify({ to_account_id: s.id })
-                                                                                        });
-                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                        // Also link the raw_account
-                                                                                        if (tx.source_to_account) {
-                                                                                            try {
-                                                                                                await linkRawAccount({ source: tx.source, label: tx.source_to_account, network: tx.network, accountId: s.id });
-                                                                                            } catch { }
-                                                                                        }
-                                                                                        invalidateTransactionData();
-                                                                                    } catch (err) {
-                                                                                        toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                                    }
-                                                                                }}
-                                                                            />
-                                                                        )}
-                                                                    </Flex>
-                                                                ) : (
-                                                                    <Badge
-                                                                        size="xs"
-                                                                        colorPalette="gray"
-                                                                        variant="outline"
-                                                                        cursor="pointer"
-                                                                        onClick={() => startCellEdit(tx, 'to_account_id')}
-                                                                    >
-                                                                        + To
-                                                                    </Badge>
-                                                                )}
-                                                            </VStack>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Direction - click to edit */}
-                                                    {showColumn('direction') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'direction') && startCellEdit(tx, 'direction')} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'direction') ? (
-                                                                <NativeSelect.Root size="sm" width="45px">
-                                                                    <NativeSelect.Field
-                                                                        value={editValues.direction || tx.direction}
-                                                                        onChange={async e => {
-                                                                            const newDir = e.target.value;
-                                                                            // Save directly with the new value
-                                                                            try {
-                                                                                const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                    method: 'PATCH',
-                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                    body: JSON.stringify({ direction: newDir })
-                                                                                });
-                                                                                if (!response.ok) throw new Error('Failed to update');
-                                                                                invalidateTransactionData();
-                                                                                setEditingCell(null);
-                                                                                setEditValues({});
-                                                                            } catch (err) {
-                                                                                toaster.error({ title: 'Error', description: 'Failed to save direction' });
-                                                                            }
-                                                                        }}
-                                                                        onBlur={() => {
-                                                                            if (!escapePressedRef.current) {
-                                                                                setEditingCell(null);
-                                                                                setEditValues({});
-                                                                            }
-                                                                        }}
-                                                                        style={{ fontSize: '8px', padding: '2px' }}
-                                                                        autoFocus
-                                                                    >
-                                                                        {DIRECTION_OPTIONS.map(opt => (
-                                                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                                        ))}
-                                                                    </NativeSelect.Field>
-                                                                </NativeSelect.Root>
-                                                            ) : (
-                                                                <Badge size="sm" colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}>
-                                                                    {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'}
-                                                                </Badge>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Type - click to edit */}
-                                                    {showColumn('type') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'transaction_type') && startCellEdit(tx, 'transaction_type')} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'transaction_type') ? (
-                                                                <NativeSelect.Root size="sm" width="80px">
-                                                                    <NativeSelect.Field
-                                                                        value={editValues.transaction_type || tx.transaction_type}
-                                                                        onChange={async e => {
-                                                                            const newType = e.target.value;
-                                                                            try {
-                                                                                const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                    method: 'PATCH',
-                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                    body: JSON.stringify({ transaction_type: newType })
-                                                                                });
-                                                                                if (!response.ok) throw new Error('Failed to update');
-                                                                                invalidateTransactionData();
-                                                                                setEditingCell(null);
-                                                                                setEditValues({});
-                                                                            } catch (err) {
-                                                                                toaster.error({ title: 'Error', description: 'Failed to save type' });
-                                                                            }
-                                                                        }}
-                                                                        onBlur={() => {
-                                                                            if (!escapePressedRef.current) {
-                                                                                setEditingCell(null);
-                                                                                setEditValues({});
-                                                                            }
-                                                                        }}
-                                                                        style={{ fontSize: '8px', padding: '2px' }}
-                                                                        autoFocus
-                                                                    >
-                                                                        {TRANSACTION_TYPE_OPTIONS.map(opt => (
-                                                                            <option key={opt} value={opt}>{opt}</option>
-                                                                        ))}
-                                                                    </NativeSelect.Field>
-                                                                </NativeSelect.Root>
-                                                            ) : (
-                                                                <Flex align="center" gap={1}>
-                                                                    {tx.transaction_type === 'transfer' ? (
-                                                                        <BiTransfer color="#805AD5" size={12} title="Transfer" />
-                                                                    ) : tx.transaction_type === 'trade' ? (
-                                                                        <RiExchangeFundsLine color="#3182CE" size={12} title="Trade" />
-                                                                    ) : tx.transaction_type === 'technical' ? (
-                                                                        <FaQuestion color="#A0AEC0" size={10} title="Technical (approval, contract call)" />
-                                                                    ) : (
-                                                                        <FaQuestion color="#718096" size={10} title="Other" />
-                                                                    )}
-                                                                    <Badge size="xs" colorPalette="blue">{tx.transaction_type?.substring(0, 6)}</Badge>
-                                                                </Flex>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Linked Asset - click to edit */}
-                                                    {showColumn('asset') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'asset_id') ? (
-                                                                <Flex direction="column" gap={1} minW="90px">
-                                                                    <AssetSelector
-                                                                        value={editValues.asset_id ?? null}
-                                                                        onChange={(assetId) => {
-                                                                            if (!escapePressedRef.current) {
-                                                                                updateEditValues({ asset_id: assetId ?? undefined });
-                                                                                saveAndClose();
-                                                                            }
-                                                                        }}
-                                                                        assets={assets}
-                                                                        onAssetCreated={refetchAssets}
-                                                                        defaultSymbol={tx.source_asset_symbol || ''}
-                                                                        placeholder="Link..."
-                                                                        rawAssetSource={tx.source}
-                                                                        rawAssetSymbol={tx.source_asset_symbol}
-                                                                    />
-                                                                    {/* Show asset suggestions when editing unlinked asset */}
-                                                                    {tx.source_asset_symbol && !tx.asset_id && (() => {
-                                                                        const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
-                                                                        return suggestions.length > 0 ? (
-                                                                            <HStack gap={1} flexWrap="wrap">
-                                                                                <Text fontSize="7px" color="gray.500">Suggestions:</Text>
-                                                                                {suggestions.map((s, idx) => (
-                                                                                    <Tooltip
-                                                                                        key={idx}
-                                                                                        content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
-                                                                                        openDelay={100}
-                                                                                    >
-                                                                                        <Badge
-                                                                                            size="xs"
-                                                                                            colorPalette={getConfidenceColor(s.confidence)}
-                                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                            cursor="pointer"
-                                                                                            fontSize="7px"
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                updateEditValues({ asset_id: s.item.asset_id });
-                                                                                                saveAndClose();
-                                                                                            }}
-                                                                                        >
-                                                                                            {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
-                                                                                            {s.confidence >= 0.9 && ' ✓'}
-                                                                                        </Badge>
-                                                                                    </Tooltip>
-                                                                                ))}
-                                                                            </HStack>
-                                                                        ) : null;
-                                                                    })()}
-                                                                </Flex>
-                                                            ) : (
-                                                                tx.linked_asset_symbol ? (
-                                                                    <AssetBadge
-                                                                        asset={tx.linked_asset}
-                                                                        size="sm"
-                                                                        colorPalette="purple"
-                                                                        maxLength={10}
-                                                                        onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
-                                                                    />
-                                                                ) : tx.source_asset_symbol ? (
-                                                                    <Flex direction="column" gap={0.5} align="start">
-                                                                        <Flex align="center" gap={0.5}>
-                                                                            <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
-                                                                                <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
-                                                                                    ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
-                                                                                </Text>
-                                                                            </Tooltip>
-                                                                            <Tooltip content="Create new asset" openDelay={100}>
-                                                                                <Box
-                                                                                    as="button"
-                                                                                    onClick={(e: React.MouseEvent) => {
-                                                                                        e.stopPropagation();
-                                                                                        setQuickCreateAsset({
-                                                                                            txId: tx.id,
-                                                                                            field: 'asset_id',
-                                                                                            prefill: { symbol: tx.source_asset_symbol || '' },
-                                                                                            rawSource: tx.source,
-                                                                                            rawSymbol: tx.source_asset_symbol || undefined,
-                                                                                        });
-                                                                                    }}
-                                                                                    color="green.500"
-                                                                                    cursor="pointer"
-                                                                                    flexShrink={0}
-                                                                                    _hover={{ color: 'green.700' }}
-                                                                                >
-                                                                                    <FiPlusCircle size={10} />
-                                                                                </Box>
-                                                                            </Tooltip>
-                                                                        </Flex>
-                                                                        {/* Always-visible suggestion badges for unlinked asset */}
-                                                                        {(() => {
-                                                                            const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={0.5} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        // Also link the raw_asset
-                                                                                                        if (tx.source_asset_symbol) {
-                                                                                                            try {
-                                                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_asset_symbol)}`, {
-                                                                                                                    method: 'PATCH',
-                                                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                                                    body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                                                                });
-                                                                                                            } catch { }
-                                                                                                        }
-                                                                                                        invalidateTransactionData();
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link asset' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
-                                                                    </Flex>
-                                                                ) : (
-                                                                    <Text color="gray.400" fontSize="8px">-</Text>
-                                                                )
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Quantity - click to edit */}
-                                                    {showColumn('qty') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'quantity') && startCellEdit(tx, 'quantity')} cursor="pointer">
-                                                            {isEditingCell(tx.id, 'quantity') ? (
-                                                                <Input
-                                                                    ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                    size="xs"
-                                                                    type="number"
-                                                                    step="any"
-                                                                    value={editValues.quantity ?? tx.quantity ?? ''}
-                                                                    onChange={e => updateEditValues({ quantity: parseFloat(e.target.value) || 0 })}
-                                                                    onKeyDown={e => {
-                                                                        if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                        else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity); }
-                                                                    }}
-                                                                    onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity)}
-                                                                    width="60px"
-                                                                    fontSize="8px"
-                                                                    px={1}
-                                                                />
-                                                            ) : (
-                                                                <Text fontSize="8px"><ValueDisplay value={tx.quantity} /></Text>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Price - click to edit value, click badge to edit quote asset */}
-                                                    {showColumn('price') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'price') && !isEditingCell(tx.id, 'price_quote_asset_id') && startCellEdit(tx, 'price')} cursor="pointer">
-                                                            <Flex direction="column" gap={0}>
-                                                                {isEditingCell(tx.id, 'price') ? (
-                                                                    <Input
-                                                                        ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                        size="xs"
-                                                                        type="number"
-                                                                        step="any"
-                                                                        value={editValues.price ?? tx.price ?? ''}
-                                                                        onChange={e => updateEditValues({ price: parseFloat(e.target.value) || 0 })}
-                                                                        onKeyDown={e => {
-                                                                            if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                            else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'price', editValuesRef.current.price); }
-                                                                        }}
-                                                                        onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'price', editValuesRef.current.price)}
-                                                                        width="60px"
-                                                                        fontSize="8px"
-                                                                        px={1}
-                                                                    />
-                                                                ) : (
-                                                                    <Text fontSize="8px">
-                                                                        {tx.price ? <ValueDisplay value={tx.price} /> : '-'}
-                                                                    </Text>
-                                                                )}
-                                                                {isEditingCell(tx.id, 'price_quote_asset_id') ? (
-                                                                    <Flex direction="column" gap={1} minW="70px">
-                                                                        <AssetSelector
-                                                                            value={editValues.price_quote_asset_id ?? null}
-                                                                            onChange={(assetId) => {
-                                                                                if (!escapePressedRef.current) {
-                                                                                    updateEditValues({ price_quote_asset_id: assetId ?? undefined });
-                                                                                    saveAndClose();
-                                                                                }
-                                                                            }}
-                                                                            assets={assets}
-                                                                            onAssetCreated={refetchAssets}
-                                                                            defaultSymbol={tx.source_price_quote_asset_symbol || ''}
-                                                                            placeholder="Quote..."
-                                                                            rawAssetSource={tx.source}
-                                                                            rawAssetSymbol={tx.source_price_quote_asset_symbol}
-                                                                        />
-                                                                        {/* Show asset suggestions when editing unlinked price quote asset */}
-                                                                        {tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id && (() => {
-                                                                            const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 3);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={1} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip
-                                                                                            key={idx}
-                                                                                            content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
-                                                                                            openDelay={100}
-                                                                                        >
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    updateEditValues({ price_quote_asset_id: s.item.asset_id });
-                                                                                                    saveAndClose();
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
-                                                                    </Flex>
-                                                                ) : tx.linked_price_quote_asset_symbol ? (
-                                                                    <AssetBadge
-                                                                        asset={tx.price_quote_asset}
-                                                                        size="xs"
-                                                                        colorPalette="cyan"
-                                                                        maxLength={10}
-                                                                        onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}
-                                                                    />
-                                                                ) : tx.source_price_quote_asset_symbol ? (
-                                                                    <Flex direction="column" gap={0.5} align="start">
-                                                                        <Flex align="center" gap={0.5}>
-                                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
-                                                                            <Tooltip content="Create new asset" openDelay={100}>
-                                                                                <Box
-                                                                                    as="button"
-                                                                                    onClick={(e: React.MouseEvent) => {
-                                                                                        e.stopPropagation();
-                                                                                        setQuickCreateAsset({
-                                                                                            txId: tx.id,
-                                                                                            field: 'price_quote_asset_id',
-                                                                                            prefill: { symbol: tx.source_price_quote_asset_symbol || '' },
-                                                                                            rawSource: tx.source,
-                                                                                            rawSymbol: tx.source_price_quote_asset_symbol || undefined,
-                                                                                        });
-                                                                                    }}
-                                                                                    color="green.500"
-                                                                                    cursor="pointer"
-                                                                                    flexShrink={0}
-                                                                                    _hover={{ color: 'green.700' }}
-                                                                                >
-                                                                                    <FiPlusCircle size={9} />
-                                                                                </Box>
-                                                                            </Tooltip>
-                                                                        </Flex>
-                                                                        {/* Always-visible suggestion badges for unlinked price quote asset */}
-                                                                        {(() => {
-                                                                            const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 2);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={0.5} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ price_quote_asset_id: s.item.asset_id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        // Also link the raw_asset
-                                                                                                        if (tx.source_price_quote_asset_symbol) {
-                                                                                                            try {
-                                                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_price_quote_asset_symbol)}`, {
-                                                                                                                    method: 'PATCH',
-                                                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                                                    body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                                                                });
-                                                                                                            } catch { }
-                                                                                                        }
-                                                                                                        invalidateTransactionData();
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link asset' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
-                                                                    </Flex>
-                                                                ) : null}
-                                                            </Flex>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {showColumn('total') && (
-                                                        <Table.Cell py={1}>
-                                                            <Text fontSize="8px">
-                                                                {tx.total ? <ValueDisplay value={tx.total} /> : '-'}
-                                                            </Text>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Fee - click to edit value, click badge to edit quote asset */}
-                                                    {showColumn('fee') && (
-                                                        <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'fee') && !isEditingCell(tx.id, 'fee_quote_asset_id') && startCellEdit(tx, 'fee')} cursor="pointer">
-                                                            <Flex direction="column" gap={0}>
-                                                                {isEditingCell(tx.id, 'fee') ? (
-                                                                    <Input
-                                                                        ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                        size="xs"
-                                                                        type="number"
-                                                                        step="any"
-                                                                        value={editValues.fee ?? tx.fee ?? ''}
-                                                                        onChange={e => updateEditValues({ fee: parseFloat(e.target.value) || 0 })}
-                                                                        onKeyDown={e => {
-                                                                            if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                            else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee); }
-                                                                        }}
-                                                                        onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee)}
-                                                                        width="60px"
-                                                                        fontSize="8px"
-                                                                        px={1}
-                                                                    />
-                                                                ) : (
-                                                                    <Text fontSize="8px">
-                                                                        {tx.fee ? <ValueDisplay value={tx.fee} /> : '-'}
-                                                                    </Text>
-                                                                )}
-                                                                {isEditingCell(tx.id, 'fee_quote_asset_id') ? (
-                                                                    <Flex direction="column" gap={1} minW="70px">
-                                                                        <AssetSelector
-                                                                            value={editValues.fee_quote_asset_id ?? null}
-                                                                            onChange={(assetId) => {
-                                                                                if (!escapePressedRef.current) {
-                                                                                    updateEditValues({ fee_quote_asset_id: assetId ?? undefined });
-                                                                                    saveAndClose();
-                                                                                }
-                                                                            }}
-                                                                            assets={assets}
-                                                                            onAssetCreated={refetchAssets}
-                                                                            defaultSymbol={tx.source_fee_quote_asset_symbol || ''}
-                                                                            placeholder="Fee..."
-                                                                            rawAssetSource={tx.source}
-                                                                            rawAssetSymbol={tx.source_fee_quote_asset_symbol}
-                                                                        />
-                                                                        {/* Show asset suggestions when editing unlinked fee quote asset */}
-                                                                        {tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id && (() => {
-                                                                            const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 3);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={1} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip
-                                                                                            key={idx}
-                                                                                            content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
-                                                                                            openDelay={100}
-                                                                                        >
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    updateEditValues({ fee_quote_asset_id: s.item.asset_id });
-                                                                                                    saveAndClose();
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
-                                                                    </Flex>
-                                                                ) : tx.linked_fee_quote_asset_symbol ? (
-                                                                    <AssetBadge
-                                                                        asset={tx.fee_quote_asset}
-                                                                        size="xs"
-                                                                        colorPalette="cyan"
-                                                                        maxLength={10}
-                                                                        onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}
-                                                                    />
-                                                                ) : tx.source_fee_quote_asset_symbol ? (
-                                                                    <Flex direction="column" gap={0.5} align="start">
-                                                                        <Flex align="center" gap={0.5}>
-                                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
-                                                                            <Tooltip content="Create new asset" openDelay={100}>
-                                                                                <Box
-                                                                                    as="button"
-                                                                                    onClick={(e: React.MouseEvent) => {
-                                                                                        e.stopPropagation();
-                                                                                        setQuickCreateAsset({
-                                                                                            txId: tx.id,
-                                                                                            field: 'fee_quote_asset_id',
-                                                                                            prefill: { symbol: tx.source_fee_quote_asset_symbol || '' },
-                                                                                            rawSource: tx.source,
-                                                                                            rawSymbol: tx.source_fee_quote_asset_symbol || undefined,
-                                                                                        });
-                                                                                    }}
-                                                                                    color="green.500"
-                                                                                    cursor="pointer"
-                                                                                    flexShrink={0}
-                                                                                    _hover={{ color: 'green.700' }}
-                                                                                >
-                                                                                    <FiPlusCircle size={9} />
-                                                                                </Box>
-                                                                            </Tooltip>
-                                                                        </Flex>
-                                                                        {/* Always-visible suggestion badges for unlinked fee quote asset */}
-                                                                        {(() => {
-                                                                            const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 2);
-                                                                            return suggestions.length > 0 ? (
-                                                                                <HStack gap={0.5} flexWrap="wrap">
-                                                                                    {suggestions.map((s, idx) => (
-                                                                                        <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
-                                                                                            <Badge
-                                                                                                size="xs"
-                                                                                                colorPalette={getConfidenceColor(s.confidence)}
-                                                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                                cursor="pointer"
-                                                                                                fontSize="6px"
-                                                                                                onClick={async (e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    try {
-                                                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                                            method: 'PATCH',
-                                                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                                                            body: JSON.stringify({ fee_quote_asset_id: s.item.asset_id })
-                                                                                                        });
-                                                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                                                        // Also link the raw_asset
-                                                                                                        if (tx.source_fee_quote_asset_symbol) {
-                                                                                                            try {
-                                                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_fee_quote_asset_symbol)}`, {
-                                                                                                                    method: 'PATCH',
-                                                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                                                    body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                                                                });
-                                                                                                            } catch { }
-                                                                                                        }
-                                                                                                        invalidateTransactionData();
-                                                                                                    } catch (err) {
-                                                                                                        toaster.error({ title: 'Error', description: 'Failed to link asset' });
-                                                                                                    }
-                                                                                                }}
-                                                                                            >
-                                                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
-                                                                                            </Badge>
-                                                                                        </Tooltip>
-                                                                                    ))}
-                                                                                </HStack>
-                                                                            ) : null;
-                                                                        })()}
-                                                                    </Flex>
-                                                                ) : null}
-                                                            </Flex>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Taxable - always toggle, saves immediately */}
-                                                    {showColumn('taxability') && (
-                                                        <Table.Cell py={1}>
-                                                            <Switch.Root
-                                                                size="sm"
-                                                                checked={tx.disposal_taxable ?? false}
-                                                                onCheckedChange={() => quickToggle(tx, 'disposal_taxable')}
-                                                            >
-                                                                <Switch.HiddenInput />
-                                                                <Switch.Control />
-                                                            </Switch.Root>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Include Fee - always toggle, saves immediately */}
-                                                    {showColumn('feeInBase') && (
-                                                        <Table.Cell py={1}>
-                                                            <Switch.Root
-                                                                size="sm"
-                                                                checked={tx.include_fee ?? false}
-                                                                onCheckedChange={() => quickToggle(tx, 'include_fee')}
-                                                            >
-                                                                <Switch.HiddenInput />
-                                                                <Switch.Control />
-                                                            </Switch.Root>
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Bundle - read only */}
-                                                    {showColumn('bundle') && (
-                                                        <Table.Cell py={1}>
-                                                            {tx.user_calculation_unit_id ? <Badge size="sm" colorPalette="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <Text fontSize="8px" color="gray.400">-</Text>}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Tags - display only */}
-                                                    {showColumn('tags') && (
-                                                        <Table.Cell py={1}>
-                                                            {tx.tags && Object.keys(tx.tags).length > 0 ? (
-                                                                <Tooltip
-                                                                    content={
-                                                                        <VStack gap={0.5} align="start">
-                                                                            {Object.entries(tx.tags).map(([key, value]) => (
-                                                                                <Text key={key} fontSize="xs">
-                                                                                    {key}: {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                                                                                </Text>
-                                                                            ))}
-                                                                        </VStack>
-                                                                    }
-                                                                    openDelay={200}
-                                                                >
-                                                                    <HStack gap={0.5} flexWrap="wrap" maxW="100px">
-                                                                        {Object.entries(tx.tags).slice(0, 2).map(([key, value]) => (
-                                                                            <Badge key={key} size="xs" colorPalette="blue" variant="subtle">
-                                                                                {key === 'value' ? String(value).slice(0, 8) : key.slice(0, 6)}
-                                                                            </Badge>
-                                                                        ))}
-                                                                        {Object.keys(tx.tags).length > 2 && (
-                                                                            <Text fontSize="7px" color="gray.500">+{Object.keys(tx.tags).length - 2}</Text>
-                                                                        )}
-                                                                    </HStack>
-                                                                </Tooltip>
-                                                            ) : (
-                                                                <Text fontSize="8px" color="gray.400">-</Text>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Source Transaction ID - display only */}
-                                                    {showColumn('sourceTransactionId') && (
-                                                        <Table.Cell py={1}>
-                                                            {tx.source_transaction_id ? (
-                                                                <Tooltip content={tx.source_transaction_id} openDelay={200}>
-                                                                    <Text fontSize="8px" color="gray.600" cursor="pointer">
-                                                                        {tx.source_transaction_id.slice(0, 12)}{tx.source_transaction_id.length > 12 && '…'}
-                                                                    </Text>
-                                                                </Tooltip>
-                                                            ) : (
-                                                                <Text fontSize="8px" color="gray.400">-</Text>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Additional plugin columns */}
-                                                    {additionalColumns.map(col => (
-                                                        <Table.Cell key={col.id} py={1}>
-                                                            {col.render(tx as T)}
-                                                        </Table.Cell>
-                                                    ))}
-                                                    {/* Status - click to edit */}
-                                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && (
-                                                        <Table.Cell position="sticky" right="50px" bg={getRowBgColor(tx)} zIndex={5} borderLeft="2px solid" borderColor="gray.300" onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')} cursor="pointer" px={1} py={0}>
-                                                            {isEditingCell(tx.id, 'review_status') ? (
-                                                                <NativeSelect.Root size="sm" width="55px">
-                                                                    <NativeSelect.Field
-                                                                        value={editValues.review_status || tx.review_status}
-                                                                        onChange={e => updateEditValues({ review_status: e.target.value as TransactionStatus })}
-                                                                        onKeyDown={handleEditKeyDown}
-                                                                        onBlur={saveAndClose}
-                                                                        style={{ fontSize: '7px', padding: '1px' }}
-                                                                    >
-                                                                        <option value="valid">Valid</option>
-                                                                        <option value="pending">Pending</option>
-                                                                        <option value="invalid">Invalid</option>
-                                                                    </NativeSelect.Field>
-                                                                </NativeSelect.Root>
-                                                            ) : (
-                                                                <Flex direction="column" gap={0}>
-                                                                    <Badge size="xs" colorPalette={statusBadgeColors[tx.review_status] || 'gray'} fontSize="6px">
-                                                                        {tx.review_status}
-                                                                    </Badge>
-                                                                    {/* Quick set valid button */}
-                                                                    {tx.review_status !== 'valid' && (
-                                                                        <Button
-                                                                            size="2xs"
-                                                                            variant="ghost"
-                                                                            colorPalette="green"
-                                                                            onClick={async (e) => {
-                                                                                e.stopPropagation();
-                                                                                try {
-                                                                                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                                        method: 'PATCH',
-                                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                                        body: JSON.stringify({ review_status: 'valid' }),
-                                                                                    });
-                                                                                    if (!response.ok) throw new Error('Failed to update');
-                                                                                    invalidateTransactionData();
-                                                                                } catch (err) {
-                                                                                    toaster.error({ title: 'Error', description: 'Failed to set status' });
-                                                                                }
-                                                                            }}
-                                                                            title="Set valid"
-                                                                            p={0}
-                                                                            minW="14px"
-                                                                            h="12px"
-                                                                        >
-                                                                            <LuCheck size={8} />
-                                                                        </Button>
-                                                                    )}
-                                                                    {/* Duplicate indicators */}
-                                                                    {hasPotentialDuplicateTag(tx) && (() => {
-                                                                        const resolutionTag = getDuplicateResolutionTag(tx);
-                                                                        const groupHash = getDuplicateGroupHash(tx);
-
-                                                                        if (resolutionTag) {
-                                                                            // Read dup_resolution field from new format
-                                                                            const resolution = resolutionTag.dup_resolution;
-                                                                            const status = resolutionTag.data?.status;
-
-                                                                            if (resolution === 'kept' || resolution === 'keep_selected') {
-                                                                                return (
-                                                                                    <Tooltip content={`Kept (${status || 'resolved'})`}>
-                                                                                        <Badge size="xs" colorPalette="green" variant="outline" fontSize="7px">
-                                                                                            <FiCopy size={8} style={{ marginRight: '2px' }} />
-                                                                                            Kept
-                                                                                        </Badge>
-                                                                                    </Tooltip>
-                                                                                );
-                                                                            } else if (resolution === 'dismissed' || resolution === 'dismiss_selected') {
-                                                                                return (
-                                                                                    <Tooltip content={`Dismissed (${status || 'resolved'})`}>
-                                                                                        <Badge size="xs" colorPalette="gray" variant="outline" fontSize="7px">
-                                                                                            <FiCopy size={8} style={{ marginRight: '2px' }} />
-                                                                                            Dismissed
-                                                                                        </Badge>
-                                                                                    </Tooltip>
-                                                                                );
-                                                                            } else if (resolution === 'merged') {
-                                                                                return (
-                                                                                    <Tooltip content={`Merged (${status || 'resolved'})`}>
-                                                                                        <Badge size="xs" colorPalette="purple" variant="outline" fontSize="7px">
-                                                                                            <FiCopy size={8} style={{ marginRight: '2px' }} />
-                                                                                            Merged
-                                                                                        </Badge>
-                                                                                    </Tooltip>
-                                                                                );
-                                                                            }
-                                                                        }
-
-                                                                        // Show pending duplicate indicator
-                                                                        return (
-                                                                            <Tooltip content={`Potential duplicate (group: ${groupHash?.slice(0, 8)}...)`}>
-                                                                                <Badge size="xs" colorPalette="orange" variant="solid" fontSize="7px">
-                                                                                    <FiCopy size={8} style={{ marginRight: '2px' }} />
-                                                                                    Duplicate?
-                                                                                </Badge>
-                                                                            </Tooltip>
-                                                                        );
-                                                                    })()}
-                                                                </Flex>
-                                                            )}
-                                                        </Table.Cell>
-                                                    )}
-                                                    {/* Actions - show cancel when editing */}
-                                                    {!embeddedMode && (
-                                                        <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="50px" px={0} py={0}>
-                                                            <Flex gap={0}>
-                                                                {/* Unbundle action — remove tx from bundle */}
-                                                                {!suggestionEntry && tx.user_calculation_unit_id && (
-                                                                    <Button
-                                                                        size="2xs"
-                                                                        variant="ghost"
-                                                                        colorPalette="red"
-                                                                        onClick={async (e) => {
-                                                                            e.stopPropagation();
-                                                                            try {
-                                                                                const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}/remove-transactions`, {
-                                                                                    method: 'POST',
-                                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                                    body: JSON.stringify({ transaction_ids: [tx.id] }),
-                                                                                });
-                                                                                if (!response.ok) throw new Error('Failed to unbundle');
-                                                                                invalidateTransactionData();
-                                                                                queryClient.invalidateQueries({ queryKey: ['bundles'] });
-                                                                                toaster.success({ title: 'Unbundled', description: `Transaction #${tx.id} removed from bundle` });
-                                                                            } catch (err) {
-                                                                                toaster.error({ title: 'Error', description: 'Failed to remove from bundle' });
-                                                                            }
-                                                                        }}
-                                                                        onMouseEnter={() => setHoveredBundleId(tx.user_calculation_unit_id!)}
-                                                                        onMouseLeave={() => setHoveredBundleId(null)}
-                                                                        title={`Remove from bundle #${tx.user_calculation_unit_id}`}
-                                                                        p={0}
-                                                                        minW="16px"
-                                                                        h="16px"
-                                                                    >
-                                                                        <LuPackageX size={10} />
-                                                                    </Button>
-                                                                )}
-                                                                {/* Bundle suggestion icon in actions */}
-                                                                {suggestionEntry && (
-                                                                    <Button
-                                                                        size="2xs"
-                                                                        variant="ghost"
-                                                                        colorPalette="teal"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            setOpenSuggestionTxId(openSuggestionTxId === tx.id ? null : tx.id);
-                                                                        }}
-                                                                        onMouseEnter={() => setHoveredSuggestionGroup(suggestionEntry.groupIndex)}
-                                                                        onMouseLeave={() => setHoveredSuggestionGroup(null)}
-                                                                        title={`Bundle suggestion: ${suggestionEntry.suggestion.label}`}
-                                                                        p={0}
-                                                                        minW="16px"
-                                                                        h="16px"
-                                                                    >
-                                                                        <BundleSuggestionIcon size={10} color={suggestionEntry.color} />
-                                                                    </Button>
-                                                                )}
-                                                                {getEditingTxId() === tx.id ? (
-                                                                    <Button size="2xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)" p={0} minW="16px" h="16px">
-                                                                        ✗
-                                                                    </Button>
-                                                                ) : (
-                                                                    <>
-                                                                        <Button
-                                                                            size="2xs"
-                                                                            variant="ghost"
-                                                                            colorPalette="blue"
-                                                                            onClick={() => {
-                                                                                setDrawerTransactionId(tx.id);
-                                                                                setIsDrawerOpen(true);
-                                                                            }}
-                                                                            title="Edit all fields"
-                                                                            p={0}
-                                                                            minW="16px"
-                                                                            h="16px"
-                                                                        >
-                                                                            <LuPencil size={10} />
-                                                                        </Button>
-                                                                        <Button
-                                                                            size="2xs"
-                                                                            variant="ghost"
-                                                                            colorPalette="red"
-                                                                            onClick={() => {
-                                                                                setTransactionToDelete(tx);
-                                                                                fetchDeletionImpact([tx.id]);
-                                                                                setShowDeleteDialog(true);
-                                                                            }}
-                                                                            title="Delete transaction"
-                                                                            p={0}
-                                                                            minW="16px"
-                                                                            h="16px"
-                                                                        >
-                                                                            🗑️
-                                                                        </Button>
-                                                                    </>
-                                                                )}
-                                                                {/* Additional plugin row actions */}
-                                                                {additionalRowActions.map(action => {
-                                                                    const isVisible = action.isVisible ? action.isVisible(tx as T) : true;
-                                                                    const isDisabled = action.isDisabled ? action.isDisabled(tx as T) : false;
-                                                                    if (!isVisible) return null;
-                                                                    return (
-                                                                        <Button
-                                                                            key={action.id}
-                                                                            size="2xs"
-                                                                            variant="ghost"
-                                                                            colorPalette={action.colorPalette || 'gray'}
-                                                                            onClick={() => action.onClick(tx as T)}
-                                                                            disabled={isDisabled}
-                                                                            title={action.label}
-                                                                            p={0}
-                                                                            minW="16px"
-                                                                            h="16px"
-                                                                        >
-                                                                            {action.icon}
-                                                                        </Button>
-                                                                    );
-                                                                })}
-                                                            </Flex>
-                                                        </Table.Cell>
-                                                    )}
-                                                </Table.Row>
-                                            </React.Fragment>
-                                        );
-                                    })
+                                    paginatedTransactions.map(tx => (
+                                        <TransactionTableRow
+                                            key={tx.id}
+                                            tx={tx}
+                                            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
+                                            duplicateEntry={duplicateMap.get(tx.id)}
+                                            rowBgColor={getRowBgColor(tx)}
+                                            rowBorderColor={getRowBorderColor(tx)}
+                                            isInvalidCollapsed={isInvalidCollapsed(tx)}
+                                            accounts={accounts}
+                                            accountsById={accountsById}
+                                            assets={assets}
+                                            batchSuggestionsMap={batchSuggestionsMap}
+                                            showColumn={showColumn}
+                                            visibleColumnCount={visibleColumnCount}
+                                            embeddedMode={embeddedMode}
+                                            showSuggestions={showSuggestions}
+                                            showSelectionInEmbedded={showSelectionInEmbedded}
+                                            additionalColumns={additionalColumns as ColumnPlugin[]}
+                                            additionalRowActions={additionalRowActions as RowAction[]}
+                                            editingCell={editingCell}
+                                            editValues={editValues}
+                                            selectedIds={selectedIds}
+                                            expandedInvalidIds={expandedInvalidIds}
+                                            openSuggestionTxId={openSuggestionTxId}
+                                            hoveredSuggestionGroup={hoveredSuggestionGroup}
+                                            openDuplicateTxId={openDuplicateTxId}
+                                            hoveredDuplicateGroup={hoveredDuplicateGroup}
+                                            hoveredBundleId={hoveredBundleId}
+                                            openBundleTxId={openBundleTxId}
+                                            bundleColorMap={bundleColorMap}
+                                            editInputRef={editInputRef}
+                                            escapePressedRef={escapePressedRef}
+                                            editValuesRef={editValuesRef}
+                                            callbacks={rowCallbacksRef.current}
+                                        />
+                                    ))
                                 )}
                             </Table.Body>
                         </Table.Root>
@@ -3457,7 +1878,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 {!loading && !error && !embeddedMode && (
                     <TablePagination
                         pagination={pagination}
-                        total={transactions.length}
+                        total={filterMetadata?.filtered_count ?? 0}
                     />
                 )}
             </>

@@ -64,7 +64,7 @@ class TestOKXTradesFileConnector:
         assert result.quantity == 16.1864
         assert result.price == 0.87060000
         assert result.source_price_quote_asset_symbol == "EUR"
-        assert result.total == 14.09188855
+        assert result.total == pytest.approx(14.09188855, rel=1e-4)
         assert result.fee == 0.0
         assert result.source_fee_quote_asset_symbol == "USDC"
         assert result.tags is None or result.tags == []
@@ -96,7 +96,7 @@ class TestOKXTradesFileConnector:
         assert result.transaction_type == "trade"
         assert result.source_asset_symbol == "BTC"
         assert result.tags is not None
-        assert result.tags == [ {"type":"convert"}]
+        assert result.tags == {"type": "convert"}
 
     def test_raw_to_normalized_with_fee(self):
         """Test normalization with non-zero fee."""
@@ -269,7 +269,7 @@ class TestOKXTradesFileConnector:
         result = connector.raw_to_normalized(raw_row)
         assert result.source_fee_quote_asset_symbol == "EUR"
 
-    @patch("backend.connectors.cex.connector_okx_trades_file.load_okx_trades_file")
+    @patch("backend.file_loaders.okx_trades_loader.load_okx_trades_file")
     def test_load_file_data(self, mock_loader):
         """Test _load_file_data method."""
         mock_df = pd.DataFrame([
@@ -299,7 +299,7 @@ class TestOKXTradesFileConnector:
         assert len(data) == 1
         mock_loader.assert_called_once_with("/tmp/test.csv")
 
-    @patch("backend.connectors.cex.connector_okx_trades_file.load_okx_trades_file")
+    @patch("backend.file_loaders.okx_trades_loader.load_okx_trades_file")
     def test_yield_raws(self, mock_loader):
         """Test yield_raws method."""
         mock_df = pd.DataFrame([

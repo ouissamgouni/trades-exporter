@@ -165,6 +165,9 @@ class DatabaseConnectorHub(BaseHubConnector):
                     if since_dt:
                         config["since_datetime"] = since_dt
                         log.info(f"📅 Connector {connector_key} will sync since: {since_dt}")
+                    else:
+                        # since_dt is None → full sync (no since_datetime filter)
+                        log.info(f"📅 Connector {connector_key} performing full sync (no since_datetime)")
                 
                 # Apply symbols override if specified (for trade connectors)
                 if connector_id in self._override_symbols:

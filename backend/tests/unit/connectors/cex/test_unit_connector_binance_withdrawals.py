@@ -64,7 +64,7 @@ class TestBinanceWithdrawalsConnector:
         assert result.fee == 0.005
         assert result.source_fee_quote_asset_symbol == "ETH"
         assert result.network_transaction_id == "0xabc123def456"
-        assert result.network == "eth"
+        assert result.network == "ethereum"
         # Verify account fields: source (from) is connector account, destination (to) is blockchain address
         assert result.source_from_account == "binance-main-account"  # Connector account identifier
         assert result.from_account_id == 1  # Resolved account ID
@@ -102,7 +102,7 @@ class TestBinanceWithdrawalsConnector:
         assert result.quantity == 0.1
         assert result.fee == 0.0001
         assert result.source_fee_quote_asset_symbol == "BTC"
-        assert result.network == "btc"
+        assert result.network == "bitcoin"
 
     @patch("backend.connectors.cex.connector_binance_withdrawals.load_credentials")
     @patch("ccxt.binance")

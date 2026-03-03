@@ -176,7 +176,6 @@ class TransactionUpdate(BaseModel):
     price: Optional[float] = None
     fee: Optional[float] = None
     include_fee: Optional[bool] = None
-    disposal_taxable: Optional[bool] = None
     transaction_type: Optional[str] = Field(
         None, description="Transaction type (predefined or custom)"
     )
@@ -296,9 +295,6 @@ class TransactionResponse(BaseModel):
     # Fee information (in fee quote asset)
     fee: Optional[float] = None
     include_fee: Optional[bool] = False
-
-    # Tax fields - disposal_taxable indicates if disposing this asset is a taxable event
-    disposal_taxable: Optional[bool] = False
 
     # Blockchain/transfer fields
     source_from_account: Optional[str] = None
@@ -469,7 +465,6 @@ class RealizedPnLResponse(BaseModel):
     proceeds_in_base: float
     cost_basis_in_base: float
     pnl_in_base: float
-    disposal_taxable: bool = False
     transaction_id: Optional[int] = None
     group_id: Optional[int] = None
     consumed_cost_lot_ids: List[int] = Field(default_factory=list)
@@ -815,6 +810,129 @@ TransferIssuesResponse.model_rebuild()
 
 
 # =============================================================================
+# Derivative Position Models
+# =============================================================================
+
+
+class DerivativePositionResponse(BaseModel):
+    """Response model for a derivative (perp) position."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    exchange: str
+    coin: str
+    side: str
+    status: str
+
+    entry_price: Optional[float] = None
+    exit_price: Optional[float] = None
+    size: Optional[float] = None
+    remaining_size: Optional[float] = None
+
+    margin_currency: str = "USDC"
+    realized_pnl: Optional[float] = None
+    total_fees: Optional[float] = None
+
+    opened_at: Optional[Union[datetime, str]] = None
+    closed_at: Optional[Union[datetime, str]] = None
+
+    open_transaction_id: Optional[int] = None
+    close_transaction_ids: List[int] = Field(default_factory=list)
+
+    # Computed fields (set by the API route, not the ORM)
+    net_pnl: Optional[float] = None
+    duration_hours: Optional[float] = None
+    return_pct: Optional[float] = None
+
+    # Nested transaction summaries (optional, populated on detail endpoint)
+    open_transaction: Optional[TransactionResponse] = None
+    close_transactions: List[TransactionResponse] = Field(default_factory=list)
+
+    @field_serializer(
+        "entry_price", "exit_price", "size", "remaining_size",
+        "realized_pnl", "total_fees",
+        when_used="always",
+    )
+    def serialize_decimal(self, v: Any) -> Optional[float]:
+        return _serialize_decimal(v)
+
+    @field_serializer("opened_at", "closed_at", when_used="always")
+    def serialize_datetime_utc(self, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            if v.tzinfo is None:
+                v = v.replace(tzinfo=timezone.utc)
+            return v.isoformat()
+        return v
+
+
+# =============================================================================
+# Account delete preview
+# =============================================================================
+
+
+class AccountDeletePreviewResponse(BaseModel):
+    """Preview of what will be affected when deleting an account."""
+
+    account_id: int
+    account_name: str
+    transactions: int = 0
+    connectors: int = 0
+    cost_lots: int = 0
+    derivative_positions: int = 0
+    raw_accounts: int = 0
+    transfer_references: int = 0  # txs from OTHER accounts referencing this one via from/to_account_id
+    sync_runs: int = 0
+    file_imports: int = 0
+
+
+# =============================================================================
+# Data Cleanup (Connector / Account purge)
+# =============================================================================
+
+
+class CleanupRequest(BaseModel):
+    """Request body for connector data cleanup."""
+
+    connector_ids: List[int] = Field(..., description="IDs of connectors to clean up")
+    delete_connectors: bool = Field(
+        default=False,
+        description="If true, delete connector rows. If false, purge data but keep connector config.",
+    )
+
+
+class CleanupPreviewResponse(BaseModel):
+    """Preview of what will be affected by a cleanup operation."""
+
+    connector_ids: List[int]
+    connector_names: List[str]
+    transactions: int = 0
+    raw_transactions: int = 0
+    cost_lots: int = 0
+    sync_runs: int = 0
+    file_imports: int = 0
+    transfer_references: int = 0
+    derivative_positions: int = 0
+    pnl_legs_affected: int = 0
+
+
+class CleanupResultResponse(BaseModel):
+    """Result summary of a completed cleanup operation."""
+
+    connectors_deleted: int = 0
+    connectors_reset: int = 0
+    transactions_deleted: int = 0
+    raw_transactions_deleted: int = 0
+    cost_lots_deleted: int = 0
+    sync_runs_deleted: int = 0
+    file_imports_deleted: int = 0
+    derivative_positions_deleted: int = 0
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -856,4 +974,12 @@ __all__ = [
     "RawAccountIssue",
     "TransactionIssue",
     "IssueType",
+    # Derivative positions
+    "DerivativePositionResponse",
+    # Account delete preview
+    "AccountDeletePreviewResponse",
+    # Data cleanup
+    "CleanupRequest",
+    "CleanupPreviewResponse",
+    "CleanupResultResponse",
 ]

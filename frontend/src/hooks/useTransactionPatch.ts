@@ -56,7 +56,7 @@ export function useTransactionPatch(transactionId: number) {
                         }
                         return tag; // Already in {key: value} format
                     });
-                } else if (field === 'include_fee' || field === 'disposal_taxable') {
+                } else if (field === 'include_fee') {
                     // Handle boolean fields that may come as strings
                     payload[field] = typeof value === 'string' ? value === 'true' : !!value;
                 } else if (field === 'account_id' || field === 'asset_id' || field === 'price_quote_asset_id' ||

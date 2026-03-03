@@ -168,7 +168,6 @@ export interface Transaction {
     total?: number; // Computed: price * quantity
     fee?: number;
     include_fee?: boolean;
-    disposal_taxable?: boolean;  // Whether disposing this asset is a taxable event
     source_account?: string;  // Raw account identifier before mapping
     source_from_account?: string;
     source_to_account?: string;
@@ -234,7 +233,7 @@ export interface ClassificationSuggestion {
     pattern: GroupPattern;
     confidence: number;
     reason: string;
-    suggested_disposal_taxable: boolean;
+    suggested_taxability_status: string;
     suggested_group_type: string;
     inflow_asset_ids: number[];
     outflow_asset_ids: number[];
@@ -964,6 +963,37 @@ const getDefaultApiUrl = (): string => {
  * This prevents dangerous cross-environment connections (e.g., prod frontend → dev backend)
  */
 export const API_URL = import.meta.env.VITE_API_URL || getDefaultApiUrl();
+
+// ============================================================================
+// Derivative Position Types
+// ============================================================================
+
+export interface DerivativePosition {
+    id: number;
+    account_id: number;
+    exchange: string;
+    coin: string;
+    side: 'long' | 'short';
+    status: 'open' | 'closed';
+    entry_price: number;
+    exit_price: number | null;
+    size: number;
+    remaining_size: number;
+    margin_currency: string;
+    realized_pnl: number;
+    total_fees: number;
+    opened_at: string;
+    closed_at: string | null;
+    open_transaction_id: number | null;
+    close_transaction_ids: number[];
+    // Computed fields
+    net_pnl: number;
+    duration_hours: number | null;
+    return_pct: number | null;
+    // Optional nested transactions (from detail endpoint)
+    open_transaction?: Transaction;
+    close_transactions?: Transaction[];
+}
 
 // ============================================================================
 // File Upload Preview Types

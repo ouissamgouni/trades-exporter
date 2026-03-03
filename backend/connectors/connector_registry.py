@@ -47,6 +47,10 @@ class ConnectorInfo:
     # Balance support - True for connectors that can fetch live balances
     supports_balance: bool = False
 
+    # Derivative support - exchange name for derivative position tracking
+    # Only set for connectors that produce derivative positions (perps, futures)
+    derivative_exchange: Optional[str] = None
+
     def to_api_dict(self) -> Dict[str, Any]:
         """Convert to API-friendly dictionary."""
         return {
@@ -345,10 +349,11 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Hyperliquid Perps",
                 required_config=[],
-                optional_config=["start_datetime"],
+                optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
                 supports_balance=True,
+                derivative_exchange="hyperliquid",
             )
         )
 
@@ -358,7 +363,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Hyperliquid Funding",
                 required_config=[],
-                optional_config=["start_datetime"],
+                optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
             )
@@ -370,7 +375,7 @@ class ConnectorRegistry:
                 category="cex",
                 display_name="Hyperliquid Transfers",
                 required_config=[],
-                optional_config=["start_datetime"],
+                optional_config=["wallet_address", "start_datetime"],
                 supports_incremental_sync=True,
                 connector_family="hyperliquid",
             )
@@ -532,6 +537,20 @@ class ConnectorRegistry:
             )
         )
 
+        self._register(
+            ConnectorInfo(
+                type="polymarket",
+                category="onchain",
+                display_name="Polymarket",
+                hub_key="on-chain",
+                supported_chains=["polygon"],
+                required_config=["address"],
+                optional_config=[],
+                supports_incremental_sync=True,
+                supports_balance=True,
+            )
+        )
+
 
     def _register_chain_configs(self):
         """Register chain configurations for on-chain connectors."""
@@ -670,6 +689,17 @@ class ConnectorRegistry:
             ),
         }
 
+        # Polymarket (Polygon-based prediction market)
+        self._chain_configs["polymarket"] = {
+            "polygon": ChainConfig(
+                explorer_type="polymarket",
+                base_url="https://data-api.polymarket.com",
+                chain_id=137,
+                native_currency="USDC",
+                native_token_decimals=6,
+            ),
+        }
+
 
     def _register(self, info: ConnectorInfo):
         """Register a connector type."""
@@ -746,6 +776,12 @@ class ConnectorRegistry:
         from backend.connectors.onchain.connector_bittensor import (
             ConnectorBittensor,
         )
+        from backend.connectors.onchain.connector_polymarket import (
+            ConnectorPolymarket,
+        )
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
 
         self._connector_classes = {
             "binance-transactions": BinanceTrxConnector,
@@ -781,6 +817,7 @@ class ConnectorRegistry:
             "bitcoin_esplora": ConnectorBitcoinEsplora,
             "near": ConnectorNearHub,
             "bittensor": ConnectorBittensor,
+            "polymarket": ConnectorPolymarketHub,
         }
 
         return self._connector_classes

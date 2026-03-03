@@ -16,6 +16,9 @@ from backend.services.sync_job_service import SyncJobService, get_sync_job_servi
 from sqlmodel import Session
 
 
+pytestmark = pytest.mark.e2e
+
+
 
 @pytest.fixture
 def sync_service():

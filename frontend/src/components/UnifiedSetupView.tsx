@@ -50,14 +50,16 @@ interface PrimaryTab {
   status?: boolean;
 }
 
-const UnifiedSetupView: React.FC = () => {
+const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [activeItem, setActiveItem] = useState<string>("accounts");
   const [activePrimaryTab, setActivePrimaryTab] = useState<string>("accounts");
 
+  // Fetch setup status on mount and when tab becomes active
   useEffect(() => {
+    if (!isActive) return;
     fetchSetupStatus();
-  }, []);
+  }, [isActive]);
 
   const fetchSetupStatus = async () => {
     try {

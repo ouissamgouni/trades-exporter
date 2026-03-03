@@ -46,5 +46,13 @@
       "type": "deposit",
       "usdc": "578.2"
     }
+  },
+  {
+    "time": 1764200000000,
+    "hash": "0xabc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a",
+    "delta": {
+      "type": "withdraw",
+      "usdc": "250.0"
+    }
   }
 ]

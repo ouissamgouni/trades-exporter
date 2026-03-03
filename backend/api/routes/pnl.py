@@ -24,17 +24,54 @@ from backend.db.database import get_session_dependency
 from backend.db.models import (
     Asset, NormalizedTransaction, CalculationUnit,
     CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg,
-    AssetCategory, Category, UnitPattern
+    AssetCategory, Category, Dimension, UnitPattern, Account, SyncJobConnectorRun,
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.services.pnl.models import PnLResult
 from backend.services.price_service import PriceService
+from backend.services.pnl.filter_utils import resolve_filtered_unit_ids
+from backend.api.routes.pnl_filter_depends import PnLTransactionFilters, get_pnl_transaction_filters
 from backend.config.loader import configure_logging
 
 log = configure_logging("pnl_api")
 
 router = APIRouter(prefix="/pnl", tags=["Profit & Loss"])
+
+
+# =============================================================================
+# Shared filter helper
+# =============================================================================
+
+def _apply_unit_filter(query, tx_filters: PnLTransactionFilters, version_id: int, session: Session, *, unit_column=None):
+    """
+    Apply transaction-level filters to a P&L query by resolving matching unit IDs.
+
+    Args:
+        query: The SQLAlchemy Select query to filter
+        tx_filters: Resolved transaction filter state from the Depends
+        version_id: The P&L version ID
+        session: DB session
+        unit_column: The column to filter on (defaults to CalculationUnit.id).
+                     For RealizedPnl use RealizedPnl.origin_unit_id,
+                     for FeeEntry use FeeEntry.unit_id, etc.
+
+    Returns:
+        Tuple of (filtered_query, unit_ids_or_none)
+    """
+    if not tx_filters.has_active_filters:
+        return query, None
+
+    unit_ids = resolve_filtered_unit_ids(
+        session, version_id, tx_filters.applied_filters,
+        non_owned=tx_filters.non_owned,
+    )
+
+    if unit_ids is not None:
+        col = unit_column if unit_column is not None else CalculationUnit.id
+        query = query.where(col.in_(unit_ids))
+
+    return query, unit_ids
 
 
 # =============================================================================
@@ -1291,6 +1328,7 @@ def get_version_lots(
     include_unsettled_negative: bool = True,
     asset_id: Optional[int] = None,
     account_id: Optional[int] = None,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
@@ -1319,6 +1357,7 @@ def get_version_lots(
         .join(CostLot.unit)  # join the related CalculationUnit
         .where(CalculationUnit.version_id == version_id)
     )
+    base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=CostLot.unit_id)
     
     if not include_zero_remaining:
         base_query = base_query.where(CostLot.qty_remaining > 0)
@@ -1439,6 +1478,7 @@ def get_version_consumed_slices(
 def get_version_realized_pnl(
     version_id: int,
     asset_id: Optional[int] = None,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
@@ -1463,6 +1503,7 @@ def get_version_realized_pnl(
         .join(RealizedPnl.origin_unit)
         .where(CalculationUnit.version_id == version_id)
     )
+    base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=RealizedPnl.origin_unit_id)
     
     if asset_id:
         base_query = base_query.where(RealizedPnl.asset_id == asset_id)
@@ -1523,6 +1564,7 @@ def get_version_fees(
     version_id: int,
     asset_id: Optional[int] = None,
     unit_id: Optional[int] = None,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
@@ -1552,6 +1594,7 @@ def get_version_fees(
         .where(FeeEntry.version_id == version_id)
         .order_by(NormalizedTransaction.date_time)
     )
+    query, _ = _apply_unit_filter(query, tx_filters, version_id, session, unit_column=FeeEntry.unit_id)
     
     if asset_id:
         query = query.where(CalculationUnitLeg.asset_id == asset_id)
@@ -1655,6 +1698,7 @@ def get_version_balances(
     version_id: int,
     group_by_asset: bool = False,
     include_unsettled_negative: bool = False,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -1677,6 +1721,14 @@ def get_version_balances(
     if not version:
         raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
     
+    # Resolve unit-level filter from transaction filters
+    filtered_unit_ids = None
+    if tx_filters.has_active_filters:
+        filtered_unit_ids = resolve_filtered_unit_ids(
+            session, version_id, tx_filters.applied_filters,
+            non_owned=tx_filters.non_owned,
+        )
+
     # Query cost lots with remaining qty, eager load asset and account
     query = (
         select(CostLot)
@@ -1685,6 +1737,8 @@ def get_version_balances(
         .where(CalculationUnit.version_id == version_id)
         #.where(CostLot.qty_remaining > 0)
     )
+    if filtered_unit_ids is not None:
+        query = query.where(CostLot.unit_id.in_(filtered_unit_ids))
     lots = session.exec(query).all()
     
     # Separate lots into included and excluded based on unsettled negative filter
@@ -1730,6 +1784,8 @@ def get_version_balances(
             .where(CalculationUnit.version_id == version_id)
             .group_by(RealizedPnl.asset_id)
         )
+        if filtered_unit_ids is not None:
+            realized_query = realized_query.where(RealizedPnl.origin_unit_id.in_(filtered_unit_ids))
         realized_results = session.exec(realized_query).all()
         realized_map = {r.asset_id: {"pnl": float(r.total_pnl or 0), "count": r.event_count} for r in realized_results}
         
@@ -1744,6 +1800,8 @@ def get_version_balances(
             .where(PnlWarning.asset_id.isnot(None))
             .group_by(PnlWarning.asset_id)
         )
+        if filtered_unit_ids is not None:
+            warning_query = warning_query.where(PnlWarning.unit_id.in_(filtered_unit_ids))
         warning_results = session.exec(warning_query).all()
         warning_map = {w.asset_id: w.warning_count for w in warning_results}
         
@@ -1760,6 +1818,8 @@ def get_version_balances(
             .where(FeeEntry.related_asset_id.isnot(None))
             .group_by(FeeEntry.related_asset_id)
         )
+        if filtered_unit_ids is not None:
+            fee_query = fee_query.where(FeeEntry.unit_id.in_(filtered_unit_ids))
         fee_results = session.exec(fee_query).all()
         fee_map = {r.related_asset_id: float(r.total_fees_fmv or 0) for r in fee_results}
         
@@ -1859,6 +1919,7 @@ def get_version_balances(
 @router.get("/versions/{version_id}/warnings")
 def get_version_warnings(
     version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
@@ -1880,6 +1941,7 @@ def get_version_warnings(
         .join(PnlWarning.unit)
         .where(CalculationUnit.version_id == version_id)
     )
+    base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=PnlWarning.unit_id)
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -1961,6 +2023,7 @@ def get_version_lot_events(
     unit_id: Optional[int] = None,
     date_start: Optional[str] = None,  # ISO datetime string for filtering
     date_end: Optional[str] = None,  # ISO datetime string for filtering
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
     session: Session = Depends(get_session_dependency),
@@ -1998,6 +2061,7 @@ def get_version_lot_events(
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
         .where(CalculationUnit.version_id == version_id)
     )
+    base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=CostLot.unit_id)
     
     # Apply filters
     if lot_id:
@@ -2164,6 +2228,391 @@ def get_lot_events_filter_options(
 
 
 # =============================================================================
+# P&L Transaction Filter Options
+# =============================================================================
+
+
+class PnLFilterOption(BaseModel):
+    """A single filter option with value and label."""
+    value: str
+    label: str
+    count: Optional[int] = None
+
+
+class PnLDimensionWithCategories(BaseModel):
+    """Dimension with its categories."""
+    id: int
+    label: str
+    categories: List[PnLFilterOption]
+
+
+class PnLFilterOptionsResponse(BaseModel):
+    """
+    Response for P&L filter options – same shape as the transaction filter options
+    so the frontend TransactionFilters component can consume it directly.
+    Adds non_owned_count for the Counterparty filter card.
+    """
+    sources: List[PnLFilterOption]
+    accounts: List[PnLFilterOption]
+    from_accounts: List[PnLFilterOption]
+    to_accounts: List[PnLFilterOption]
+    assets: List[PnLFilterOption]
+    categories: List[PnLFilterOption]
+    categories_by_dimension: List[PnLDimensionWithCategories]
+    dimensions: List[PnLFilterOption]
+    transaction_types: List[PnLFilterOption]
+    directions: List[PnLFilterOption]
+    review_statuses: List[PnLFilterOption]
+    taxability_statuses: List[PnLFilterOption]
+    connector_runs: List[PnLFilterOption]
+    tags: List[PnLFilterOption]
+    networks: List[PnLFilterOption]
+    non_owned_count: int = 0
+
+
+@router.get("/versions/{version_id}/filter-options", response_model=PnLFilterOptionsResponse)
+def get_pnl_filter_options(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get all available filter options scoped to a P&L calculation version.
+
+    Returns the same shape as the transactions filter-options endpoint so the
+    shared TransactionFilters component can be reused.  Options are scoped to
+    the transactions that participate in this version (via CalculationUnitLeg).
+    """
+    from sqlalchemy import distinct, or_, cast, String
+
+    # ------------------------------------------------------------------
+    # Verify version
+    # ------------------------------------------------------------------
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # ------------------------------------------------------------------
+    # CTE: transaction IDs that belong to this version
+    # ------------------------------------------------------------------
+    version_txs = (
+        select(distinct(CalculationUnitLeg.transaction_id).label("id"))
+        .join(CalculationUnit, CalculationUnitLeg.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    ).cte("version_txs")
+
+    # Shorthand for joining NormalizedTransaction to the version CTE
+    def _versioned_count():
+        return (
+            select(func.count(version_txs.c.id))
+            .join(NormalizedTransaction, NormalizedTransaction.id == version_txs.c.id)
+        )
+
+    # ------------------------------------------------------------------
+    # Sources
+    # ------------------------------------------------------------------
+    source_q = (
+        select(NormalizedTransaction.source, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(NormalizedTransaction.source)
+        .order_by(NormalizedTransaction.source)
+    )
+    source_options = [
+        PnLFilterOption(value=s[0], label=s[0], count=s[1])
+        for s in session.exec(source_q).all() if s[0]
+    ]
+
+    # ------------------------------------------------------------------
+    # Accounts (main account_id) + unmapped
+    # ------------------------------------------------------------------
+    account_q = (
+        select(Account.id, Account.name, func.count(version_txs.c.id).label("cnt"))
+        .outerjoin(NormalizedTransaction, NormalizedTransaction.account_id == Account.id)
+        .outerjoin(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Account.id, Account.name)
+        .order_by(Account.name)
+    )
+    account_options = [
+        PnLFilterOption(value=str(a[0]), label=a[1], count=a[2] or 0)
+        for a in session.exec(account_q).all()
+    ]
+    # Undefined (NULL account_id)
+    unmapped_account_cnt = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.account_id.is_(None))
+    ).one()
+    if unmapped_account_cnt > 0:
+        account_options.append(
+            PnLFilterOption(value="undefined", label="\u2753 Undefined", count=unmapped_account_cnt)
+        )
+
+    # ------------------------------------------------------------------
+    # From accounts + undefined (NULL) + non-owned count
+    # ------------------------------------------------------------------
+    from_q = (
+        select(Account.id, Account.name, Account.owned, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.from_account_id == Account.id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Account.id, Account.name, Account.owned)
+        .order_by(Account.name)
+    )
+    from_rows = session.exec(from_q).all()
+    from_account_options: List[PnLFilterOption] = [
+        PnLFilterOption(value=str(r[0]), label=r[1], count=r[3] or 0)
+        for r in from_rows
+    ]
+    # Undefined (NULL from_account_id)
+    undefined_from_cnt = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.from_account_id.is_(None))
+    ).one()
+    if undefined_from_cnt > 0:
+        from_account_options.insert(
+            0, PnLFilterOption(value="undefined", label="\u2753 Undefined", count=undefined_from_cnt)
+        )
+
+    # ------------------------------------------------------------------
+    # To accounts + undefined (NULL) + non-owned count
+    # ------------------------------------------------------------------
+    to_q = (
+        select(Account.id, Account.name, Account.owned, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.to_account_id == Account.id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Account.id, Account.name, Account.owned)
+        .order_by(Account.name)
+    )
+    to_rows = session.exec(to_q).all()
+    to_account_options: List[PnLFilterOption] = [
+        PnLFilterOption(value=str(r[0]), label=r[1], count=r[3] or 0)
+        for r in to_rows
+    ]
+    undefined_to_cnt = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.to_account_id.is_(None))
+    ).one()
+    if undefined_to_cnt > 0:
+        to_account_options.insert(
+            0, PnLFilterOption(value="undefined", label="\u2753 Undefined", count=undefined_to_cnt)
+        )
+
+    # ------------------------------------------------------------------
+    # Non-owned count (includes unmapped / NULL from/to)
+    # A transaction is "non-owned" if *any* of its account references
+    # points to a non-owned account or is NULL.
+    # ------------------------------------------------------------------
+    non_owned_subq = (
+        select(func.count(distinct(NormalizedTransaction.id)))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(
+            or_(
+                NormalizedTransaction.from_account_id.in_(
+                    select(Account.id).where(Account.owned == False)
+                ),
+                NormalizedTransaction.to_account_id.in_(
+                    select(Account.id).where(Account.owned == False)
+                ),
+                NormalizedTransaction.from_account_id.is_(None),
+                NormalizedTransaction.to_account_id.is_(None),
+            )
+        )
+    )
+    non_owned_count = session.exec(non_owned_subq).one() or 0
+
+    # ------------------------------------------------------------------
+    # Assets
+    # ------------------------------------------------------------------
+    asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.asset_id == Asset.asset_id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(Asset.symbol)
+    )
+    asset_options = [
+        PnLFilterOption(
+            value=str(a[0]),
+            label=f"{a[1]}" + (f" ({a[2]})" if a[2] else ""),
+            count=a[3],
+        )
+        for a in session.exec(asset_q).all()
+    ]
+
+    # ------------------------------------------------------------------
+    # Categories + dimensions
+    # ------------------------------------------------------------------
+    cat_q = (
+        select(Category, Dimension)
+        .join(Dimension, Category.dimension_id == Dimension.id)
+        .order_by(Dimension.ordinal, Category.label)
+    )
+    cat_results = session.exec(cat_q).all()
+    category_options = [PnLFilterOption(value=str(c.id), label=c.label) for c, _ in cat_results]
+
+    dims_dict: Dict[int, PnLDimensionWithCategories] = {}
+    for cat, dim in cat_results:
+        if dim.id not in dims_dict:
+            dims_dict[dim.id] = PnLDimensionWithCategories(id=dim.id, label=dim.label, categories=[])
+        dims_dict[dim.id].categories.append(
+            PnLFilterOption(value=str(cat.id), label=cat.label)
+        )
+    categories_by_dimension = list(dims_dict.values())
+
+    dim_q = select(Dimension).order_by(Dimension.ordinal)
+    dimension_options = [PnLFilterOption(value=str(d.id), label=d.label) for d in session.exec(dim_q).all()]
+
+    # ------------------------------------------------------------------
+    # Transaction types
+    # ------------------------------------------------------------------
+    type_q = (
+        select(NormalizedTransaction.transaction_type, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(NormalizedTransaction.transaction_type)
+        .order_by(NormalizedTransaction.transaction_type)
+    )
+    type_options = [
+        PnLFilterOption(value=t[0], label=t[0].title() if t[0] else "Unknown", count=t[1])
+        for t in session.exec(type_q).all() if t[0]
+    ]
+
+    # ------------------------------------------------------------------
+    # Directions
+    # ------------------------------------------------------------------
+    dir_q = (
+        select(NormalizedTransaction.direction, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(NormalizedTransaction.direction)
+        .order_by(NormalizedTransaction.direction)
+    )
+    direction_options = [
+        PnLFilterOption(value=d[0], label=d[0].title() if d[0] else "Unknown", count=d[1])
+        for d in session.exec(dir_q).all() if d[0]
+    ]
+
+    # ------------------------------------------------------------------
+    # Review statuses (included for shape compatibility – P&L hides these)
+    # ------------------------------------------------------------------
+    review_q = (
+        select(NormalizedTransaction.review_status, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(NormalizedTransaction.review_status)
+    )
+    review_counts = {r[0]: r[1] for r in session.exec(review_q).all()}
+    review_status_options = [
+        PnLFilterOption(value="pending", label="Pending", count=review_counts.get("pending", 0)),
+        PnLFilterOption(value="valid", label="Valid", count=review_counts.get("valid", 0)),
+        PnLFilterOption(value="invalid", label="Invalid", count=review_counts.get("invalid", 0)),
+    ]
+
+    # ------------------------------------------------------------------
+    # Taxability statuses (included for shape compatibility – P&L hides these)
+    # ------------------------------------------------------------------
+    tax_q = (
+        select(NormalizedTransaction.taxability_status, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(NormalizedTransaction.taxability_status)
+    )
+    tax_counts = {t[0]: t[1] for t in session.exec(tax_q).all()}
+    taxability_options = [
+        PnLFilterOption(value="taxable", label="Taxable", count=tax_counts.get("taxable", 0)),
+        PnLFilterOption(value="non_taxable", label="Non-Taxable", count=tax_counts.get("non_taxable", 0)),
+        PnLFilterOption(value="unknown", label="Unknown", count=tax_counts.get("unknown", 0)),
+    ]
+
+    # ------------------------------------------------------------------
+    # Connector runs
+    # ------------------------------------------------------------------
+    cr_q = (
+        select(
+            SyncJobConnectorRun.id, SyncJobConnectorRun.connector_type,
+            SyncJobConnectorRun.account_name, SyncJobConnectorRun.started_at,
+            func.count(version_txs.c.id).label("cnt"),
+        )
+        .outerjoin(NormalizedTransaction, NormalizedTransaction.sync_connector_run_id == SyncJobConnectorRun.id)
+        .outerjoin(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(
+            SyncJobConnectorRun.id, SyncJobConnectorRun.connector_type,
+            SyncJobConnectorRun.account_name, SyncJobConnectorRun.started_at,
+        )
+        .having(func.count(version_txs.c.id) > 0)
+        .order_by(SyncJobConnectorRun.started_at.desc())
+        .limit(50)
+    )
+    connector_run_options = [
+        PnLFilterOption(
+            value=str(cr[0]),
+            label=f"{cr[2] or 'Unknown'} {cr[1]} #{cr[0]} - ({cr[3].strftime('%m/%d %H:%M') if cr[3] else 'N/A'})",
+            count=cr[4],
+        )
+        for cr in session.exec(cr_q).all()
+    ]
+
+    # ------------------------------------------------------------------
+    # Tags
+    # ------------------------------------------------------------------
+    try:
+        tag_stmt = (
+            select(NormalizedTransaction.tags)
+            .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+            .where(NormalizedTransaction.tags.isnot(None))
+        )
+        unique_tags: set[str] = set()
+        for tags in session.exec(tag_stmt).all():
+            if tags and isinstance(tags, list):
+                for tag in tags:
+                    if isinstance(tag, dict):
+                        for k, v in tag.items():
+                            unique_tags.add(f"{k}:{v}")
+        tag_options = [
+            PnLFilterOption(value=ts, label=ts.replace("_", " ").replace(":", ": "))
+            for ts in sorted(unique_tags) if ts
+        ]
+    except Exception:
+        tag_options = []
+
+    # ------------------------------------------------------------------
+    # Networks
+    # ------------------------------------------------------------------
+    from backend.core.network_normalizer import get_network_display_name
+
+    net_q = (
+        select(NormalizedTransaction.network, func.count(version_txs.c.id).label("cnt"))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.network.isnot(None))
+        .where(NormalizedTransaction.network != "")
+        .group_by(NormalizedTransaction.network)
+        .order_by(NormalizedTransaction.network)
+    )
+    network_options = [
+        PnLFilterOption(value=n[0], label=get_network_display_name(n[0]), count=n[1])
+        for n in session.exec(net_q).all() if n[0]
+    ]
+
+    # ------------------------------------------------------------------
+    # Build response
+    # ------------------------------------------------------------------
+    return PnLFilterOptionsResponse(
+        sources=source_options,
+        accounts=account_options,
+        from_accounts=from_account_options,
+        to_accounts=to_account_options,
+        assets=asset_options,
+        categories=category_options,
+        categories_by_dimension=categories_by_dimension,
+        dimensions=dimension_options,
+        transaction_types=type_options,
+        directions=direction_options,
+        review_statuses=review_status_options,
+        taxability_statuses=taxability_options,
+        connector_runs=connector_run_options,
+        tags=tag_options,
+        networks=network_options,
+        non_owned_count=non_owned_count,
+    )
+
+
+# =============================================================================
 # Unit Detail Endpoints (for drill-down from units list)
 # =============================================================================
 
@@ -2301,6 +2750,7 @@ def get_unit_warnings(
 def get_version_units(
     version_id: int,
     asset_id: Optional[int] = None,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 50,
     session: Session = Depends(get_session_dependency),
@@ -2330,6 +2780,7 @@ def get_version_units(
     
     # Build base query for counting
     base_query = select(CalculationUnit).where(CalculationUnit.version_id == version_id)
+    base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=CalculationUnit.id)
     
     # Filter by asset_id if provided
     if asset_id is not None:

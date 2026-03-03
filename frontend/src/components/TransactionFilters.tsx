@@ -10,10 +10,11 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { LuCalendar, LuCheck, LuChevronDown, LuFilter, LuRotateCcw, LuSearch, LuX } from 'react-icons/lu';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { API_URL } from '../types';
 import type { AppliedFilters as BackendAppliedFilters, FilterMetadata, ValidationWarning } from '../types';
 import { toDateInputString, getDateRangePreset } from '../utils/dateUtils';
+import { CounterpartyFilterCard } from './CounterpartyFilterCard';
 
 // Filter option from backend
 export interface FilterOption {
@@ -54,6 +55,8 @@ export interface FilterOptions {
     connector_runs: FilterOption[];
     tags: FilterOption[];
     networks: FilterOption[];
+    // P&L context extras
+    non_owned_count?: number;
 }
 
 // Current filter state
@@ -73,11 +76,15 @@ export interface TransactionFilterState {
     networks: string[];
     dateFrom: string;
     dateTo: string;
+    /** Counterparty filter: show only transactions with non-owned/unmapped counterparties */
+    nonOwned: boolean;
     // P&L audit filters (hidden from UI, locked to version context)
     versionId?: string;
     inclusionStatus?: 'included' | 'excluded';
     // Transaction ID filter (for issue-specific views)
     transactionIds?: number[];
+    // Connector run outcome filter (synced/updated/skipped) — used in job detail drawer
+    connectorRunOutcome?: 'synced' | 'updated' | 'skipped';
 }
 
 // Default filter state - includes all statuses; invalid rows are collapsed client-side
@@ -99,7 +106,9 @@ export const defaultFilterState: TransactionFilterState = {
     networks: [],
     dateFrom: '',
     dateTo: '',
+    nonOwned: false,
     transactionIds: undefined,
+    connectorRunOutcome: undefined,
 };
 
 interface TransactionFiltersProps {
@@ -112,6 +121,16 @@ interface TransactionFiltersProps {
     filterMetadata?: FilterMetadata | null;
     /** Custom reset state - if not provided, uses defaultFilterState */
     resetFilters?: TransactionFilterState;
+    /** Custom URL for fetching filter options (default: /transactions/filter-options) */
+    filterOptionsUrl?: string;
+    /** Custom React Query key for filter options (default: ['filterOptions']) */
+    filterOptionsQueryKey?: string[];
+    /** Filter keys to hide from the UI */
+    hiddenFilters?: (keyof TransactionFilterState)[];
+    /** Extra filter cards to render in the grid (e.g., Counterparty) */
+    extraFilterCards?: React.ReactNode;
+    /** Callback receiving loaded filterOptions for parent to access (e.g. non_owned_count) */
+    onFilterOptionsLoaded?: (options: FilterOptions) => void;
 }
 
 // Filter definitions - ordered: date, account, source, type, direction, taxability, status, assets, category
@@ -919,17 +938,65 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     appliedFilters,
     filterMetadata,
     resetFilters,
+    filterOptionsUrl,
+    filterOptionsQueryKey,
+    hiddenFilters,
+    extraFilterCards,
+    onFilterOptionsLoaded,
 }) => {
+    const effectiveBaseUrl = filterOptionsUrl || `${API_URL}/transactions/filter-options`;
+    const hiddenSet = React.useMemo(() => new Set(hiddenFilters || []), [hiddenFilters]);
+
+    // Build URL search params from applied filters for context-aware counts
+    const filterParams = React.useMemo(() => {
+        const params = new URLSearchParams();
+        if (filters.reviewStatus.length > 0) params.append('review_status', filters.reviewStatus.join(','));
+        if (filters.taxability.length > 0) params.append('taxability', filters.taxability.join(','));
+        if (filters.sources.length > 0) params.append('source', filters.sources.join(','));
+        if (filters.accountIds.length > 0) params.append('account_id', filters.accountIds.join(','));
+        if (filters.fromAccountIds?.length) params.append('from_account_id', filters.fromAccountIds.join(','));
+        if (filters.toAccountIds?.length) params.append('to_account_id', filters.toAccountIds.join(','));
+        if (filters.assetIds.length > 0) params.append('asset_id', filters.assetIds.join(','));
+        if (filters.categoryIds.length > 0) params.append('category_id', filters.categoryIds.join(','));
+        if (filters.transactionTypes.length > 0) params.append('transaction_type', filters.transactionTypes.join(','));
+        if (filters.directions.length > 0) params.append('direction', filters.directions.join(','));
+        if (filters.connectorRunIds.length > 0) params.append('connector_run_id', filters.connectorRunIds.join(','));
+        if (filters.tagKeys.length > 0) params.append('tag_key', filters.tagKeys.join(','));
+        if (filters.networks?.length) params.append('network', filters.networks.join(','));
+        if (filters.dateFrom) params.append('date_from', filters.dateFrom);
+        if (filters.dateTo) params.append('date_to', filters.dateTo);
+        return params;
+    }, [filters]);
+
+    const effectiveUrl = React.useMemo(() => {
+        const qs = filterParams.toString();
+        return qs ? `${effectiveBaseUrl}?${qs}` : effectiveBaseUrl;
+    }, [effectiveBaseUrl, filterParams]);
+
+    // Query key includes applied filter state so cache is keyed per filter combination
+    const filterKey = React.useMemo(() => JSON.stringify(filters), [filters]);
+    const effectiveQueryKey = filterOptionsQueryKey || ['filterOptions', filterKey];
+
     const { data: filterOptions = null, isLoading: loading } = useQuery({
-        queryKey: ['filterOptions'],
+        queryKey: effectiveQueryKey,
         queryFn: async () => {
-            const response = await fetch(`${API_URL}/transactions/filter-options`);
+            const response = await fetch(effectiveUrl);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return response.json() as Promise<FilterOptions>;
         },
-        staleTime: 5 * 60_000, // Cache for 5 minutes
+        staleTime: 30_000, // 30 seconds — filter counts refresh on invalidation or after brief staleness
+        placeholderData: keepPreviousData, // Keep previous data visible while refetching for new filter state
         retry: 2,
     });
+
+    // Notify parent when filter options load (e.g., for non_owned_count)
+    const prevOptionsRef = useRef<FilterOptions | null>(null);
+    useEffect(() => {
+        if (filterOptions && filterOptions !== prevOptionsRef.current) {
+            prevOptionsRef.current = filterOptions;
+            onFilterOptionsLoaded?.(filterOptions);
+        }
+    }, [filterOptions, onFilterOptionsLoaded]);
 
     // Local state for pending filter changes
     const [localFilters, setLocalFilters] = useState<TransactionFilterState>(filters);
@@ -965,6 +1032,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         const resetDates = effectiveResetState;
         if ((localFilters.dateFrom || localFilters.dateTo) &&
             (localFilters.dateFrom !== resetDates.dateFrom || localFilters.dateTo !== resetDates.dateTo)) count++;
+        if (localFilters.nonOwned && !effectiveResetState.nonOwned) count++;
         FILTER_DEFS.forEach(def => {
             const values = localFilters[def.key];
             const resetValues = effectiveResetState[def.key];
@@ -1064,6 +1132,18 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             });
         }
 
+        // Non-owned counterparty chip
+        if (localFilters.nonOwned) {
+            chips.push({
+                id: 'non-owned',
+                label: 'Non-Owned Counterparties',
+                filterKey: 'nonOwned' as keyof TransactionFilterState,
+                value: 'true',
+                category: 'Counterparty',
+                color: 'red',
+            });
+        }
+
         // Date range chip
         if (sourceFilters.date_from || sourceFilters.date_to) {
             const fromStr = sourceFilters.date_from ? new Date(sourceFilters.date_from).toLocaleDateString() : '';
@@ -1145,7 +1225,12 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             // User should navigate away from P&L audit view instead
             return;
         }
-        if (chip.filterKey === 'dateFrom') {
+        if (chip.filterKey === 'nonOwned') {
+            // Toggle off non-owned filter
+            const newFilters = { ...localFilters, nonOwned: false };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        } else if (chip.filterKey === 'dateFrom') {
             // Clear date range
             const newFilters = { ...localFilters, dateFrom: '', dateTo: '' };
             setLocalFilters(newFilters);
@@ -1189,8 +1274,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     }
 
     const activeFilterCount = getActiveFilterCount();
-    const openFilters = FILTER_DEFS.filter(d => !d.isDropdown);
-    const dropdownFilters = FILTER_DEFS.filter(d => d.isDropdown);
+    const openFilters = FILTER_DEFS.filter(d => !d.isDropdown && !hiddenSet.has(d.key));
+    const dropdownFilters = FILTER_DEFS.filter(d => d.isDropdown && !hiddenSet.has(d.key));
     const filterChips = getFilterChips();
     const hasActiveFilters = filterChips.length > 0;
     const visibleChips = filterChips.slice(0, visibleChipCount);
@@ -1347,93 +1432,119 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                             })}
 
                             {/* Asset Dropdown Card */}
-                            <DropdownCard
-                                label="Asset"
-                                icon="💎"
-                                options={filterOptions?.assets || []}
-                                selected={localFilters.assetIds || []}
-                                onChange={(v) => updateLocalFilter('assetIds', v)}
-                                color="orange"
-                                isOpen={openDropdown === 'assetIds'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('assetIds') && (
+                                <DropdownCard
+                                    label="Asset"
+                                    icon="💎"
+                                    options={filterOptions?.assets || []}
+                                    selected={localFilters.assetIds || []}
+                                    onChange={(v) => updateLocalFilter('assetIds', v)}
+                                    color="orange"
+                                    isOpen={openDropdown === 'assetIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* From Account Dropdown Card */}
-                            <DropdownCard
-                                label="From Account"
-                                icon="⬅️"
-                                options={filterOptions?.from_accounts || []}
-                                selected={localFilters.fromAccountIds || []}
-                                onChange={(v) => updateLocalFilter('fromAccountIds', v)}
-                                color="teal"
-                                isOpen={openDropdown === 'fromAccountIds'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'fromAccountIds' ? null : 'fromAccountIds')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('fromAccountIds') && (
+                                <DropdownCard
+                                    label="From Account"
+                                    icon="⬅️"
+                                    options={filterOptions?.from_accounts || []}
+                                    selected={localFilters.fromAccountIds || []}
+                                    onChange={(v) => updateLocalFilter('fromAccountIds', v)}
+                                    color="teal"
+                                    isOpen={openDropdown === 'fromAccountIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'fromAccountIds' ? null : 'fromAccountIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* To Account Dropdown Card */}
-                            <DropdownCard
-                                label="To Account"
-                                icon="➡️"
-                                options={filterOptions?.to_accounts || []}
-                                selected={localFilters.toAccountIds || []}
-                                onChange={(v) => updateLocalFilter('toAccountIds', v)}
-                                color="cyan"
-                                isOpen={openDropdown === 'toAccountIds'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'toAccountIds' ? null : 'toAccountIds')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('toAccountIds') && (
+                                <DropdownCard
+                                    label="To Account"
+                                    icon="➡️"
+                                    options={filterOptions?.to_accounts || []}
+                                    selected={localFilters.toAccountIds || []}
+                                    onChange={(v) => updateLocalFilter('toAccountIds', v)}
+                                    color="cyan"
+                                    isOpen={openDropdown === 'toAccountIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'toAccountIds' ? null : 'toAccountIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* Network Dropdown Card */}
-                            <DropdownCard
-                                label="Network"
-                                icon="🌐"
-                                options={filterOptions?.networks || []}
-                                selected={localFilters.networks || []}
-                                onChange={(v) => updateLocalFilter('networks', v)}
-                                color="emerald"
-                                isOpen={openDropdown === 'networks'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'networks' ? null : 'networks')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('networks') && (
+                                <DropdownCard
+                                    label="Network"
+                                    icon="🌐"
+                                    options={filterOptions?.networks || []}
+                                    selected={localFilters.networks || []}
+                                    onChange={(v) => updateLocalFilter('networks', v)}
+                                    color="emerald"
+                                    isOpen={openDropdown === 'networks'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'networks' ? null : 'networks')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* Category Dropdown Card */}
-                            <CategoryCard
-                                categoriesByDimension={filterOptions?.categories_by_dimension || []}
-                                allCategories={filterOptions?.categories || []}
-                                selected={localFilters.categoryIds || []}
-                                onChange={(v) => updateLocalFilter('categoryIds', v)}
-                                isOpen={openDropdown === 'categoryIds'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'categoryIds' ? null : 'categoryIds')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('categoryIds') && (
+                                <CategoryCard
+                                    categoriesByDimension={filterOptions?.categories_by_dimension || []}
+                                    allCategories={filterOptions?.categories || []}
+                                    selected={localFilters.categoryIds || []}
+                                    onChange={(v) => updateLocalFilter('categoryIds', v)}
+                                    isOpen={openDropdown === 'categoryIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'categoryIds' ? null : 'categoryIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* Connector Run Dropdown Card */}
-                            <DropdownCard
-                                label="Connector Run"
-                                icon="🔄"
-                                options={filterOptions?.connector_runs || []}
-                                selected={localFilters.connectorRunIds || []}
-                                onChange={(v) => updateLocalFilter('connectorRunIds', v)}
-                                color="indigo"
-                                isOpen={openDropdown === 'connectorRunIds'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'connectorRunIds' ? null : 'connectorRunIds')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('connectorRunIds') && (
+                                <DropdownCard
+                                    label="Connector Run"
+                                    icon="🔄"
+                                    options={filterOptions?.connector_runs || []}
+                                    selected={localFilters.connectorRunIds || []}
+                                    onChange={(v) => updateLocalFilter('connectorRunIds', v)}
+                                    color="indigo"
+                                    isOpen={openDropdown === 'connectorRunIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'connectorRunIds' ? null : 'connectorRunIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
 
                             {/* Tags Dropdown Card (Searchable) */}
-                            <DropdownCard
-                                label="Tags"
-                                icon="🏷️"
-                                options={filterOptions?.tags || []}
-                                selected={localFilters.tagKeys || []}
-                                onChange={(v) => updateLocalFilter('tagKeys', v)}
-                                color="purple"
-                                isOpen={openDropdown === 'tagKeys'}
-                                onToggle={() => setOpenDropdown(openDropdown === 'tagKeys' ? null : 'tagKeys')}
-                                onClose={() => setOpenDropdown(null)}
-                            />
+                            {!hiddenSet.has('tagKeys') && (
+                                <DropdownCard
+                                    label="Tags"
+                                    icon="🏷️"
+                                    options={filterOptions?.tags || []}
+                                    selected={localFilters.tagKeys || []}
+                                    onChange={(v) => updateLocalFilter('tagKeys', v)}
+                                    color="purple"
+                                    isOpen={openDropdown === 'tagKeys'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'tagKeys' ? null : 'tagKeys')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
+
+                            {/* Counterparty filter card (non-owned / unmapped) */}
+                            {filterOptions?.non_owned_count != null && filterOptions.non_owned_count > 0 && (
+                                <CounterpartyFilterCard
+                                    nonOwned={localFilters.nonOwned}
+                                    onToggle={(v) => updateLocalFilter('nonOwned', v)}
+                                    nonOwnedCount={filterOptions.non_owned_count}
+                                />
+                            )}
+
+                            {/* Extra filter cards from parent */}
+                            {extraFilterCards}
                         </SimpleGrid>
                     </Box>
                 )}

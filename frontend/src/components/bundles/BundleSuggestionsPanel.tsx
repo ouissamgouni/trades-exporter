@@ -108,6 +108,7 @@ export const BundleSuggestionsPanel: React.FC<BundleSuggestionsPanelProps> = ({
                 queryClient.invalidateQueries({ queryKey: ['transactions'] });
                 queryClient.invalidateQueries({ queryKey: ['bundles'] });
                 queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+                queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
 
                 // Clear override for this suggestion
                 setTaxabilityOverrides(prev => {

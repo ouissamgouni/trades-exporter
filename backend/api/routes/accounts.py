@@ -4,11 +4,12 @@ API routes for Account CRUD operations.
 
 from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlmodel import Session, select, col
-from backend.db.models import Account, AccountConnector
+from sqlmodel import Session, select, col, text
+from backend.db.models import Account, AccountConnector, NormalizedTransaction
 from backend.db.database import get_session_dependency
-from backend.api.schemas import SuggestionInfo
+from backend.api.schemas import SuggestionInfo, AccountDeletePreviewResponse, CleanupPreviewResponse
 from backend.services.similarity_service import get_top_account_suggestions
+from backend.services.data_cleanup_service import DataCleanupService
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -393,23 +394,103 @@ def update_account(
     )
 
 
-@router.delete("/{account_id}", status_code=204)
-def delete_account(account_id: int, session: Session = Depends(get_session_dependency)):
+@router.get("/{account_id}/delete-preview", response_model=AccountDeletePreviewResponse)
+def delete_account_preview(account_id: int, session: Session = Depends(get_session_dependency)):
     """
-    Delete an account.
-
-    Args:
-        account_id: Account ID to delete
-        session: Database session
-
-    Returns:
-        No content
+    Preview what will be affected when deleting an account.
+    Returns counts of all dependent rows without modifying anything.
     """
     account = session.get(Account, account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
 
-    session.delete(account)
+    def _count(sql: str) -> int:
+        return session.exec(text(sql), params={"aid": account_id}).one()[0]
+
+    transactions = _count("SELECT COUNT(*) FROM normalized_transactions WHERE account_id = :aid")
+    connectors = _count("SELECT COUNT(*) FROM account_connectors WHERE account_id = :aid")
+    cost_lots = _count("SELECT COUNT(*) FROM cost_lots WHERE account_id = :aid")
+    derivative_positions = _count("SELECT COUNT(*) FROM derivative_positions WHERE account_id = :aid")
+    raw_accounts = _count("SELECT COUNT(*) FROM raw_accounts WHERE account_id = :aid")
+    transfer_references = _count(
+        "SELECT COUNT(*) FROM normalized_transactions "
+        "WHERE (from_account_id = :aid OR to_account_id = :aid) AND account_id != :aid"
+    )
+
+    conn_sub = "(SELECT id FROM account_connectors WHERE account_id = :aid)"
+    sync_runs = _count(f"SELECT COUNT(*) FROM sync_job_connector_runs WHERE connector_id IN {conn_sub}")
+    file_imports = _count(f"SELECT COUNT(*) FROM file_imports WHERE connector_id IN {conn_sub}")
+
+    return AccountDeletePreviewResponse(
+        account_id=account_id,
+        account_name=account.name,
+        transactions=transactions,
+        connectors=connectors,
+        cost_lots=cost_lots,
+        derivative_positions=derivative_positions,
+        raw_accounts=raw_accounts,
+        transfer_references=transfer_references,
+        sync_runs=sync_runs,
+        file_imports=file_imports,
+    )
+
+
+@router.delete("/{account_id}", status_code=204)
+def delete_account(account_id: int, session: Session = Depends(get_session_dependency)):
+    """
+    Delete an account and all dependent data.
+
+    Uses DataCleanupService to handle the full FK dependency tree in correct order.
+    """
+    account = session.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+
+    service = DataCleanupService(session)
+    service.execute_account_delete(account_id)
+    session.commit()
+
+    return None
+
+
+@router.post("/{account_id}/cleanup-preview", response_model=CleanupPreviewResponse)
+def account_cleanup_preview(account_id: int, session: Session = Depends(get_session_dependency)):
+    """
+    Preview the impact of purging all data for an account (without deleting the account itself).
+    """
+    account = session.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+
+    service = DataCleanupService(session)
+    preview = service.preview_account_cleanup(account_id)
+
+    return CleanupPreviewResponse(
+        connector_ids=preview.connector_ids,
+        connector_names=preview.connector_names,
+        transactions=preview.transactions,
+        raw_transactions=preview.raw_transactions,
+        cost_lots=preview.cost_lots,
+        sync_runs=preview.sync_runs,
+        file_imports=preview.file_imports,
+        transfer_references=preview.transfer_references,
+        derivative_positions=preview.derivative_positions,
+        pnl_legs_affected=preview.pnl_legs_affected,
+    )
+
+
+@router.post("/{account_id}/cleanup", status_code=204)
+def account_cleanup(account_id: int, session: Session = Depends(get_session_dependency)):
+    """
+    Purge all data for an account while keeping the account and its connector configs.
+    Resets connector sync status to 'pending'.
+    """
+    account = session.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+
+    service = DataCleanupService(session)
+    service.execute_account_cleanup(account_id, delete_connectors=False)
     session.commit()
 
     return None

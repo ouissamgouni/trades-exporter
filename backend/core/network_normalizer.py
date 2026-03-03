@@ -106,6 +106,8 @@ NETWORK_ALIASES: dict[str, str] = {
     # Sonic
     "s": "sonic",
     "sonic network": "sonic",
+    # Polymarket (runs on Polygon)
+    "polymarket": "polygon",
 }
 
 # Identity mappings (canonical -> canonical) are implied by the lookup logic.

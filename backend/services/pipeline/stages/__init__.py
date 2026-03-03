@@ -9,10 +9,12 @@ from backend.services.pipeline.stages.onchain_enrichment import OnChainAddressEn
 from backend.services.pipeline.stages.transfer import AccountResolutionStage
 from backend.services.pipeline.stages.enrichment import AssetEnrichmentStage
 from backend.services.pipeline.stages.persistence import PersistenceStage
+from backend.services.pipeline.stages.derivative_position_stage import DerivativePositionStage
 
 __all__ = [
     "OnChainAddressEnrichmentStage",
     "AccountResolutionStage",
     "AssetEnrichmentStage",
     "PersistenceStage",
+    "DerivativePositionStage",
 ]

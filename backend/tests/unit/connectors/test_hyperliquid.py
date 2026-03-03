@@ -36,7 +36,7 @@ def _load_fixture(name: str):
 # =========================================================================
 
 class TestHyperliquidPerpsNormalization:
-    """Test perps fill normalization with real API fixture data."""
+    """Test perps fill normalization with USDC-only flow model."""
 
     @pytest.fixture
     def connector(self):
@@ -50,58 +50,100 @@ class TestHyperliquidPerpsNormalization:
     def fills(self):
         return _load_fixture("hyperliquid_perps.json")
 
-    def test_buy_fill_direction_is_inflow(self, connector, fills):
-        """Buy fills should produce inflow direction."""
-        buy_fill = next(f for f in fills if f["side"] == "B")
-        tx = connector.raw_to_normalized(buy_fill)
-        assert tx.direction == "inflow"
-        assert tx.transaction_type == "trade"
-        assert tx.source_transaction_type == "buy"
+    def test_open_fill_direction_is_neutral(self, connector, fills):
+        """Opening a position should produce neutral direction with qty=0 (no cash flow)."""
+        open_fill = next(f for f in fills if f.get("dir", "").startswith("Open"))
+        tx = connector.raw_to_normalized(open_fill)
+        assert tx.direction == "neutral"
+        assert tx.quantity == 0.0
+        assert tx.transaction_type == "transfer"
+        assert tx.source_transaction_type == "perp_open"
 
-    def test_sell_fill_direction_is_outflow(self, connector, fills):
-        """Sell fills should produce outflow direction."""
-        sell_fill = next((f for f in fills if f["side"] == "A"), None)
-        if sell_fill is None:
-            pytest.skip("No sell fills in fixture data")
-        tx = connector.raw_to_normalized(sell_fill)
-        assert tx.direction == "outflow"
-        assert tx.source_transaction_type == "sell"
+    def test_close_fill_direction_from_pnl(self, connector, fills):
+        """Close direction is based on closedPnl sign: positive→inflow, negative→outflow."""
+        # Grab a close with negative closedPnl (loss)
+        loss_close = next(
+            (f for f in fills if f.get("dir", "").startswith("Close") and float(f["closedPnl"]) < 0),
+            None,
+        )
+        if loss_close is not None:
+            tx = connector.raw_to_normalized(loss_close)
+            assert tx.direction == "outflow"
+            assert tx.quantity == abs(float(loss_close["closedPnl"]))
+            assert tx.source_transaction_type == "perp_close"
+
+        # Grab a close with positive closedPnl (profit)
+        profit_close = next(
+            (f for f in fills if f.get("dir", "").startswith("Close") and float(f["closedPnl"]) > 0),
+            None,
+        )
+        if profit_close is not None:
+            tx = connector.raw_to_normalized(profit_close)
+            assert tx.direction == "inflow"
+            assert tx.quantity == abs(float(profit_close["closedPnl"]))
+            assert tx.source_transaction_type == "perp_close"
+
+        # Grab a close with zero closedPnl (break-even)
+        zero_close = next(
+            (f for f in fills if f.get("dir", "").startswith("Close") and float(f["closedPnl"]) == 0),
+            None,
+        )
+        if zero_close is not None:
+            tx = connector.raw_to_normalized(zero_close)
+            assert tx.direction == "neutral"
+            assert tx.quantity == 0.0
 
     def test_fill_fields_mapped_correctly(self, connector, fills):
-        """Core fields should map correctly from API response."""
-        fill = fills[0]
+        """Core fields should map correctly in closedPnl-based flow model."""
+        fill = fills[0]  # First fill is an Open Long with closedPnl=0
         tx = connector.raw_to_normalized(fill)
 
         assert tx.source == "hyperliquid-perps"
         assert tx.account_id == 99
-        assert tx.source_asset_symbol == fill["coin"]
-        assert tx.quantity == float(fill["sz"])
-        assert tx.price == float(fill["px"])
-        assert tx.source_price_quote_asset_symbol == "USDC"
+        # Asset is the margin/settlement currency (from feeToken)
+        assert tx.source_asset_symbol == fill["feeToken"]
+        # Open fills: direction=neutral, qty=0 (no USDC cash flow)
+        assert tx.direction == "neutral"
+        assert tx.quantity == 0.0
         assert tx.fee == abs(float(fill["fee"]))
         assert tx.source_fee_quote_asset_symbol == fill["feeToken"]
-        # source_transaction_id now uses oid (order ID) instead of tid
+        # source_transaction_id uses oid (order ID)
         assert tx.source_transaction_id == str(fill["oid"])
         assert tx.network_transaction_id == fill["hash"]
 
-    def test_closed_pnl_stored_in_tags(self, connector, fills):
-        """closedPnl from API should be stored in transaction tags for P&L validation."""
+    def test_taxability_status_is_non_taxable(self, connector, fills):
+        """Perp fills should have taxability_status=non_taxable."""
+        fill = fills[0]
+        tx = connector.raw_to_normalized(fill)
+        assert tx.taxability_status == "non_taxable"
+
+    def test_tags_contain_coin_and_pnl(self, connector, fills):
+        """Tags should include coin, closedPnl, dir, price, size, and _position_data."""
         fill = fills[0]
         tx = connector.raw_to_normalized(fill)
 
         assert tx.tags is not None
         assert len(tx.tags) == 1
-        assert "closed_pnl" in tx.tags[0]
-        assert tx.tags[0]["closed_pnl"] == fill["closedPnl"]
-        assert "dir" in tx.tags[0]
-        assert "start_position" in tx.tags[0]
+        tag = tx.tags[0]
+        assert "closed_pnl" in tag
+        assert tag["closed_pnl"] == fill["closedPnl"]
+        assert "dir" in tag
+        assert "coin" in tag
+        assert tag["coin"] == fill["coin"]
+        assert "px" in tag
+        assert "sz" in tag
+        assert "start_position" in tag
 
-    def test_total_computed_correctly(self, connector, fills):
-        """Total = price * quantity."""
-        fill = fills[0]
-        tx = connector.raw_to_normalized(fill)
-        expected_total = float(Decimal(fill["px"]) * Decimal(fill["sz"]))
-        assert abs(tx.total - expected_total) < 0.01
+        # _position_data should be present for the DerivativePositionStage
+        assert "_position_data" in tag
+        pd = tag["_position_data"]
+        assert pd["coin"] == fill["coin"]
+        assert pd["side"] in ("long", "short")
+        assert pd["execution_price"] == str(fill["px"])  # to_dict() converts Decimals to str
+        assert pd["size"] == str(fill["sz"])
+        assert pd["realized_pnl"] == str(fill["closedPnl"])
+        assert pd["action"] in ("open", "close")
+        assert isinstance(pd["is_new_position"], bool)
 
     def test_datetime_is_utc(self, connector, fills):
         """Timestamps should be converted to UTC datetime."""
@@ -116,6 +158,8 @@ class TestHyperliquidPerpsNormalization:
             tx = connector.raw_to_normalized(fill)
             assert isinstance(tx, NormalizedTransaction)
             assert tx.source_transaction_id
+            assert tx.source_asset_symbol == fill["feeToken"]  # Margin currency from fill
+            assert tx.transaction_type == "transfer"
 
 
 # =========================================================================
@@ -252,6 +296,10 @@ class TestHyperliquidPerpsAggregation:
         }
         tx = connector.raw_to_normalized(agg_fill)
         assert tx.tags[0]["aggregated_fills"] == 3
+        # Close Short with closedPnl=-10.5 → outflow (loss)
+        assert tx.direction == "outflow"
+        assert tx.quantity == 10.5  # abs(closedPnl)
+        assert tx.source_transaction_type == "perp_close"
 
     def test_real_fixture_aggregation(self):
         """Aggregating real fixture data should reduce fill count."""
@@ -271,6 +319,99 @@ class TestHyperliquidPerpsAggregation:
         """Empty input should return empty list."""
         result = HyperliquidPerpsConnector._aggregate_fills_by_oid([])
         assert result == []
+
+    def test_multi_fill_open_preserves_zero_start_position(self):
+        """
+        Regression: multi-fill open orders must pick the fill with the
+        smallest startPosition (the chronologically first one).
+
+        Previously the sort was always descending, which picked the *last*
+        partial fill for open orders — making startPosition non-zero and
+        is_new_position=False.  This caused the DerivativePositionStage
+        to never create a position, leaving the derivatives table empty.
+        """
+        fills = [
+            {"coin": "BTC", "px": "88172.0", "sz": "0.00366", "side": "B",
+             "time": 3000, "oid": 300, "tid": 5, "fee": "0.15",
+             "closedPnl": "0.0", "startPosition": "0.0", "dir": "Open Long",
+             "hash": "0xabc", "feeToken": "USDC", "crossed": True, "twapId": None},
+            {"coin": "BTC", "px": "88172.0", "sz": "0.01", "side": "B",
+             "time": 3000, "oid": 300, "tid": 6, "fee": "0.40",
+             "closedPnl": "0.0", "startPosition": "0.00366", "dir": "Open Long",
+             "hash": "0xabc", "feeToken": "USDC", "crossed": True, "twapId": None},
+            {"coin": "BTC", "px": "88172.0", "sz": "0.00168", "side": "B",
+             "time": 3000, "oid": 300, "tid": 7, "fee": "0.07",
+             "closedPnl": "0.0", "startPosition": "0.01366", "dir": "Open Long",
+             "hash": "0xabc", "feeToken": "USDC", "crossed": True, "twapId": None},
+        ]
+        result = HyperliquidPerpsConnector._aggregate_fills_by_oid(fills)
+        assert len(result) == 1
+        # The aggregated fill must have startPosition from the first partial
+        # fill (the one that truly opened from zero)
+        assert result[0]["startPosition"] == "0.0"
+
+    def test_multi_fill_open_produces_is_new_position_true(self):
+        """
+        After aggregation, normalizing a multi-fill open order that starts
+        from position 0 must set is_new_position=True in the PositionIntent.
+        """
+        fills = [
+            {"coin": "BTC", "px": "88000.0", "sz": "0.01", "side": "B",
+             "time": 4000, "oid": 400, "tid": 10, "fee": "0.40",
+             "closedPnl": "0.0", "startPosition": "0.0", "dir": "Open Long",
+             "hash": "0xdef", "feeToken": "USDC", "crossed": True, "twapId": None},
+            {"coin": "BTC", "px": "88001.0", "sz": "0.02", "side": "B",
+             "time": 4000, "oid": 400, "tid": 11, "fee": "0.80",
+             "closedPnl": "0.0", "startPosition": "0.01", "dir": "Open Long",
+             "hash": "0xdef", "feeToken": "USDC", "crossed": True, "twapId": None},
+        ]
+        aggregated = HyperliquidPerpsConnector._aggregate_fills_by_oid(fills)
+        connector = HyperliquidPerpsConnector(
+            account_id=99, connector_id=1,
+            config={"test_mode": True, "_account_address_or_identifier": WALLET},
+        )
+        tx = connector.raw_to_normalized(aggregated[0])
+
+        pd = tx.tags[0]["_position_data"]
+        assert pd["is_new_position"] is True
+        assert pd["action"] == "open"
+
+    def test_multi_fill_close_preserves_largest_start_position(self):
+        """Close orders must pick the fill with the largest startPosition."""
+        fills = [
+            {"coin": "ZEC", "px": "532.78", "sz": "1.25", "side": "A",
+             "time": 2000, "oid": 200, "tid": 3, "fee": "0.30",
+             "closedPnl": "-5.0", "startPosition": "2.50", "dir": "Close Long",
+             "hash": "0xdef", "feeToken": "USDC", "crossed": True, "twapId": None},
+            {"coin": "ZEC", "px": "532.72", "sz": "1.25", "side": "A",
+             "time": 2000, "oid": 200, "tid": 4, "fee": "0.30",
+             "closedPnl": "-3.0", "startPosition": "1.25", "dir": "Close Long",
+             "hash": "0xdef", "feeToken": "USDC", "crossed": True, "twapId": None},
+        ]
+        result = HyperliquidPerpsConnector._aggregate_fills_by_oid(fills)
+        assert result[0]["startPosition"] == "2.50"
+
+    def test_is_new_position_with_varied_zero_formats(self):
+        """
+        is_new_position must be True for any string representation of zero
+        (e.g. '0', '0.0', '0.00', '0.000').
+        """
+        connector = HyperliquidPerpsConnector(
+            account_id=99, connector_id=1,
+            config={"test_mode": True, "_account_address_or_identifier": WALLET},
+        )
+        for zero_str in ("0", "0.0", "0.00", "0.000", "0.0000"):
+            fill = {
+                "coin": "ETH", "px": "3000.0", "sz": "1.0", "side": "B",
+                "time": 5000, "oid": 500, "tid": 20, "fee": "1.35",
+                "closedPnl": "0.0", "startPosition": zero_str, "dir": "Open Long",
+                "hash": "0xabc", "feeToken": "USDC", "crossed": True, "twapId": None,
+            }
+            tx = connector.raw_to_normalized(fill)
+            pd = tx.tags[0]["_position_data"]
+            assert pd["is_new_position"] is True, (
+                f"is_new_position should be True for startPosition='{zero_str}'"
+            )
 
 
 # =========================================================================
@@ -301,6 +442,7 @@ class TestHyperliquidFundingNormalization:
         assert tx.direction == "inflow"
         assert tx.transaction_type == "transfer"
         assert tx.source_asset_symbol == "USDC"
+        assert tx.taxability_status == "non_taxable"
 
     def test_negative_funding_is_outflow(self, connector, entries):
         """Negative USDC funding → paid → outflow."""
@@ -310,6 +452,7 @@ class TestHyperliquidFundingNormalization:
         tx = connector.raw_to_normalized(neg)
         assert tx.direction == "outflow"
         assert tx.source_asset_symbol == "USDC"
+        assert tx.taxability_status == "non_taxable"
 
     def test_funding_tags_contain_rate(self, connector, entries):
         """Tags should include funding rate and position info."""
@@ -354,7 +497,7 @@ class TestHyperliquidTransfersNormalization:
         return _load_fixture("hyperliquid_transfers.json")
 
     def test_deposit_is_inflow(self, connector, entries):
-        """Deposit entries should be inflow transfers."""
+        """Deposit entries should be inflow transfers with known from (wallet)."""
         deposit = next((e for e in entries if e["delta"]["type"] == "deposit"), None)
         if deposit is None:
             pytest.skip("No deposits in fixtures")
@@ -362,17 +505,29 @@ class TestHyperliquidTransfersNormalization:
         assert tx.direction == "inflow"
         assert tx.transaction_type == "transfer"
         assert tx.source_asset_symbol == "USDC"
-        assert tx.to_account_id == 99
+        # Known side: to is the wallet (destination on Hyperliquid)
+        assert tx.source_to_account == WALLET
+        # from side left empty for pipeline enrichment
+        assert tx.source_from_account is None
+        # Account ID is set for the destination
+        assert tx.to_account_id is not None
+        assert tx.from_account_id is None
 
     def test_withdrawal_is_outflow(self, connector, entries):
-        """Withdrawal entries should be outflow transfers."""
+        """Withdrawal entries should be outflow transfers with known from (wallet)."""
         withdrawal = next((e for e in entries if e["delta"]["type"] == "withdraw"), None)
         if withdrawal is None:
             pytest.skip("No withdrawals in fixtures")
         tx = connector.raw_to_normalized(withdrawal)
         assert tx.direction == "outflow"
         assert tx.source_asset_symbol == "USDC"
-        assert tx.from_account_id == 99
+        # Known side: from is the wallet (sender from Hyperliquid)
+        assert tx.source_from_account == WALLET
+        # to side left empty for pipeline enrichment
+        assert tx.source_to_account is None
+        # Account ID is set for the source
+        assert tx.from_account_id is not None
+        assert tx.to_account_id is None
 
     def test_network_is_arbitrum(self, connector, entries):
         """Transfer network should be arbitrum (Hyperliquid bridges via Arbitrum)."""

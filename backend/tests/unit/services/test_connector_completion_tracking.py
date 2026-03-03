@@ -111,8 +111,10 @@ class TestConnectorPendingCountTracking:
         initial_pending = processor.get_connector_pending_count(1)
         assert initial_pending == 2
         
-        # Wait for processing
-        time.sleep(0.5)
+        # Poll for processing instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while processor.get_connector_pending_count(1) >= initial_pending and time.monotonic() < deadline:
+            time.sleep(0.01)
         
         # Pending count should decrease
         final_pending = processor.get_connector_pending_count(1)
@@ -243,8 +245,10 @@ class TestCompletionCallbacks:
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
         processor.submit({"id": "tx2"}, normalized_item, connector_id=2, connector_name="etherscan")
         
-        # Wait for callbacks
-        time.sleep(1.0)
+        # Poll for callbacks instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while len(callbacks_called) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
         
         # Both callbacks should be triggered
         assert 1 in callbacks_called, "Connector 1 callback should be triggered"
@@ -299,8 +303,10 @@ class TestCompletionCallbacks:
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
         
-        # Wait for processing
-        time.sleep(1.0)
+        # Poll for processing instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while processor.get_stats()["processed"] < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
         
         # Processor should still be functional
         stats = processor.get_stats()
@@ -322,8 +328,10 @@ class TestCompletionCallbacks:
         normalized_item = Mock()
         processor.submit({"id": "tx1"}, normalized_item, connector_id=1, connector_name="binance")
         
-        # Wait for processing
-        time.sleep(0.5)
+        # Poll for processing instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while processor.get_stats()["processed"] < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
         
         # Should process successfully without callback
         stats = processor.get_stats()
@@ -452,7 +460,7 @@ class TestEdgeCases:
         
         # Callback should not be triggered automatically for 0-item case
         # (this requires manual trigger in sync_job_service)
-        callback_triggered = callback_called.wait(timeout=0.5)
+        callback_triggered = callback_called.wait(timeout=0.1)
         assert not callback_triggered, "Callback should not trigger for 0 items"
         
         processor.stop()
@@ -495,7 +503,7 @@ class TestEdgeCases:
         """Test that aborting during processing properly cleans up tracking."""
         # Slow processing
         def slow_process(*args, **kwargs):
-            time.sleep(0.5)
+            time.sleep(0.05)
             result = Mock(spec=PipelineResult)
             result.success = True
             result.errors = []

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from backend.config.loader import configure_logging
-from backend.db.models import NormalizedTransaction
+from backend.db.models import NormalizedTransaction, ensure_utc
 from backend.db.repositories import (
     NormalizedTransactionRepository,
     RawTransactionRepository,
@@ -47,6 +47,7 @@ UPDATABLE_FIELDS = [
     "source_account",
     "source_from_account",
     "source_to_account",
+    "account_id",
     "from_account_id",
     "to_account_id",
     
@@ -55,14 +56,19 @@ UPDATABLE_FIELDS = [
     "network_transaction_id",
     "token_contract_address",
     
-    # Tax and review settings
-    "include_fee",
-    "disposal_taxable",
-    "review_status",
+    # NOTE: include_fee, taxability_status, and review_status are intentionally
+    # excluded — these are user-editable settings that should NOT be overwritten
+    # by a connector resync. They are only set on initial insert via
+    # _pydantic_to_sqlmodel.
 ]
 
 # Float/Decimal fields that need tolerance-based comparison
 FLOAT_FIELDS = {"quantity", "price", "fee"}
+
+# Datetime fields that need timezone-aware comparison
+# DB stores TIMESTAMP WITHOUT TIME ZONE (naive), connectors produce aware datetimes.
+# We normalize both sides via ensure_utc() before comparing.
+DATETIME_FIELDS = {"date_time"}
 
 
 class PersistenceStage(PipelineStage):
@@ -107,6 +113,11 @@ class PersistenceStage(PipelineStage):
 
         for tx in transactions:
             try:
+                # Stamp connector_id from pipeline context onto the transaction
+                # so it persists correctly (connectors don't set this themselves)
+                if tx.connector_id is None and context.connector_id is not None:
+                    tx.connector_id = context.connector_id
+
                 # --- Renormalize mode: atomically delete old + insert new ---
                 if context.renormalize_mode:
                     # Look up the existing raw transaction record (it already exists in DB)
@@ -137,7 +148,7 @@ class PersistenceStage(PipelineStage):
                     new_count += 1
                     result.synced_ids.append(tx.source_transaction_id)
 
-                    log.info(
+                    log.debug(
                         "renormalize_saved",
                         source=tx.source,
                         tx_id=tx.source_transaction_id,
@@ -157,7 +168,7 @@ class PersistenceStage(PipelineStage):
                         context.session.add(existing)
                         updated_count += 1
                         result.updated_ids.append(tx.source_transaction_id)
-                        log.info(
+                        log.debug(
                             "transaction_updated",
                             source=tx.source,
                             tx_type=tx.transaction_type,
@@ -174,7 +185,7 @@ class PersistenceStage(PipelineStage):
                         
                         skipped_count += 1
                         result.skipped_ids.append(tx.source_transaction_id)
-                        log.info(
+                        log.debug(
                             "transaction_skipped",
                             reason="duplicate",
                             source=tx.source,
@@ -202,7 +213,7 @@ class PersistenceStage(PipelineStage):
                 new_count += 1
                 result.synced_ids.append(tx.source_transaction_id)
 
-                log.info(
+                log.debug(
                     "transaction_saved",
                     source=tx.source,
                     tx_type=tx.transaction_type,
@@ -300,6 +311,10 @@ class PersistenceStage(PipelineStage):
                 if not self._floats_equal(old_val, new_val):
                     log.debug(f"Field {field} changed: {old_val} -> {new_val}")
                     return True
+            elif field in DATETIME_FIELDS:
+                if not self._datetimes_equal(old_val, new_val):
+                    log.debug(f"Field {field} changed: {old_val} -> {new_val}")
+                    return True
             elif old_val != new_val:
                 log.debug(f"Field {field} changed: {old_val} -> {new_val}")
                 return True
@@ -331,6 +346,26 @@ class PersistenceStage(PipelineStage):
         # Use math.isclose for tolerance-based comparison
         import math
         return math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
+
+    @staticmethod
+    def _datetimes_equal(
+        a: Optional[datetime],
+        b: Optional[datetime],
+    ) -> bool:
+        """
+        Compare two datetimes, normalizing timezone info first.
+
+        The DB stores TIMESTAMP WITHOUT TIME ZONE so values read back are
+        naive, while connectors produce timezone-aware (UTC) datetimes.
+        We call ensure_utc() on both sides so that
+        ``datetime(2025,1,1,12,0,0)`` equals
+        ``datetime(2025,1,1,12,0,0, tzinfo=utc)``.
+        """
+        if a is None and b is None:
+            return True
+        if a is None or b is None:
+            return False
+        return ensure_utc(a) == ensure_utc(b)
 
     def _update_transaction(
         self,
@@ -386,7 +421,7 @@ class PersistenceStage(PipelineStage):
             price=tx.price,
             fee=tx.fee,
             include_fee=tx.include_fee or False,
-            disposal_taxable=tx.disposal_taxable or False,
+            taxability_status=tx.taxability_status or "unknown",
             source_from_account=tx.source_from_account,
             source_to_account=tx.source_to_account,
             from_account_id=tx.from_account_id,

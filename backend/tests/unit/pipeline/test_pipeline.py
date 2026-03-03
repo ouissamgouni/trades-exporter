@@ -200,6 +200,7 @@ class TestCreateDefaultPipeline:
         assert "account_resolution" in stage_names
         assert "asset_enrichment" in stage_names
         assert "persistence" in stage_names
+        # derivative_position is now a batch post-step, not a per-item stage
 
     def test_default_pipeline_stage_order(self, mock_session):
         """Test default pipeline has correct stage order."""

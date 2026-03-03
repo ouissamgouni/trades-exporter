@@ -5,12 +5,16 @@ Tests that the connector can fetch and map trade data successfully.
 
 import pytest
 import logging
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+# Only fetch recent data to speed up integration tests
+TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
 
 
 @pytest.mark.integration
@@ -23,7 +27,7 @@ def test_mexc_trx_connector_yield_normalized():
         return_value=["BTC/USDT", "ETH/USDT", "SOL/USDT"],
     ):
         try:
-            connector = MEXCConnectorTrx()
+            connector = MEXCConnectorTrx(config={"since_datetime": TEST_SINCE})
         except Exception as e:
             # Network errors (DNS, connection timeout) are acceptable in test environments
             if "Failed to resolve" in str(e) or "NetworkError" in str(e) or "connection" in str(e).lower():

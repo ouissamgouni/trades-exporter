@@ -5,17 +5,21 @@ Tests that the connector can fetch and map convert data successfully.
 
 import pytest
 import logging
+from datetime import datetime, timezone
 
 from backend.connectors.cex.connector_okx_convert import OKXConvertConnector
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
+# Only fetch recent data to speed up integration tests
+TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
+
 
 @pytest.mark.integration
 def test_okx_convert_connector_yield_normalized():
     """Test OKX convert connector yield_normalized method."""
-    connector = OKXConvertConnector()
+    connector = OKXConvertConnector(config={"since_datetime": TEST_SINCE})
 
     results = []
     errors = []

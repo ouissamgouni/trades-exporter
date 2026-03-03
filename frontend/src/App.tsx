@@ -29,7 +29,7 @@ const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
             staleTime: 30_000, // Data considered fresh for 30 seconds
-            gcTime: 60_000, // Garbage-collect unused cache entries after 1 minute
+            gcTime: 5 * 60_000, // Garbage-collect unused cache entries after 5 minutes
             refetchOnWindowFocus: false, // Don't refetch on tab focus
             retry: 1, // Only retry once on failure
         },
@@ -44,6 +44,7 @@ const InboxView = React.lazy(() => import('./components/InboxView').then(m => ({
 const AllTransactionsView = React.lazy(() => import('./components/AllTransactionsView').then(m => ({ default: m.AllTransactionsView })));
 const TransactionsTable = React.lazy(() => import('./components/TransactionsTable').then(m => ({ default: m.TransactionsTable })));
 const TimelineSection = React.lazy(() => import('./components/TimelineSection'));
+const PositionsView = React.lazy(() => import('./components/PositionsView'));
 const PnLPanel = React.lazy(() => import('./components/PnLPanel').then(m => ({ default: m.PnLPanel })));
 const PricesViewer = React.lazy(() => import('./components/PricesViewer').then(m => ({ default: m.PricesViewer })));
 
@@ -136,6 +137,8 @@ const AppContent = () => {
     }, []);
 
     // Check if there are setup issues
+    const [activeTab, setActiveTab] = useState('setup');
+
     const hasSetupIssues = setupStatus && (
         !setupStatus.base_currency_set ||
         setupStatus.accounts_count === 0 ||
@@ -170,7 +173,7 @@ const AppContent = () => {
                     <Badge colorScheme="green" px={2} py={1}>4. P&L</Badge>
                 </HStack>
 
-                <Tabs.Root defaultValue="setup" lazyMount unmountOnExit>
+                <Tabs.Root defaultValue="setup" lazyMount value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
                     <Tabs.List>
                         <Box flex="1" display="flex" alignItems="center">
                             {/* Step 1: Configuration */}
@@ -218,6 +221,7 @@ const AppContent = () => {
                                 📋 All
                             </Tabs.Trigger>
                             <Tabs.Trigger value="timeline">📅 Timeline</Tabs.Trigger>
+                            <Tabs.Trigger value="positions">🎯 Positions</Tabs.Trigger>
 
                             {/* Step 4: Analysis */}
                             <Tabs.Trigger value="pnl">📊 P&L</Tabs.Trigger>
@@ -263,14 +267,14 @@ const AppContent = () => {
                     {/* Step 1: Configuration */}
                     <Tabs.Content value="setup">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <UnifiedSetupView />
+                            <UnifiedSetupView isActive={activeTab === 'setup'} />
                         </Suspense>
                     </Tabs.Content>
 
                     {/* Step 2: Data Import */}
                     <Tabs.Content value="sync">
                         <Suspense fallback={<TabLoadingFallback />}>
-                            <SyncJobPanel />
+                            <SyncJobPanel isActive={activeTab === 'sync'} />
                         </Suspense>
                     </Tabs.Content>
                     <Tabs.Content value="add-transaction">
@@ -295,11 +299,17 @@ const AppContent = () => {
                             <TimelineSection />
                         </Suspense>
                     </Tabs.Content>
+                    <Tabs.Content value="positions">
+                        <Suspense fallback={<TabLoadingFallback />}>
+                            <PositionsView />
+                        </Suspense>
+                    </Tabs.Content>
 
                     {/* Step 4: Analysis */}
                     <Tabs.Content value="pnl">
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PnLPanel
+                                isActive={activeTab === 'pnl'}
                                 onOpenHealthCheck={() => {
                                     refreshHealthData();
                                     setIsHealthCheckOpen(true);

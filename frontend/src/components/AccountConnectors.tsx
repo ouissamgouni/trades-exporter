@@ -12,10 +12,11 @@ import {
     VStack,
 } from '@chakra-ui/react';
 import { FiEdit2, FiPlus, FiRefreshCw, FiTrash2 } from 'react-icons/fi';
+import { LuEraser } from 'react-icons/lu';
 
 import { Account, AccountConnector, ConnectorTypeInfo, API_URL } from '../types';
 import ConnectorFormDialog from './ConnectorFormDialog';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { CleanupDialog } from './CleanupDialog';
 import { toaster } from './ui/toaster';
 
 interface AccountConnectorsProps {
@@ -30,7 +31,9 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
     const [editingConnector, setEditingConnector] = useState<AccountConnector | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-    const deleteConfirm = useConfirmDialog<AccountConnector>();
+    // Cleanup dialog state
+    const [cleanupTarget, setCleanupTarget] = useState<{ connectorIds: number[]; title: string; mode: 'purge' | 'delete' } | null>(null);
+    const isCleanupOpen = cleanupTarget !== null;
 
     const fetchConnectors = async () => {
         setLoading(true);
@@ -76,24 +79,29 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
         }
     };
 
-    const handleDelete = (connector: AccountConnector) => {
-        deleteConfirm.open(connector);
+    const handlePurge = (connector: AccountConnector) => {
+        setCleanupTarget({
+            connectorIds: [connector.id],
+            title: `Purge Data: ${connector.connector_type}`,
+            mode: 'purge',
+        });
     };
 
-    const executeDelete = async () => {
-        if (!deleteConfirm.data) return;
-        const connector = deleteConfirm.data;
-        try {
-            const response = await fetch(
-                `${API_URL}/accounts/${account.id}/connectors/${connector.connector_type}`,
-                { method: 'DELETE' }
-            );
-            if (!response.ok) throw new Error('Failed to delete connector');
-            fetchConnectors();
-        } catch (error) {
-            console.error('Error deleting connector:', error);
-            toaster.error({ title: 'Error', description: 'Failed to delete connector' });
-        }
+    const handleDelete = (connector: AccountConnector) => {
+        setCleanupTarget({
+            connectorIds: [connector.id],
+            title: `Delete Connector: ${connector.connector_type}`,
+            mode: 'delete',
+        });
+    };
+
+    const handleCleanupClose = () => {
+        setCleanupTarget(null);
+    };
+
+    const handleCleanupCompleted = () => {
+        setCleanupTarget(null);
+        fetchConnectors();
     };
 
     const handleEdit = (connector: AccountConnector) => {
@@ -236,6 +244,11 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                                                         {connector.config.address}
                                                     </Text>
                                                 )}
+                                                {connector.config?.wallet_address && (
+                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.wallet_address}>
+                                                        {connector.config.wallet_address}
+                                                    </Text>
+                                                )}
                                                 {connector.config?.symbols && (
                                                     <Text fontSize="2xs">
                                                         {connector.config.symbols.slice(0, 3).join(', ')}
@@ -286,6 +299,15 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                                         <Table.Cell textAlign="right">
                                             <HStack justify="flex-end" gap={0.5}>
                                                 <IconButton
+                                                    aria-label="Purge data"
+                                                    size="2xs"
+                                                    variant="ghost"
+                                                    title="Purge connector data (keep config)"
+                                                    onClick={() => handlePurge(connector)}
+                                                >
+                                                    <LuEraser size={10} />
+                                                </IconButton>
+                                                <IconButton
                                                     aria-label="Edit"
                                                     size="2xs"
                                                     variant="ghost"
@@ -328,15 +350,14 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                 usedColors={connectors.map(c => c.color).filter((c): c is string => !!c)}
             />
 
-            {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteConfirm.isOpen}
-                onClose={deleteConfirm.close}
-                onConfirm={executeDelete}
-                title="Delete Connector"
-                message={deleteConfirm.data ? `Delete ${deleteConfirm.data.connector_type} connector?` : ''}
-                confirmLabel="Delete"
-                isDestructive
+            {/* Cleanup / Delete Dialog */}
+            <CleanupDialog
+                isOpen={isCleanupOpen}
+                onClose={handleCleanupClose}
+                connectorIds={cleanupTarget?.connectorIds ?? []}
+                defaultMode={cleanupTarget?.mode ?? 'purge'}
+                title={cleanupTarget?.title ?? ''}
+                onCompleted={handleCleanupCompleted}
             />
         </Box>
     );

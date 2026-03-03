@@ -74,7 +74,7 @@ const formatRelativeTime = (dateStr?: string): string => {
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-export const SyncJobPanel: React.FC = () => {
+export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
     const queryClient = useQueryClient();
     const [jobStatus, setJobStatus] = useState<SyncJobProgress | null>(null);
     const [connectors, setConnectors] = useState<ConnectorsInfo | null>(null);
@@ -139,19 +139,23 @@ export const SyncJobPanel: React.FC = () => {
         }
     }, []);
 
-    // Initial load and polling
+    // Initial load and refresh when tab becomes active
+    const hasLoadedRef = useRef(false);
     useEffect(() => {
+        if (!isActive) return;
+        // Always fetch on first mount; after that, refetch when tab becomes active again
         fetchJobStatus();
         fetchConnectors();
-    }, [fetchJobStatus, fetchConnectors]);
+        hasLoadedRef.current = true;
+    }, [isActive, fetchJobStatus, fetchConnectors]);
 
-    // Poll for status updates when job is running (covers both full jobs and retries)
+    // Poll for status updates when job is running — only while tab is active
     useEffect(() => {
-        if (jobStatus?.status === 'running') {
+        if (jobStatus?.status === 'running' && isActive) {
             const interval = setInterval(fetchJobStatus, 2000);
             return () => clearInterval(interval);
         }
-    }, [jobStatus?.status, fetchJobStatus]);
+    }, [jobStatus?.status, isActive, fetchJobStatus]);
 
     // Trigger transaction refresh when sync job completes
     useEffect(() => {

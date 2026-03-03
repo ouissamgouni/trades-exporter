@@ -495,3 +495,218 @@ class TestRetryAPIRoute:
         resp = client.post("/sync-job/retry/1")
         assert resp.status_code == 409
         assert "already in progress" in resp.json()["detail"]
+
+
+# ─── Retry Override Bug Fix Tests ─────────────────────────────────────────
+
+
+class TestRetryConnectorOverrides:
+    """
+    Tests for the fix to the retry connector override bug.
+
+    The bug: _run_single_connector used to build a single-element override list
+    [ConnectorOverride(connector_id=X, enabled=True)] which left every other
+    DB-enabled connector without an explicit override. DatabaseConnectorHub then
+    fell back to account_connector.enabled for those, loading ALL enabled
+    connectors instead of just the retried one.
+
+    The fix: Build override list from ALL connectors, setting enabled=True only
+    for the target connector and enabled=False for everything else.
+    """
+
+    def test_run_single_connector_builds_full_override_list(self, service):
+        """
+        _run_single_connector must pass overrides that disable every connector
+        except the retried one, so the hub doesn't fall back to DB defaults.
+        """
+        target_id = 1
+        other_ids = [2, 3, 4]
+        all_ids = [target_id] + other_ids
+
+        # Set up connector progress for the target
+        service.progress.connector_statuses[target_id] = _make_connector_progress(
+            connector_id=target_id,
+            status=ConnectorSyncStatus.QUEUED,
+        )
+        service.progress.job_id = 42
+        service._run_job_db_connector_runs = {target_id: 100}
+
+        # Build mock AccountConnector objects returned by acct_repo.get_all()
+        mock_connectors = []
+        for cid in all_ids:
+            ac = MagicMock()
+            ac.id = cid
+            ac.connector_type = f"type-{cid}"
+            ac.enabled = True  # All enabled in DB — this is what triggered the bug
+            ac.account_id = cid * 10
+            ac.config = {}
+            account = MagicMock()
+            account.name = f"Account-{cid}"
+            mock_connectors.append((ac, account))
+
+        captured_overrides = []
+
+        def capture_hub_init(self_hub, session, **kwargs):
+            """Intercept DatabaseConnectorHub.__init__ to capture connector_overrides."""
+            captured_overrides.extend(kwargs.get("connector_overrides", []))
+            # Don't actually initialize the hub — we just want to see the overrides
+            raise StopIteration("captured")
+
+        # Patch DatabaseConnectorHub at its source module (it's imported locally
+        # inside _run_single_connector, so we patch the canonical location)
+        with patch("backend.services.sync_job_service.get_engine") as mock_engine, \
+             patch("backend.services.sync_job_service.Session") as MockSession, \
+             patch("backend.db.repositories.sync_job_repository.SyncJobRepository"), \
+             patch("backend.db.repositories.AccountConnectorRepository") as MockACRepo, \
+             patch("backend.db.repositories.NormalizedTransactionRepository"), \
+             patch("backend.connectors.connector_registry.get_connector_registry") as mock_reg, \
+             patch("backend.connectors.hub.database_connector_hub.DatabaseConnectorHub.__init__", capture_hub_init):
+
+            # Mock session and repository
+            mock_session = MagicMock()
+            MockSession.return_value = mock_session
+            mock_session.get.return_value = MagicMock(
+                id=target_id, connector_type="type-1", account_id=10, config={}
+            )
+
+            mock_repo_instance = MagicMock()
+            mock_repo_instance.get_all.return_value = mock_connectors
+            MockACRepo.return_value = mock_repo_instance
+
+            # Registry mock
+            mock_info = MagicMock()
+            mock_info.supports_incremental_sync = False
+            mock_reg.return_value.get.return_value = mock_info
+
+            # Run — expect StopIteration from our capture
+            try:
+                service._run_single_connector(target_id)
+            except StopIteration:
+                pass  # Expected — we intercepted hub init
+
+        # Verify overrides
+        assert len(captured_overrides) == len(all_ids), (
+            f"Expected overrides for all {len(all_ids)} connectors, "
+            f"got {len(captured_overrides)}"
+        )
+
+        override_map = {o.connector_id: o.enabled for o in captured_overrides}
+        assert override_map[target_id] is True, "Target connector must be enabled"
+        for oid in other_ids:
+            assert override_map[oid] is False, (
+                f"Connector {oid} should be disabled but was {override_map[oid]}"
+            )
+
+    def test_run_single_connector_old_bug_would_enable_all(self):
+        """
+        Regression guard: a single-element override [enabled=True for target]
+        leaves other connectors uncontrolled — they'd fall back to DB defaults.
+        Verify the DatabaseConnectorHub._override_enabled logic to illustrate.
+        """
+        from backend.services.sync_job_service import ConnectorOverride
+
+        target_id = 1
+        other_id = 2
+
+        # Simulate the OLD buggy override list
+        buggy_overrides = [ConnectorOverride(connector_id=target_id, enabled=True)]
+        override_enabled = {}
+        for o in buggy_overrides:
+            if o.enabled is not None:
+                override_enabled[o.connector_id] = o.enabled
+
+        # For the target, override says True
+        assert override_enabled.get(target_id, True) is True
+        # For another connector, no override → falls back to default (True = DB enabled)
+        assert override_enabled.get(other_id, True) is True  # BUG: would run
+
+        # Simulate the FIXED override list
+        fixed_overrides = [
+            ConnectorOverride(connector_id=target_id, enabled=True),
+            ConnectorOverride(connector_id=other_id, enabled=False),
+        ]
+        override_enabled_fixed = {}
+        for o in fixed_overrides:
+            if o.enabled is not None:
+                override_enabled_fixed[o.connector_id] = o.enabled
+
+        assert override_enabled_fixed.get(target_id, True) is True
+        assert override_enabled_fixed.get(other_id, True) is False  # FIXED
+
+
+# ─── has_since_override Bug Fix Tests ─────────────────────────────────────
+
+
+class TestSinceOverrideBugFix:
+    """
+    Tests for the fix to the has_since_override check.
+
+    The bug: `hasattr(o, 'since_datetime')` was always True because
+    since_datetime is a dataclass field (defaults to None). This caused ALL
+    overridden connectors to be tracked as having a since override, potentially
+    forcing full syncs or using wrong since_datetime values.
+
+    The fix: `o.since_datetime is not None` — only track connectors that
+    actually specify a since_datetime value.
+    """
+
+    def test_disabled_connector_without_since_not_in_override_set(self):
+        """
+        A disabled connector (enabled=False, since_datetime=None) should NOT
+        be added to has_since_override.
+        """
+        from backend.services.sync_job_service import ConnectorOverride
+
+        overrides = [
+            ConnectorOverride(connector_id=1, enabled=False),
+            ConnectorOverride(connector_id=2, enabled=False),
+        ]
+
+        has_since_override = set()
+        override_since = {}
+
+        for o in overrides:
+            # The FIXED check
+            if o.since_datetime is not None:
+                has_since_override.add(o.connector_id)
+                override_since[o.connector_id] = o.since_datetime
+
+        assert len(has_since_override) == 0
+        assert len(override_since) == 0
+
+    def test_connector_with_explicit_since_is_tracked(self):
+        """A connector with an actual since_datetime should be tracked."""
+        from backend.services.sync_job_service import ConnectorOverride
+
+        since_dt = datetime(2024, 6, 15, 12, 0)
+        overrides = [
+            ConnectorOverride(connector_id=1, enabled=True, since_datetime=since_dt),
+            ConnectorOverride(connector_id=2, enabled=True),  # No since
+        ]
+
+        has_since_override = set()
+        override_since = {}
+
+        for o in overrides:
+            if o.since_datetime is not None:
+                has_since_override.add(o.connector_id)
+                override_since[o.connector_id] = o.since_datetime
+
+        assert 1 in has_since_override
+        assert 2 not in has_since_override
+        assert override_since[1] == since_dt
+
+    def test_old_hasattr_bug_would_track_all_connectors(self):
+        """
+        Regression guard: `hasattr(o, 'since_datetime')` is always True
+        for a ConnectorOverride dataclass, even when since_datetime=None.
+        """
+        from backend.services.sync_job_service import ConnectorOverride
+
+        o = ConnectorOverride(connector_id=1, enabled=False)
+        # The old buggy check — always True for dataclass fields
+        assert hasattr(o, 'since_datetime') is True
+        # The field value is actually None
+        assert o.since_datetime is None
+        # The fixed check correctly returns False
+        assert (o.since_datetime is not None) is False

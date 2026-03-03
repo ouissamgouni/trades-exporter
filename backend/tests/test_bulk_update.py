@@ -22,6 +22,9 @@ from backend.db.database import get_engine
 from backend.db.models import NormalizedTransaction, ReviewStatus
 
 
+pytestmark = pytest.mark.integration
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

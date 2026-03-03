@@ -101,6 +101,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             queryClient.invalidateQueries({ queryKey: ['bundles'] });
             queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+            queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
 
             toaster.success({
                 title: 'Removed from bundle',
@@ -125,6 +126,8 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
             open={open}
             onOpenChange={(e) => onOpenChange(e.open)}
             positioning={{ placement: 'right-start' }}
+            lazyMount
+            unmountOnExit
         >
             <Popover.Trigger asChild>
                 {children}

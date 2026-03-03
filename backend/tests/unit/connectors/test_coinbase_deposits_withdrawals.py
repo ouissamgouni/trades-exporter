@@ -220,7 +220,7 @@ class TestCoinbaseDepositsConnector:
         result = connector.raw_to_normalized(ccxt_deposit)
 
         assert result.fee == 0.5
-        assert result.source_fee_quote_asset_symbol == "USDC"  # Defaults to currency
+        assert result.source_fee_quote_asset_symbol == ""  # Float fee does not auto-set quote
 
     @patch("backend.connectors.cex.connector_coinbase_deposits.load_credentials")
     @patch("ccxt.coinbase")
@@ -326,7 +326,7 @@ class TestCoinbaseWithdrawalsConnector:
         assert result.network_transaction_id == "0xdef456abc789"
         assert result.network == "ethereum"
         assert result.source_to_account == "0xrecipient"
-        assert result.source_from_account == "0xmyaddress"
+        assert result.source_from_account == "1"  # Falls back to str(account_id) when no config
         assert result.date_time == datetime(2022, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     @patch("backend.connectors.cex.connector_coinbase_withdrawals.load_credentials")

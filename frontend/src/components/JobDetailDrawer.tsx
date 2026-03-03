@@ -412,7 +412,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         emptyMessage="No new transactions"
                         filters={{
                             ...defaultFilterState,
+                            reviewStatus: [],
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'synced',
                         }}
                         onDataChange={fetchDetail}
                     />
@@ -430,7 +432,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         emptyMessage="No updated transactions"
                         filters={{
                             ...defaultFilterState,
+                            reviewStatus: [],
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'updated',
                         }}
                         onDataChange={fetchDetail}
                     />
@@ -448,7 +452,9 @@ const ConnectorRunDetailView: React.FC<ConnectorRunDetailViewProps> = ({
                         emptyMessage="No skipped transactions"
                         filters={{
                             ...defaultFilterState,
+                            reviewStatus: [],
                             connectorRunIds: [String(detail.id)],
+                            connectorRunOutcome: 'skipped',
                         }}
                         onDataChange={fetchDetail}
                     />

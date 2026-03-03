@@ -5,11 +5,15 @@ Tests that the connector can fetch and map trade data successfully.
 
 import pytest
 import logging
+from datetime import datetime, timezone
 
 from backend.connectors.cex.connector_okx_trx import OKXConnectorTrx
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+# Only fetch recent data to speed up integration tests
+TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
 
 
 @pytest.mark.integration
@@ -17,7 +21,7 @@ def test_okx_trx_connector_yield_normalized():
     """Test OKX trades connector yield_normalized method."""
     # Limit symbols for faster testing
     test_symbols = ["BTC-USDT", "ETH-USDT"]  # OKX uses dash format
-    connector = OKXConnectorTrx(symbols=test_symbols)
+    connector = OKXConnectorTrx(symbols=test_symbols, config={"since_datetime": TEST_SINCE})
 
     results = []
     errors = []

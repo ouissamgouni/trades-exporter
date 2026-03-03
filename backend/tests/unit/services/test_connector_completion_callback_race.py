@@ -125,8 +125,10 @@ class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
             connector_name="test-connector",
         )
 
-        # Wait for processing
-        time.sleep(1)
+        # Poll for processing completion instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while processor.get_connector_pending_count(42) > 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
         processor.stop(timeout=5)
 
         # Pending count should be 0 (item processed), but no callback was fired
@@ -177,8 +179,10 @@ class TestCompletionCallbackRegisteredForAlreadyRunningConnector:
         processor.submit({"id": "b"}, mock_norm, connector_id=1, connector_name="c1")
         processor.submit({"id": "c"}, mock_norm, connector_id=2, connector_name="c2")
 
-        # Wait and stop
-        time.sleep(2)
+        # Poll until both connectors complete instead of fixed sleep
+        deadline = time.monotonic() + 5
+        while len(completed_ids) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
         processor.stop(timeout=5)
 
         assert sorted(completed_ids) == [1, 2], (

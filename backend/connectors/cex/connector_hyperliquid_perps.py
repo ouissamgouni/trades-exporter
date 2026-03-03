@@ -1,7 +1,13 @@
 """
 Hyperliquid Perps connector: Fetch perpetual futures fill history.
 Uses hyperliquid-python-sdk (public Info API — no API key required).
-Models perp fills as spot-equivalent trades for the P&L engine.
+
+Models perp fills as USDC margin flows for the P&L engine.
+Opening a position = USDC outflow (margin locked).
+Closing a position = USDC inflow (margin returned ± PnL).
+
+The notional difference between open and close flows captures the
+realized P&L naturally through the USDC lot system.
 Stores closedPnl from the API in transaction tags for validation.
 """
 
@@ -24,6 +30,11 @@ log = configure_logging("hyperliquid_perps")
 # Hyperliquid returns max 2000 fills per request
 PAGE_SIZE = 2000
 
+# Rate-limit / retry settings
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 2.0   # seconds, doubles each retry
+REQUEST_DELAY = 0.3     # polite delay between every request
+
 
 class HyperliquidPerpsConnector(BaseConnector):
     """
@@ -38,10 +49,13 @@ class HyperliquidPerpsConnector(BaseConnector):
     - Summed quantity, fees, and closedPnl
     - Volume-weighted average price (VWAP)
 
-    The P&L engine treats these as spot-equivalent trades:
-    - BUY 1 ETH @ 3000 → inflow ETH, outflow USDC (via leg expansion)
-    - SELL 1 ETH @ 3500 → outflow ETH, inflow USDC
-    - Short positions produce negative lots, resolved on cover
+    USDC-only flow model:
+    - Open position (long or short) → USDC outflow (notional = px × sz)
+    - Close position → USDC inflow (notional = px × sz)
+    - The P&L engine tracks USDC lots; the notional difference between
+      open outflow and close inflow captures realized P&L naturally.
+    - All perp flows are marked taxability_status="non_taxable" and
+      source_transaction_type="perp_open"/"perp_close".
 
     closedPnl from the API is stored in tags for P&L validation.
     """
@@ -71,9 +85,10 @@ class HyperliquidPerpsConnector(BaseConnector):
         if self.test_mode or self.renormalize_mode:
             return
 
-        # Wallet address comes from the account's address_or_identifier
+        # Wallet address from connector config, fallback to account identifier
         self._wallet_address = (config or {}).get(
-            "_account_address_or_identifier", ""
+            "wallet_address",
+            (config or {}).get("_account_address_or_identifier", ""),
         )
         if not self._wallet_address:
             raise ValueError(
@@ -92,6 +107,34 @@ class HyperliquidPerpsConnector(BaseConnector):
         except Exception as e:
             log.error(f"❌ Failed to initialize Hyperliquid SDK: {e}")
             raise
+
+    # ------------------------------------------------------------------
+    # Retry helper
+    # ------------------------------------------------------------------
+
+    def _call_with_retry(self, operation: str, func, *args, **kwargs):
+        """Call *func* with exponential back-off on HTTP 429."""
+        backoff = INITIAL_BACKOFF
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if "429" in str(e):
+                    if attempt < MAX_RETRIES:
+                        log.warning(
+                            f"⚠️ Rate limited (429) on {operation}, "
+                            f"retrying in {backoff:.0f}s "
+                            f"(attempt {attempt}/{MAX_RETRIES})"
+                        )
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    else:
+                        log.error(
+                            f"❌ Rate limited on {operation} "
+                            f"after {MAX_RETRIES} retries"
+                        )
+                raise
 
     # ------------------------------------------------------------------
     # Raw data fetching
@@ -125,8 +168,12 @@ class HyperliquidPerpsConnector(BaseConnector):
                 break
 
             try:
-                fills = self._info.user_fills_by_time(
-                    self._wallet_address, start_ms
+                time.sleep(REQUEST_DELAY)
+                fills = self._call_with_retry(
+                    "user_fills_by_time",
+                    self._info.user_fills_by_time,
+                    self._wallet_address,
+                    start_ms,
                 )
             except Exception as e:
                 log.error(f"❌ API error fetching fills: {e}")
@@ -218,11 +265,13 @@ class HyperliquidPerpsConnector(BaseConnector):
                 aggregated.append(group[0])
                 continue
 
-            # Sort by startPosition descending to get the first fill's start
-            # (startPosition decrements as each fill reduces the position)
+            # Sort to get the chronologically first fill's startPosition.
+            # Close orders: position decrements → first fill has largest |startPosition| → descending.
+            # Open orders:  position increments → first fill has smallest |startPosition| → ascending.
+            is_close_order = group[0].get("dir", "").startswith("Close")
             group.sort(
                 key=lambda f: abs(Decimal(f.get("startPosition", "0"))),
-                reverse=True,
+                reverse=is_close_order,
             )
 
             first = group[0]
@@ -273,6 +322,10 @@ class HyperliquidPerpsConnector(BaseConnector):
         """
         Map a Hyperliquid fill (or aggregated order) to NormalizedTransaction.
 
+        USDC-only flow model:
+        - Open (long or short) → USDC outflow of notional (px × sz)
+        - Close (long or short) → USDC inflow of notional (px × sz)
+
         Fill shape (single or aggregated):
         {
             "coin": "ETH", "px": "3000.5", "sz": "0.1", "side": "B",
@@ -285,7 +338,6 @@ class HyperliquidPerpsConnector(BaseConnector):
         """
         try:
             coin = fill["coin"]
-            side = fill["side"]  # "B" = buy, "A" = sell (ask)
             px = fill["px"]
             sz = fill["sz"]
             fee_str = fill.get("fee", "0")
@@ -300,18 +352,62 @@ class HyperliquidPerpsConnector(BaseConnector):
 
             dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
 
-            # side "B" = buy (inflow of the coin), "A" = sell (outflow of the coin)
-            direction = "inflow" if side == "B" else "outflow"
-            source_trx_type = "buy" if side == "B" else "sell"
+            # Margin/settlement currency from the fill (typically USDC, but HL
+            # also supports USDT-margined and spot-margined perps)
+            margin_currency = fee_token  # feeToken reflects the settlement asset
+
+            # Determine open vs close from the dir field
+            # dir values: "Open Long", "Close Long", "Open Short", "Close Short"
+            is_close = direction_label.startswith("Close")
+            source_trx_type = "perp_close" if is_close else "perp_open"
+
+            # Direction & quantity based on real USDC cash flow:
+            # - Opens: no cash flow (margin locked internally) → neutral, qty=0
+            # - Closes: closedPnl sign determines direction
+            #   positive → USDC inflow (profit), negative → USDC outflow (loss)
+            if not is_close:
+                direction = "neutral"
+                quantity = 0.0
+            else:
+                cpnl = Decimal(closed_pnl)
+                if cpnl > 0:
+                    direction = "inflow"
+                    quantity = float(abs(cpnl))
+                elif cpnl < 0:
+                    direction = "outflow"
+                    quantity = float(abs(cpnl))
+                else:
+                    direction = "neutral"
+                    quantity = 0.0
 
             # Use oid as source_transaction_id (one txn per order)
             tag_data = {
                 "closed_pnl": closed_pnl,
                 "dir": direction_label,
+                "coin": coin,
                 "start_position": start_position,
+                "px": px,
+                "sz": sz,
             }
             if aggregated_fills > 1:
                 tag_data["aggregated_fills"] = aggregated_fills
+
+            # Position intent data for the DerivativePositionStage pipeline stage.
+            # Connectors have no DB access, so position lifecycle is managed downstream.
+            from backend.connectors.base.position_intent import PositionIntent
+
+            side = "long" if "Long" in direction_label else "short"
+            is_fresh = not is_close and Decimal(start_position) == 0
+            tag_data["_position_data"] = PositionIntent(
+                coin=coin,
+                side=side,
+                action="close" if is_close else "open",
+                size=Decimal(sz),
+                execution_price=Decimal(px),
+                realized_pnl=Decimal(closed_pnl),
+                margin_currency=margin_currency,
+                is_new_position=is_fresh,
+            ).to_dict()
 
             return NormalizedTransaction(
                 source="hyperliquid-perps",
@@ -320,16 +416,14 @@ class HyperliquidPerpsConnector(BaseConnector):
                 source_transaction_id=oid,
                 date_time=dt,
                 direction=direction,
-                transaction_type="trade",
+                transaction_type="transfer",
                 source_transaction_type=source_trx_type,
-                source_asset_symbol=coin,
-                quantity=float(sz),
-                price=float(px),
-                source_price_quote_asset_symbol="USDC",
-                total=float(Decimal(px) * Decimal(sz)),
+                source_asset_symbol=margin_currency,
+                quantity=quantity,
                 fee=abs(float(fee_str)),
                 source_fee_quote_asset_symbol=fee_token,
                 network_transaction_id=tx_hash,
+                taxability_status="non_taxable",
                 tags=[tag_data],
             )
         except Exception as e:

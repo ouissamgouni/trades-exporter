@@ -17,6 +17,8 @@ from backend.db.database import get_session_dependency
 from backend.db.repositories import FileImportRepository
 from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging
+from backend.api.schemas import CleanupRequest, CleanupPreviewResponse, CleanupResultResponse
+from backend.services.data_cleanup_service import DataCleanupService
 
 log = configure_logging("connectors_api")
 
@@ -325,7 +327,9 @@ def delete_connector(
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Delete a connector by ID.
+    Delete a connector and all its associated data.
+
+    Uses DataCleanupService to handle the full FK dependency tree.
     """
     connector = session.get(AccountConnector, connector_id)
     if not connector:
@@ -333,7 +337,71 @@ def delete_connector(
             status_code=404, detail=f"Connector {connector_id} not found"
         )
 
-    session.delete(connector)
+    service = DataCleanupService(session)
+    service.execute_connector_cleanup([connector_id], delete_connectors=True)
+    session.commit()
+
+    return None
+
+
+# ============================================================================
+# Cleanup Endpoints (Bulk purge / delete)
+# ============================================================================
+
+
+@router.post("/cleanup-preview", response_model=CleanupPreviewResponse)
+def cleanup_preview(
+    request: CleanupRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Preview the impact of a data cleanup operation.
+
+    Returns counts of all dependent data that will be affected
+    without modifying anything.
+    """
+    # Validate all connector IDs exist
+    for cid in request.connector_ids:
+        if not session.get(AccountConnector, cid):
+            raise HTTPException(status_code=404, detail=f"Connector {cid} not found")
+
+    service = DataCleanupService(session)
+    preview = service.preview_connector_cleanup(request.connector_ids)
+
+    return CleanupPreviewResponse(
+        connector_ids=preview.connector_ids,
+        connector_names=preview.connector_names,
+        transactions=preview.transactions,
+        raw_transactions=preview.raw_transactions,
+        cost_lots=preview.cost_lots,
+        sync_runs=preview.sync_runs,
+        file_imports=preview.file_imports,
+        transfer_references=preview.transfer_references,
+        derivative_positions=preview.derivative_positions,
+        pnl_legs_affected=preview.pnl_legs_affected,
+    )
+
+
+@router.post("/cleanup", status_code=204)
+def cleanup(
+    request: CleanupRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Execute a data cleanup operation on one or more connectors.
+
+    If delete_connectors is True: removes connectors and all data.
+    If delete_connectors is False: purges data but keeps connector config.
+    """
+    # Validate all connector IDs exist
+    for cid in request.connector_ids:
+        if not session.get(AccountConnector, cid):
+            raise HTTPException(status_code=404, detail=f"Connector {cid} not found")
+
+    service = DataCleanupService(session)
+    service.execute_connector_cleanup(
+        request.connector_ids, delete_connectors=request.delete_connectors
+    )
     session.commit()
 
     return None

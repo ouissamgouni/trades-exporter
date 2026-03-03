@@ -32,7 +32,7 @@ def moralis_connector():
 @pytest.fixture
 def sample_transactions():
     """Load sample transaction data from fixtures."""
-    fixture_path = Path(__file__).parent / "fixtures" / "moralis" / "wallet_history_bsc.json"
+    fixture_path = Path(__file__).parents[2] / "fixtures" / "moralis" / "wallet_history_bsc.json"
     with open(fixture_path, "r") as f:
         data = json.load(f)
     return data["result"]

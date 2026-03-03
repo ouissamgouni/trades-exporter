@@ -33,6 +33,8 @@ export interface AccountSuggestionBadgesProps {
     fontSize?: string;
     /** Whether to enable the query */
     enabled?: boolean;
+    /** Pre-fetched suggestions — when provided, skips internal useAccountSuggestions hook */
+    suggestions?: AccountSuggestion[];
 }
 
 export const AccountSuggestionBadges: React.FC<AccountSuggestionBadgesProps> = ({
@@ -45,15 +47,19 @@ export const AccountSuggestionBadges: React.FC<AccountSuggestionBadgesProps> = (
     minConfidence = 0.5,
     fontSize = '7px',
     enabled = true,
+    suggestions: externalSuggestions,
 }) => {
-    const { suggestions } = useAccountSuggestions({
+    // When pre-fetched suggestions are provided, skip the internal hook
+    const { suggestions: hookSuggestions } = useAccountSuggestions({
         label,
         source,
         network,
         minConfidence,
         maxResults,
-        enabled: enabled && !!label,
+        enabled: enabled && !!label && externalSuggestions === undefined,
     });
+
+    const suggestions = externalSuggestions ?? hookSuggestions;
 
     if (suggestions.length === 0) return null;
 

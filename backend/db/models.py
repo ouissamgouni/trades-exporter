@@ -789,9 +789,6 @@ class NormalizedTransaction(SQLModel, table=True):
         default=False
     )  # Whether to include fee in P&L calculation
 
-    # Tax - disposal_taxable indicates if disposing this asset is a taxable event (capital gains)
-    disposal_taxable: bool = Field(default=False)
-
     # NOTE: group_id removed in V2 architecture - use calculation_unit_id instead
     # Migration 004 drops the groups tables entirely
 
@@ -929,6 +926,14 @@ class NormalizedTransaction(SQLModel, table=True):
     cost_lot_events: List["CostLotEvent"] = Relationship(
         back_populates="triggered_by_transaction",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+
+    # Derivative positions linked to this transaction (viewonly - managed by pipeline stage)
+    derivative_positions_opened: List["DerivativePosition"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DerivativePosition.open_transaction_id]",
+            "viewonly": True,
+        },
     )
 
     # Computed total property (price * quantity)
@@ -1564,9 +1569,11 @@ class CalculationUnitLeg(SQLModel, table=True):
         return self.leg_type == LegType.FEE
     
     @property
-    def tx_disposal_taxable(self) -> bool:
-        """Get disposal_taxable override flag from transaction (user input)."""
-        return self.transaction.disposal_taxable if self.transaction else False
+    def tx_taxability_status(self) -> str:
+        """Get taxability_status from transaction (3-state: taxable/non_taxable/unknown)."""
+        if self.transaction and self.transaction.taxability_status:
+            return self.transaction.taxability_status
+        return TaxabilityStatus.UNKNOWN.value
     
     # Persisted taxability (computed by TaxabilityCalculator during P&L processing)
     disposal_taxable: bool = Field(default=False)
@@ -2114,3 +2121,73 @@ class CostLotEvent(SQLModel, table=True):
     def asset(self) -> Optional["Asset"]:
         """Access asset through the lot."""
         return self.lot.asset if self.lot else None
+
+
+# ============================================================================
+# Derivative Positions
+# ============================================================================
+
+
+class DerivativePosition(SQLModel, table=True):
+    """
+    Tracks derivative (perpetual futures) position lifecycle.
+
+    Created and updated by the DerivativePositionStage in the sync pipeline.
+    Links to NormalizedTransactions for the opening and closing fills.
+    """
+
+    __tablename__ = "derivative_positions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    account_id: int = Field(foreign_key="accounts.id", index=True)
+    connector_id: Optional[int] = Field(
+        default=None, foreign_key="account_connectors.id", index=True
+    )
+    exchange: str = Field(index=True)  # "hyperliquid", extensible
+    coin: str = Field(index=True)  # "ZEC", "BTC", "HYPE"
+    side: str = Field(default="long")  # "long" / "short"
+    status: str = Field(default="open", index=True)  # "open" / "closed"
+
+    # Price tracking
+    entry_price: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    exit_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18), nullable=True)
+    )
+
+    # Size tracking
+    size: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    remaining_size: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Settlement
+    margin_currency: str = Field(default="USDC")
+    realized_pnl: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_fees: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Timestamps
+    opened_at: Optional[datetime] = Field(default=None)
+    closed_at: Optional[datetime] = Field(default=None)
+
+    # Transaction links
+    open_transaction_id: Optional[int] = Field(
+        default=None, foreign_key="normalized_transactions.id"
+    )
+    close_transaction_ids: Optional[List[int]] = Field(
+        default_factory=list, sa_column=Column(JSONB, default=[])
+    )
+
+    # Relationship to opening transaction
+    open_transaction: Optional["NormalizedTransaction"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[DerivativePosition.open_transaction_id]",
+        },
+    )

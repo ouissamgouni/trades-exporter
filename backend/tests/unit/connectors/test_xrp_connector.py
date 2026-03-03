@@ -27,7 +27,7 @@ def xrp_connector():
 @pytest.fixture
 def sample_transactions():
     """Load sample transaction data from fixtures."""
-    fixture_path = Path(__file__).parent / "fixtures" / "xrp" / "xrp_ledger_transactions.json"
+    fixture_path = Path(__file__).parents[2] / "fixtures" / "xrp" / "xrp_ledger_transactions.json"
     with open(fixture_path, "r") as f:
         data = json.load(f)
     return data["transactions"]

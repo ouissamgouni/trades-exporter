@@ -240,6 +240,15 @@ class PnLEngine:
         # Set version on lot_manager so new lots have version relationship
         self.lot_manager.set_version(version)
 
+        # Ensure all units are linked to this version
+        # (Already done by aggregate_legs_to_units in the normal calculate() flow,
+        #  but needed when process_calculation_units is called directly.)
+        for unit in units:
+            if version.calculation_units is None:
+                version.calculation_units = []
+            if unit not in version.calculation_units:
+                version.calculation_units.append(unit)
+
         # Sort units by earliest transaction timestamp
         # Note: Asset symbols should already be enriched in build_runtime_units()
         sorted_units = sorted(units, key=self._get_earliest_timestamp)

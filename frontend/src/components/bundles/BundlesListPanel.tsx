@@ -79,7 +79,7 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                 body: JSON.stringify(updates),
             });
             if (!response.ok) throw new Error('Failed to update bundle');
-            
+
             queryClient.invalidateQueries({ queryKey: ['bundles'] });
             toaster.success({
                 title: 'Bundle updated',
@@ -102,9 +102,10 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                 method: 'DELETE',
             });
             if (!response.ok) throw new Error('Failed to delete bundle');
-            
+
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
             toaster.success({
                 title: 'Bundle deleted',
             });
@@ -127,9 +128,10 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
                 body: JSON.stringify({ user_calculation_unit_id: null }),
             });
             if (!response.ok) throw new Error('Failed to remove transaction from bundle');
-            
+
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            queryClient.invalidateQueries({ queryKey: ['filterOptions'] });
             toaster.success({
                 title: 'Transaction removed from bundle',
             });
