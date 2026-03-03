@@ -9,6 +9,7 @@ from backend.db.models import NormalizedTransaction
 
 
 @pytest.mark.integration
+@pytest.mark.timeout(30)
 class TestMEXCDepositsConnectorIntegration:
     """Integration tests for MEXC deposits connector."""
 

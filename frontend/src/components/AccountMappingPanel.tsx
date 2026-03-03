@@ -1,5 +1,5 @@
 import {
-    Badge, Box, Button, Dialog, Flex, Heading, Input, NativeSelect,
+    Badge, Box, Button, Dialog, Flex, Heading, Input,
     Portal, Spinner, Table, Text, HStack, Textarea, VStack
 } from '@chakra-ui/react';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -571,6 +571,23 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [sourceFilter, setSourceFilter] = useState('');
+    const [allSources, setAllSources] = useState<{ source: string; count: number }[]>([]);
+    const [sourceSearch, setSourceSearch] = useState('');
+
+    // Fetch all distinct sources once (and when dismissed toggle changes)
+    useEffect(() => {
+        const fetchSources = async () => {
+            try {
+                const res = await fetch(`${API_URL}/raw-accounts/sources?include_dismissed=${includeDismissed}`);
+                if (res.ok) {
+                    setAllSources(await res.json());
+                }
+            } catch (err) {
+                console.error('Failed to fetch sources:', err);
+            }
+        };
+        fetchSources();
+    }, [includeDismissed]);
 
     useEffect(() => {
         fetchData();
@@ -587,6 +604,7 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
                 params.append('only_valid_pending', 'true');
             }
             params.append('include_dismissed', includeDismissed.toString());
+            params.append('limit', '1000');
 
             const [rawAccountsRes, accountsRes] = await Promise.all([
                 fetch(`${API_URL}/raw-accounts?${params}`),
@@ -651,7 +669,11 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
         return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
     }, [rawAccounts]);
 
-    const uniqueSources = [...new Set(rawAccounts.map(ra => ra.source))];
+    const filteredSources = useMemo(() => {
+        if (!sourceSearch) return allSources;
+        const q = sourceSearch.toLowerCase();
+        return allSources.filter(s => s.source.toLowerCase().includes(q));
+    }, [allSources, sourceSearch]);
 
     if (loading) {
         return (
@@ -683,29 +705,56 @@ export const AccountMappingPanel: React.FC<AccountMappingPanelProps> = ({
     return (
         <Box>
             {mode === 'full' && (
-                <Flex gap={4} mb={4} align="center" flexWrap="wrap">
-                    <Flex align="center" gap={2}>
-                        <Text fontWeight="medium" fontSize="2xs">Source:</Text>
-                        <NativeSelect.Root size="sm" width="150px" value={sourceFilter} onValueChange={(e) => setSourceFilter(e.value[0])}>
-                            <NativeSelect.Field placeholder="All">
-                                <option value="">All sources</option>
-                                {uniqueSources.map(s => (
-                                    <option key={s} value={s}>{s}</option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-                    {onDismissedChange && (
-                        <Button
+                <Box mb={4}>
+                    <Flex gap={2} mb={3} align="center">
+                        <Input
                             size="sm"
-                            fontSize="2xs"
-                            variant="outline"
-                            onClick={() => onDismissedChange(!includeDismissed)}
+                            placeholder="Search sources..."
+                            value={sourceSearch}
+                            onChange={(e) => setSourceSearch(e.target.value)}
+                            maxW="250px"
+                        />
+                        {sourceFilter && (
+                            <Button size="sm" variant="outline" onClick={() => setSourceFilter('')}>
+                                Clear filter
+                            </Button>
+                        )}
+                        {onDismissedChange && (
+                            <Button
+                                size="sm"
+                                fontSize="2xs"
+                                variant="outline"
+                                onClick={() => onDismissedChange(!includeDismissed)}
+                            >
+                                {includeDismissed ? 'Hide' : 'Show'} Dismissed
+                            </Button>
+                        )}
+                    </Flex>
+                    <Flex gap={2} flexWrap="wrap">
+                        <Button
+                            size="xs"
+                            variant={sourceFilter === '' ? 'solid' : 'outline'}
+                            colorPalette={sourceFilter === '' ? 'blue' : 'gray'}
+                            onClick={() => setSourceFilter('')}
                         >
-                            {includeDismissed ? 'Hide' : 'Show'} Dismissed
+                            All ({allSources.reduce((sum, s) => sum + s.count, 0)})
                         </Button>
-                    )}
-                </Flex>
+                        {filteredSources.map(({ source, count }) => (
+                            <Button
+                                key={source}
+                                size="xs"
+                                variant={sourceFilter === source ? 'solid' : 'outline'}
+                                colorPalette={sourceFilter === source ? 'blue' : 'gray'}
+                                onClick={() => setSourceFilter(source)}
+                            >
+                                {source}
+                                <Badge ml={1} size="sm" colorPalette={sourceFilter === source ? 'white' : 'gray'}>
+                                    {count}
+                                </Badge>
+                            </Button>
+                        ))}
+                    </Flex>
+                </Box>
             )}
 
             {groupedBySource.map(([source, sourceRawAccounts]) => (

@@ -297,6 +297,29 @@ def list_raw_accounts(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@router.get("/sources")
+def list_raw_account_sources(
+    include_dismissed: bool = Query(False, description="Include dismissed raw accounts"),
+    session: Session = Depends(get_db),
+):
+    """
+    List all distinct sources with their raw account counts.
+    Returns a list of {source, count} objects sorted alphabetically.
+    """
+    try:
+        statement = (
+            select(RawAccount.source, func.count().label("count"))
+            .group_by(RawAccount.source)
+        )
+        if not include_dismissed:
+            statement = statement.where(RawAccount.dismissed == False)
+        statement = statement.order_by(RawAccount.source)
+        rows = session.exec(statement).all()
+        return [{"source": row[0], "count": row[1]} for row in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
 @router.get("/count")
 def count_raw_accounts(
     source: Optional[str] = Query(None, description="Filter by source"),

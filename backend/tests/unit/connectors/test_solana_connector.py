@@ -5,6 +5,7 @@ Tests transaction normalization using fixtures.
 
 import pytest
 from decimal import Decimal
+from unittest.mock import patch, MagicMock
 from backend.connectors.onchain.connector_solana_helius import ConnectorSolanaHelius
 
 
@@ -429,6 +430,198 @@ class TestSolanaConnector:
         quantities = sorted([t.quantity for t in native_txs])
         assert quantities[0] == Decimal(threshold) / connector.SOL_DIVISOR
         assert quantities[1] == Decimal(threshold + 1) / connector.SOL_DIVISOR
+
+
+class TestSolanaRpcGapFill:
+    """Tests for the RPC gap-fill mechanism that catches transactions
+    missed by the Helius enhanced API due to indexing lag."""
+
+    def _make_live_connector(self):
+        """Create a connector in live mode with mocked API credentials."""
+        with patch.dict("os.environ", {"HELIUS_API_KEY": "test-key"}):
+            connector = ConnectorSolanaHelius(
+                wallet_address="6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                account_id=1,
+                connector_id=1,
+                config={},
+            )
+        return connector
+
+    def test_fetch_missing_yields_gap_transactions(self):
+        """Gap-fill should discover and yield transactions that the
+        enhanced API missed."""
+        connector = self._make_live_connector()
+
+        # Simulate: enhanced API returned sig_A and sig_B
+        seen = {"sig_A", "sig_B"}
+
+        # RPC returns sig_A, sig_B, sig_C (sig_C is the gap)
+        rpc_sigs = [
+            {"signature": "sig_A", "err": None},
+            {"signature": "sig_B", "err": None},
+            {"signature": "sig_C", "err": None},
+        ]
+
+        parsed_response = [
+            {
+                "signature": "sig_C",
+                "timestamp": 1772498488,
+                "type": "TRANSFER",
+                "fee": 5000,
+                "feePayer": "other",
+                "nativeTransfers": [],
+                "tokenTransfers": [
+                    {
+                        "fromUserAccount": "other",
+                        "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                        "tokenAmount": 48.956623,
+                    }
+                ],
+            }
+        ]
+
+        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+            with patch.object(connector, "safe_request", return_value=parsed_response):
+                results = list(connector._fetch_missing_via_rpc(seen))
+
+        assert len(results) == 1
+        assert results[0]["signature"] == "sig_C"
+
+    def test_fetch_missing_skips_errored_rpc_sigs(self):
+        """Signatures with `err != None` in RPC response should be ignored."""
+        connector = self._make_live_connector()
+
+        rpc_sigs = [
+            {"signature": "sig_ok", "err": None},
+            {"signature": "sig_fail", "err": {"InstructionError": [0, "Custom"]}},
+        ]
+
+        parsed_response = [
+            {"signature": "sig_ok", "timestamp": 1772498488, "type": "TRANSFER",
+             "fee": 0, "feePayer": "x", "nativeTransfers": [], "tokenTransfers": []}
+        ]
+
+        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+            with patch.object(connector, "safe_request", return_value=parsed_response):
+                results = list(connector._fetch_missing_via_rpc(set()))
+
+        sigs = [r["signature"] for r in results]
+        assert "sig_ok" in sigs
+        assert "sig_fail" not in sigs
+
+    def test_fetch_missing_no_gaps(self):
+        """If RPC returns exactly what the enhanced API already had, yield nothing."""
+        connector = self._make_live_connector()
+
+        seen = {"sig_A", "sig_B"}
+        rpc_sigs = [
+            {"signature": "sig_A", "err": None},
+            {"signature": "sig_B", "err": None},
+        ]
+
+        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+            results = list(connector._fetch_missing_via_rpc(seen))
+
+        assert results == []
+
+    def test_fetch_missing_is_best_effort(self):
+        """If the RPC call fails, gap-fill should not raise — it logs a warning."""
+        connector = self._make_live_connector()
+
+        with patch.object(
+            connector, "_rpc_request", side_effect=RuntimeError("RPC down")
+        ):
+            # Should NOT raise
+            results = list(connector._fetch_missing_via_rpc(set()))
+
+        assert results == []
+
+    def test_fetch_missing_batches_large_gap(self):
+        """When more than PARSE_BATCH_SIZE signatures are missing,
+        they should be split into multiple parse requests."""
+        connector = self._make_live_connector()
+        connector.PARSE_BATCH_SIZE = 2  # small batch for testing
+
+        seen = set()
+        rpc_sigs = [
+            {"signature": f"sig_{i}", "err": None} for i in range(5)
+        ]
+
+        def mock_safe_request(endpoint, method="GET", json_body=None, params=None):
+            sigs = json_body["transactions"]
+            return [{"signature": s, "timestamp": 1772498488, "type": "TRANSFER",
+                      "fee": 0, "feePayer": "x",
+                      "nativeTransfers": [], "tokenTransfers": []} for s in sigs]
+
+        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+            with patch.object(connector, "safe_request", side_effect=mock_safe_request):
+                results = list(connector._fetch_missing_via_rpc(seen))
+
+        assert len(results) == 5
+
+    def test_yield_raws_live_includes_gap_fill(self):
+        """End-to-end: yield_raws should include gap-filled transactions."""
+        connector = self._make_live_connector()
+
+        # Enhanced API returns 1 transaction
+        enhanced_tx = {
+            "signature": "enhanced_sig_1",
+            "timestamp": 1772490000,
+            "type": "TRANSFER",
+            "fee": 5000,
+            "feePayer": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+            "nativeTransfers": [
+                {
+                    "fromUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "toUserAccount": "someone",
+                    "amount": 1000000000,
+                }
+            ],
+            "tokenTransfers": [],
+        }
+
+        # Gap-fill finds 1 additional transaction
+        gap_tx = {
+            "signature": "gap_sig_1",
+            "timestamp": 1772498488,
+            "type": "TRANSFER",
+            "fee": 5000,
+            "feePayer": "other",
+            "nativeTransfers": [],
+            "tokenTransfers": [
+                {
+                    "fromUserAccount": "other",
+                    "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                    "tokenAmount": 48.956623,
+                }
+            ],
+        }
+
+        def mock_safe_request(endpoint, params=None, method="GET", json_body=None):
+            if method == "POST":
+                return [gap_tx]
+            # Enhanced API: first call returns 1 tx, second returns empty
+            if not hasattr(mock_safe_request, "_called"):
+                mock_safe_request._called = True
+                return [enhanced_tx]
+            return []
+
+        rpc_sigs = [
+            {"signature": "enhanced_sig_1", "err": None},
+            {"signature": "gap_sig_1", "err": None},
+        ]
+
+        with patch.object(connector, "safe_request", side_effect=mock_safe_request):
+            with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+                with patch.object(connector, "update_progress"):
+                    results = list(connector.yield_raws())
+
+        sigs = [r["signature"] for r in results]
+        assert "enhanced_sig_1" in sigs
+        assert "gap_sig_1" in sigs
+        assert len(results) == 2
 
 
 if __name__ == "__main__":

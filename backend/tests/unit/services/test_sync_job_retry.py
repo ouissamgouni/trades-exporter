@@ -642,20 +642,19 @@ class TestSinceOverrideBugFix:
     Tests for the fix to the has_since_override check.
 
     The bug: `hasattr(o, 'since_datetime')` was always True because
-    since_datetime is a dataclass field (defaults to None). This caused ALL
-    overridden connectors to be tracked as having a since override, potentially
-    forcing full syncs or using wrong since_datetime values.
+    since_datetime is a dataclass field. This caused ALL overridden connectors
+    to be tracked as having a since override.
 
-    The fix: `o.since_datetime is not None` — only track connectors that
-    actually specify a since_datetime value.
+    The fix: `o.since_datetime is not _UNSET` — only track connectors that
+    actually specify a since_datetime value (_UNSET is the sentinel default).
     """
 
     def test_disabled_connector_without_since_not_in_override_set(self):
         """
-        A disabled connector (enabled=False, since_datetime=None) should NOT
+        A disabled connector (enabled=False, since_datetime=_UNSET) should NOT
         be added to has_since_override.
         """
-        from backend.services.sync_job_service import ConnectorOverride
+        from backend.services.sync_job_service import ConnectorOverride, _UNSET
 
         overrides = [
             ConnectorOverride(connector_id=1, enabled=False),
@@ -666,8 +665,8 @@ class TestSinceOverrideBugFix:
         override_since = {}
 
         for o in overrides:
-            # The FIXED check
-            if o.since_datetime is not None:
+            # The FIXED check — _UNSET means "not provided"
+            if o.since_datetime is not _UNSET:
                 has_since_override.add(o.connector_id)
                 override_since[o.connector_id] = o.since_datetime
 
@@ -676,19 +675,19 @@ class TestSinceOverrideBugFix:
 
     def test_connector_with_explicit_since_is_tracked(self):
         """A connector with an actual since_datetime should be tracked."""
-        from backend.services.sync_job_service import ConnectorOverride
+        from backend.services.sync_job_service import ConnectorOverride, _UNSET
 
         since_dt = datetime(2024, 6, 15, 12, 0)
         overrides = [
             ConnectorOverride(connector_id=1, enabled=True, since_datetime=since_dt),
-            ConnectorOverride(connector_id=2, enabled=True),  # No since
+            ConnectorOverride(connector_id=2, enabled=True),  # No since (_UNSET)
         ]
 
         has_since_override = set()
         override_since = {}
 
         for o in overrides:
-            if o.since_datetime is not None:
+            if o.since_datetime is not _UNSET:
                 has_since_override.add(o.connector_id)
                 override_since[o.connector_id] = o.since_datetime
 
@@ -699,14 +698,15 @@ class TestSinceOverrideBugFix:
     def test_old_hasattr_bug_would_track_all_connectors(self):
         """
         Regression guard: `hasattr(o, 'since_datetime')` is always True
-        for a ConnectorOverride dataclass, even when since_datetime=None.
+        for a ConnectorOverride dataclass, even when since_datetime=_UNSET.
+        The correct check is `o.since_datetime is not _UNSET`.
         """
-        from backend.services.sync_job_service import ConnectorOverride
+        from backend.services.sync_job_service import ConnectorOverride, _UNSET
 
         o = ConnectorOverride(connector_id=1, enabled=False)
         # The old buggy check — always True for dataclass fields
         assert hasattr(o, 'since_datetime') is True
-        # The field value is actually None
-        assert o.since_datetime is None
+        # The field value is _UNSET (sentinel), not None
+        assert o.since_datetime is _UNSET
         # The fixed check correctly returns False
-        assert (o.since_datetime is not None) is False
+        assert (o.since_datetime is not _UNSET) is False

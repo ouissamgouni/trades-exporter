@@ -611,6 +611,9 @@ class SyncJobService:
                         )
                         fresh_session.commit()
                         self.logger.debug(f"📝 Updated connector run {run_id} to {db_status}")
+
+            # --- Derivative position processing (per-connector, scoped to this run) ---
+            self._run_derivative_position_sync(connector_id, cstatus.connector_type)
             
             # Add to completed list for job-level tracking
             if cstatus.account_name not in self.progress.connectors_completed:
@@ -627,6 +630,56 @@ class SyncJobService:
             self.logger.error(f"❌ Error in connector completion handler for {connector_id}: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
+
+    def _run_derivative_position_sync(
+        self, connector_id: int, connector_type: str
+    ) -> None:
+        """
+        Run derivative position processing for a connector if it's a derivative connector.
+
+        Uses DerivativesSyncService scoped to the current sync_connector_run_id,
+        processing only the NTs from this run. Uses a fresh DB session.
+
+        Args:
+            connector_id: The connector ID that just finished.
+            connector_type: The connector type string (e.g. "hyperliquid-perps").
+        """
+        try:
+            from backend.services.derivatives_sync_service import DerivativesSyncService
+
+            if not DerivativesSyncService.is_derivative_connector(connector_type):
+                return
+
+            # Resolve the sync_connector_run_id for this connector
+            run_id = None
+            if hasattr(self, "_run_job_db_connector_runs"):
+                run_id = self._run_job_db_connector_runs.get(connector_id)
+
+            if not run_id:
+                self.logger.warning(
+                    f"⚠️ No sync_connector_run_id for derivative connector {connector_id}, skipping position sync"
+                )
+                return
+
+            from backend.db.database import get_session
+
+            with get_session() as session:
+                service = DerivativesSyncService()
+                dp_count = service.process_connector_run(
+                    session,
+                    connector_id=connector_id,
+                    sync_connector_run_id=run_id,
+                )
+                if dp_count > 0:
+                    self.logger.info(
+                        f"📊 Derivative positions: {dp_count} created/updated "
+                        f"for connector {connector_id} (run {run_id})"
+                    )
+
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ Derivative position sync failed for connector {connector_id} (non-fatal): {e}"
+            )
     
     def _update_connector_run_metrics(self, run_id: int, cstatus: ConnectorProgress) -> None:
         """
@@ -828,6 +881,9 @@ class SyncJobService:
         connector_name = cstatus.connector_type
         if connector_name not in self.progress.connectors_completed:
             self.progress.connectors_completed.append(connector_name)
+
+        # --- Derivative position processing (fallback path) ---
+        self._run_derivative_position_sync(connector_id, cstatus.connector_type)
 
     def _determine_and_set_job_status(self, sync_job_repo: Any = None) -> None:
         """
@@ -1297,16 +1353,6 @@ class SyncJobService:
             finally:
                 # Stop processor and wait for workers
                 processor.stop(timeout=60)
-
-                # --- Batch derivative position processing ---
-                try:
-                    from backend.services.pipeline.stages.derivative_position_stage import DerivativePositionStage
-                    dp_stage = DerivativePositionStage()
-                    dp_count = dp_stage.process_batch(session, connector_ids=[connector_id])
-                    if dp_count > 0:
-                        self.logger.info(f"📊 Derivative positions batch (retry): {dp_count} positions created/updated")
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Derivative position batch processing failed (non-fatal): {e}")
 
             # Finalize connector if still running (completion callback may have already handled it)
             self._finalize_connector(connector_id, db_connector_runs, sync_job_repo)
@@ -1838,20 +1884,6 @@ class SyncJobService:
                 # Stop processor and wait for workers to finish
                 processor.stop(timeout=60)
                 self.logger.info(f"📊 Processor stats: {processor.get_stats()}")
-
-                # --- Batch derivative position processing ---
-                # Run after all workers finish so fills are processed in
-                # chronological order with full idempotency (safe for resync).
-                try:
-                    from backend.services.pipeline.stages.derivative_position_stage import DerivativePositionStage
-                    dp_stage = DerivativePositionStage()
-                    # Scope to connectors being synced in this job
-                    synced_connector_ids = list(self.progress.connector_statuses.keys())
-                    dp_count = dp_stage.process_batch(session, connector_ids=synced_connector_ids)
-                    if dp_count > 0:
-                        self.logger.info(f"📊 Derivative positions batch: {dp_count} positions created/updated")
-                except Exception as e:
-                    self.logger.warning(f"⚠️ Derivative position batch processing failed (non-fatal): {e}")
 
             # Mark job as complete (if not aborted)
             if self.progress.status == JobStatus.RUNNING:

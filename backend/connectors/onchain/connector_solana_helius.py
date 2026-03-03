@@ -35,6 +35,12 @@ class ConnectorSolanaHelius(BaseConnector):
     
     # Default decimals for unknown tokens
     DEFAULT_TOKEN_DECIMALS = 8
+    
+    # Max signatures to fetch from RPC for gap-fill
+    RPC_GAP_FILL_LIMIT = 1000
+    
+    # Max transactions per Helius parse batch
+    PARSE_BATCH_SIZE = 100
 
     @property
     def connector_name(self) -> str:
@@ -269,8 +275,152 @@ class ConnectorSolanaHelius(BaseConnector):
         self._token_cache[mint_address] = result
         return result
 
+    def _rpc_request(self, method: str, params: list) -> Any:
+        """
+        Perform a Solana JSON-RPC call via the Helius RPC endpoint.
+
+        Args:
+            method: RPC method name (e.g. "getSignaturesForAddress")
+            params: RPC positional params list
+
+        Returns:
+            The "result" field from the JSON-RPC response.
+
+        Raises:
+            RuntimeError: on HTTP or RPC errors after retries.
+        """
+        url = f"{self.rpc_url}/?api-key={self.api_key}"
+        body = {
+            "jsonrpc": "2.0",
+            "id": f"rpc-{method}",
+            "method": method,
+            "params": params,
+        }
+        delay = self.request_delay
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                time.sleep(delay)
+                response = requests.post(url, json=body, timeout=30)
+
+                if response.status_code == 429:
+                    log.warning(f"⚠️ RPC rate limited (attempt {attempt})")
+                    delay *= 2
+                    continue
+                if response.status_code >= 400:
+                    raise RuntimeError(
+                        f"RPC HTTP {response.status_code}: {response.text[:200]}"
+                    )
+
+                rpc_resp = response.json()
+                if "error" in rpc_resp:
+                    raise RuntimeError(f"RPC error: {rpc_resp['error']}")
+
+                return rpc_resp.get("result")
+
+            except requests.exceptions.RequestException as e:
+                log.warning(f"⚠️ RPC network error (attempt {attempt}): {e}")
+                if attempt < self.max_retries:
+                    delay *= 2
+                    continue
+                raise RuntimeError(
+                    f"RPC network error after {self.max_retries} retries: {e}"
+                )
+            except Exception as e:
+                if attempt < self.max_retries:
+                    delay *= 2
+                    continue
+                raise RuntimeError(
+                    f"RPC error after {self.max_retries} retries: {e}"
+                )
+
+        raise RuntimeError(f"RPC {method} failed after {self.max_retries} retries")
+
+    def _fetch_missing_via_rpc(
+        self, seen_signatures: set
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Gap-fill: discover recent on-chain signatures via Solana RPC and
+        fetch parsed data for any that the Helius enhanced endpoint missed.
+
+        The Helius ``/v0/addresses/{address}/transactions`` endpoint can have
+        indexing lag for very recent transactions.  The standard Solana RPC
+        ``getSignaturesForAddress`` is always up-to-date, so we use it as a
+        cross-check and parse any missing signatures through the Helius
+        ``POST /v0/transactions`` parse endpoint.
+
+        Args:
+            seen_signatures: Set of signatures already yielded by the main loop.
+
+        Yields:
+            Parsed transaction dicts for any signatures found on-chain but
+            missing from the enhanced endpoint.
+        """
+        try:
+            # Step 1: Get recent signatures from RPC
+            rpc_sigs_result = self._rpc_request(
+                "getSignaturesForAddress",
+                [
+                    self.wallet_address,
+                    {"limit": self.RPC_GAP_FILL_LIMIT},
+                ],
+            )
+
+            if not rpc_sigs_result:
+                return
+
+            rpc_signatures = [
+                entry["signature"]
+                for entry in rpc_sigs_result
+                if entry.get("signature") and entry.get("err") is None
+            ]
+
+            # Step 2: Find missing signatures
+            missing = [sig for sig in rpc_signatures if sig not in seen_signatures]
+
+            if not missing:
+                log.info("   RPC gap-fill: no missing transactions found")
+                return
+
+            log.info(
+                f"   RPC gap-fill: {len(missing)} transaction(s) not in enhanced API, fetching..."
+            )
+
+            # Step 3: Batch-parse missing signatures via Helius parse endpoint
+            for batch_start in range(0, len(missing), self.PARSE_BATCH_SIZE):
+                batch = missing[batch_start : batch_start + self.PARSE_BATCH_SIZE]
+                parsed = self.safe_request(
+                    "/transactions", method="POST", json_body={"transactions": batch}
+                )
+
+                if not parsed or not isinstance(parsed, list):
+                    log.warning(
+                        f"   RPC gap-fill: empty/invalid parse response for batch "
+                        f"{batch_start // self.PARSE_BATCH_SIZE + 1}"
+                    )
+                    continue
+
+                for tx in parsed:
+                    sig = tx.get("signature", "")
+                    if sig:
+                        yield tx
+
+            log.info(
+                f"   ✅ RPC gap-fill: recovered {len(missing)} transaction(s)"
+            )
+
+        except Exception as e:
+            # Gap-fill is best-effort — log and continue without raising
+            log.warning(f"   ⚠️ RPC gap-fill failed (non-fatal): {e}")
+
     def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
-        """Fetch and yield raw transactions with cursor-based pagination."""
+        """Fetch and yield raw transactions with cursor-based pagination.
+
+        After the main Helius enhanced-API pagination, a supplementary
+        RPC gap-fill checks ``getSignaturesForAddress`` for any recent
+        transactions that have not yet been indexed by the enhanced endpoint,
+        and parses them via ``POST /v0/transactions``.
+        """
         try:
             # Test mode: Load from fixture file
             if self.test_mode:
@@ -305,6 +455,7 @@ class ConnectorSolanaHelius(BaseConnector):
             before_signature = None
             total_items = 0
             page = 0
+            seen_signatures: set = set()
             
             while True:
                 page += 1
@@ -323,6 +474,9 @@ class ConnectorSolanaHelius(BaseConnector):
                 
                 # Yield items from this page immediately
                 for item in items:
+                    sig = item.get("signature")
+                    if sig:
+                        seen_signatures.add(sig)
                     total_items += 1
                     yield item
                 
@@ -338,8 +492,20 @@ class ConnectorSolanaHelius(BaseConnector):
                     break
 
             log.info(
-                f"   ✅ Found {total_items} transactions on Solana"
+                f"   ✅ Found {total_items} transactions from enhanced API"
             )
+
+            # --- RPC gap-fill: catch recent txs the enhanced API missed ---
+            gap_count = 0
+            for tx in self._fetch_missing_via_rpc(seen_signatures):
+                gap_count += 1
+                total_items += 1
+                yield tx
+
+            if gap_count:
+                log.info(
+                    f"   ✅ Total after gap-fill: {total_items} transactions"
+                )
             
             self.update_progress(
                 operation="Completed",

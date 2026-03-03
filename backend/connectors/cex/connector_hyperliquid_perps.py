@@ -35,6 +35,10 @@ MAX_RETRIES = 5
 INITIAL_BACKOFF = 2.0   # seconds, doubles each retry
 REQUEST_DELAY = 0.3     # polite delay between every request
 
+# Default start date when no since_datetime is configured.
+# Oct 1, 2025 00:00 UTC — aligns with accounts.yaml default start_datetime.
+DEFAULT_START_MS = 1_727_740_800_000  # 2025-10-01T00:00:00Z
+
 
 class HyperliquidPerpsConnector(BaseConnector):
     """
@@ -151,7 +155,7 @@ class HyperliquidPerpsConnector(BaseConnector):
                 yield item
             return
 
-        start_ms = self.since_timestamp_ms or 0
+        start_ms = self.since_timestamp_ms or DEFAULT_START_MS
         all_fills: list[dict] = []
 
         self.update_progress(
