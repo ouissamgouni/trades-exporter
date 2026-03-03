@@ -4,7 +4,6 @@ Tests the mapping of CCXT trade responses to normalized format.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
 
 from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
@@ -13,15 +12,9 @@ from backend.connectors.cex.connector_mexc_trx import MEXCConnectorTrx
 class TestMEXCConnector:
     """Unit tests for MEXC connector trade mapping."""
 
-    @patch("backend.connectors.cex.connector_mexc_base.load_credentials")
-    @patch("backend.connectors.cex.connector_mexc_base.ccxt.mexc")
-    def test_map_trade_buy(self, mock_ccxt, mock_creds):
+    def test_map_trade_buy(self):
         """Test mapping a buy trade from CCXT format to normalized format."""
-        mock_creds.return_value = {"api_key": "test_key", "api_secret": "test_secret"}
-        mock_exchange = MagicMock()
-        mock_ccxt.return_value = mock_exchange
-
-        connector = MEXCConnectorTrx()
+        connector = MEXCConnectorTrx(config={"test_mode": True, "disable_file_output": True})
 
         # Mock CCXT trade response (buy)
         ccxt_trade = {

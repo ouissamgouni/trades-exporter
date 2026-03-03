@@ -132,7 +132,7 @@ const TransactionFieldSections: React.FC<{ source: string; label: string; networ
                                     showFilters={false}
                                     showBundles={false}
                                     showSuggestions={false}
-                                    hiddenColumns={['total', 'taxability', 'feeInBase', 'bundle']}
+                                    initialColumnVisibility={{ total: false, taxability: false, feeInBase: false, bundle: false }}
                                     customApiUrl={`${API_URL}/raw-accounts/${encodeURIComponent(source)}/${encodeURIComponent(label)}/transactions?field_type=${section.fieldType}${networkParam}`}
                                 />
                             </Box>
@@ -411,8 +411,9 @@ const SourceGroup: React.FC<{
                                         <Table.Cell>
                                             {isEditing ? (
                                                 <AccountSelector
-                                                    value={editAccountId ?? undefined}
+                                                    value={editAccountId}
                                                     onChange={(id) => setEditAccountId(id ?? null)}
+                                                    accounts={accounts}
                                                     size="sm"
                                                     rawAccountNetwork={rawAccount.network || undefined}
                                                 />

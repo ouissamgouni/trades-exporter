@@ -291,8 +291,7 @@ const AccountCard: React.FC<{
                                 <Tooltip.Trigger asChild>
                                     <Box display="inline-flex">
                                         <Checkbox.Root
-                                            checked={allEnabled}
-                                            indeterminate={enabledCount > 0 && !allEnabled}
+                                            checked={(enabledCount > 0 && !allEnabled) ? 'indeterminate' : allEnabled}
                                             disabled={disabled}
                                             onCheckedChange={(details) => {
                                                 // Determine if we're in mixed state

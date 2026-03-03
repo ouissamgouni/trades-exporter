@@ -19,6 +19,7 @@ from backend.db.models import NormalizedTransaction
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "e2e", "fixtures")
 WALLET = "0xaecc12ea31b1e0d70b046f19e74c2a95524eb8be"
+HL_BRIDGE_ADDRESS = "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7"
 
 
 # =========================================================================
@@ -489,7 +490,11 @@ class TestHyperliquidTransfersNormalization:
         return HyperliquidTransfersConnector(
             account_id=99,
             connector_id=3,
-            config={"test_mode": True, "_account_address_or_identifier": WALLET},
+            config={
+                "test_mode": True,
+                "_account_address_or_identifier": HL_BRIDGE_ADDRESS,
+                "wallet_address": WALLET,
+            },
         )
 
     @pytest.fixture
@@ -497,7 +502,7 @@ class TestHyperliquidTransfersNormalization:
         return _load_fixture("hyperliquid_transfers.json")
 
     def test_deposit_is_inflow(self, connector, entries):
-        """Deposit entries should be inflow transfers with known from (wallet)."""
+        """Deposit entries should be inflow transfers with known to (account identifier)."""
         deposit = next((e for e in entries if e["delta"]["type"] == "deposit"), None)
         if deposit is None:
             pytest.skip("No deposits in fixtures")
@@ -505,25 +510,25 @@ class TestHyperliquidTransfersNormalization:
         assert tx.direction == "inflow"
         assert tx.transaction_type == "transfer"
         assert tx.source_asset_symbol == "USDC"
-        # Known side: to is the wallet (destination on Hyperliquid)
-        assert tx.source_to_account == WALLET
-        # from side left empty for pipeline enrichment
+        # Known side: to is the account identifier (HL bridge address)
+        assert tx.source_to_account == HL_BRIDGE_ADDRESS
+        # from side left empty for OnChainAddressEnrichmentStage
         assert tx.source_from_account is None
         # Account ID is set for the destination
         assert tx.to_account_id is not None
         assert tx.from_account_id is None
 
     def test_withdrawal_is_outflow(self, connector, entries):
-        """Withdrawal entries should be outflow transfers with known from (wallet)."""
+        """Withdrawal entries should be outflow transfers with known from (account identifier)."""
         withdrawal = next((e for e in entries if e["delta"]["type"] == "withdraw"), None)
         if withdrawal is None:
             pytest.skip("No withdrawals in fixtures")
         tx = connector.raw_to_normalized(withdrawal)
         assert tx.direction == "outflow"
         assert tx.source_asset_symbol == "USDC"
-        # Known side: from is the wallet (sender from Hyperliquid)
-        assert tx.source_from_account == WALLET
-        # to side left empty for pipeline enrichment
+        # Known side: from is the account identifier (HL bridge address)
+        assert tx.source_from_account == HL_BRIDGE_ADDRESS
+        # to side left empty for OnChainAddressEnrichmentStage
         assert tx.source_to_account is None
         # Account ID is set for the source
         assert tx.from_account_id is not None
@@ -536,6 +541,21 @@ class TestHyperliquidTransfersNormalization:
             pytest.skip("No deposits in fixtures")
         tx = connector.raw_to_normalized(deposit)
         assert tx.network == "arbitrum"
+
+    def test_source_transaction_id_is_tx_hash(self, connector, entries):
+        """source_transaction_id should be the raw tx hash (no prefix, no timestamp)."""
+        entry = next(
+            (e for e in entries if e["delta"]["type"] in ("deposit", "withdraw")),
+            None,
+        )
+        if entry is None:
+            pytest.skip("No deposit/withdraw in fixtures")
+        tx = connector.raw_to_normalized(entry)
+        expected_hash = entry.get("hash", "")
+        assert tx.source_transaction_id == expected_hash
+        # Must NOT contain type prefix or timestamp suffix
+        assert "deposit_" not in tx.source_transaction_id
+        assert "withdraw_" not in tx.source_transaction_id
 
     def test_all_entries_normalize_without_error(self, connector, entries):
         """Every transfer entry should normalize without exceptions."""

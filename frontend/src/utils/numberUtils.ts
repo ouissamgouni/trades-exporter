@@ -22,6 +22,7 @@ const DEFAULT_OPTIONS: Required<QuantityFormatOptions> = {
   maxDecimals: 8,
   useLargeNumberSuffixes: true,
   largeNumberThreshold: 1000,
+  forceFullPrecision: false,
 };
 
 /**

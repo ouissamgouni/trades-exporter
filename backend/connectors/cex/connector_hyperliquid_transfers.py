@@ -233,12 +233,17 @@ class HyperliquidTransfersConnector(BaseConnector):
             direction = "inflow" if is_deposit else "outflow"
             quantity = abs(float(usdc_amount))
 
+            # Known side = account identifier (HL bridge address).
+            # Unknown side left empty for OnChainAddressEnrichmentStage
+            # to resolve from Moralis (the user's Arbitrum wallet).
+            account_identifier = self._get_account_identifier()
+
             # Build the normalized transaction
             tx = NormalizedTransaction(
                 source="hyperliquid-transfers",
                 account_id=self.account_id,
                 source_account=self.connector_name,
-                source_transaction_id=f"{entry_type}_{tx_hash}_{timestamp_ms}",
+                source_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
                 transaction_type="transfer",
@@ -249,19 +254,14 @@ class HyperliquidTransfersConnector(BaseConnector):
                 network="arbitrum",  # Hyperliquid L1 bridges via Arbitrum
             )
 
-            # Set the known side of from/to with both account ID and address.
-            # Pipeline enrichment (OnChainAddressEnrichmentStage →
-            # AccountResolutionStage) will fill the other side from the
-            # on-chain transaction.
-            wallet = self._wallet_address or self._get_account_identifier()
             if is_deposit:
-                # Deposit into HL: current account is the destination
+                # Deposit into HL: this account is the destination
                 tx.to_account_id = self.account_id
-                tx.source_to_account = wallet
+                tx.source_to_account = account_identifier
             else:
-                # Withdrawal from HL: current account is the source
+                # Withdrawal from HL: this account is the source
                 tx.from_account_id = self.account_id
-                tx.source_from_account = wallet
+                tx.source_from_account = account_identifier
 
             return tx
         except Exception as e:
