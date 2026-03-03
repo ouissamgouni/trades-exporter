@@ -14,6 +14,7 @@ export enum UnitPattern {
   SPLIT = 'split',
   FLOW = 'flow',
   UNMATCHED_INTERNAL_TRANSFER = 'unmatched_internal_transfer',
+  CUSTOM = 'custom',
   UNKNOWN = 'unknown',
 }
 

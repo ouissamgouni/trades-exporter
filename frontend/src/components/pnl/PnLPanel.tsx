@@ -24,10 +24,11 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Badge, Box, Button, Dialog, Flex, Heading, Switch, Text } from '@chakra-ui/react';
 import { FiRefreshCw } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
-import { Account, API_URL, PriceResponse, DimensionWithCategories } from '../../types';
+import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
 import { useDataHealth } from '../../contexts/DataHealthContext';
+import { useBalance } from '../../hooks/useBalance';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
 
@@ -61,6 +62,7 @@ import {
     PnLFilterState,
     PerAccountBalanceItem,
     AccountBalanceBreakdown,
+    UnmappedLiveAsset,
 } from './types';
 
 interface PnLPanelProps {
@@ -155,6 +157,47 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Per-account balances for expandable rows (prefetched)
     const [accountBalances, setAccountBalances] = useState<Map<number, AccountBalanceBreakdown[]>>(new Map());
     const [isLoadingAccountBalances, setIsLoadingAccountBalances] = useState(false);
+
+    // --- Live balance comparison ---
+    const {
+        accountBalances: liveAccountBalancesRaw,
+        isLoading: liveBalanceLoading,
+        pendingCount: livePendingCount,
+        fetchGlobalBalance: fetchLiveBalances,
+        clear: clearLiveBalances,
+    } = useBalance();
+
+    // Build aggregated live balance map: symbol (uppercase) → total qty
+    const liveBalanceMap = useMemo(() => {
+        if (liveAccountBalancesRaw.length === 0) return new Map<string, number>();
+        const map = new Map<string, number>();
+        for (const ab of liveAccountBalancesRaw) {
+            for (const cb of ab.connector_balances) {
+                for (const entry of cb.entries) {
+                    const sym = entry.asset_symbol.toUpperCase();
+                    map.set(sym, (map.get(sym) ?? 0) + (parseFloat(entry.total) || 0));
+                }
+            }
+        }
+        return map;
+    }, [liveAccountBalancesRaw]);
+
+    // Build per-account live balance map: symbol → (accountId → qty)
+    const liveAccountBalanceMap = useMemo(() => {
+        if (liveAccountBalancesRaw.length === 0) return new Map<string, Map<number, number>>();
+        const map = new Map<string, Map<number, number>>();
+        for (const ab of liveAccountBalancesRaw) {
+            for (const cb of ab.connector_balances) {
+                for (const entry of cb.entries) {
+                    const sym = entry.asset_symbol.toUpperCase();
+                    if (!map.has(sym)) map.set(sym, new Map());
+                    const acctMap = map.get(sym)!;
+                    acctMap.set(ab.account_id, (acctMap.get(ab.account_id) ?? 0) + (parseFloat(entry.total) || 0));
+                }
+            }
+        }
+        return map;
+    }, [liveAccountBalancesRaw]);
 
     // Main view mode: 'portfolio' (filtered view) or 'audit' (full unfiltered audit)
     const [viewMode, setViewMode] = useState<'portfolio' | 'audit'>('portfolio');
@@ -308,6 +351,26 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             consumed_slices_count: realizedEventCount,
         };
     }, [summary, filteredAssets, hasActiveFilters]);
+
+    // Build unmapped live assets list (symbols in live balance but not in P&L assets)
+    const unmappedLiveAssets = useMemo<UnmappedLiveAsset[]>(() => {
+        if (liveBalanceMap.size === 0 || assets.length === 0) return [];
+        const pnlSymbols = new Set(assets.map(a => a.asset.symbol?.toUpperCase()).filter(Boolean));
+        const unmapped: UnmappedLiveAsset[] = [];
+        for (const [sym, qty] of liveBalanceMap) {
+            if (!pnlSymbols.has(sym)) {
+                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null });
+            }
+        }
+        return unmapped.sort((a, b) => b.totalQty - a.totalQty);
+    }, [liveBalanceMap, assets]);
+
+    // Auto-fetch live balances when assets are loaded (after calculation or version load)
+    useEffect(() => {
+        if (assets.length > 0 && status !== 'idle' && status !== 'calculating') {
+            fetchLiveBalances();
+        }
+    }, [assets.length > 0 && status !== 'idle' && status !== 'calculating']);
 
     // Compute available account IDs (accounts that have assets in current results)
     const availableAccountIds = useMemo(() => {
@@ -1507,6 +1570,10 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             accountBalances={accountBalances}
                             accounts={accounts}
                             onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
+                            liveBalances={liveBalanceMap}
+                            liveAccountBalances={liveAccountBalanceMap}
+                            liveBalanceLoading={liveBalanceLoading}
+                            unmappedLiveAssets={unmappedLiveAssets}
                         />
                     )}
 

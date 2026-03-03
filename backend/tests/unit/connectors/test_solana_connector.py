@@ -481,9 +481,10 @@ class TestSolanaRpcGapFill:
             }
         ]
 
-        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
-            with patch.object(connector, "safe_request", return_value=parsed_response):
-                results = list(connector._fetch_missing_via_rpc(seen))
+        with patch.object(connector, "_get_wallet_token_accounts", return_value=[]):
+            with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+                with patch.object(connector, "safe_request", return_value=parsed_response):
+                    results = list(connector._fetch_missing_via_rpc(seen))
 
         assert len(results) == 1
         assert results[0]["signature"] == "sig_C"
@@ -502,9 +503,10 @@ class TestSolanaRpcGapFill:
              "fee": 0, "feePayer": "x", "nativeTransfers": [], "tokenTransfers": []}
         ]
 
-        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
-            with patch.object(connector, "safe_request", return_value=parsed_response):
-                results = list(connector._fetch_missing_via_rpc(set()))
+        with patch.object(connector, "_get_wallet_token_accounts", return_value=[]):
+            with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+                with patch.object(connector, "safe_request", return_value=parsed_response):
+                    results = list(connector._fetch_missing_via_rpc(set()))
 
         sigs = [r["signature"] for r in results]
         assert "sig_ok" in sigs
@@ -520,8 +522,9 @@ class TestSolanaRpcGapFill:
             {"signature": "sig_B", "err": None},
         ]
 
-        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
-            results = list(connector._fetch_missing_via_rpc(seen))
+        with patch.object(connector, "_get_wallet_token_accounts", return_value=[]):
+            with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+                results = list(connector._fetch_missing_via_rpc(seen))
 
         assert results == []
 
@@ -530,10 +533,13 @@ class TestSolanaRpcGapFill:
         connector = self._make_live_connector()
 
         with patch.object(
-            connector, "_rpc_request", side_effect=RuntimeError("RPC down")
+            connector, "_get_wallet_token_accounts", side_effect=RuntimeError("RPC down")
         ):
-            # Should NOT raise
-            results = list(connector._fetch_missing_via_rpc(set()))
+            with patch.object(
+                connector, "_rpc_request", side_effect=RuntimeError("RPC down")
+            ):
+                # Should NOT raise
+                results = list(connector._fetch_missing_via_rpc(set()))
 
         assert results == []
 
@@ -554,9 +560,10 @@ class TestSolanaRpcGapFill:
                       "fee": 0, "feePayer": "x",
                       "nativeTransfers": [], "tokenTransfers": []} for s in sigs]
 
-        with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
-            with patch.object(connector, "safe_request", side_effect=mock_safe_request):
-                results = list(connector._fetch_missing_via_rpc(seen))
+        with patch.object(connector, "_get_wallet_token_accounts", return_value=[]):
+            with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
+                with patch.object(connector, "safe_request", side_effect=mock_safe_request):
+                    results = list(connector._fetch_missing_via_rpc(seen))
 
         assert len(results) == 5
 
@@ -615,13 +622,103 @@ class TestSolanaRpcGapFill:
 
         with patch.object(connector, "safe_request", side_effect=mock_safe_request):
             with patch.object(connector, "_rpc_request", return_value=rpc_sigs):
-                with patch.object(connector, "update_progress"):
-                    results = list(connector.yield_raws())
+                with patch.object(connector, "_get_wallet_token_accounts", return_value=[]):
+                    with patch.object(connector, "update_progress"):
+                        results = list(connector.yield_raws())
 
         sigs = [r["signature"] for r in results]
         assert "enhanced_sig_1" in sigs
         assert "gap_sig_1" in sigs
         assert len(results) == 2
+
+    def test_fetch_missing_via_ata_discovers_token_transfer(self):
+        """Gap-fill should discover token transfers by querying the wallet's
+        Associated Token Accounts (ATAs), not just the wallet address."""
+        connector = self._make_live_connector()
+
+        # Enhanced API returned sig_A only; the target token transfer (sig_T)
+        # was missed because the wallet address wasn't a direct account key.
+        seen = {"sig_A"}
+
+        # Wallet address query returns sig_A only
+        wallet_rpc_sigs = [
+            {"signature": "sig_A", "err": None},
+        ]
+        # USDC ATA query returns sig_A (also referenced) + sig_T (the gap)
+        ata_rpc_sigs = [
+            {"signature": "sig_A", "err": None},
+            {"signature": "sig_T", "err": None},
+        ]
+
+        parsed_response = [
+            {
+                "signature": "sig_T",
+                "timestamp": 1772498488,
+                "type": "TRANSFER",
+                "fee": 5000,
+                "feePayer": "other",
+                "nativeTransfers": [],
+                "tokenTransfers": [
+                    {
+                        "fromUserAccount": "other",
+                        "toUserAccount": "6VUr67Aux76vH32vpZaKbjU9wq4ubcqsTxuUnqDzhyz8",
+                        "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                        "tokenAmount": 48.956623,
+                    }
+                ],
+            }
+        ]
+
+        # Mock _rpc_request to return different results per address
+        def mock_rpc_request(method, params):
+            addr = params[0]
+            if addr == connector.wallet_address:
+                return wallet_rpc_sigs
+            else:
+                return ata_rpc_sigs
+
+        with patch.object(connector, "_get_wallet_token_accounts",
+                          return_value=["65MoBaeZyGf2hFnkCN7G_fake_ata"]):
+            with patch.object(connector, "_rpc_request", side_effect=mock_rpc_request):
+                with patch.object(connector, "safe_request", return_value=parsed_response):
+                    results = list(connector._fetch_missing_via_rpc(seen))
+
+        assert len(results) == 1
+        assert results[0]["signature"] == "sig_T"
+
+    def test_get_wallet_token_accounts_returns_pubkeys(self):
+        """_get_wallet_token_accounts should return ATA pubkeys."""
+        connector = self._make_live_connector()
+
+        rpc_result = {
+            "value": [
+                {"pubkey": "ata_usdc_123"},
+                {"pubkey": "ata_sol_456"},
+            ]
+        }
+
+        with patch.object(connector, "_rpc_request", return_value=rpc_result):
+            atas = connector._get_wallet_token_accounts()
+
+        assert atas == ["ata_usdc_123", "ata_sol_456"]
+
+    def test_get_wallet_token_accounts_empty(self):
+        """_get_wallet_token_accounts should return empty list when no ATAs."""
+        connector = self._make_live_connector()
+
+        with patch.object(connector, "_rpc_request", return_value={"value": []}):
+            atas = connector._get_wallet_token_accounts()
+
+        assert atas == []
+
+    def test_get_wallet_token_accounts_rpc_returns_none(self):
+        """_get_wallet_token_accounts should return empty list on None result."""
+        connector = self._make_live_connector()
+
+        with patch.object(connector, "_rpc_request", return_value=None):
+            atas = connector._get_wallet_token_accounts()
+
+        assert atas == []
 
 
 if __name__ == "__main__":

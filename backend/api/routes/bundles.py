@@ -333,7 +333,6 @@ def create_bundle(
     # Link transactions via user_calculation_unit_id FK
     for tx in transactions:
         tx.user_calculation_unit_id = bundle.id
-        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
 
     session.commit()
@@ -372,9 +371,10 @@ def update_bundle(
         bundle.pattern = request.pattern
     if request.notes is not None:
         bundle.notes = request.notes
-    if request.taxability_override is not None:
+    # Use model_fields_set to detect if taxability_override was explicitly sent (even as null)
+    if 'taxability_override' in request.model_fields_set:
         bundle.taxability_override = (
-            request.taxability_override if request.taxability_override else None
+            request.taxability_override.value if request.taxability_override else None
         )
 
     bundle.updated_at = datetime.now(timezone.utc)
@@ -412,7 +412,6 @@ def delete_bundle(
 
         for tx in transactions:
             tx.user_calculation_unit_id = None
-            tx.review_status = ReviewStatus.PENDING.value
             session.add(tx)
 
     session.delete(bundle)
@@ -443,7 +442,6 @@ def add_transactions_to_bundle(
             continue  # Already in a bundle
 
         tx.user_calculation_unit_id = bundle_id
-        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
         added.append(tx_id)
 
@@ -472,7 +470,6 @@ def remove_transactions_from_bundle(
             continue
 
         tx.user_calculation_unit_id = None
-        tx.review_status = ReviewStatus.PENDING.value
         session.add(tx)
         removed += 1
 

@@ -336,6 +336,35 @@ class ConnectorSolanaHelius(BaseConnector):
 
         raise RuntimeError(f"RPC {method} failed after {self.max_retries} retries")
 
+    def _get_wallet_token_accounts(self) -> list[str]:
+        """
+        Fetch the wallet's SPL token accounts (ATAs) via RPC.
+
+        ``getSignaturesForAddress`` for the wallet address only returns
+        transactions where the wallet is a direct account key.  SPL token
+        transfers to the wallet go through the Associated Token Account
+        (ATA) instead, so we must also query each ATA.
+
+        Returns:
+            List of ATA public-key strings owned by the wallet.
+        """
+        result = self._rpc_request(
+            "getTokenAccountsByOwner",
+            [
+                self.wallet_address,
+                {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                {"encoding": "jsonParsed"},
+            ],
+        )
+        if not result or "value" not in result:
+            return []
+
+        return [
+            acct["pubkey"]
+            for acct in result["value"]
+            if acct.get("pubkey")
+        ]
+
     def _fetch_missing_via_rpc(
         self, seen_signatures: set
     ) -> Generator[Dict[str, Any], None, None]:
@@ -349,6 +378,10 @@ class ConnectorSolanaHelius(BaseConnector):
         cross-check and parse any missing signatures through the Helius
         ``POST /v0/transactions`` parse endpoint.
 
+        Because SPL token transfers reference the Associated Token Account
+        (ATA) rather than the wallet address, this method also queries
+        ``getSignaturesForAddress`` for each of the wallet's ATAs.
+
         Args:
             seen_signatures: Set of signatures already yielded by the main loop.
 
@@ -357,26 +390,38 @@ class ConnectorSolanaHelius(BaseConnector):
             missing from the enhanced endpoint.
         """
         try:
-            # Step 1: Get recent signatures from RPC
-            rpc_sigs_result = self._rpc_request(
-                "getSignaturesForAddress",
-                [
-                    self.wallet_address,
-                    {"limit": self.RPC_GAP_FILL_LIMIT},
-                ],
-            )
+            # Step 1: Collect signatures from the wallet address AND its ATAs
+            all_rpc_sigs: set = set()
 
-            if not rpc_sigs_result:
-                return
+            # 1a. Wallet address itself (catches native SOL transfers)
+            addresses_to_query = [self.wallet_address]
 
-            rpc_signatures = [
-                entry["signature"]
-                for entry in rpc_sigs_result
-                if entry.get("signature") and entry.get("err") is None
-            ]
+            # 1b. Discover token ATAs owned by this wallet
+            try:
+                atas = self._get_wallet_token_accounts()
+                if atas:
+                    log.info(
+                        f"   RPC gap-fill: found {len(atas)} token account(s) to scan"
+                    )
+                    addresses_to_query.extend(atas)
+            except Exception as e:
+                log.warning(f"   RPC gap-fill: failed to fetch ATAs (non-fatal): {e}")
+
+            # 1c. Query getSignaturesForAddress for each address
+            for addr in addresses_to_query:
+                rpc_sigs_result = self._rpc_request(
+                    "getSignaturesForAddress",
+                    [addr, {"limit": self.RPC_GAP_FILL_LIMIT}],
+                )
+                if not rpc_sigs_result:
+                    continue
+                for entry in rpc_sigs_result:
+                    sig = entry.get("signature")
+                    if sig and entry.get("err") is None:
+                        all_rpc_sigs.add(sig)
 
             # Step 2: Find missing signatures
-            missing = [sig for sig in rpc_signatures if sig not in seen_signatures]
+            missing = [sig for sig in all_rpc_sigs if sig not in seen_signatures]
 
             if not missing:
                 log.info("   RPC gap-fill: no missing transactions found")

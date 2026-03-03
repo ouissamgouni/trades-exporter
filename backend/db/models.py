@@ -122,6 +122,7 @@ class UnitPattern(str, Enum):
     UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Incomplete internal transfer (no P&L)
     FLOW = "flow"  # External single-leg movement (airdrop, payment, external deposit/withdrawal)
     SPLIT = "split"  # Stock split - same asset, qty changes (non-taxable)
+    CUSTOM = "custom"  # User-created bundle with no predefined pattern
     UNKNOWN = "unknown"  # Needs review
 
 

@@ -1028,3 +1028,18 @@ export interface PerAccountBalanceItem {
     category_ids: number[];
 }
 
+// ============================================================================
+// Live Balance Comparison Types
+// ============================================================================
+
+/**
+ * An asset that appears in live connector balances but has no matching
+ * AssetPnLRow (no P&L data). Typically dust, spam, or un-imported tokens.
+ */
+export interface UnmappedLiveAsset {
+    symbol: string;
+    totalQty: number;
+    /** Market value in base currency, null if no price available */
+    marketValue: number | null;
+}
+

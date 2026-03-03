@@ -18,6 +18,7 @@ import {
     Box,
     Button,
     Flex,
+    NativeSelect,
     Popover,
     Portal,
     Spinner,
@@ -25,7 +26,7 @@ import {
 } from '@chakra-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, Bundle } from '../../types';
-import { UnitPattern } from '../../enums';
+import { TaxabilityStatus, UnitPattern } from '../../enums';
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
@@ -35,6 +36,7 @@ const patternColors: Record<string, string> = {
     [UnitPattern.SWAP]: 'orange',
     [UnitPattern.SPLIT]: 'purple',
     [UnitPattern.FLOW]: 'cyan',
+    [UnitPattern.CUSTOM]: 'purple',
 };
 
 interface BundleMembershipPopoverProps {
@@ -64,6 +66,8 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
     const [bundle, setBundle] = useState<Bundle | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [taxability, setTaxability] = useState<string>(TaxabilityStatus.UNKNOWN);
+    const [taxabilityLoading, setTaxabilityLoading] = useState(false);
 
     // Fetch bundle details lazily when opened
     useEffect(() => {
@@ -78,6 +82,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                 if (!response.ok) throw new Error('Failed to fetch bundle');
                 const data = await response.json();
                 if (!cancelled) setBundle(data);
+                if (!cancelled) setTaxability(data.taxability_override || TaxabilityStatus.UNKNOWN);
             } catch (err) {
                 if (!cancelled) setError(err instanceof Error ? err.message : 'Unknown error');
             } finally {
@@ -88,6 +93,39 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
         fetchBundle();
         return () => { cancelled = true; };
     }, [open, bundleId]);
+
+    // Update taxability override via PATCH
+    const handleTaxabilityChange = async (newValue: string) => {
+        setTaxability(newValue);
+        setTaxabilityLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue,
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to update taxability');
+
+            queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+
+            toaster.success({
+                title: 'Taxability updated',
+                description: `Bundle #${bundleId} set to ${newValue}`,
+            });
+        } catch (err) {
+            // Revert on failure
+            setTaxability(bundle?.taxability_override || TaxabilityStatus.UNKNOWN);
+            toaster.error({
+                title: 'Error',
+                description: err instanceof Error ? err.message : 'Failed to update taxability',
+            });
+        } finally {
+            setTaxabilityLoading(false);
+        }
+    };
 
     const handleRemoveFromBundle = async (txId: number) => {
         try {
@@ -177,6 +215,34 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                                             {bundle.notes}
                                         </Text>
                                     )}
+                                    {/* Taxability Override */}
+                                    <Flex align="center" gap={2} mt={2}>
+                                        <Text fontSize="xs" color="gray.500" flexShrink={0}>
+                                            Taxability:
+                                        </Text>
+                                        <NativeSelect.Root size="sm" width="130px">
+                                            <NativeSelect.Field
+                                                value={taxability}
+                                                onChange={(e) => handleTaxabilityChange(e.target.value)}
+                                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                                style={{
+                                                    fontSize: '11px',
+                                                    padding: '2px 6px',
+                                                    backgroundColor:
+                                                        taxability === TaxabilityStatus.TAXABLE
+                                                            ? '#FED7AA'
+                                                            : taxability === TaxabilityStatus.NON_TAXABLE
+                                                                ? '#C6F6D5'
+                                                                : '#FEFCBF',
+                                                    borderRadius: '4px',
+                                                }}
+                                            >
+                                                <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                                <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                                <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                            </NativeSelect.Field>
+                                        </NativeSelect.Root>
+                                    </Flex>
                                 </>
                             )}
                         </Box>

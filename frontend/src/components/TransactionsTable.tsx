@@ -40,6 +40,7 @@ import { TableConfig, ColumnPlugin, RowAction, BulkAction, TransactionColumnKey,
 import { useDuplicateMap } from '../hooks/useDuplicateMap';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
+import { BundleCreateDialog, BundleCreateDefaults } from './bundles/BundleCreateDialog';
 import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
 
 // Types for CSV import
@@ -457,6 +458,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // Transaction editor dialog state (replaced by drawer)
     // Pencil icon now opens the detail drawer for inline editing
+
+    // Bundle Create Dialog state
+    const [showBundleCreateDialog, setShowBundleCreateDialog] = useState(false);
+    const [bundleCreateDefaults, setBundleCreateDefaults] = useState<BundleCreateDefaults>({
+        pattern: 'custom',
+        label: 'Bundle',
+        transactionIds: [],
+    });
 
     // CSV Import state
     const [showImportDialog, setShowImportDialog] = useState(false);
@@ -965,7 +974,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         return 'Bundle';
     };
 
-    const createBundle = async (pattern: string, label: string) => {
+    // Open the bundle create dialog with a specific default pattern
+    const openBundleDialog = (pattern: string) => {
         if (selectedIds.size === 0) return;
 
         // Pre-check: warn if any selected transactions are already in a bundle
@@ -981,33 +991,22 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             return;
         }
 
-        setBulkActionLoading(true);
-        try {
-            const response = await fetch(`${API_URL}/bundles`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    label,
-                    pattern,
-                    transaction_ids: Array.from(selectedIds)
-                })
-            });
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => null);
-                throw new Error(errorData?.detail || 'Failed to create bundle');
-            }
-            toaster.success({ title: 'Bundle created', description: `"${label}" with ${selectedIds.size} transaction(s)` });
-            await refetchTransactions();
-            queryClient.invalidateQueries({ queryKey: ["bundles"] });
-            queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
-            refreshHealthData();
-            onDataChange?.();
-            setSelectedIds(new Set());
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create bundle' });
-        } finally {
-            setBulkActionLoading(false);
-        }
+        setBundleCreateDefaults({
+            pattern,
+            label: generateBundleLabel(pattern, selectedIds),
+            transactionIds: Array.from(selectedIds),
+        });
+        setShowBundleCreateDialog(true);
+    };
+
+    // Called after the BundleCreateDialog successfully creates a bundle
+    const handleBundleCreated = async () => {
+        await refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundles'] });
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+        refreshHealthData();
+        onDataChange?.();
+        setSelectedIds(new Set());
     };
 
     // Bulk action handlers
@@ -1589,7 +1588,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         size="sm"
                                         colorPalette="orange"
                                         variant="outline"
-                                        onClick={() => createBundle('swap', generateBundleLabel('swap', selectedIds))}
+                                        onClick={() => openBundleDialog('swap')}
                                         disabled={bulkActionLoading}
                                     >
                                         🔄 Swap
@@ -1598,7 +1597,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         size="sm"
                                         colorPalette="blue"
                                         variant="outline"
-                                        onClick={() => createBundle('internal_transfer', generateBundleLabel('internal_transfer', selectedIds))}
+                                        onClick={() => openBundleDialog('internal_transfer')}
                                         disabled={bulkActionLoading}
                                     >
                                         ↔ Transfer
@@ -1607,7 +1606,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         size="sm"
                                         colorPalette="purple"
                                         variant="outline"
-                                        onClick={() => createBundle('custom', generateBundleLabel('custom', selectedIds))}
+                                        onClick={() => openBundleDialog('custom')}
                                         disabled={bulkActionLoading}
                                     >
                                         📦 Bundle
@@ -2477,6 +2476,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 prefill={quickCreateAsset?.prefill}
                 rawAssetSource={quickCreateAsset?.rawSource}
                 rawAssetSymbol={quickCreateAsset?.rawSymbol}
+            />
+
+            {/* Bundle Create Dialog */}
+            <BundleCreateDialog
+                isOpen={showBundleCreateDialog}
+                onClose={() => setShowBundleCreateDialog(false)}
+                onCreated={handleBundleCreated}
+                defaults={bundleCreateDefaults}
+                generateLabel={(pattern) => generateBundleLabel(pattern, selectedIds.size > 0 ? selectedIds : new Set(bundleCreateDefaults.transactionIds))}
             />
         </Box >
     );
