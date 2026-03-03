@@ -15,7 +15,7 @@ tasks:
     cmds:
       - task: unit:backend
       - task: unit:frontend
-      - echo "✅ All unit tests passed"
+      - cmd: echo "All unit tests passed"
 
   unit:backend:
     desc: Run backend unit + API tests in parallel
@@ -111,7 +111,7 @@ tasks:
       - task: int:onchain
       - task: int:exchanges
       - task: int:prices
-      - echo "✅ All integration test chunks passed"
+      - cmd: echo "All integration test chunks passed"
 
   int:dev:
     desc: Run integration tests against dev environment
@@ -124,13 +124,13 @@ tasks:
     desc: Run full integration test cycle (setup → test → cleanup)
     dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
-      - echo "🔧 Setting up integration test database..."
+      - cmd: echo "Setting up integration test database..."
       - task: :db:setup:integ
-      - echo "🧪 Running integration tests..."
+      - cmd: echo "Running integration tests..."
       - task: int:local
-      - echo "🧹 Cleaning up integration test database..."
+      - cmd: echo "Cleaning up integration test database..."
       - task: :db:reset:integ
-      - echo "✅ Integration test cycle complete"
+      - cmd: echo "Integration test cycle complete"
 
   # =========================================================================
   # E2E Tests
@@ -174,24 +174,15 @@ tasks:
   # =========================================================================
 
   all:
-    desc: Run all tests (unit parallel → integration chunks → e2e)
+    desc: Run all tests (unit parallel, integration chunks, e2e)
     cmds:
-      - echo "═══════════════════════════════════════"
-      - echo "  Phase 1: Unit Tests (parallel)"
-      - echo "═══════════════════════════════════════"
+      - cmd: echo "--- Phase 1 - Unit Tests (parallel) ---"
       - task: unit
-      - echo ""
-      - echo "═══════════════════════════════════════"
-      - echo "  Phase 2: Integration Tests (chunked)"
-      - echo "═══════════════════════════════════════"
+      - cmd: echo "--- Phase 2 - Integration Tests (chunked) ---"
       - task: int:all
-      - echo ""
-      - echo "═══════════════════════════════════════"
-      - echo "  Phase 3: E2E Tests"
-      - echo "═══════════════════════════════════════"
+      - cmd: echo "--- Phase 3 - E2E Tests ---"
       - task: e2e
-      - echo ""
-      - echo "✅ All tests passed!"
+      - cmd: echo "All tests passed!"
 
   # =========================================================================
   # CI & Misc
