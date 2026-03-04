@@ -147,6 +147,7 @@ class ConnectorBlockscoutHub(BaseHubConnector):
                 native_symbol = {
                     "ethereum": "ETH", "base": "ETH", "arbitrum": "ETH",
                     "optimism": "ETH", "polygon": "MATIC", "bsc": "BNB",
+                    "hyperevm": "HYPE",
                 }.get(self.chain_name, "ETH")
                 entries.append(BalanceEntry(
                     asset_symbol=native_symbol,

@@ -571,6 +571,10 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (filters.transactionIds && filters.transactionIds.length > 0) {
                 params.append('ids', filters.transactionIds.join(','));
             }
+            // Has fees filter
+            if (filters.hasFees) {
+                params.append('has_fee', 'true');
+            }
 
             // Server-side pagination
             params.append('limit', String(pagination.pageSize));

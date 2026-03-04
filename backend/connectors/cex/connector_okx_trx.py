@@ -307,6 +307,7 @@ class OKXConnectorTrx(BaseConnector):
                 total=total,
                 fee=fee,
                 source_fee_quote_asset_symbol=fee_quote,
+                include_fee=True,
             )
         except Exception as e:
             error_msg = f"Failed to map OKX trade: {e}"

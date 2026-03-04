@@ -497,7 +497,7 @@ class TestDetectDuplicateGroups:
         dt = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
 
         tx1 = _make_mock_tx(
-            id=1, source="okx-funding-file", source_transaction_id="10018451232",
+            id=1, source="okx-file", source_transaction_id="10018451232",
             date_time=dt, sync_connector_run_id=1384,
         )
         tx2 = _make_mock_tx(

@@ -349,6 +349,8 @@ def get_filter_options(
     network: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    ids: Optional[str] = Query(None, description="Filter by transaction IDs (comma-separated)"),
+    has_fee: bool = Query(False, description="Filter to transactions that have a fee > 0"),
     session: Session = Depends(get_db)
 ):
     """
@@ -390,6 +392,21 @@ def get_filter_options(
     try:
         # Build base CTE from the shared filter builder
         base_query = build_filtered_transaction_query(applied)
+
+        # Apply extra filters not handled by the shared builder
+        if ids:
+            id_list = [int(i.strip()) for i in ids.split(',') if i.strip().isdigit()]
+            if id_list:
+                if len(id_list) == 1:
+                    base_query = base_query.where(NormalizedTransaction.id == id_list[0])
+                else:
+                    base_query = base_query.where(NormalizedTransaction.id.in_(id_list))
+        if has_fee:
+            base_query = base_query.where(
+                NormalizedTransaction.fee.isnot(None),
+                NormalizedTransaction.fee > 0,
+            )
+
         base_cte = base_query.cte("filtered_txs")
         
         # Get distinct sources with counts (filtered)
@@ -1292,6 +1309,8 @@ def list_transactions(
     pnl_cal_inclusions_status: Optional[str] = Query(None, description="Filter by inclusion status in P&L version (included/excluded)"),
     # Counterparty filter
     non_owned: bool = Query(False, description="Filter to transactions with non-owned or unmapped counterparties"),
+    # Fee filter
+    has_fee: bool = Query(False, description="Filter to transactions that have a fee > 0"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     sort_by: Optional[str] = Query("date_time", description="Column to sort by (date_time, id, source, direction, transaction_type, quantity, price, total, fee, review_status, taxability_status)"),
@@ -1401,6 +1420,13 @@ def list_transactions(
                     statement = statement.where(NormalizedTransaction.id == id_list[0])
                 else:
                     statement = statement.where(NormalizedTransaction.id.in_(id_list))
+
+        # Has fee filter
+        if has_fee:
+            statement = statement.where(
+                NormalizedTransaction.fee.isnot(None),
+                NormalizedTransaction.fee > 0,
+            )
 
         # P&L version inclusion/exclusion filter
         if pnl_cal_version is not None and pnl_cal_inclusions_status:

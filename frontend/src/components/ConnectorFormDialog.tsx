@@ -223,8 +223,9 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
 
         // Chain selector for on-chain connectors
         if (selectedTypeInfo.supported_chains?.length) {
-            // For wallet accounts, auto-select detected chain
-            const chainValue = detectedChain || formData.config.chain || '';
+            // Priority: 1) user selection in form, 2) saved connector config (immediate prop),
+            // 3) auto-detected from address, 4) empty
+            const chainValue = formData.config.chain || connector?.config?.chain || detectedChain || '';
             // Only lock chain for unambiguous address formats (XRP, Solana)
             // EVM addresses (0x) are valid on multiple chains, so pre-select but don't lock
             const isChainInherited = !!(isWalletAccount && detectedChain && detectedChain !== 'ethereum');
@@ -360,6 +361,92 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                     />
                     <Text fontSize="xs" color="gray.500" mt={1}>
                         Default start date for incremental sync
+                    </Text>
+                </Box>
+            );
+        }
+
+        // Timezone selector for file connectors whose CSV timestamps are in a local timezone
+        if (selectedTypeInfo.optional_config.includes('timezone')) {
+            // Default to browser timezone on create
+            const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const currentValue = formData.config.timezone ?? browserTz;
+
+            // Initialize config with browser timezone if not set yet
+            if (formData.config.timezone === undefined) {
+                // Use a microtask to avoid updating state during render
+                Promise.resolve().then(() => updateConfig('timezone', browserTz));
+            }
+
+            fields.push(
+                <Box key="timezone">
+                    <Text fontWeight="medium" mb={1}>
+                        File Timezone
+                    </Text>
+                    <NativeSelect.Root>
+                        <NativeSelect.Field
+                            value={currentValue}
+                            onChange={(e) => updateConfig('timezone', e.target.value)}
+                        >
+                            {(() => {
+                                // Build a curated list of common IANA timezones
+                                const commonTimezones = [
+                                    'UTC',
+                                    'Europe/London',
+                                    'Europe/Paris',
+                                    'Europe/Berlin',
+                                    'Europe/Amsterdam',
+                                    'Europe/Brussels',
+                                    'Europe/Zurich',
+                                    'Europe/Rome',
+                                    'Europe/Madrid',
+                                    'Europe/Lisbon',
+                                    'Europe/Vienna',
+                                    'Europe/Warsaw',
+                                    'Europe/Prague',
+                                    'Europe/Budapest',
+                                    'Europe/Bucharest',
+                                    'Europe/Athens',
+                                    'Europe/Helsinki',
+                                    'Europe/Stockholm',
+                                    'Europe/Oslo',
+                                    'Europe/Copenhagen',
+                                    'Europe/Dublin',
+                                    'Europe/Istanbul',
+                                    'Europe/Moscow',
+                                    'Asia/Dubai',
+                                    'Asia/Kolkata',
+                                    'Asia/Bangkok',
+                                    'Asia/Singapore',
+                                    'Asia/Hong_Kong',
+                                    'Asia/Shanghai',
+                                    'Asia/Seoul',
+                                    'Asia/Tokyo',
+                                    'Australia/Sydney',
+                                    'Australia/Melbourne',
+                                    'Pacific/Auckland',
+                                    'America/New_York',
+                                    'America/Chicago',
+                                    'America/Denver',
+                                    'America/Los_Angeles',
+                                    'America/Toronto',
+                                    'America/Sao_Paulo',
+                                    'America/Argentina/Buenos_Aires',
+                                ];
+                                // Ensure browser timezone is in the list
+                                const allTimezones = commonTimezones.includes(browserTz)
+                                    ? commonTimezones
+                                    : [browserTz, ...commonTimezones];
+                                return allTimezones.map(tz => (
+                                    <option key={tz} value={tz}>
+                                        {tz.replace(/_/g, ' ')}{tz === browserTz ? ' (detected)' : ''}
+                                    </option>
+                                ));
+                            })()}
+                        </NativeSelect.Field>
+                    </NativeSelect.Root>
+                    <Text fontSize="xs" color="gray.500" mt={1}>
+                        Timezone of timestamps in the exported CSV file (usually your browser timezone when you exported from OKX)
                     </Text>
                 </Box>
             );

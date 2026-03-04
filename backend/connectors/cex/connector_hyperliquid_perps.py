@@ -426,6 +426,7 @@ class HyperliquidPerpsConnector(BaseConnector):
                 quantity=quantity,
                 fee=abs(float(fee_str)),
                 source_fee_quote_asset_symbol=fee_token,
+                include_fee=True,
                 network_transaction_id=tx_hash,
                 taxability_status="non_taxable",
                 tags=[tag_data],

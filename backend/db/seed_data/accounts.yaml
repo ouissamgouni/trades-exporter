@@ -157,18 +157,11 @@ accounts:
         config:
           start_datetime: "2025-10-01T00:00:00"
 
-      - connector_type: "okx-funding-file"
+      - connector_type: "okx-file"
         color: "#1B4F72"
         enabled: false
         sync_priority: 45
-        default_file: "okx/Funding History_2025-01-01~2026-02-19~UTC0~d1034754ea4408f8b65822b590dfae7e_1.csv"
-        config: {}
-
-      - connector_type: "okx-trades-file"
-        color: "#1B7D72"
-        enabled: false
-        sync_priority: 46
-        default_file: "okx/Trade Details_2025-01-01~2026-01-28~f0e70424f991434ae37250803aa096dc_1.csv"
+        default_file: "okx/Trading History_2025-06-30~2026-02-19~UTC0~8339611181c6b2622eec0551fbd4d298_1.csv"
         config: {}
 
   # Coinbase Account

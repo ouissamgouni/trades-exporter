@@ -258,6 +258,7 @@ class OKXConvertConnector(BaseConnector):
                 total=to_amount,
                 fee=fee,
                 source_fee_quote_asset_symbol=quote,
+                include_fee=True,
                 tags=[{"type": "convert"}],
             )
         except Exception as e:

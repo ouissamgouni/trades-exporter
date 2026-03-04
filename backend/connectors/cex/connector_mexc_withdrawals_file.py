@@ -329,6 +329,7 @@ class MEXCWithdrawalsFileConnector(BaseConnector):
                 quantity=amount,
                 fee=fee,
                 source_fee_quote_asset_symbol=fee_quote,
+                include_fee=True,
                 source_from_account=self._get_account_identifier(),
                 from_account_id=self.account_id,
                 source_to_account=withdrawal_address,  # Destination address

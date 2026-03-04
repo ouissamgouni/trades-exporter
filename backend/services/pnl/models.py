@@ -249,6 +249,33 @@ class PnLResult:
             if entry.pnl_in_base:
                 total += entry.pnl_in_base
         return total
+
+    @property
+    def fee_entries(self) -> list:
+        """All FeeEntry records across all calculation units.
+        
+        Traverses: version → units → legs → fee_entries
+        """
+        from backend.db.models import FeeEntry
+        entries: list[FeeEntry] = []
+        for unit in self.calculation_units:
+            for leg in (unit.legs or []):
+                entries.extend(leg.fee_entries or [])
+        return entries
+
+    @property
+    def total_fee_in_base(self) -> Decimal:
+        """Sum of all fee values in base currency."""
+        total = Decimal("0")
+        for fe in self.fee_entries:
+            if fe.fee_value_in_base:
+                total += fe.fee_value_in_base
+        return total
+
+    @property
+    def fee_entry_count(self) -> int:
+        """Number of fee entries."""
+        return len(self.fee_entries)
     
 
         

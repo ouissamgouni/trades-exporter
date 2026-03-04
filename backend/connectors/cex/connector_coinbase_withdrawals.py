@@ -268,6 +268,7 @@ class ConnectorCoinbaseWithdrawals(BaseConnector):
             quantity=amount,
             fee=fee,
             source_fee_quote_asset_symbol=fee_quote,
+            include_fee=True,
             source_from_account=self._get_account_identifier(),  # Connector's account identifier
             from_account_id=self.account_id,  # Resolved account ID
             source_to_account=to_address,

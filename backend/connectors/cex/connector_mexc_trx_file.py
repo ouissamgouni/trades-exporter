@@ -400,6 +400,7 @@ class MEXCTrxFileConnector(BaseConnector):
                 source_price_quote_asset_symbol=quote,
                 fee=fee,
                 source_fee_quote_asset_symbol=fee_quote,
+                include_fee=True,
                 content_hash=content_hash,
             )
             

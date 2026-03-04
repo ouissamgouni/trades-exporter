@@ -72,8 +72,7 @@ class TestConnectorRegistryFileConnector:
             "mexc-transactions-file",
             "mexc-deposits-file",
             "mexc-withdrawals-file",
-            "okx-funding-file",
-            "okx-trades-file",
+            "okx-file",
         ]
         for ct in file_connector_types:
             info = registry.get(ct)

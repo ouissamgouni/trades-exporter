@@ -154,6 +154,17 @@ class TestBalance:
         mock_req.return_value = []
         assert _make_connector().get_balance() == []
 
+    @patch.object(ConnectorPolymarket, "_safe_request")
+    def test_resolved_positions_return_empty(self, mock_req):
+        """Positions with size>0 but currentValue=0 (resolved losers) return empty."""
+        mock_req.return_value = [
+            {"size": 100, "currentValue": 0, "avgPrice": 0.1, "curPrice": 0,
+             "cashPnl": -10, "percentPnl": -100, "redeemable": True,
+             "title": "Expired Market", "outcome": "Yes", "endDate": "2025-11-07",
+             "conditionId": "0xabc"},
+        ]
+        assert _make_connector().get_balance() == []
+
 
 # ── Hub ──────────────────────────────────────────────────────────────
 
@@ -175,3 +186,74 @@ class TestHub:
         from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
         with pytest.raises(ValueError, match="Missing wallet address"):
             ConnectorPolymarketHub(wallet_address="", config={"test_mode": True})
+
+    @patch("backend.connectors.onchain.connector_polymarket_hub.get_connector_registry")
+    def test_hub_balance_includes_wallet_cash(self, mock_registry):
+        """Hub balance should include on-chain USDC cash from Blockscout."""
+        from unittest.mock import MagicMock
+        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+
+        mock_chain = MagicMock()
+        mock_chain.base_url = "https://polygon.blockscout.com/api/v2"
+        mock_registry.return_value.get_chain_config.return_value = mock_chain
+
+        hub = ConnectorPolymarketHub(
+            wallet_address=WALLET, account_id=1, connector_id=1,
+            config={"test_mode": True},
+        )
+
+        # Mock Polymarket child: no positions
+        with patch.object(type(hub.child_connectors[0][1]), "get_balance", return_value=[]):
+            # Mock Blockscout HTTP call: 150.49 USDC on-chain
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = [
+                {"value": "150490000", "token": {"symbol": "USDC.e", "decimals": "6"}},
+                {"value": "1000000000000000", "token": {"symbol": "MATIC", "decimals": "18"}},
+            ]
+            mock_resp.raise_for_status = MagicMock()
+
+            with patch("requests.get", return_value=mock_resp):
+                entries = hub.get_balance()
+
+        # Should have 1 entry: the USDC wallet cash (no positions)
+        assert len(entries) == 1
+        assert entries[0].asset_symbol == "USDC"
+        assert entries[0].total == Decimal("150.49")
+        assert entries[0].raw["source"] == "wallet_cash"
+
+    @patch("backend.connectors.onchain.connector_polymarket_hub.get_connector_registry")
+    def test_hub_balance_combines_positions_and_cash(self, mock_registry):
+        """Hub balance should combine position value and wallet USDC cash."""
+        from unittest.mock import MagicMock
+        from backend.connectors.base.base_connector import BalanceEntry
+        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+
+        mock_chain = MagicMock()
+        mock_chain.base_url = "https://polygon.blockscout.com/api/v2"
+        mock_registry.return_value.get_chain_config.return_value = mock_chain
+
+        hub = ConnectorPolymarketHub(
+            wallet_address=WALLET, account_id=1, connector_id=1,
+            config={"test_mode": True},
+        )
+
+        # Polymarket child returns 50 USDC in positions
+        position_entry = BalanceEntry(
+            asset_symbol="USDC", total=Decimal("50"), available=Decimal("50"),
+            chain="polygon", raw={"positions_count": 1, "positions": []},
+        )
+        with patch.object(type(hub.child_connectors[0][1]), "get_balance", return_value=[position_entry]):
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = [
+                {"value": "100000000", "token": {"symbol": "USDC", "decimals": "6"}},
+            ]
+            mock_resp.raise_for_status = MagicMock()
+
+            with patch("requests.get", return_value=mock_resp):
+                entries = hub.get_balance()
+
+        # 2 entries: positions (50) + wallet cash (100)
+        assert len(entries) == 2
+        assert entries[0].total == Decimal("50")
+        assert entries[1].total == Decimal("100")
+        assert entries[1].raw["source"] == "wallet_cash"

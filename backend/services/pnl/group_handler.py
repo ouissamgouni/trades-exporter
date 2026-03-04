@@ -739,7 +739,6 @@ def _create_fee_entry(
     
     # Use relationship objects instead of IDs - SQLAlchemy will resolve IDs on flush
     # This handles the case where entities haven't been persisted yet
-    # Setting fee_leg=disposal auto-populates disposal.fee_entries via back_populates
     fee_entry = FeeEntry(
         fee_leg=disposal,
         realized_pnl=realized_pnl,
@@ -748,6 +747,14 @@ def _create_fee_entry(
         related_asset_id=related_asset_id,
         fee_value_in_base=fee_value_in_base,
     )
+
+    # Manual append needed - SQLAlchemy back-population doesn't work reliably
+    # for transient objects (not yet in a session). Same pattern as RealizedPnl above.
+    # Without this, the FeeEntry is a dangling object never reached by cascade persistence.
+    if disposal.fee_entries is None:
+        disposal.fee_entries = []
+    if fee_entry not in disposal.fee_entries:
+        disposal.fee_entries.append(fee_entry)
     
     log.debug(
         "fee_entry_created",

@@ -12,6 +12,7 @@ import {
 import { LuUpload, LuFile, LuX, LuCheck, LuHistory, LuTrash2, LuTriangleAlert, LuEye, LuPin } from 'react-icons/lu';
 import { API_URL } from '../types';
 import { FileUploadPreviewModal } from './FileUploadPreviewModal';
+import { DefaultFilePreviewModal } from './DefaultFilePreviewModal';
 
 interface FileUploadPreview {
     row_count: number;
@@ -90,6 +91,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [showHistory, setShowHistory] = useState(false);
     const [showPreviewModal, setShowPreviewModal] = useState(false);
+    const [showDefaultFilePreview, setShowDefaultFilePreview] = useState(false);
 
     // Import history from API
     const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
@@ -337,9 +339,18 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     >
                         <Flex align="center" gap={2} minW={0}>
                             <LuPin size={12} style={{ flexShrink: 0 }} />
-                            <Text fontSize="xs" color="teal.700" truncate>
+                            <Text fontSize="xs" color="teal.700" truncate flex="1">
                                 Default: <Text as="span" fontWeight="medium">{defaultFileName}</Text>
                             </Text>
+                            <IconButton
+                                aria-label="Preview default file"
+                                size="2xs"
+                                variant="ghost"
+                                colorPalette="teal"
+                                onClick={() => setShowDefaultFilePreview(true)}
+                            >
+                                <LuEye />
+                            </IconButton>
                         </Flex>
                     </Box>
                 )}
@@ -370,7 +381,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     <Box>
                         <input
                             type="file"
-                            accept={(connectorType.includes('okx-funding') || connectorType.includes('okx-trades')) ? '.csv' : '.xlsx,.xls'}
+                            accept={connectorType.includes('okx') ? '.csv' : '.xlsx,.xls'}
                             onChange={handleFileSelect}
                             style={{ display: 'none' }}
                             id={`file-input-${connectorId}`}
@@ -671,6 +682,16 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     fileSize={selectedFile.size}
                     quickPreview={preview}
                     file={selectedFile}
+                />
+            )}
+
+            {/* Default File Preview Modal */}
+            {defaultFileName && (
+                <DefaultFilePreviewModal
+                    open={showDefaultFilePreview}
+                    onClose={() => setShowDefaultFilePreview(false)}
+                    connectorId={connectorId}
+                    fileName={defaultFileName}
                 />
             )}
         </Box>

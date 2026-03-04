@@ -80,6 +80,8 @@ export interface TransactionFilterState {
     dateTo: string;
     /** Counterparty filter: show only transactions with non-owned/unmapped counterparties */
     nonOwned: boolean;
+    /** Has fees filter: show only transactions that have a fee > 0 */
+    hasFees?: boolean;
     // P&L audit filters (hidden from UI, locked to version context)
     versionId?: string;
     inclusionStatus?: 'included' | 'excluded';
@@ -111,6 +113,7 @@ export const defaultFilterState: TransactionFilterState = {
     dateFrom: '',
     dateTo: '',
     nonOwned: false,
+    hasFees: undefined,
     transactionIds: undefined,
     connectorRunOutcome: undefined,
 };
@@ -973,6 +976,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if (filters.networks?.length) params.append('network', filters.networks.join(','));
         if (filters.dateFrom) params.append('date_from', filters.dateFrom);
         if (filters.dateTo) params.append('date_to', filters.dateTo);
+        if (filters.transactionIds?.length) params.append('ids', filters.transactionIds.join(','));
+        if (filters.hasFees) params.append('has_fee', 'true');
         return params;
     }, [filters]);
 
@@ -1041,6 +1046,8 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if ((localFilters.dateFrom || localFilters.dateTo) &&
             (localFilters.dateFrom !== resetDates.dateFrom || localFilters.dateTo !== resetDates.dateTo)) count++;
         if (localFilters.nonOwned && !effectiveResetState.nonOwned) count++;
+        if (localFilters.hasFees && !effectiveResetState.hasFees) count++;
+        if (localFilters.transactionIds?.length) count++;
         FILTER_DEFS.forEach(def => {
             const values = localFilters[def.key];
             const resetValues = effectiveResetState[def.key];
@@ -1154,6 +1161,30 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             });
         }
 
+        // Has fees chip
+        if (localFilters.hasFees) {
+            chips.push({
+                id: 'has-fees',
+                label: 'Has Fees',
+                filterKey: 'hasFees' as keyof TransactionFilterState,
+                value: 'true',
+                category: 'Fee',
+                color: 'orange',
+            });
+        }
+
+        // Transaction IDs chip
+        if (localFilters.transactionIds?.length) {
+            chips.push({
+                id: 'transaction-ids',
+                label: `IDs: ${localFilters.transactionIds.join(', ')}`,
+                filterKey: 'transactionIds' as keyof TransactionFilterState,
+                value: localFilters.transactionIds.join(','),
+                category: 'ID',
+                color: 'gray',
+            });
+        }
+
         // Date range chip
         if (sourceFilters.date_from || sourceFilters.date_to) {
             const fromStr = sourceFilters.date_from ? new Date(sourceFilters.date_from).toLocaleDateString() : '';
@@ -1242,6 +1273,14 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if (chip.filterKey === 'nonOwned') {
             // Toggle off non-owned filter
             const newFilters = { ...localFilters, nonOwned: false };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        } else if (chip.filterKey === 'hasFees') {
+            const newFilters = { ...localFilters, hasFees: undefined };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        } else if (chip.filterKey === 'transactionIds') {
+            const newFilters = { ...localFilters, transactionIds: undefined };
             setLocalFilters(newFilters);
             onChange(newFilters);
         } else if (chip.filterKey === 'dateFrom') {
@@ -1576,6 +1615,111 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                     onToggle={() => setOpenDropdown(openDropdown === 'tagKeys' ? null : 'tagKeys')}
                                     onClose={() => setOpenDropdown(null)}
                                 />
+                            )}
+
+                            {/* Transaction ID filter card */}
+                            {!hiddenSet.has('transactionIds') && (
+                                <Box
+                                    bg="white"
+                                    border="1px solid"
+                                    borderColor={localFilters.transactionIds?.length ? 'gray.300' : 'gray.200'}
+                                    borderRadius="md"
+                                    p={2}
+                                    minH="70px"
+                                >
+                                    <Flex align="center" justify="space-between" mb={1.5}>
+                                        <Flex align="center" gap={1}>
+                                            <Text fontSize="xs">#️⃣</Text>
+                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                                Transaction IDs
+                                            </Text>
+                                        </Flex>
+                                        {localFilters.transactionIds?.length ? (
+                                            <Badge size="xs" colorPalette="gray" borderRadius="full">
+                                                {localFilters.transactionIds.length}
+                                            </Badge>
+                                        ) : null}
+                                    </Flex>
+                                    <Flex align="center" gap={1} px={1} py={1} bg="gray.50" borderRadius="sm">
+                                        <LuSearch size={10} color="#A0AEC0" />
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. 42, 99, 105"
+                                            value={localFilters.transactionIds?.join(', ') || ''}
+                                            onChange={(e) => {
+                                                const raw = e.target.value;
+                                                if (!raw.trim()) {
+                                                    updateLocalFilter('transactionIds', undefined);
+                                                    return;
+                                                }
+                                                const ids = raw
+                                                    .split(/[,\s]+/)
+                                                    .map(s => s.trim())
+                                                    .filter(s => /^\d+$/.test(s))
+                                                    .map(Number);
+                                                updateLocalFilter('transactionIds', ids.length > 0 ? ids : undefined);
+                                            }}
+                                            style={{
+                                                border: 'none', outline: 'none', background: 'transparent',
+                                                fontSize: '10px', width: '100%', color: '#4A5568',
+                                            }}
+                                        />
+                                        {localFilters.transactionIds?.length ? (
+                                            <Box
+                                                as="button"
+                                                onClick={() => updateLocalFilter('transactionIds', undefined)}
+                                                cursor="pointer"
+                                                color="gray.400"
+                                                _hover={{ color: 'gray.600' }}
+                                            >
+                                                <LuX size={10} />
+                                            </Box>
+                                        ) : null}
+                                    </Flex>
+                                    <Text fontSize="2xs" color="gray.400" mt={1}>
+                                        Comma-separated IDs
+                                    </Text>
+                                </Box>
+                            )}
+
+                            {/* Has Fees filter card */}
+                            {!hiddenSet.has('hasFees') && (
+                                <Box
+                                    bg="white"
+                                    border="1px solid"
+                                    borderColor={localFilters.hasFees ? 'orange.200' : 'gray.200'}
+                                    borderRadius="md"
+                                    p={2}
+                                    minH="70px"
+                                >
+                                    <Flex align="center" justify="space-between" mb={1.5}>
+                                        <Flex align="center" gap={1}>
+                                            <Text fontSize="xs">💸</Text>
+                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                                Fees
+                                            </Text>
+                                        </Flex>
+                                        {localFilters.hasFees && (
+                                            <Badge size="xs" colorPalette="orange">active</Badge>
+                                        )}
+                                    </Flex>
+                                    <Flex flexWrap="wrap" gap={1.5}>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.hasFees ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.hasFees ? 'orange' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            onClick={() => updateLocalFilter('hasFees', localFilters.hasFees ? undefined : true)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            💸 Has Fees
+                                        </Badge>
+                                    </Flex>
+                                    <Text fontSize="2xs" color="gray.400" mt={1.5}>
+                                        Only transactions with fee &gt; 0
+                                    </Text>
+                                </Box>
                             )}
 
                             {/* Counterparty filter card (non-owned / unmapped) */}

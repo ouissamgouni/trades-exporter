@@ -364,7 +364,7 @@ class ConnectorPolymarket(BaseConnector):
                     "condition_id": pos.get("conditionId", ""),
                 })
 
-            if total_value == 0 and not positions_detail:
+            if not positions_detail or total_value == 0:
                 return []
 
             return [

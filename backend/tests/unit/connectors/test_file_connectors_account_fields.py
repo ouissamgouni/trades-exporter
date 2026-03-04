@@ -9,7 +9,7 @@ import pandas as pd
 
 from backend.connectors.cex.connector_mexc_deposits_file import MEXCDepositsFileConnector
 from backend.connectors.cex.connector_mexc_withdrawals_file import MEXCWithdrawalsFileConnector
-from backend.connectors.cex.connector_okx_funding_file import OKXFundingFileConnector
+from backend.connectors.cex.connector_okx_file import OKXFileConnector
 from backend.db.models import NormalizedTransaction
 
 
@@ -110,8 +110,8 @@ class TestMEXCWithdrawalsFileAccountFields:
         assert result.to_account_id is None
 
 
-class TestOKXFundingFileAccountFields:
-    """Test suite for OKX funding file connector account fields."""
+class TestOKXFileAccountFields:
+    """Test suite for OKX unified file connector account fields (transfers)."""
 
     def test_deposit_account_fields(self):
         """Test that deposits correctly populate source_to_account and to_account_id."""
@@ -121,15 +121,24 @@ class TestOKXFundingFileAccountFields:
             "_account_name": "okx-test",
             "_account_address_or_identifier": "okx-main"
         }
-        connector = OKXFundingFileConnector(account_id=3, config=config)
+        connector = OKXFileConnector(account_id=3, config=config)
         
         raw_row = {
             "datetime": pd.Timestamp("2025-01-10 09:00:00+00:00"),
+            "row_type": "transfer",
             "transaction_id": "deposit_001",
-            "transaction_type": "deposit",
+            "transfer_type": "deposit",
             "currency": "ETH",
             "amount": 2.0,
-            "fee": 0.0
+            "fee": 0.0,
+            "symbol": "",
+            "base_asset": "",
+            "quantity": 0.0,
+            "price": 0.0,
+            "quote_asset": "",
+            "total": 0.0,
+            "fee_currency": "ETH",
+            "tags": {},
         }
         
         result = connector.raw_to_normalized(raw_row)
@@ -150,15 +159,24 @@ class TestOKXFundingFileAccountFields:
             "_account_name": "okx-test",
             "_account_address_or_identifier": "okx-main"
         }
-        connector = OKXFundingFileConnector(account_id=3, config=config)
+        connector = OKXFileConnector(account_id=3, config=config)
         
         raw_row = {
             "datetime": pd.Timestamp("2025-01-11 15:30:00+00:00"),
+            "row_type": "transfer",
             "transaction_id": "withdrawal_002",
-            "transaction_type": "withdrawal",
+            "transfer_type": "withdrawal",
             "currency": "ETH",
             "amount": 1.5,
-            "fee": 0.005
+            "fee": 0.005,
+            "symbol": "",
+            "base_asset": "",
+            "quantity": 0.0,
+            "price": 0.0,
+            "quote_asset": "",
+            "total": 0.0,
+            "fee_currency": "ETH",
+            "tags": {},
         }
         
         result = connector.raw_to_normalized(raw_row)

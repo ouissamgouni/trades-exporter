@@ -316,6 +316,7 @@ class MEXCDepositsFileConnector(BaseConnector):
                 quantity=amount,
                 fee=fee,
                 source_fee_quote_asset_symbol=fee_quote,
+                include_fee=False,  # Deposit fees deducted before receipt; quantity is net
                 source_to_account=self._get_account_identifier(),
                 to_account_id=self.account_id,
                 network=network,

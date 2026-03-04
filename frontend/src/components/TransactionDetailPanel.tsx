@@ -21,14 +21,19 @@ import {
     Button,
     Flex,
     Input,
+    NativeSelect,
+    Spinner,
     Text,
     Textarea,
 } from '@chakra-ui/react';
 import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle, FiArrowDown, FiArrowUp } from 'react-icons/fi';
-import { Transaction, Account, API_URL } from '../types';
+import { Transaction, Account, Bundle, API_URL } from '../types';
+import { UnitPattern, TaxabilityStatus } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { formatDateTimeLocale } from '../utils/dateUtils';
 import { ValueDisplay } from './ValueDisplay';
+import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { toaster } from './ui/toaster';
 
 // ============================================================================
 // Types
@@ -214,8 +219,11 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     const normalizedTags = normalizeTags(tx.tags);
 
     // Bundle/Calculation Unit state
-    const [bundleData, setBundleData] = useState<{ id: number; pattern: string | null; label: string | null } | null>(null);
+    const [bundleData, setBundleData] = useState<Bundle | null>(null);
     const [bundleLoading, setBundleLoading] = useState(false);
+    const [bundleError, setBundleError] = useState<string | null>(null);
+    const [bundleTaxability, setBundleTaxability] = useState<string>(TaxabilityStatus.UNKNOWN);
+    const [taxabilityLoading, setTaxabilityLoading] = useState(false);
 
     // Raw data state
     const [rawData, setRawData] = useState<RawTransactionData | null>(null);
@@ -241,18 +249,16 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
             }
 
             setBundleLoading(true);
+            setBundleError(null);
             try {
                 const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setBundleData({
-                        id: data.id,
-                        pattern: data.pattern || null,
-                        label: data.label || null,
-                    });
-                }
+                if (!response.ok) throw new Error('Failed to fetch bundle');
+                const data = await response.json();
+                setBundleData(data);
+                setBundleTaxability(data.taxability_override || TaxabilityStatus.UNKNOWN);
             } catch (err) {
                 console.error('Failed to fetch bundle:', err);
+                setBundleError(err instanceof Error ? err.message : 'Unknown error');
             } finally {
                 setBundleLoading(false);
             }
@@ -260,6 +266,35 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
 
         fetchBundle();
     }, [tx.user_calculation_unit_id]);
+
+    // Update bundle taxability override via PATCH
+    const handleBundleTaxabilityChange = async (newValue: string) => {
+        if (!bundleData) return;
+        setBundleTaxability(newValue);
+        setTaxabilityLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleData.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue,
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to update taxability');
+            toaster.success({
+                title: 'Taxability updated',
+                description: `Bundle #${bundleData.id} set to ${newValue}`,
+            });
+        } catch (err) {
+            setBundleTaxability(bundleData.taxability_override || TaxabilityStatus.UNKNOWN);
+            toaster.error({
+                title: 'Error',
+                description: err instanceof Error ? err.message : 'Failed to update taxability',
+            });
+        } finally {
+            setTaxabilityLoading(false);
+        }
+    };
 
     // Fetch raw transaction data on-demand
     const fetchRawData = useCallback(async () => {
@@ -500,27 +535,19 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             </Text>
                         ) : '-'
                     } />
-                    {/* Bundle/Calculation Unit */}
-                    {tx.user_calculation_unit_id && (
+                    {/* Bundle/Calculation Unit - link to full section */}
+                    {tx.user_calculation_unit_id && bundleData && (
                         <InfoRow
                             label="Bundle"
                             value={
-                                bundleLoading ? (
-                                    <Text fontSize="9px" color="gray.400">Loading...</Text>
-                                ) : bundleData ? (
-                                    <Badge
-                                        size="xs"
-                                        colorPalette="blue"
-                                        fontSize="9px"
-                                        variant="subtle"
-                                    >
-                                        #{bundleData.id} {bundleData.pattern ? `• ${bundleData.pattern}` : ''}
-                                    </Badge>
-                                ) : (
-                                    <Badge size="xs" colorPalette="gray" fontSize="9px">
-                                        #{tx.user_calculation_unit_id}
-                                    </Badge>
-                                )
+                                <Badge
+                                    size="xs"
+                                    colorPalette="purple"
+                                    fontSize="9px"
+                                    variant="subtle"
+                                >
+                                    📦 #{bundleData.id} {bundleData.pattern ? `• ${bundleData.pattern}` : ''}
+                                </Badge>
                             }
                         />
                     )}
@@ -653,6 +680,103 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     )}
                 </Section>
             </Section>
+
+            {/* ============================================================ */}
+            {/* BUNDLE SECTION (only if transaction belongs to a bundle) */}
+            {/* ============================================================ */}
+            {tx.user_calculation_unit_id && (
+                <Section title="Bundle" level="main" defaultOpen={true} colorScheme="purple">
+                    {bundleLoading ? (
+                        <Flex align="center" gap={2} py={2}>
+                            <Spinner size="xs" />
+                            <Text fontSize="xs" color="gray.500">Loading bundle...</Text>
+                        </Flex>
+                    ) : bundleError ? (
+                        <Text fontSize="xs" color="red.500">{bundleError}</Text>
+                    ) : bundleData ? (
+                        <Box>
+                            {/* Header: pattern badge + ID */}
+                            <Flex justify="space-between" align="center" mb={2}>
+                                <Flex align="center" gap={1.5}>
+                                    <Badge
+                                        size="sm"
+                                        colorPalette={
+                                            bundleData.pattern === UnitPattern.INTERNAL_TRANSFER ? 'blue' :
+                                                bundleData.pattern === UnitPattern.SWAP ? 'orange' :
+                                                    bundleData.pattern === UnitPattern.SPLIT ? 'purple' :
+                                                        bundleData.pattern === UnitPattern.FLOW ? 'cyan' :
+                                                            bundleData.pattern === UnitPattern.CUSTOM ? 'purple' : 'gray'
+                                        }
+                                    >
+                                        {bundleData.pattern || 'unknown'}
+                                    </Badge>
+                                    {bundleData.label && (
+                                        <Text fontSize="10px" fontWeight="bold" color="purple.800">
+                                            {bundleData.label}
+                                        </Text>
+                                    )}
+                                </Flex>
+                                <Badge size="sm" colorPalette="purple" variant="subtle">
+                                    📦 #{bundleData.id}
+                                </Badge>
+                            </Flex>
+
+                            {/* Notes */}
+                            {bundleData.notes && (
+                                <Text fontSize="9px" color="gray.600" mb={2}>
+                                    {bundleData.notes}
+                                </Text>
+                            )}
+
+                            {/* Taxability Override */}
+                            <Flex align="center" gap={2} mb={2}>
+                                <Text fontSize="10px" color="gray.500" flexShrink={0}>
+                                    Taxability:
+                                </Text>
+                                <NativeSelect.Root size="sm" width="130px">
+                                    <NativeSelect.Field
+                                        value={bundleTaxability}
+                                        onChange={(e) => handleBundleTaxabilityChange(e.target.value)}
+                                        _disabled={{ opacity: 0.5, cursor: 'not-allowed' }}
+                                        aria-disabled={taxabilityLoading || undefined}
+                                        style={{
+                                            fontSize: '11px',
+                                            padding: '2px 6px',
+                                            backgroundColor:
+                                                bundleTaxability === TaxabilityStatus.TAXABLE
+                                                    ? '#FED7AA'
+                                                    : bundleTaxability === TaxabilityStatus.NON_TAXABLE
+                                                        ? '#C6F6D5'
+                                                        : '#FEFCBF',
+                                            borderRadius: '4px',
+                                        }}
+                                    >
+                                        <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                        <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                        <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                    </NativeSelect.Field>
+                                </NativeSelect.Root>
+                                {taxabilityLoading && <Spinner size="xs" />}
+                            </Flex>
+
+                            {/* Transaction count */}
+                            <Text fontSize="xs" color="gray.500" mb={1} fontWeight="medium">
+                                {bundleData.transaction_count} transaction
+                                {bundleData.transaction_count !== 1 ? 's' : ''}
+                            </Text>
+
+                            {/* Embedded transactions table */}
+                            <BundleMemberTransactionsTable
+                                transactionIds={bundleData.transactions.map(t => t.id)}
+                            />
+                        </Box>
+                    ) : (
+                        <Text fontSize="xs" color="gray.500">
+                            Bundle #{tx.user_calculation_unit_id}
+                        </Text>
+                    )}
+                </Section>
+            )}
 
             {/* ============================================================ */}
             {/* DETAILS SECTION */}

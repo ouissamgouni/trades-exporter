@@ -2081,22 +2081,11 @@ def get_version_lot_events(
         asset_ids = [int(id.strip()) for id in asset_id.split(',')]
         base_query = base_query.where(CostLot.asset_id.in_(asset_ids))
     
-    # Related-asset filter: lots whose primary asset matches OR events triggered
-    # by a unit that has any leg involving the asset (price-quote, fee-quote, etc.)
+    # Related-asset filter: cost lot events are always about one specific asset
+    # (the lot's asset), so filter directly on CostLot.asset_id.
     if related_asset_id:
         related_ids = [int(id.strip()) for id in related_asset_id.split(',')]
-        # Subquery: unit IDs that have at least one leg with the given asset
-        units_with_legs = (
-            select(CalculationUnitLeg.unit_id)
-            .where(CalculationUnitLeg.asset_id.in_(related_ids))
-            .distinct()
-        )
-        base_query = base_query.where(
-            or_(
-                CostLot.asset_id.in_(related_ids),
-                CostLotEvent.triggered_by_unit_id.in_(units_with_legs),
-            )
-        )
+        base_query = base_query.where(CostLot.asset_id.in_(related_ids))
     
     # Account filter (comma-separated)
     if account_id:

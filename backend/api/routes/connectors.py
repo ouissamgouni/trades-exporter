@@ -419,8 +419,7 @@ FILE_LOADERS = {
     "mexc-deposits": "backend.file_loaders.mexc_deposits_loader",
     "mexc-deposits-file": "backend.file_loaders.mexc_deposits_loader",
     "mexc-withdrawals-file": "backend.file_loaders.mexc_withdrawals_loader",
-    "okx-funding-file": "backend.file_loaders.okx_funding_loader",
-    "okx-trades-file": "backend.file_loaders.okx_trades_loader",
+    "okx-file": "backend.file_loaders.okx_trading_history_loader",
 }
 
 # Connector class dispatch - maps connector types to their classes
@@ -429,8 +428,7 @@ CONNECTOR_CLASSES = {
     "mexc-transactions-file": "backend.connectors.cex.connector_mexc_trx_file.MEXCTrxFileConnector",
     "mexc-deposits-file": "backend.connectors.cex.connector_mexc_deposits_file.MEXCDepositsFileConnector",
     "mexc-withdrawals-file": "backend.connectors.cex.connector_mexc_withdrawals_file.MEXCWithdrawalsFileConnector",
-    "okx-funding-file": "backend.connectors.cex.connector_okx_funding_file.OKXFundingFileConnector",
-    "okx-trades-file": "backend.connectors.cex.connector_okx_trades_file.OKXTradesFileConnector",
+    "okx-file": "backend.connectors.cex.connector_okx_file.OKXFileConnector",
 }
 
 
@@ -536,7 +534,7 @@ async def preview_file_upload(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-funding-file", "okx-trades-file"]:
+    if connector.connector_type in ["okx-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -634,7 +632,7 @@ async def preview_file_upload_detailed(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-funding-file", "okx-trades-file"]:
+    if connector.connector_type in ["okx-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -786,7 +784,7 @@ async def confirm_file_upload(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-funding-file", "okx-trades-file"]:
+    if connector.connector_type in ["okx-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -1041,6 +1039,127 @@ def preview_file_import(
     except Exception as e:
         log.error(f"❌ Failed to preview file import {file_import_id}: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
+
+
+@router.get("/{connector_id}/default-file/preview-detailed", response_model=FileUploadDetailedPreviewResponse)
+def preview_default_file_detailed(
+    connector_id: int,
+    max_samples: int = Query(10, description="Maximum normalized samples to return (0 for all)"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Preview the default file for a connector with both raw and normalized data.
+
+    Reads the stored default file from disk and returns the same detailed
+    preview as the upload preview-detailed endpoint, without requiring a
+    file upload.
+    """
+    connector = session.get(AccountConnector, connector_id)
+    if not connector:
+        raise HTTPException(status_code=404, detail=f"Connector {connector_id} not found")
+
+    config = connector.config or {}
+    default_file_path = config.get("default_file_path")
+    if not default_file_path:
+        raise HTTPException(status_code=404, detail="No default file configured for this connector")
+
+    if not os.path.exists(default_file_path):
+        raise HTTPException(status_code=400, detail="Default file no longer exists on disk")
+
+    loader = _get_file_loader(connector.connector_type)
+    if not loader:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No file loader configured for connector type: {connector.connector_type}",
+        )
+
+    connector_instance = _get_connector_instance(connector.connector_type)
+    if not connector_instance:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No connector class configured for normalization preview: {connector.connector_type}",
+        )
+
+    try:
+        with open(default_file_path, "rb") as f:
+            content = f.read()
+
+        # Quick preview
+        preview_fn = None
+        for attr_name in dir(loader):
+            if attr_name.startswith("get_") and attr_name.endswith("_file_preview"):
+                preview_fn = getattr(loader, attr_name)
+                break
+        if not preview_fn:
+            raise HTTPException(status_code=500, detail="Loader missing preview function")
+
+        quick_preview = preview_fn(content)
+
+        # Load and normalize
+        load_fn = None
+        for attr_name in dir(loader):
+            if attr_name.startswith("load_") and attr_name.endswith("_file"):
+                load_fn = getattr(loader, attr_name)
+                break
+        if not load_fn:
+            raise HTTPException(status_code=500, detail="Loader missing load function")
+
+        df = load_fn(content=content)
+        rows = df.to_dict("records")
+        total_rows = len(rows)
+
+        sample_rows = rows if max_samples == 0 else rows[:max_samples]
+        rows_to_process = rows if max_samples == 0 else rows[:max_samples]
+
+        normalized_list = []
+        normalization_errors = []
+        for idx, raw_row in enumerate(rows_to_process):
+            try:
+                normalized = connector_instance.raw_to_normalized(raw_row)
+                normalized_list.append(
+                    NormalizedTransactionSample(
+                        source_transaction_id=normalized.source_transaction_id,
+                        date_time=normalized.date_time.replace(tzinfo=timezone.utc).isoformat() if normalized.date_time else "",
+                        transaction_type=normalized.transaction_type or "",
+                        direction=normalized.direction or "",
+                        source_asset_symbol=normalized.source_asset_symbol or "",
+                        quantity=float(normalized.quantity or 0),
+                        fee=float(normalized.fee or 0),
+                        source_fee_quote_asset_symbol=normalized.source_fee_quote_asset_symbol,
+                        network=normalized.network,
+                        source_price=float(normalized.price) if normalized.price else None,
+                        source_price_quote_asset_symbol=normalized.source_price_quote_asset_symbol,
+                        source_from_account=normalized.source_from_account,
+                        source_to_account=normalized.source_to_account,
+                    )
+                )
+            except Exception as e:
+                normalization_errors.append({"row_index": idx + 1, "error": str(e)})
+
+        log.info(
+            f"📊 Default file preview for connector {connector_id}: "
+            f"{total_rows} raw, {len(normalized_list)}/{len(rows_to_process)} normalized, "
+            f"{len(normalization_errors)} errors"
+        )
+
+        return FileUploadDetailedPreviewResponse(
+            row_count=total_rows,
+            normalized_count=len(normalized_list),
+            date_range=quick_preview.get("date_range"),
+            pairs=quick_preview.get("pairs"),
+            currencies=quick_preview.get("currencies"),
+            sample_rows=sample_rows,
+            sample_normalized=normalized_list,
+            normalization_errors=normalization_errors,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"❌ Failed to preview default file for connector {connector_id}: {e}")
+        import traceback
+        log.error(traceback.format_exc())
+        raise HTTPException(status_code=400, detail=f"Failed to parse default file: {str(e)}")
 
 
 @router.post("/{connector_id}/import-history/cleanup")

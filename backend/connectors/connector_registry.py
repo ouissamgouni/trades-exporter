@@ -283,26 +283,13 @@ class ConnectorRegistry:
 
         self._register(
             ConnectorInfo(
-                type="okx-funding-file",
+                type="okx-file",
                 category="cex",
-                display_name="OKX Funding History (File)",
+                display_name="OKX Trading History (File)",
                 required_config=[],
-                optional_config=["file_path"],
+                optional_config=["file_path", "source_timezone"],
                 supports_incremental_sync=False,
-                connector_family="okx-funding",
-                is_file_connector=True,
-            )
-        )
-
-        self._register(
-            ConnectorInfo(
-                type="okx-trades-file",
-                category="cex",
-                display_name="OKX Trades (File)",
-                required_config=[],
-                optional_config=["file_path"],
-                supports_incremental_sync=False,
-                connector_family="okx-trades",
+                connector_family="okx",
                 is_file_connector=True,
             )
         )
@@ -722,8 +709,7 @@ class ConnectorRegistry:
         from backend.connectors.cex.connector_okx_convert import OKXConvertConnector
         from backend.connectors.cex.connector_okx_deposits import OKXDepositsConnector
         from backend.connectors.cex.connector_okx_withdrawals import OKXWithdrawalsConnector
-        from backend.connectors.cex.connector_okx_funding_file import OKXFundingFileConnector
-        from backend.connectors.cex.connector_okx_trades_file import OKXTradesFileConnector
+        from backend.connectors.cex.connector_okx_file import OKXFileConnector
         from backend.connectors.cex.connector_coinbase_trx import ConnectorCoinbaseTrx
         from backend.connectors.cex.connector_coinbase_deposits import (
             ConnectorCoinbaseDeposits,
@@ -797,8 +783,7 @@ class ConnectorRegistry:
             "okx-convert": OKXConvertConnector,
             "okx-deposits": OKXDepositsConnector,
             "okx-withdrawals": OKXWithdrawalsConnector,
-            "okx-funding-file": OKXFundingFileConnector,
-            "okx-trades-file": OKXTradesFileConnector,
+            "okx-file": OKXFileConnector,
             "coinbase-transactions": ConnectorCoinbaseTrx,
             "coinbase-deposits": ConnectorCoinbaseDeposits,
             "coinbase-withdrawals": ConnectorCoinbaseWithdrawals,

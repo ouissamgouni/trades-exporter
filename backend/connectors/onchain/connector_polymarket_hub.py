@@ -97,7 +97,7 @@ class ConnectorPolymarketHub(BaseHubConnector):
         ]
 
     # ------------------------------------------------------------------
-    # Balance API — delegate to Polymarket child (portfolio value)
+    # Balance API — positions value + on-chain USDC cash balance
     # ------------------------------------------------------------------
 
     @property
@@ -106,11 +106,61 @@ class ConnectorPolymarketHub(BaseHubConnector):
 
     def get_balance(self):
         """
-        Delegate balance to the Polymarket Data API child connector.
-        Returns portfolio USDC value from /positions endpoint.
+        Combined Polymarket balance: positions value + on-chain USDC cash.
+
+        The Polymarket Data API /positions endpoint only reports the value
+        of open prediction-market positions.  USDC cash sitting in the proxy
+        wallet (from deposits, redeemed winnings, etc.) is NOT included
+        there — it lives on-chain as a standard ERC-20 balance on Polygon.
+
+        This method queries both sources and returns separate BalanceEntry
+        items so the caller can see the breakdown.
         """
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        entries = []
+
+        # 1) Positions value from Polymarket Data API child
         for _, connector in self.child_connectors:
             if hasattr(connector, "get_balance") and hasattr(connector, "supports_balance"):
                 if connector.supports_balance:
-                    return connector.get_balance()
-        return []
+                    entries.extend(connector.get_balance())
+                    break
+
+        # 2) On-chain USDC cash balance via Blockscout Polygon
+        try:
+            registry = get_connector_registry()
+            chain_config = registry.get_chain_config("blockscout", "polygon")
+            if chain_config and chain_config.base_url:
+                base_url = chain_config.base_url
+                resp = requests.get(
+                    f"{base_url}/addresses/{self.wallet_address}/token-balances",
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                tokens = resp.json()
+
+                for tok in tokens:
+                    value = tok.get("value")
+                    token_info = tok.get("token", {})
+                    symbol = (token_info.get("symbol") or "").upper()
+                    if symbol not in ("USDC", "USDC.E"):
+                        continue
+                    decimals = int(token_info.get("decimals", 6))
+                    if value and int(value) > 0:
+                        total = Decimal(value) / Decimal(10 ** decimals)
+                        entries.append(BalanceEntry(
+                            asset_symbol="USDC",
+                            total=total,
+                            available=total,
+                            chain="polygon",
+                            raw={"source": "wallet_cash", **tok},
+                        ))
+            else:
+                log.warning("Blockscout Polygon not configured — cannot fetch wallet USDC balance")
+        except Exception as e:
+            log.warning(f"Failed to fetch on-chain USDC balance: {e}")
+
+        return entries

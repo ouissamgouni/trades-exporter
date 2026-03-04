@@ -254,6 +254,7 @@ class ConnectorBinanceDeposits(BaseConnector):
             quantity=amount,
             fee=fee,
             source_fee_quote_asset_symbol=fee_quote,
+            include_fee=False,  # Deposit fees deducted before receipt; quantity is net
             source_from_account=from_address,
             source_to_account=to_address if to_address and to_address != "None" else self._get_account_identifier(),
             to_account_id=self.account_id,  # Resolved account ID
