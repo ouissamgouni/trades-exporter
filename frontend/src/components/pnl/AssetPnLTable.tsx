@@ -84,6 +84,8 @@ interface AssetPnLTableProps {
     assets: AssetPnLRow[];
     baseCurrency: string;
     onAssetClick: (assetId: number | undefined | null) => void;
+    /** Callback when user clicks an account name in expanded row: navigate to asset transactions filtered by account */
+    onAccountClick?: (assetId: number, accountId: number) => void;
     loading?: boolean;
     /** Per-account balance breakdown, keyed by asset ID */
     accountBalances?: Map<number, AccountBalanceBreakdown[]>;
@@ -218,6 +220,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     assets,
     baseCurrency,
     onAssetClick,
+    onAccountClick,
     loading = false,
     accountBalances,
     accounts = [],
@@ -269,9 +272,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         });
     };
 
-    // Check if asset has multiple accounts (expandable)
-    const hasMultipleAccounts = (row: AssetPnLRow): boolean => {
-        return row.account_ids != null && row.account_ids.length > 1;
+    // Check if asset has account breakdown data (expandable)
+    const hasAccountData = (row: AssetPnLRow): boolean => {
+        return row.account_ids != null && row.account_ids.length >= 1;
     };
 
     // --- Filter + sort ---
@@ -773,7 +776,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     <>
                                         {filtered.map((assetpnlrow) => {
                                             const assetId = assetpnlrow.asset.id;
-                                            const isExpandable = hasMultipleAccounts(assetpnlrow);
+                                            const isExpandable = hasAccountData(assetpnlrow);
                                             const isExpanded = assetId != null && expandedAssetIds.has(assetId);
                                             const assetAccountBalances = assetId != null ? accountBalances?.get(assetId) : undefined;
 
@@ -855,7 +858,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                         {/* Info */}
                                                         <Table.Cell textAlign="center">
                                                             <Flex gap={0.5} justify="center" align="center">
-                                                                {isExpandable && assetAccountBalances && (
+                                                                {assetAccountBalances && assetAccountBalances.length > 1 && (
                                                                     <Flex gap={0.5} mr={0.5}>
                                                                         {assetAccountBalances.slice(0, 3).map((bal) => (
                                                                             <Box
@@ -900,13 +903,26 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                 key={`${assetpnlrow.asset.id}-${balance.account_id}`}
                                                                 bg="gray.50"
                                                                 _hover={{ bg: 'gray.100' }}
-                                                                css={{ '& td': { py: '1px', px: '4px' } }}
+                                                                css={{ '& td': { py: '1px', px: '4px' }, '& td:first-of-type': { borderLeft: '2px solid', borderLeftColor: accountColor, pl: '28px' } }}
                                                             >
-                                                                {/* Account name (indented) */}
-                                                                <Table.Cell pl={8}>
+                                                                {/* Account name (indented, border starts right of parent asset name) */}
+                                                                <Table.Cell>
                                                                     <Flex align="center" gap={1}>
                                                                         <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                                        <Text {...XS} color="gray.700">{balance.account_name}</Text>
+                                                                        <Text
+                                                                            {...XS}
+                                                                            color="gray.700"
+                                                                            cursor={onAccountClick ? 'pointer' : undefined}
+                                                                            _hover={onAccountClick ? { textDecoration: 'underline', color: 'blue.600' } : undefined}
+                                                                            onClick={(e) => {
+                                                                                if (onAccountClick && assetId != null) {
+                                                                                    e.stopPropagation();
+                                                                                    onAccountClick(assetId, balance.account_id);
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            {balance.account_name}
+                                                                        </Text>
                                                                     </Flex>
                                                                 </Table.Cell>
                                                                 {/* Qty */}

@@ -115,6 +115,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     initialSelectedIds?: number[];
     /** Whether to show the filter bar */
     showFilters?: boolean;
+    /** Whether to start with filters collapsed */
+    defaultFiltersCollapsed?: boolean;
     /** Whether to show the bundles section */
     showBundles?: boolean;
     /** Whether to show bundle suggestions */
@@ -180,6 +182,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     onSelectionChange,
     initialSelectedIds,
     showFilters = true,
+    defaultFiltersCollapsed = false,
     showBundles = true,
     showSuggestions = false,
     onDataChange,
@@ -356,7 +359,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     // Transaction detail drawer state (replaces expandedRow)
     const [drawerTransactionId, setDrawerTransactionId] = useState<number | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-    const [filtersExpanded, setFiltersExpanded] = useState(true);
+    const [filtersExpanded, setFiltersExpanded] = useState(!defaultFiltersCollapsed);
 
     // ============== Bundle Suggestion State ==============
     // Fetch suggestions and build tx→suggestion lookup map
@@ -1078,6 +1081,58 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
         }
     };
 
+    const bulkUpdateTaxability = async (taxabilityStatus: string) => {
+        if (selectedIds.size === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: Array.from(selectedIds),
+                    taxability_status: taxabilityStatus
+                })
+            });
+            if (!response.ok) throw new Error('Failed to update transactions');
+            const result = await response.json();
+            toaster.success({ title: 'Success', description: result.message });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkUpdateIncludeFee = async (includeFee: boolean) => {
+        if (selectedIds.size === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: Array.from(selectedIds),
+                    include_fee: includeFee
+                })
+            });
+            if (!response.ok) throw new Error('Failed to update transactions');
+            const result = await response.json();
+            toaster.success({ title: 'Success', description: result.message });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
     const bulkUnbundle = async () => {
         if (selectedIds.size === 0) return;
         const selectedTxs = transactions.filter(tx => selectedIds.has(tx.id) && tx.user_calculation_unit_id != null);
@@ -1488,8 +1543,24 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     );
     const totalInvalidCount = invalidTransactions.length;
 
+    // Check if any selected transactions have unlinked fields (for auto-link visibility)
+    const hasUnlinkedFields = useMemo(() => {
+        if (selectedIds.size === 0) return false;
+        return paginatedTransactions.some(tx => {
+            if (!selectedIds.has(tx.id)) return false;
+            return (
+                (tx.source_from_account && !tx.from_account_id) ||
+                (tx.source_to_account && !tx.to_account_id) ||
+                (tx.source_account && !tx.account_id) ||
+                (tx.source_asset_symbol && !tx.asset_id) ||
+                (tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id) ||
+                (tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id)
+            );
+        });
+    }, [selectedIds, paginatedTransactions]);
+
     return (
-        <Box pb={selectedIds.size > 0 && !embeddedMode ? '72px' : '0'}>
+        <Box pb={selectedIds.size > 0 && !embeddedMode ? '48px' : '0'}>
             {!embeddedMode && (
                 <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
                     <Box>
@@ -1540,11 +1611,12 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                         left={0}
                         right={0}
                         zIndex={1000}
-                        bg="white"
+                        bg="rgba(255, 255, 255, 0.85)"
+                        backdropFilter="blur(8px)"
                         borderTop="1px solid"
                         borderColor="gray.200"
-                        boxShadow="0 -4px 12px rgba(0,0,0,0.1)"
-                        animation="slideUp 200ms ease-out"
+                        boxShadow="0 -2px 8px rgba(0,0,0,0.08)"
+                        animation="slideUp 150ms ease-out"
                         css={{
                             '@keyframes slideUp': {
                                 from: { transform: 'translateY(100%)' },
@@ -1552,15 +1624,36 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                             },
                         }}
                     >
-                        <Box maxW="1400px" mx="auto" px={6} py={3}>
-                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={3}>
-                                <Text fontWeight="semibold" color="blue.700" fontSize="sm">
-                                    {selectedIds.size} transaction(s) selected
+                        <Box maxW="1400px" mx="auto" px={4} py={1.5}>
+                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={1.5}>
+                                <Text fontWeight="semibold" color="blue.700" fontSize="xs">
+                                    {selectedIds.size} selected
                                 </Text>
-                                <Flex gap={2} flexWrap="wrap" align="center">
+                                <Flex gap={1} flexWrap="wrap" align="center">
+                                    {/* Additional bulk actions from plugins (rendered first) */}
+                                    {additionalBulkActions
+                                        .filter(action => !action.isVisible || action.isVisible(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]))
+                                        .map(action => (
+                                            <Button
+                                                key={action.id}
+                                                size="2xs"
+                                                fontSize="xs"
+                                                colorPalette={action.colorPalette || 'gray'}
+                                                variant={action.variant || 'outline'}
+                                                onClick={() => action.onClick(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[])}
+                                                disabled={bulkActionLoading || (action.isDisabled ? action.isDisabled(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]) : false)}
+                                            >
+                                                {action.icon} {action.label}
+                                            </Button>
+                                        ))}
+                                    {additionalBulkActions.length > 0 && (
+                                        <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+                                    )}
+
                                     {/* Quick Status Actions */}
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="green"
                                         variant="outline"
                                         onClick={() => bulkUpdateStatus('valid')}
@@ -1569,7 +1662,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         ✓ Valid
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="yellow"
                                         variant="outline"
                                         onClick={() => bulkUpdateStatus('pending')}
@@ -1578,7 +1672,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         ⏳ Pending
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="red"
                                         variant="outline"
                                         onClick={() => bulkUpdateStatus('invalid')}
@@ -1587,11 +1682,64 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         ✗ Invalid
                                     </Button>
 
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="24px" mx={1} />
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Taxability Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="teal"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateTaxability('taxable')}
+                                        disabled={bulkActionLoading}
+                                        title="Set taxability to Taxable"
+                                    >
+                                        💰 Taxable
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateTaxability('non_taxable')}
+                                        disabled={bulkActionLoading}
+                                        title="Set taxability to Non-Taxable"
+                                    >
+                                        🚫 Non-Tax
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Include Fee Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="blue"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateIncludeFee(true)}
+                                        disabled={bulkActionLoading}
+                                        title="Include fee in cost basis/proceeds"
+                                    >
+                                        Fee ✓
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateIncludeFee(false)}
+                                        disabled={bulkActionLoading}
+                                        title="Exclude fee from cost basis/proceeds"
+                                    >
+                                        Fee ✗
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
 
                                     {/* Quick Bundle Actions */}
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="orange"
                                         variant="outline"
                                         onClick={() => openBundleDialog('swap')}
@@ -1600,7 +1748,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         🔄 Swap
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="blue"
                                         variant="outline"
                                         onClick={() => openBundleDialog('internal_transfer')}
@@ -1609,7 +1758,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         ↔ Transfer
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="purple"
                                         variant="outline"
                                         onClick={() => openBundleDialog('custom')}
@@ -1618,7 +1768,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         📦 Bundle
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="gray"
                                         variant="outline"
                                         onClick={bulkUnbundle}
@@ -1628,29 +1779,34 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         🔓 Unbundle
                                     </Button>
 
-                                    <Box borderLeft="1px solid" borderColor="gray.300" h="24px" mx={1} />
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
 
                                     {/* Other Actions */}
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="purple"
                                         variant="outline"
                                         onClick={() => setShowBulkTypeDialog(true)}
                                     >
-                                        🏷️ Set Type
+                                        🏷️ Type
                                     </Button>
+                                    {hasUnlinkedFields && (
+                                        <Button
+                                            size="2xs"
+                                            fontSize="xs"
+                                            colorPalette="cyan"
+                                            variant="outline"
+                                            onClick={autoLinkHighConfidence}
+                                            disabled={bulkActionLoading}
+                                            title="Auto-link accounts and assets with ≥95% confidence match"
+                                        >
+                                            🔗 Auto-Link
+                                        </Button>
+                                    )}
                                     <Button
-                                        size="sm"
-                                        colorPalette="cyan"
-                                        variant="outline"
-                                        onClick={autoLinkHighConfidence}
-                                        disabled={bulkActionLoading}
-                                        title="Auto-link accounts and assets with ≥95% confidence match"
-                                    >
-                                        🔗 Auto-Link
-                                    </Button>
-                                    <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         colorPalette="red"
                                         variant="outline"
                                         onClick={() => {
@@ -1661,7 +1817,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         🗑️ Delete
                                     </Button>
                                     <Button
-                                        size="sm"
+                                        size="2xs"
+                                        fontSize="xs"
                                         variant="ghost"
                                         onClick={() => setSelectedIds(new Set())}
                                     >

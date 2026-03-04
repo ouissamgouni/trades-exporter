@@ -56,6 +56,8 @@ interface AssetDetailViewProps {
     liveFetchedAccountIds?: Set<number>;
     /** Account IDs that had connector-level errors: accountId → error messages */
     liveAccountErrors?: Map<number, string[]>;
+    /** Initial account ID to filter transactions by (from clicking account in expanded PnL row) */
+    initialAccountFilter?: number;
 }
 
 /** Metric Card for sidebar */
@@ -111,8 +113,9 @@ const LoadingPlaceholder: React.FC<{ label: string }> = ({ label }) => (
 const AssetTransactionsTab: React.FC<{
     versionId: number;
     assetId: number;
+    accountId?: number;
     onTransactionClick?: (txId: number) => void;
-}> = ({ versionId, assetId, onTransactionClick }) => {
+}> = ({ versionId, assetId, accountId, onTransactionClick }) => {
     const [filters, setFilters] = React.useState<TransactionFilterState>(() => ({
         ...defaultFilterState,
         reviewStatus: [],
@@ -120,6 +123,7 @@ const AssetTransactionsTab: React.FC<{
         relatedAssetIds: [String(assetId)],
         versionId: String(versionId),
         inclusionStatus: 'included',
+        relatedAccountIds: accountId ? [String(accountId)] : [],
     }));
 
     const resetFilters = React.useMemo<TransactionFilterState>(() => ({
@@ -130,6 +134,14 @@ const AssetTransactionsTab: React.FC<{
         versionId: String(versionId),
         inclusionStatus: 'included',
     }), [versionId, assetId]);
+
+    // Update account filter when accountId prop changes
+    React.useEffect(() => {
+        setFilters(prev => ({
+            ...prev,
+            relatedAccountIds: accountId ? [String(accountId)] : [],
+        }));
+    }, [accountId]);
 
     return (
         <TransactionsTable
@@ -143,6 +155,7 @@ const AssetTransactionsTab: React.FC<{
             showBundles={false}
             showSuggestions={false}
             compact={true}
+            defaultFiltersCollapsed={true}
         />
     );
 };
@@ -159,10 +172,15 @@ function AssetDetailView({
     liveBalanceLoading = false,
     liveFetchedAccountIds,
     liveAccountErrors,
+    initialAccountFilter,
 }: AssetDetailViewProps) {
-    // Tab state
-    const [activeTab, setActiveTab] = useState<'units' | 'events' | 'timeline' | 'transactions'>('units');
+    // Tab state - if initialAccountFilter is set, start on transactions tab
+    const [activeTab, setActiveTab] = useState<'units' | 'events' | 'timeline' | 'transactions'>(
+        initialAccountFilter ? 'transactions' : 'units'
+    );
     const [timelineViewMode, setTimelineViewMode] = useState<'total' | 'by-account'>('total');
+    // Account filter for transactions tab
+    const [txAccountFilter, setTxAccountFilter] = useState<number | undefined>(initialAccountFilter);
 
     // Units data state
     const [calculationUnits, setCalculationUnits] = useState<CalculationUnit[]>([]);
@@ -188,7 +206,7 @@ function AssetDetailView({
         setEventsLoaded(false);
         setLotEvents([]);
 
-        fetch(`${API_URL}/pnl/versions/${versionId}/units?asset_id=${assetPnlRow.asset.id}&limit=1000`)
+        fetch(`${API_URL}/pnl/versions/${versionId}/units?related_asset_id=${assetPnlRow.asset.id}&limit=1000`)
             .then(response => {
                 if (fetchIdRef.current !== currentFetchId) {
                     console.log(`[AssetDetailView] Fetch ${currentFetchId}: Stale response, ignoring`);
@@ -258,7 +276,7 @@ function AssetDetailView({
         console.log('[AssetDetailView] Starting events fetch');
         setEventsLoading(true);
 
-        fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?asset_id=${assetPnlRow.asset.id}&limit=1000`)
+        fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?related_asset_id=${assetPnlRow.asset.id}&limit=1000`)
             .then(response => {
                 if (!response.ok) throw new Error('Failed to load lot events');
                 return response.json();
@@ -399,7 +417,19 @@ function AssetDetailView({
                                                 <Box key={acct.account_id} px={1.5} py={1} bg="gray.50" borderRadius="md">
                                                     <Flex align="center" gap={1} mb={0.5}>
                                                         <Box w="6px" h="6px" borderRadius="full" bg={acctColor} flexShrink={0} />
-                                                        <Text fontSize="2xs" fontWeight="medium" truncate maxW="120px" title={acct.account_name}>
+                                                        <Text
+                                                            fontSize="2xs"
+                                                            fontWeight="medium"
+                                                            truncate
+                                                            maxW="120px"
+                                                            title={acct.account_name}
+                                                            cursor="pointer"
+                                                            _hover={{ textDecoration: 'underline', color: 'blue.600' }}
+                                                            onClick={() => {
+                                                                setTxAccountFilter(acct.account_id);
+                                                                setActiveTab('transactions');
+                                                            }}
+                                                        >
                                                             {acct.account_name}
                                                         </Text>
                                                     </Flex>
@@ -577,6 +607,7 @@ function AssetDetailView({
                                     <AssetTransactionsTab
                                         versionId={versionId}
                                         assetId={assetPnlRow.asset.id!}
+                                        accountId={txAccountFilter}
                                         onTransactionClick={onTransactionClick}
                                     />
                                 </Tabs.Content>

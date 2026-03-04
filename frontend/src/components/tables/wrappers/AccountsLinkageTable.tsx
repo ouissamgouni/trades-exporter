@@ -10,11 +10,11 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Box, Badge, Spinner, Text, Flex, Button } from '@chakra-ui/react';
-import { LuX, LuEyeOff } from 'react-icons/lu';
+import { Box, Badge, Spinner, Text, Flex } from '@chakra-ui/react';
+import { LuEyeOff } from 'react-icons/lu';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
-import { ColumnPlugin, TableConfig } from '../types';
+import { BulkAction, ColumnPlugin, TableConfig } from '../types';
 import { presetToVisibility } from '../useTransactionsTable';
 import { API_URL, Account, Asset, Transaction, TransactionIssue } from '../../../types';
 import { Tooltip } from '../../ui/tooltip';
@@ -185,6 +185,20 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
         }
     }, [selectedIds, issuesByTxId, queryClient, onFixed]);
 
+    // Bulk dismiss action as plugin for the main floating bar
+    const additionalBulkActions: BulkAction<Transaction>[] = useMemo(() => [
+        {
+            id: 'dismiss-account-issues',
+            label: 'Dismiss Issues',
+            icon: <LuEyeOff size={12} />,
+            colorPalette: 'orange',
+            variant: 'outline' as const,
+            onClick: async () => {
+                await handleBulkDismiss();
+            },
+        },
+    ], [handleBulkDismiss]);
+
     // Account issue column plugin
     const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => [
         {
@@ -254,49 +268,6 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
 
     return (
         <Box position="relative">
-            {/* Bulk dismiss floating bar */}
-            {selectedIds.size > 0 && (
-                <Flex
-                    position="sticky"
-                    top={0}
-                    zIndex={20}
-                    bg="blue.50"
-                    borderRadius="md"
-                    px={4}
-                    py={2}
-                    mb={2}
-                    align="center"
-                    justify="space-between"
-                    boxShadow="sm"
-                    border="1px solid"
-                    borderColor="blue.200"
-                >
-                    <Text fontSize="xs" fontWeight="medium" color="blue.700">
-                        {selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''} selected
-                    </Text>
-                    <Flex gap={2}>
-                        <Button
-                            size="xs"
-                            variant="outline"
-                            colorPalette="gray"
-                            onClick={() => setSelectedIds(new Set())}
-                        >
-                            <LuX />
-                            Clear
-                        </Button>
-                        <Button
-                            size="xs"
-                            colorPalette="orange"
-                            onClick={handleBulkDismiss}
-                            loading={isDismissing}
-                        >
-                            <LuEyeOff />
-                            Dismiss Selected
-                        </Button>
-                    </Flex>
-                </Flex>
-            )}
-
             <TransactionsTable
                 title="Account Linkage Issues"
                 subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
@@ -312,6 +283,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
                 showSuggestions={false}
                 compact={true}
                 additionalColumns={additionalColumns}
+                additionalBulkActions={additionalBulkActions}
                 config={tableConfig}
                 onDataChange={onFixed}
                 onSelectionChange={handleSelectionChange}

@@ -15,6 +15,7 @@ from backend.db.database import get_db
 from backend.db.models import (
     NormalizedTransaction,
     UserCalculationBundle,
+    DismissedSuggestion,
     Asset,
     Account,
     UnitPattern,
@@ -24,6 +25,7 @@ from backend.db.models import (
 )
 from backend.api.routes.pnl import TransactionSummary, AssetRef  # Import shared models
 from backend.services.suggestion_service import SuggestionService, GroupingSuggestion
+from backend.services.suggestion_fingerprint import compute_suggestion_fingerprint
 from backend.services.pnl.taxability import suggest_bundle_taxability
 from backend.services.pnl.config import PnLConfig
 
@@ -82,6 +84,7 @@ class UnitResponse(BaseModel):
 class SuggestionResponse(BaseModel):
     """Response model for a unit suggestion."""
 
+    fingerprint: str
     pattern: UnitPattern
     transaction_ids: List[int]
     confidence: float
@@ -115,6 +118,27 @@ class AcceptSuggestionRequest(BaseModel):
     taxability_override: Optional[TaxabilityStatus] = Field(
         None, description="Override taxability for the bundle"
     )
+
+
+class DismissSuggestionRequest(BaseModel):
+    """Request to dismiss a suggestion."""
+
+    pattern: str
+    transaction_ids: List[int]
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class DismissedSuggestionResponse(BaseModel):
+    """Response model for a dismissed suggestion."""
+
+    id: int
+    fingerprint: str
+    pattern: Optional[str]
+    transaction_ids: List[int]
+    label: Optional[str]
+    reason: Optional[str]
+    dismissed_at: str
 
 
 # ============================================================================
@@ -237,6 +261,7 @@ def get_suggestions(
         
         responses.append(
             SuggestionResponse(
+                fingerprint=compute_suggestion_fingerprint(s.pattern, s.transaction_ids),
                 pattern=s.pattern,
                 transaction_ids=s.transaction_ids,
                 confidence=s.confidence,
@@ -249,6 +274,77 @@ def get_suggestions(
         )
     
     return responses
+
+
+@router.post("/suggestions/dismiss", response_model=DismissedSuggestionResponse)
+def dismiss_suggestion(
+    request: DismissSuggestionRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Dismiss a suggestion so it won't appear in future results.
+
+    The suggestion is identified by (pattern, transaction_ids). Only the exact
+    combination is blocked — individual transactions can still appear in other suggestions.
+    """
+    service = SuggestionService(session)
+    try:
+        dismissed = service.dismiss_suggestion(
+            pattern=request.pattern,
+            transaction_ids=request.transaction_ids,
+            label=request.label,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return DismissedSuggestionResponse(
+        id=dismissed.id,
+        fingerprint=dismissed.fingerprint,
+        pattern=dismissed.pattern,
+        transaction_ids=dismissed.transaction_ids,
+        label=dismissed.label,
+        reason=dismissed.reason,
+        dismissed_at=dismissed.dismissed_at.isoformat(),
+    )
+
+
+@router.delete("/suggestions/dismiss/{fingerprint}")
+def undismiss_suggestion(
+    fingerprint: str,
+    session: Session = Depends(get_db),
+):
+    """
+    Restore a dismissed suggestion so it appears again.
+    """
+    service = SuggestionService(session)
+    restored = service.undismiss_suggestion(fingerprint)
+    if not restored:
+        raise HTTPException(status_code=404, detail="Dismissed suggestion not found")
+    return {"success": True, "message": f"Suggestion {fingerprint} restored"}
+
+
+@router.get("/suggestions/dismissed", response_model=List[DismissedSuggestionResponse])
+def list_dismissed_suggestions(
+    session: Session = Depends(get_db),
+):
+    """
+    List all dismissed suggestions.
+    """
+    service = SuggestionService(session)
+    dismissed_list = service.list_dismissed()
+    return [
+        DismissedSuggestionResponse(
+            id=d.id,
+            fingerprint=d.fingerprint,
+            pattern=d.pattern,
+            transaction_ids=d.transaction_ids or [],
+            label=d.label,
+            reason=d.reason,
+            dismissed_at=d.dismissed_at.isoformat() if d.dismissed_at else "",
+        )
+        for d in dismissed_list
+    ]
 
 
 @router.post("/accept-suggestion", response_model=UnitResponse)

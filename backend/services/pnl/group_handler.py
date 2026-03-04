@@ -481,7 +481,7 @@ def _proceeds_and_pnl_entry(
     qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
     tx_id = disposal.origin_transaction_id
     origin_tx_id = disposal.origin_transaction_id if hasattr(disposal, 'origin_transaction_id') else tx_id
-    disposal_dt = disposal.date_time if disposal.date_time else datetime.utcnow()
+    disposal_dt = disposal.date_time if disposal.date_time else utc_now()
 
     cost_basis = sum(s.total_cost_in_base for s in slices)
     proceeds, price_error, proceeds_metadata = _compute_proceeds(
@@ -539,7 +539,7 @@ def _proceeds_and_pnl_entry(
     pnl = proceeds - cost_basis
 
     # Calculate holding period (now uses slice.holding_period_days property)
-    min_acquired = min(s.cost_lot.acquired_at for s in slices)
+    min_acquired = min(ensure_utc(s.cost_lot.acquired_at) for s in slices)
     holding_days = (ensure_utc(disposal_dt) - ensure_utc(min_acquired)).days
     
     # Always create RealizedPnl for all real disposals.

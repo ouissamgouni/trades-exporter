@@ -1064,6 +1064,31 @@ class UserCalculationBundle(SQLModel, table=True):
 
 
 # ============================================================================
+# DismissedSuggestion Model (Persisted dismissals of bundle suggestions)
+# ============================================================================
+
+
+class DismissedSuggestion(SQLModel, table=True):
+    """
+    Stores dismissed bundle suggestions so they don't reappear.
+
+    Suggestions are identified by a fingerprint derived from
+    (pattern, sorted transaction_ids). This allows individual transactions
+    to still appear in other suggestions — only the exact combination is blocked.
+    """
+
+    __tablename__ = "dismissed_suggestions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    fingerprint: str = Field(index=True, unique=True)  # sha256(pattern:sorted_tx_ids)[:16]
+    pattern: Optional[str] = Field(default=None)  # internal_transfer, swap, flow, etc.
+    transaction_ids: List[int] = Field(default_factory=list, sa_column=Column(JSON))
+    label: Optional[str] = Field(default=None)  # Suggestion label at time of dismissal
+    reason: Optional[str] = Field(default=None)  # User-provided reason (optional)
+    dismissed_at: datetime = Field(default_factory=utc_now)
+
+
+# ============================================================================
 # Calculation Models (Versions, Cost Lots, Realized PnL)
 # ============================================================================
 

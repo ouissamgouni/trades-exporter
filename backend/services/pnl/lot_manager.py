@@ -19,7 +19,7 @@ from backend.config.loader import configure_logging
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 from backend.db.models import (
     Account, CalculationVersion, CostLot, ConsumedLotSlice, LotSettlement, 
-    Asset, NormalizedTransaction, CostLotEvent, LotEventType
+    Asset, NormalizedTransaction, CostLotEvent, LotEventType, utc_now
 )
 
 
@@ -108,7 +108,7 @@ class LotManager:
         account_balance_after = self.get_balance(account_id=lot.account_id, asset_id=lot.asset_id)
         
         # Use transaction datetime for event timestamp (economic time, not system time)
-        event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow()
+        event_timestamp = triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else utc_now()
         
         # Only set relationship objects if they're proper SQLModel instances
         # This allows tests to pass Mock objects (only IDs will be set)
@@ -392,7 +392,7 @@ class LotManager:
                     qty=-remaining_qty,  # Negative qty indicates debt
                     qty_remaining=-remaining_qty,  # Negative - amount of debt outstanding
                     unit_cost=unit_cost,
-                    acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else datetime.utcnow(),
+                    acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else utc_now(),
                     is_zero_cost=not is_base_currency,
                     is_negative=True,
                     is_settled=False,  # Will be settled by later acquisition
@@ -592,7 +592,7 @@ class LotManager:
                 settling_transaction_id=settling_transaction.id if settling_transaction else None,
                 # Settlement details
                 qty_settled=settle_qty,
-                settled_at=datetime.utcnow(),
+                settled_at=utc_now(),
                 cost_basis_applied=cost_applied,
             )
             

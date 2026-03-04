@@ -430,6 +430,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
     const [selectedAsset, setSelectedAsset] = useState<AssetPnLRow | null>(null);
     const [assetRealizedEntries, setAssetRealizedEntries] = useState<RealizedPnLRow[]>([]);
+    // Account filter for asset detail transactions tab (set when clicking account name in expanded PnL row)
+    const [initialAccountFilter, setInitialAccountFilter] = useState<number | undefined>(undefined);
 
     // Panel state
     const [showImpactPanel, setShowImpactPanel] = useState(false);
@@ -1205,6 +1207,17 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         if (!asset) return;
         setSelectedAssetId(assetId ?? null);
         setSelectedAsset(asset);
+        setInitialAccountFilter(undefined);
+        setCurrentView('asset-detail');
+    }, [assets]);
+
+    // Account click handler - navigate to asset detail with transactions filtered by account
+    const handleAccountClick = useCallback((assetId: number, accountId: number) => {
+        const asset = assets.find(apnl => apnl.asset.id === assetId);
+        if (!asset) return;
+        setSelectedAssetId(assetId);
+        setSelectedAsset(asset);
+        setInitialAccountFilter(accountId);
         setCurrentView('asset-detail');
     }, [assets]);
 
@@ -1212,6 +1225,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const handleBackToAssets = useCallback(() => {
         setSelectedAssetId(null);
         setSelectedAsset(null);
+        setInitialAccountFilter(undefined);
         setCurrentView('assets');
     }, []);
 
@@ -1587,6 +1601,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             assets={filteredAssets}
                             baseCurrency={config.base_currency_symbol}
                             onAssetClick={handleAssetClick}
+                            onAccountClick={handleAccountClick}
                             accountBalances={accountBalances}
                             accounts={accounts}
                             onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
@@ -1643,6 +1658,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             liveBalanceLoading={liveBalanceLoading}
                             liveFetchedAccountIds={liveFetchedAccountIds}
                             liveAccountErrors={liveAccountErrors}
+                            initialAccountFilter={initialAccountFilter}
                         />
                     )}
                 </>

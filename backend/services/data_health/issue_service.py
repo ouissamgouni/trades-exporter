@@ -13,7 +13,6 @@ from .detectors import (
     DuplicateDetector,
     PendingDetector,
     MissingDataDetector,
-    UnmappedAccountDetector,
 )
 
 
@@ -32,7 +31,6 @@ class IssueService:
         self.transfer_detector = TransferIssueDetector(session)
         self.duplicate_detector = DuplicateDetector(session)
         self.pending_detector = PendingDetector(session)
-        self.unmapped_account_detector = UnmappedAccountDetector(session)
         self.suggestion_service = SuggestionService(session)
     
     def get_counts(
@@ -59,7 +57,6 @@ class IssueService:
             duplicates=self.duplicate_detector.count(account_ids, include_dismissed),
             pending_reviews=self.pending_detector.count(account_ids, include_dismissed),
             bundle_suggestions=self._count_bundle_suggestions(account_ids),
-            unmapped_accounts=self.unmapped_account_detector.count(account_ids, include_dismissed),
         )
     
     def get_health_summary(

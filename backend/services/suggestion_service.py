@@ -21,13 +21,15 @@ from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern
+from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern, DismissedSuggestion
+from backend.db.repositories.dismissed_suggestion_repository import DismissedSuggestionRepository
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
     GroupingSuggestion,
     PATTERN_UNKNOWN,
 )
+from backend.services.suggestion_fingerprint import compute_suggestion_fingerprint
 
 log = configure_logging("suggestion_service")
 
@@ -54,6 +56,7 @@ class SuggestionService:
     def __init__(self, session: Session, config: Optional[GroupingConfig] = None):
         self.session = session
         self.engine = GroupingEngine(config)
+        self.dismissed_repo = DismissedSuggestionRepository(session)
 
     def get_suggestions(
         self,
@@ -92,6 +95,15 @@ class SuggestionService:
             if len(s.transaction_ids) >= 2  # Only 2+ transactions
             and (include_unknown or s.pattern != PATTERN_UNKNOWN)
         ]
+
+        # Filter out dismissed suggestions
+        dismissed_fps = self.dismissed_repo.get_dismissed_fingerprints()
+        if dismissed_fps:
+            filtered = [
+                s for s in filtered
+                if compute_suggestion_fingerprint(s.pattern, s.transaction_ids)
+                not in dismissed_fps
+            ]
 
         # Sort by confidence and limit
         filtered.sort(key=lambda s: s.confidence, reverse=True)
@@ -152,6 +164,56 @@ class SuggestionService:
         )
 
         return bundle
+
+    def dismiss_suggestion(
+        self,
+        pattern: str,
+        transaction_ids: List[int],
+        label: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> DismissedSuggestion:
+        """
+        Dismiss a suggestion so it won't appear in future results.
+
+        Args:
+            pattern: Suggestion pattern (e.g., 'internal_transfer', 'swap')
+            transaction_ids: Transaction IDs in the suggestion
+            label: Suggestion label (for display context)
+            reason: User-provided reason for dismissal
+
+        Returns:
+            The created DismissedSuggestion record
+        """
+        dismissed = self.dismissed_repo.dismiss(
+            pattern=pattern,
+            transaction_ids=transaction_ids,
+            label=label,
+            reason=reason,
+        )
+        self.session.commit()
+        fingerprint = compute_suggestion_fingerprint(pattern, transaction_ids)
+        log.info(f"Dismissed suggestion {fingerprint} ({pattern}, {len(transaction_ids)} txs)")
+        return dismissed
+
+    def undismiss_suggestion(self, fingerprint: str) -> bool:
+        """
+        Restore a dismissed suggestion so it appears again.
+
+        Args:
+            fingerprint: The fingerprint of the dismissed suggestion
+
+        Returns:
+            True if restored, False if not found
+        """
+        result = self.dismissed_repo.undismiss(fingerprint)
+        if result:
+            self.session.commit()
+            log.info(f"Restored dismissed suggestion {fingerprint}")
+        return result
+
+    def list_dismissed(self) -> List[DismissedSuggestion]:
+        """List all dismissed suggestions."""
+        return self.dismissed_repo.list_dismissed()
 
     def _get_pending_transactions(self) -> List[NormalizedTransaction]:
         """Get all pending transactions (not yet reviewed/grouped)."""

@@ -114,13 +114,37 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
         }
     };
 
-    const dismissSuggestion = () => {
-        onOpenChange(false);
-        toaster.info({
-            title: 'Suggestion dismissed',
-            description: 'Refresh to see updated suggestions',
-        });
-        onDismissed?.();
+    const dismissSuggestion = async () => {
+        try {
+            const response = await fetch(`${API_URL}/bundles/suggestions/dismiss`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pattern: suggestion.pattern,
+                    transaction_ids: suggestion.transactions.map((t) => t.id),
+                    label: suggestion.label,
+                }),
+            });
+
+            if (response.ok) {
+                queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+                onOpenChange(false);
+                toaster.info({
+                    title: 'Suggestion dismissed',
+                    description: suggestion.label,
+                });
+                onDismissed?.();
+            } else {
+                const errorData = await response.json().catch(() => null);
+                throw new Error(errorData?.detail || 'Failed to dismiss suggestion');
+            }
+        } catch (err) {
+            console.error('Failed to dismiss suggestion:', err);
+            toaster.error({
+                title: 'Error',
+                description: err instanceof Error ? err.message : 'Failed to dismiss suggestion',
+            });
+        }
     };
 
     return (

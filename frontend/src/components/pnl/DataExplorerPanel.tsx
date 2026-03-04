@@ -422,78 +422,16 @@ interface UnitDetailRowProps {
 }
 
 const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
-    // Fetch ALL origin transaction details on-demand (units can have multiple transactions)
-    const [originTxs, setOriginTxs] = useState<OriginTransactionDetail[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
     // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
         return unit.transactions.map(tx => tx.id);
     }, [unit.transactions]);
 
-    useEffect(() => {
-        const fetchOriginTransactions = async () => {
-            if (allTxIds.length === 0) return;
-
-            setLoading(true);
-            setError(null);
-            try {
-                // Fetch all transactions in parallel
-                const responses = await Promise.all(
-                    allTxIds.map(txId => fetch(`${API_URL}/transactions/${txId}`))
-                );
-
-                const txDetails: OriginTransactionDetail[] = [];
-                for (const response of responses) {
-                    if (!response.ok) continue;
-                    const data = await response.json();
-                    txDetails.push({
-                        transaction_id: data.id,
-                        date_time: data.date_time,
-                        account_id: data.account_id,
-                        account_name: data.account_name || '-',  // Use server-side resolved account_name
-                        source: data.source,
-                        source_transaction_type: data.source_transaction_type,
-                        transaction_type: data.transaction_type,
-                        direction: data.direction,
-                        // Transfer fields
-                        from_account_id: data.from_account_id,
-                        from_account_name: data.from_account_name,
-                        to_account_id: data.to_account_id,
-                        to_account_name: data.to_account_name,
-                        source_from_account: data.source_from_account,
-                        source_to_account: data.source_to_account,
-                        // Nested asset refs
-                        linked_asset: data.linked_asset,
-                        price_quote_asset: data.price_quote_asset,
-                        fee_quote_asset: data.fee_quote_asset,
-                        // Legacy flat fields
-                        asset_id: data.asset_id,
-                        asset_symbol: data.linked_asset_symbol || data.source_asset_symbol,
-                        source_asset_symbol: data.source_asset_symbol,
-                        quantity: data.quantity,
-                        price: data.price,
-                        price_quote_asset_id: data.price_quote_asset_id,
-                        price_quote_asset_symbol: data.linked_price_quote_asset_symbol || data.source_price_quote_asset_symbol,
-                        source_price_quote_asset_symbol: data.source_price_quote_asset_symbol,
-                        total: data.total,
-                        fee: data.fee,
-                        fee_quote_asset_id: data.fee_quote_asset_id,
-                        fee_quote_asset_symbol: data.linked_fee_quote_asset_symbol || data.source_fee_quote_asset_symbol,
-                        source_fee_quote_asset_symbol: data.source_fee_quote_asset_symbol,
-                    });
-                }
-                setOriginTxs(txDetails);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Unknown error');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchOriginTransactions();
-    }, [allTxIds]);
+    // Build filters to show only this unit's transactions
+    const txFilters = useMemo<TransactionFilterState>(() => ({
+        ...defaultFilterState,
+        transactionIds: allTxIds,
+    }), [allTxIds]);
 
     // Build a map of cost_lot_id -> CostLot for quick lookup
     const lotMap = useMemo(() => {
@@ -507,158 +445,23 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
     return (
         <Box bg="gray.50" p={4} borderRadius="md">
             <Flex direction="column" gap={4}>
-                {/* Origin Transactions - Full Width - Now shows ALL transactions in the unit */}
+                {/* Origin Transactions - Full Width - Uses TransactionsTable in embedded mode */}
                 <Card.Root size="sm" variant="outline">
                     <Card.Body p={3}>
                         <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
                             📄 Origin Transactions ({allTxIds.length})
                         </Text>
-                        {loading ? (
-                            <Flex align="center" gap={2} py={2}>
-                                <FiLoader className="animate-spin" />
-                                <Text fontSize="xs" color="gray.500">Loading transaction details...</Text>
-                            </Flex>
-                        ) : error ? (
-                            <Text fontSize="xs" color="red.500">Error: {error}</Text>
-                        ) : originTxs.length > 0 ? (
-                            <Table.Root size="sm">
-                                <Table.Header>
-                                    <Table.Row>
-                                        <Table.ColumnHeader fontSize="xs">TX ID</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Date</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Direction</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Qty</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Price</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Total</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Fee</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Account</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Type</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">From/To</Table.ColumnHeader>
-                                    </Table.Row>
-                                </Table.Header>
-                                <Table.Body>
-                                    {originTxs.map((tx) => {
-                                        const txType = tx.transaction_type || tx.source_transaction_type || '-';
-                                        const fromAccount = tx.from_account_name || tx.source_from_account;
-                                        const toAccount = tx.to_account_name || tx.source_to_account;
-                                        // From/To Account: show from_account if inflow, to_account if outflow
-                                        const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
-                                        // Build source tooltip: show source address when linked account name is displayed
-                                        const fromToSource = tx.direction === 'inflow'
-                                            ? (tx.from_account_name && tx.source_from_account && tx.source_from_account !== tx.from_account_name ? `Source: ${tx.source_from_account}` : undefined)
-                                            : (tx.to_account_name && tx.source_to_account && tx.source_to_account !== tx.to_account_name ? `Source: ${tx.source_to_account}` : undefined);
-
-                                        return (
-                                            <Table.Row key={tx.transaction_id}>
-                                                <Table.Cell>
-                                                    <TransactionCell
-                                                        txId={tx.transaction_id}
-                                                        baseCurrency={baseCurrency}
-                                                        onTransactionClick={onTransactionClick}
-                                                        prefix=""
-                                                        size="xs"
-                                                    />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs">
-                                                    {tx.date_time ? formatDateLocale(tx.date_time) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <Badge
-                                                        size="xs"
-                                                        colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
-                                                    >
-                                                        {tx.direction || '-'}
-                                                    </Badge>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <AssetBadge
-                                                        asset={tx.linked_asset}
-                                                        sourceSymbol={tx.source_asset_symbol || tx.asset_symbol}
-                                                        size="xs"
-                                                        maxLength={15}
-                                                    />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right" fontFamily="mono">
-                                                    {formatQty(tx.quantity || 0)}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.price ? <ValueDisplay value={tx.price} currency={baseCurrency} /> : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.total ? <ValueDisplay value={tx.total} currency={baseCurrency} /> : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.fee ? (
-                                                        <Flex align="center" gap={1} justify="flex-end">
-                                                            <Text color="orange.600">{formatQty(tx.fee)}</Text>
-                                                            <AssetBadge
-                                                                asset={tx.fee_quote_asset}
-                                                                sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
-                                                                size="xs"
-                                                                colorPalette="orange"
-                                                                maxLength={10}
-                                                            />
-                                                        </Flex>
-                                                    ) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs">{tx.account_name || '-'}</Table.Cell>
-                                                <Table.Cell fontSize="xs">
-                                                    <Badge size="xs" colorPalette={txType === 'transfer' ? 'blue' : 'gray'}>
-                                                        {txType}
-                                                    </Badge>
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" color="gray.600" title={fromToSource}>
-                                                    {fromToAccount || '-'}
-                                                </Table.Cell>
-                                            </Table.Row>
-                                        );
-                                    })}
-                                </Table.Body>
-                            </Table.Root>
+                        {allTxIds.length > 0 ? (
+                            <TransactionsTable
+                                filters={txFilters}
+                                showFilters={false}
+                                showBundles={false}
+                                embeddedMode={true}
+                                compact={true}
+                                tableId={`unit-detail-${unit.unit_id}`}
+                            />
                         ) : (
-                            /* Fallback: show transaction IDs as clickable buttons */
-                            <Flex gap={4} wrap="wrap" fontSize="xs" align="center">
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Date</Text>
-                                    <Text>{formatDateLocale(unit.date)}</Text>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Outflows</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {unit.legs.filter(leg => leg.leg_type === 'outflow').map((leg, i) => (
-                                            <Badge key={i} size="xs" colorPalette="red">{leg.asset?.symbol}</Badge>
-                                        ))}
-                                    </Flex>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Inflows</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {unit.legs.filter(leg => leg.leg_type === 'inflow').map((leg, i) => (
-                                            <Badge key={i} size="xs" colorPalette="green">{leg.asset?.symbol}</Badge>
-                                        ))}
-                                    </Flex>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Transactions</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {allTxIds.length > 0 ? (
-                                            allTxIds.map(txId => (
-                                                <Button
-                                                    key={txId}
-                                                    size="xs"
-                                                    variant="outline"
-                                                    onClick={() => onTransactionClick?.(txId)}
-                                                >
-                                                    #{txId}
-                                                </Button>
-                                            ))
-                                        ) : (
-                                            <Text color="gray.400">-</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-                            </Flex>
+                            <Text fontSize="xs" color="gray.400">No transactions</Text>
                         )}
                     </Card.Body>
                 </Card.Root>
@@ -890,51 +693,51 @@ export const UnitsTab: React.FC<{
 
                                 if (hasLegs) {
                                     const inflow = inflowLegs.map((leg, idx) => (
-                                        <Flex key={`inflow-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="green.500" fontWeight="bold">↓</Text>
-                                            <Text fontSize="sm" color="green.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`inflow-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="green.500" fontWeight="bold">↓</Text>
+                                            <Text fontSize="xs" color="green.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="green.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     const outflow = outflowLegs.map((leg, idx) => (
-                                        <Flex key={`outflow-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="red.500" fontWeight="bold">↑</Text>
-                                            <Text fontSize="sm" color="red.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`outflow-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="red.500" fontWeight="bold">↑</Text>
+                                            <Text fontSize="xs" color="red.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="red.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     const fee = feeLegs.map((leg, idx) => (
-                                        <Flex key={`fee-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="orange.500" fontWeight="bold">💸</Text>
-                                            <Text fontSize="sm" color="orange.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`fee-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="orange.500" fontWeight="bold">💸</Text>
+                                            <Text fontSize="xs" color="orange.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="orange.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     return (
-                                        <Flex align="center" gap={1} flexWrap="wrap" ml={2}>
+                                        <Flex align="center" gap={0.5} flexWrap="wrap" ml={2}>
                                             {/* Inflow legs */}
                                             {inflow.length > 0 && inflow}
                                             {/* Separator if both inflow and outflow */}
                                             {inflow.length > 0 && outflow.length > 0 && (
-                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
                                             )}
                                             {/* Outflow legs */}
                                             {outflow.length > 0 && outflow}
                                             {/* Separator if any fee legs */}
                                             {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
-                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
                                             )}
                                             {/* Fee legs */}
                                             {fee.length > 0 && fee}
@@ -1009,23 +812,20 @@ export const UnitsTab: React.FC<{
                                                 {unit.pattern || 'unknown'}
                                             </Badge>
                                         </Table.Cell>
-                                        <Table.Cell fontSize="xs">{formatDateLocale(unit.date)}</Table.Cell>
+                                        <Table.Cell fontSize="2xs">{formatDateLocale(unit.date)}</Table.Cell>
                                         {/* Operation Column: Icon + Label + Sub-label + Transactions */}
                                         <Table.Cell>
-                                            <Flex direction="column" gap={1}>
+                                            <Flex direction="column" gap={0.5}>
                                                 <Flex align="center" gap={1}>
-
-                                                    <Text fontSize="sm" fontWeight="medium">
+                                                    <Text fontSize="xs" fontWeight="medium">
                                                         {mainLabel}
                                                     </Text>
                                                 </Flex>
-                                                {/* Display transactions with expandable leg details */}
+                                                {/* Display transactions with truncated account/source badges */}
                                                 {(() => {
-
-                                                    // Show transaction IDs as fallback
                                                     if (unit.transactions.length > 0) {
                                                         return (
-                                                            <Flex direction="column" gap={0.5} mt={1} bg="gray.100">
+                                                            <Flex direction="column" gap={0.5} mt={0.5} bg="gray.100">
                                                                 {unit.transactions.slice(0, 3).map((tx: any) => (
                                                                     <TransactionRow
                                                                         key={tx.id}
@@ -1039,7 +839,6 @@ export const UnitsTab: React.FC<{
                                                             </Flex>
                                                         );
                                                     }
-
                                                     return null;
                                                 })()}
                                             </Flex>
@@ -1059,27 +858,27 @@ export const UnitsTab: React.FC<{
                                             })()}
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            <Text fontSize="sm" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
+                                            <Text fontSize="xs" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
                                                 <ValueDisplay value={unit.realized_pnl_in_base || 0} currency={baseCurrency} />
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
                                             {unit.has_fees && unit.total_fees_in_base ? (
-                                                <Text fontSize="sm" color="orange.600">
+                                                <Text fontSize="xs" color="orange.600">
                                                     <ValueDisplay value={unit.total_fees_in_base} currency={baseCurrency} />
                                                 </Text>
                                             ) : (
-                                                <Text fontSize="xs" color="gray.400">-</Text>
+                                                <Text fontSize="2xs" color="gray.400">-</Text>
                                             )}
                                         </Table.Cell>
                                         <Table.Cell textAlign="center">
                                             {warningCount > 0 ? (
-                                                <Badge size="sm" colorPalette="orange">
+                                                <Badge size="xs" colorPalette="orange">
                                                     <FiAlertTriangle style={{ marginRight: 2 }} />
                                                     {warningCount}
                                                 </Badge>
                                             ) : (
-                                                <Text fontSize="xs" color="gray.400">-</Text>
+                                                <Text fontSize="2xs" color="gray.400">-</Text>
                                             )}
                                         </Table.Cell>
                                     </Table.Row>

@@ -65,6 +65,12 @@ class BulkUpdateRequest(BaseModel):
         None, description="New review status"
     )
     transaction_type: Optional[str] = Field(None, description="New transaction type")
+    taxability_status: Optional[TaxabilityStatus] = Field(
+        None, description="New taxability status"
+    )
+    include_fee: Optional[bool] = Field(
+        None, description="Include fee in cost basis/proceeds"
+    )
 
 
 class BulkStatusUpdate(BaseModel):
@@ -864,7 +870,6 @@ def get_transaction_status(
             linkage_issues_count=counts.linkage_issues,
             transfer_issues_count=counts.transfer_issues,
             duplicate_count=counts.duplicates,
-            unmapped_accounts_transaction_count=counts.unmapped_accounts,
             total_issues=total_issues,
             has_issues=has_issues,
         )
@@ -2062,7 +2067,13 @@ def bulk_update_transactions(
     if not request.transaction_ids:
         raise HTTPException(status_code=400, detail="No transaction IDs provided")
 
-    if not request.review_status and not request.transaction_type:
+    has_update = (
+        request.review_status is not None
+        or request.transaction_type is not None
+        or request.taxability_status is not None
+        or request.include_fee is not None
+    )
+    if not has_update:
         raise HTTPException(
             status_code=400,
             detail="At least one field to update must be provided",
@@ -2082,6 +2093,10 @@ def bulk_update_transactions(
                 tx.review_status = request.review_status.value
             if request.transaction_type:
                 tx.transaction_type = request.transaction_type
+            if request.taxability_status is not None:
+                tx.taxability_status = request.taxability_status.value
+            if request.include_fee is not None:
+                tx.include_fee = request.include_fee
 
             session.add(tx)
             updated_count += 1

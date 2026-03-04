@@ -733,7 +733,6 @@ class TransactionStatusResponse(BaseModel):
     linkage_issues_count: int = Field(0, description="Count of linkage issues (missing asset/account/price_quote/fee_quote)")
     transfer_issues_count: int = Field(0, description="Count of transfer issues (missing from/to accounts)")
     duplicate_count: int = Field(0, description="Count of unresolved duplicate transactions")
-    unmapped_accounts_transaction_count: int = Field(0, description="Count of transactions with unmapped raw accounts")
     
     # Aggregated totals
     total_issues: int = Field(0, description="Total data issues: missing data + linkage + transfer + duplicates + pending")

@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func, not_
+from sqlalchemy import func, not_, or_
 from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_session_dependency
@@ -2018,6 +2018,7 @@ def get_version_lot_events(
     lot_id: Optional[int] = None,
     event_type: Optional[str] = None,  # Comma-separated
     asset_id: Optional[str] = None,  # Comma-separated
+    related_asset_id: Optional[str] = None,  # Comma-separated – broader than asset_id
     account_id: Optional[str] = None,  # Comma-separated
     unit_pattern: Optional[str] = None,  # Comma-separated: 'transfer', 'pending_transfer', etc.
     unit_id: Optional[int] = None,
@@ -2040,7 +2041,10 @@ def get_version_lot_events(
     
     Query params:
         event_type: Comma-separated event types to filter
-        asset_id: Comma-separated asset IDs to filter
+        asset_id: Comma-separated asset IDs to filter (lots whose primary asset matches)
+        related_asset_id: Comma-separated asset IDs – returns events on lots of this
+            asset AND events triggered by units that have a leg involving this asset
+            (e.g. price-quote, fee-quote). Broader than asset_id.
         account_id: Comma-separated account IDs to filter
         unit_pattern: Comma-separated unit patterns ('transfer', 'pending_transfer', 'swap', etc.)
         date_start: ISO datetime string for start of date range filter
@@ -2076,6 +2080,23 @@ def get_version_lot_events(
     if asset_id:
         asset_ids = [int(id.strip()) for id in asset_id.split(',')]
         base_query = base_query.where(CostLot.asset_id.in_(asset_ids))
+    
+    # Related-asset filter: lots whose primary asset matches OR events triggered
+    # by a unit that has any leg involving the asset (price-quote, fee-quote, etc.)
+    if related_asset_id:
+        related_ids = [int(id.strip()) for id in related_asset_id.split(',')]
+        # Subquery: unit IDs that have at least one leg with the given asset
+        units_with_legs = (
+            select(CalculationUnitLeg.unit_id)
+            .where(CalculationUnitLeg.asset_id.in_(related_ids))
+            .distinct()
+        )
+        base_query = base_query.where(
+            or_(
+                CostLot.asset_id.in_(related_ids),
+                CostLotEvent.triggered_by_unit_id.in_(units_with_legs),
+            )
+        )
     
     # Account filter (comma-separated)
     if account_id:

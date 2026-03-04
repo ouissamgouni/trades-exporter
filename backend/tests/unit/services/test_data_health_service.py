@@ -21,21 +21,17 @@ from backend.services.data_health.detectors import (
     TransferIssueDetector,
     DuplicateDetector,
     PendingDetector,
-    UnmappedAccountDetector,
 )
 
 
-# Always patch MissingDataDetector and UnmappedAccountDetector to avoid real DB calls during tests
+# Always patch MissingDataDetector to avoid real DB calls during tests
 @pytest.fixture(autouse=True)
 def _patch_detectors_with_defaults():
-    """Auto-patch detectors that need special DB objects (RawAccount, etc.)."""
-    with patch('backend.services.data_health.issue_service.MissingDataDetector') as mock_missing, \
-         patch('backend.services.data_health.issue_service.UnmappedAccountDetector') as mock_unmapped:
+    """Auto-patch detectors that need special DB objects."""
+    with patch('backend.services.data_health.issue_service.MissingDataDetector') as mock_missing:
         mock_missing.return_value.count.return_value = 0
         mock_missing.return_value.fetch.return_value = ([], 0)
-        mock_unmapped.return_value.count.return_value = 0
-        mock_unmapped.return_value.fetch.return_value = ([], 0)
-        yield mock_missing, mock_unmapped
+        yield mock_missing
 
 
 # =============================================================================

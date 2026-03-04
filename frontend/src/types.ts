@@ -212,6 +212,7 @@ export type Bundle = CalculationUnit;
 
 // Grouping suggestion from the suggestion service
 export interface GroupingSuggestion {
+    fingerprint: string;
     pattern: UnitPattern;
     confidence: number;
     label: string;
@@ -856,7 +857,6 @@ export interface TransactionStatusResponse {
     linkage_issues_count: number;
     transfer_issues_count: number;
     duplicate_count: number;
-    unmapped_accounts_transaction_count: number;
 
     // Aggregated totals
     total_issues: number;
@@ -914,7 +914,6 @@ export interface ValidationSummary {
     linkage_issues_count: number;
     transfer_issues_count: number;
     duplicate_count: number;
-    unmapped_accounts_transaction_count?: number;
 
     // Computed flags
     has_issues: boolean;

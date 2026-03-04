@@ -301,9 +301,9 @@ export const DataHealthCheckDrawer: React.FC<DataHealthCheckDrawerProps> = ({
                                     </Tabs.Trigger>
                                     <Tabs.Trigger value="accounts-linkage">
                                         Accounts Linkage
-                                        {(data.unmapped_accounts_transaction_count || 0) > 0 && (
+                                        {(data.transfer_issues_count || 0) > 0 && (
                                             <Badge ml={1} size="xs" colorPalette="orange">
-                                                {data.unmapped_accounts_transaction_count}
+                                                {data.transfer_issues_count}
                                             </Badge>
                                         )}
                                     </Tabs.Trigger>

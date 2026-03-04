@@ -29,7 +29,7 @@ from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern
+from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern, ensure_utc, utc_now
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     PnLResult,
@@ -116,8 +116,8 @@ class PnLEngine:
                 bundle = None
             
             # Get earliest timestamp from members for the unit
-            timestamps = [m.date_time for m in members if hasattr(m, 'date_time') and m.date_time]
-            timestamp = min(timestamps) if timestamps else datetime.utcnow()
+            timestamps = [ensure_utc(m.date_time) for m in members if hasattr(m, 'date_time') and m.date_time]
+            timestamp = min(timestamps) if timestamps else utc_now()
             
             # Create CalculationUnit with runtime attributes from bundle
             unit_data = {
@@ -319,7 +319,7 @@ class PnLEngine:
                 # Create CalculationVersion upfront so all entities have version reference
         version = CalculationVersion(
             id=uuid.uuid4(),
-            description=f"P&L calculation {datetime.utcnow().isoformat()}",
+            description=f"P&L calculation {utc_now().isoformat()}",
             method=self.config.lot_method.value,
             lot_mode=self.config.lot_mode.value,
             base_currency_id=self.config.base_currency_id,
@@ -353,7 +353,7 @@ class PnLEngine:
         if not unit.legs:
             raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs")
 
-        timestamps = [leg.date_time for leg in unit.legs if leg.date_time]
+        timestamps = [ensure_utc(leg.date_time) for leg in unit.legs if leg.date_time]
         if not timestamps:
             raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs with date_time")
         return min(timestamps)
@@ -388,7 +388,7 @@ class PnLEngine:
         # Calculate expiry for drafts
         expires_at = None
         if status == "draft":
-            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+            expires_at = utc_now() + timedelta(hours=expires_in_hours)
 
         # Update version metadata
         version.status = status

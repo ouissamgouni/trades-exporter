@@ -239,6 +239,7 @@ interface UseLotEventsQueryParams {
     unitId?: number;
     eventTypes?: LotEventType[];
     assetIds?: number[];
+    relatedAssetIds?: number[];
     accountIds?: number[];
     unitPatterns?: string[];
     dateStart?: string;  // ISO datetime string
@@ -270,6 +271,7 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
     // Serialize arrays to stable string keys for dependency comparison
     const eventTypesKey = JSON.stringify(params.eventTypes ?? []);
     const assetIdsKey = JSON.stringify(params.assetIds ?? []);
+    const relatedAssetIdsKey = JSON.stringify(params.relatedAssetIds ?? []);
     const accountIdsKey = JSON.stringify(params.accountIds ?? []);
     const unitPatternsKey = JSON.stringify(params.unitPatterns ?? []);
 
@@ -298,6 +300,9 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
             }
             if (params.assetIds && params.assetIds.length > 0) {
                 queryParams.append('asset_id', params.assetIds.join(','));
+            }
+            if (params.relatedAssetIds && params.relatedAssetIds.length > 0) {
+                queryParams.append('related_asset_id', params.relatedAssetIds.join(','));
             }
             if (params.accountIds && params.accountIds.length > 0) {
                 queryParams.append('account_id', params.accountIds.join(','));
@@ -333,7 +338,7 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
             setIsRefreshing(false);
             fetchingRef.current = false;
         }
-    }, [params.versionId, params.lotId, params.unitId, params.page, params.limit, params.dateStart, params.dateEnd, eventTypesKey, assetIdsKey, accountIdsKey, unitPatternsKey]);
+    }, [params.versionId, params.lotId, params.unitId, params.page, params.limit, params.dateStart, params.dateEnd, eventTypesKey, assetIdsKey, relatedAssetIdsKey, accountIdsKey, unitPatternsKey]);
 
     useEffect(() => {
         if (!initialFetchDoneRef.current) {
@@ -475,8 +480,14 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
     const [activeAction, setActiveAction] = useState<string | null>(null);
 
     // Stabilize array references to prevent infinite loops
-    const stableAssetIds = useMemo(() => {
+    const stableRelatedAssetIds = useMemo(() => {
         if (assetContext?.id) return [assetContext.id];
+        return undefined;
+    }, [assetContext?.id]);
+
+    const stableAssetIds = useMemo(() => {
+        // When using related-asset context, skip the narrow asset_id filter
+        if (assetContext?.id) return undefined;
         return filterState.assetIds;
     }, [assetContext?.id, filterState.assetIds]);
 
@@ -492,6 +503,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
         unitId,
         eventTypes: filterState.eventTypes,
         assetIds: stableAssetIds,
+        relatedAssetIds: stableRelatedAssetIds,
         accountIds: stableAccountIds,
         unitPatterns: filterState.unitPatterns,
         dateStart: filterState.dateStart,
@@ -662,7 +674,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                         showAccountFilter={true}
                         showAssetFilter={enabledFeatures.assetFilter}
                         showSearch={enabledFeatures.search}
-                        defaultCollapsed={false}
+                        defaultCollapsed={true}
                     />
                 )}
                 {/* Compact mode filter header */}
@@ -755,7 +767,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     showAccountFilter={true}
                     showAssetFilter={enabledFeatures.assetFilter}
                     showSearch={enabledFeatures.search}
-                    defaultCollapsed={false}
+                    defaultCollapsed={true}
                 />
             )}
 
@@ -864,12 +876,6 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                 <Flex gap={4} mb={3} fontSize="sm" color="gray.600" wrap="wrap">
                     <Text>
                         Showing: <Text as="span" fontWeight="bold">{filtered.length}</Text> of {events.length} events
-                    </Text>
-                    <Text>
-                        Total qty Δ: <Text as="span" fontWeight="bold">{formatQty(stats.totalQtyDelta)}</Text>
-                    </Text>
-                    <Text>
-                        Total cost Δ: <Text as="span" fontWeight="bold">{formatCurrency(stats.totalCostDelta, baseCurrency)}</Text>
                     </Text>
                 </Flex>
             )}
