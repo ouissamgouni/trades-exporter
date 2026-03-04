@@ -25,7 +25,7 @@ import {
 } from '../utils/similarity';
 
 // Simplified transaction category using enum values
-type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER;
+type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER | typeof TransactionType.MARGIN | typeof TransactionType.COST;
 
 // Tag as key-value pair
 interface Tag {
@@ -103,17 +103,19 @@ const initialFormData: FormData = {
 
 // Derive transaction_type from simplified_type + direction
 const deriveTransactionType = (simplifiedType: SimplifiedType, direction: string): string => {
-    if (simplifiedType === TransactionType.TRANSFER) {
-        return TransactionType.TRANSFER;
-    }
-    // Trade - direction determines buy/sell semantics at runtime
-    return TransactionType.TRADE;
+    return simplifiedType;
 };
 
 // Derive simplified_type from transaction_type
 const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
     if (transactionType === TransactionType.TRANSFER) {
         return TransactionType.TRANSFER;
+    }
+    if (transactionType === TransactionType.MARGIN) {
+        return TransactionType.MARGIN;
+    }
+    if (transactionType === TransactionType.COST) {
+        return TransactionType.COST;
     }
     return TransactionType.TRADE;
 };
@@ -561,6 +563,8 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                 >
                                                     <option value="trade">💱 Trade (Buy/Sell/Swap)</option>
                                                     <option value="transfer">↔️ Transfer</option>
+                                                    <option value="margin">📈 Margin (Derivative)</option>
+                                                    <option value="cost">💸 Cost (Fee-only)</option>
                                                 </NativeSelect.Field>
                                             </NativeSelect.Root>
                                         </GridItem>

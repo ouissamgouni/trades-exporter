@@ -39,7 +39,7 @@ class TestNearNativeTxns:
         norm = list(c.raw_to_normalized(raws[0]))  # alice.near → wallet, 5 NEAR
 
         transfers = [t for t in norm if t.transaction_type == "transfer"]
-        fees = [t for t in norm if t.transaction_type == "technical"]
+        fees = [t for t in norm if t.transaction_type == "cost"]
 
         assert len(transfers) == 1
         assert transfers[0].direction == "inflow"
@@ -55,7 +55,7 @@ class TestNearNativeTxns:
         norm = list(c.raw_to_normalized(raws[1]))  # wallet → bob.near, 2 NEAR
 
         transfers = [t for t in norm if t.transaction_type == "transfer"]
-        fees = [t for t in norm if t.transaction_type == "technical"]
+        fees = [t for t in norm if t.transaction_type == "cost"]
 
         assert len(transfers) == 1
         assert transfers[0].direction == "outflow"

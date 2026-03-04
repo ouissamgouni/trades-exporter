@@ -767,7 +767,7 @@ class ConnectorSolanaHelius(BaseConnector):
                     # Core transaction data
                     date_time=date_time,
                     direction="outflow",
-                    transaction_type="technical",
+                    transaction_type="cost",
                     source_transaction_type=tx_type,
                     
                     # Asset and amounts (quantity=0 for fee transaction)

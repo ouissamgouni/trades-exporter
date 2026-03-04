@@ -981,8 +981,11 @@ def _handle_cost_basis_transfer(
             original_acquired_at = utc_now()
 
         new_lot = CostLot(
-            # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
-            # relationship objects needed for persistence when objects aren't yet persisted)
+            # FK IDs for runtime access; relationship objects set separately below
+            # to avoid triggering dual cascade collections simultaneously in the
+            # constructor (CalculationUnit.cost_lots + NormalizedTransaction.cost_lots
+            # both track CostLot — setting both relationship objects at once in the
+            # constructor caused autoflush orphan-detection misfires).
             asset_id=inflow.asset_id,
             asset=inflow.asset,
             account_id=inflow.account_id,
@@ -992,9 +995,8 @@ def _handle_cost_basis_transfer(
             unit_cost_in_base=unit_cost,
             acquired_at=original_acquired_at,  # Preserve original holding period
             origin_transaction_id=inflow.origin_transaction_id,
-            origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
-            unit_id=unit.id,  # FK to calculation_units
-            unit=unit,  # Relationship object for persistence - auto-populates unit.cost_lots
+            origin_transaction=inflow.origin_transaction,
+            unit_id=unit.id,  # FK only — relationship set via manual append below
             notes=f"Transfer (from lot {slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else 'unknown'})",
         )
         lot_manager.add_lot(

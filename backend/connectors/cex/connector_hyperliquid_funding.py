@@ -247,7 +247,7 @@ class HyperliquidFundingConnector(BaseConnector):
                 source_transaction_id=source_id,
                 date_time=dt,
                 direction=direction,
-                transaction_type="transfer",
+                transaction_type="margin",
                 source_transaction_type="funding",
                 source_asset_symbol="USDC",
                 quantity=quantity,

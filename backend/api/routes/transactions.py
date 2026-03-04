@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func, or_, literal_column
+from sqlalchemy import func, or_, literal_column, update
 from sqlalchemy.sql.functions import count as sa_count
 from sqlalchemy import distinct
 from sqlalchemy.orm import joinedload
@@ -41,6 +41,7 @@ from backend.db.models import (
     RealizedPnl,
     LotSettlement,
     CostLotEvent,
+    ConsumedLotSlice,
     SyncJobConnectorRun,
 )
 from backend.services.pipeline import (
@@ -331,7 +332,9 @@ def get_filter_options(
     account_id: Optional[str] = Query(None),
     from_account_id: Optional[str] = Query(None),
     to_account_id: Optional[str] = Query(None),
+    related_account_id: Optional[str] = Query(None),
     asset_id: Optional[str] = Query(None),
+    related_asset_id: Optional[str] = Query(None),
     category_id: Optional[str] = Query(None),
     transaction_type: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
@@ -365,7 +368,9 @@ def get_filter_options(
         account_id=account_id,
         from_account_id=from_account_id,
         to_account_id=to_account_id,
+        related_account_id=related_account_id,
         asset_id=asset_id,
+        related_asset_id=related_asset_id,
         category_id=category_id,
         transaction_type=transaction_type,
         direction=direction,
@@ -845,38 +850,6 @@ def get_transaction_status(
         issue_service = IssueService(session)
         counts = issue_service.get_counts(account_ids=account_id_list, include_dismissed=False)
         
-        # Count transactions with unmapped raw accounts (not dismissed)
-        from backend.db.models import RawAccount
-        unmapped_accounts_tx_count = 0
-        try:
-            # Get all unmapped, non-dismissed raw accounts
-            unmapped_raw_accounts_stmt = select(RawAccount).where(
-                RawAccount.account_id == None,
-                RawAccount.dismissed == False
-            )
-            unmapped_raw_accounts = session.exec(unmapped_raw_accounts_stmt).all()
-            
-            # Count distinct transactions using any of these unmapped raw accounts
-            if unmapped_raw_accounts:
-                from sqlalchemy import or_
-                conditions = []
-                for ra in unmapped_raw_accounts:
-                    conditions.extend([
-                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_account == ra.label),
-                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_from_account == ra.label),
-                        (NormalizedTransaction.source == ra.source) & (NormalizedTransaction.source_to_account == ra.label),
-                    ])
-                
-                if conditions:
-                    unmapped_tx_query = base_filter(
-                        select(func.count(func.distinct(NormalizedTransaction.id)))
-                        .where(or_(*conditions))
-                    )
-                    unmapped_accounts_tx_count = session.exec(unmapped_tx_query).one()
-        except Exception as e:
-            print(f"Warning: Could not count unmapped accounts transactions: {e}")
-            unmapped_accounts_tx_count = 0
-        
         # Calculate aggregated totals
         total_issues = counts.total_issues
         has_issues = total_issues > 0 or counts.bundle_suggestions > 0
@@ -891,7 +864,7 @@ def get_transaction_status(
             linkage_issues_count=counts.linkage_issues,
             transfer_issues_count=counts.transfer_issues,
             duplicate_count=counts.duplicates,
-            unmapped_accounts_transaction_count=unmapped_accounts_tx_count,
+            unmapped_accounts_transaction_count=counts.unmapped_accounts,
             total_issues=total_issues,
             has_issues=has_issues,
         )
@@ -960,6 +933,10 @@ def get_linkage_issues(
         None,
         description="Optional comma-separated account IDs to filter scope"
     ),
+    issue_types: Optional[str] = Query(
+        None,
+        description="Optional comma-separated issue types to include (e.g. unlinked_asset,unlinked_price_quote,unlinked_fee_quote)"
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(50, ge=1, le=200, description="Items per page"),
     session: Session = Depends(get_db),
@@ -985,6 +962,11 @@ def get_linkage_issues(
                 if a.strip().isdigit()
             ]
         
+        # Parse issue types filter
+        issue_type_list: Optional[List[str]] = None
+        if issue_types:
+            issue_type_list = [t.strip() for t in issue_types.split(',') if t.strip()]
+        
         # Use IssueService to fetch linkage issues
         from backend.services.data_health import IssueService
         issue_service = IssueService(session)
@@ -992,14 +974,17 @@ def get_linkage_issues(
             page=page,
             per_page=per_page,
             account_ids=account_id_list,
+            issue_types=issue_type_list,
         )
         
+        import math
         return LinkageIssuesResponse(
             issues=issues_list,
             pagination=PaginationMetadata(
                 page=page,
                 per_page=per_page,
                 total_count=total_count,
+                total_pages=math.ceil(total_count / per_page) if total_count > 0 else 1,
             ),
         )
         
@@ -1219,7 +1204,8 @@ def bulk_dismiss_transfer_issues(
     """
     Bulk dismiss transfer issues for multiple transactions.
     
-    Adds system dismissal tags to all specified transactions.
+    Stores a single dismissal tag per field:
+      {"sys_transfer_dismissed": "<field>"}
     """
     from sqlalchemy.orm.attributes import flag_modified
     
@@ -1241,26 +1227,16 @@ def bulk_dismiss_transfer_issues(
                 errors.append(f"Transaction {tx_id} is not a transfer")
                 continue
             
-            # Remove any existing dismissal tags for this field
-            tags = list(tx.tags or [])
+            # Build clean tags list: remove any existing sys_transfer_dismissed for this field
             tags = [
-                tag for tag in tags
-                if not (tag.get("sys_transfer_dismissed") == "true" and 
-                        any(t.get("sys_dismissed_field") == request.field for t in tags))
+                tag for tag in (tx.tags or [])
+                if not (isinstance(tag, dict) and tag.get("sys_transfer_dismissed") == request.field)
             ]
             
-            # Add new dismissal tags
-            dismissal_tags = [
-                {"sys_transfer_dismissed": "true"},
-                {"sys_dismissed_field": request.field},
-                {"sys_dismissed_at": datetime.now().isoformat()},
-            ]
-            if request.reason:
-                dismissal_tags.append({"sys_dismissed_reason": request.reason})
+            # Add single dismissal tag
+            tags.append({"sys_transfer_dismissed": request.field})
             
-            tags.extend(dismissal_tags)
-            
-            tx.tags = tags if tags else None
+            tx.tags = tags
             flag_modified(tx, "tags")
             session.add(tx)
             dismissed_count += 1
@@ -1290,12 +1266,14 @@ def list_transactions(
     account_id: Optional[str] = Query(None, description="Filter by account IDs (comma-separated, 'unmapped' for NULL)"),
     from_account_id: Optional[str] = Query(None, description="Filter by from account IDs (comma-separated, 'unmapped' for NULL)"),
     to_account_id: Optional[str] = Query(None, description="Filter by to account IDs (comma-separated, 'unmapped' for NULL)"),
+    related_account_id: Optional[str] = Query(None, description="Filter by related account IDs — matches account, from account, or to account (comma-separated, 'unmapped' for NULL)"),
     unit_id: Optional[int] = Query(None, description="Filter by unit ID"),
     ids: Optional[str] = Query(None, description="Filter by transaction IDs (comma-separated for multiple)"),
     # New filter parameters
     date_from: Optional[str] = Query(None, description="Filter transactions from this date (ISO format)"),
     date_to: Optional[str] = Query(None, description="Filter transactions until this date (ISO format)"),
     asset_id: Optional[str] = Query(None, description="Filter by asset IDs (comma-separated for multiple)"),
+    related_asset_id: Optional[str] = Query(None, description="Filter by related asset IDs — matches base asset, price quote, or fee quote (comma-separated for multiple)"),
     category_id: Optional[str] = Query(None, description="Filter by category IDs (comma-separated for multiple)"),
     transaction_type: Optional[str] = Query(None, description="Filter by transaction type (comma-separated for multiple)"),
     direction: Optional[str] = Query(None, description="Filter by direction (comma-separated for multiple)"),
@@ -1360,7 +1338,9 @@ def list_transactions(
             account_id=account_id,
             from_account_id=from_account_id,
             to_account_id=to_account_id,
+            related_account_id=related_account_id,
             asset_id=asset_id,
+            related_asset_id=related_asset_id,
             category_id=category_id,
             transaction_type=transaction_type,
             direction=direction,
@@ -2188,14 +2168,69 @@ def bulk_delete_transactions(
         deleted_count = 0
         errors = []
 
+        # Collect valid transaction IDs first
+        valid_tx_ids = []
         for tx_id in request.transaction_ids:
             tx = session.get(NormalizedTransaction, tx_id)
             if not tx:
                 errors.append(f"Transaction {tx_id} not found")
-                continue
+            else:
+                valid_tx_ids.append(tx_id)
 
-            session.delete(tx)
-            deleted_count += 1
+        if valid_tx_ids:
+            # Detach P&L children that reference these transactions
+            # (mirrors data_cleanup_service pattern)
+            # CalculationUnitLeg has NOT NULL transaction_id — must delete, not nullify
+            legs = session.exec(
+                select(CalculationUnitLeg).where(CalculationUnitLeg.transaction_id.in_(valid_tx_ids))
+            ).all()
+            leg_ids = [leg.id for leg in legs]
+
+            # Nullify consumed_lot_slices FK before deleting legs
+            if leg_ids:
+                session.execute(
+                    update(ConsumedLotSlice)
+                    .where(ConsumedLotSlice.consumed_by_leg_id.in_(leg_ids))
+                    .values(consumed_by_leg_id=None)
+                )
+
+            for leg in legs:
+                session.delete(leg)
+
+            # Nullable FK references — set to NULL
+            session.execute(
+                update(CostLot)
+                .where(CostLot.origin_transaction_id.in_(valid_tx_ids))
+                .values(origin_transaction_id=None)
+            )
+            session.execute(
+                update(RealizedPnl)
+                .where(RealizedPnl.transaction_id.in_(valid_tx_ids))
+                .values(transaction_id=None)
+            )
+            session.execute(
+                update(LotSettlement)
+                .where(LotSettlement.settling_transaction_id.in_(valid_tx_ids))
+                .values(settling_transaction_id=None)
+            )
+            session.execute(
+                update(PnlWarning)
+                .where(PnlWarning.transaction_id.in_(valid_tx_ids))
+                .values(transaction_id=None)
+            )
+            session.execute(
+                update(CostLotEvent)
+                .where(CostLotEvent.triggered_by_transaction_id.in_(valid_tx_ids))
+                .values(triggered_by_transaction_id=None)
+            )
+            session.flush()
+
+            # Now delete the transactions
+            for tx_id in valid_tx_ids:
+                tx = session.get(NormalizedTransaction, tx_id)
+                if tx:
+                    session.delete(tx)
+                    deleted_count += 1
 
         session.commit()
 

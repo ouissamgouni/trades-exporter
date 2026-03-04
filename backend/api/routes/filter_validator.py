@@ -253,7 +253,9 @@ def validate_transaction_filters(
     account_id: Optional[str] = None,
     from_account_id: Optional[str] = None,
     to_account_id: Optional[str] = None,
+    related_account_id: Optional[str] = None,
     asset_id: Optional[str] = None,
+    related_asset_id: Optional[str] = None,
     category_id: Optional[str] = None,
     transaction_type: Optional[str] = None,
     direction: Optional[str] = None,
@@ -288,8 +290,14 @@ def validate_transaction_filters(
     validated_to_account_ids = validator.validate_ids_with_sentinels(
         to_account_id, Account, "id", "to_account_id"
     )
+    validated_related_account_ids = validator.validate_ids_with_sentinels(
+        related_account_id, Account, "id", "related_account_id"
+    )
     validated_asset_ids = validator.validate_ids(
         asset_id, Asset, "asset_id", "asset_id"
+    )
+    validated_related_asset_ids = validator.validate_ids(
+        related_asset_id, Asset, "asset_id", "related_asset_id"
     )
     validated_category_ids = validator.validate_ids(
         category_id, Category, "id", "category_id"
@@ -326,7 +334,9 @@ def validate_transaction_filters(
         account_ids=validated_account_ids,
         from_account_ids=validated_from_account_ids,
         to_account_ids=validated_to_account_ids,
+        related_account_ids=validated_related_account_ids,
         asset_ids=validated_asset_ids,
+        related_asset_ids=validated_related_asset_ids,
         category_ids=validated_category_ids,
         transaction_types=validated_transaction_types,
         directions=validated_directions,

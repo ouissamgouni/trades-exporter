@@ -146,7 +146,8 @@ export const ComboSelect: React.FC<ComboSelectProps> = ({
 export const TRANSACTION_TYPE_OPTIONS = [
     'trade',     // Buy/sell exchange of assets
     'transfer',  // Deposits, withdrawals, internal transfers
-    'technical', // Zero-value: approvals, failed txs, contract calls
+    'margin',    // Derivative cash flows: funding, perp open/close
+    'cost',      // Fee-only: approvals, gas fees, management fees
 ];
 
 export const ASSET_TYPE_OPTIONS = [

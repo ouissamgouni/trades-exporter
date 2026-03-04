@@ -277,7 +277,7 @@ class ConnectorNearTxns(NearConnectorBase):
                     network_transaction_id=tx_hash,
                     date_time=date_time,
                     direction="outflow",
-                    transaction_type="technical",
+                    transaction_type="cost",
                     source_transaction_type="FEE",
                     source_asset_symbol=self.native_token,
                     quantity=Decimal(0),

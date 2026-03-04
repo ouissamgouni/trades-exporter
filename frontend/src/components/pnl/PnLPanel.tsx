@@ -199,6 +199,23 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         return map;
     }, [liveAccountBalancesRaw]);
 
+    // Set of account IDs whose live-balance HTTP fetch completed (regardless of entries)
+    const liveFetchedAccountIds = useMemo(() => {
+        return new Set(liveAccountBalancesRaw.map(ab => ab.account_id));
+    }, [liveAccountBalancesRaw]);
+
+    // Map of accountId → connector error messages (non-null errors only)
+    const liveAccountErrors = useMemo(() => {
+        const map = new Map<number, string[]>();
+        for (const ab of liveAccountBalancesRaw) {
+            const errors = ab.connector_balances
+                .filter(cb => cb.error != null)
+                .map(cb => cb.error!);
+            if (errors.length > 0) map.set(ab.account_id, errors);
+        }
+        return map;
+    }, [liveAccountBalancesRaw]);
+
     // Main view mode: 'portfolio' (filtered view) or 'audit' (full unfiltered audit)
     const [viewMode, setViewMode] = useState<'portfolio' | 'audit'>('portfolio');
 
@@ -1000,6 +1017,9 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             setStatus('preview');
             setCurrentView('assets');
 
+            // Prefetch per-account balances for expandable rows
+            loadAccountBalances(versionId);
+
             // Step 3: Refresh prices for the loaded assets
             if (assetRows.length > 0) {
                 const balanceEntries: BalanceEntry[] = balances.map(b => ({
@@ -1019,7 +1039,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             // Mark calculation as complete
             isCalculatingRef.current = false;
         }
-    }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, showUnsettledNegative]);
+    }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
 
     // Independent loader: Load calculation units with pagination
     // Handle audit tab changes - just update state, the useEffect will handle loading
@@ -1617,6 +1637,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             baseCurrency={config.base_currency_symbol}
                             onBack={handleBackToAssets}
                             onTransactionClick={handleTransactionClick}
+                            accountBreakdown={selectedAsset.asset.id != null ? accountBalances.get(selectedAsset.asset.id) : undefined}
+                            liveBalance={liveBalanceMap.get(selectedAsset.asset.symbol?.toUpperCase() ?? '')}
+                            liveAccountBalances={liveAccountBalanceMap.get(selectedAsset.asset.symbol?.toUpperCase() ?? '')}
+                            liveBalanceLoading={liveBalanceLoading}
+                            liveFetchedAccountIds={liveFetchedAccountIds}
+                            liveAccountErrors={liveAccountErrors}
                         />
                     )}
                 </>

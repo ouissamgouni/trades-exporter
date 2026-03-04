@@ -436,7 +436,7 @@ class GroupingEngine:
         - The group has at least 1 inflow + 1 outflow of different assets
         - All legs belong to the same account
 
-        Fee transactions (transaction_type == "technical") in the group are
+        Cost transactions (transaction_type == "cost") in the group are
         included automatically.
 
         Confidence: 0.95 (on-chain evidence is very strong)
@@ -476,9 +476,9 @@ class GroupingEngine:
             if len(account_ids) != 1:
                 continue
 
-            # Separate transfer legs and fee/technical legs
-            transfer_legs = [t for t in group_txs if t.transaction_type != "technical"]
-            fee_legs = [t for t in group_txs if t.transaction_type == "technical"]
+            # Separate value legs and cost (fee-only) legs
+            transfer_legs = [t for t in group_txs if t.transaction_type != "cost"]
+            fee_legs = [t for t in group_txs if t.transaction_type == "cost"]
 
             inflows = [t for t in transfer_legs if t.direction == "inflow"]
             outflows = [t for t in transfer_legs if t.direction == "outflow"]
@@ -965,7 +965,7 @@ class GroupingEngine:
         """
         extra = len(all_txs) - len(seed_txs)
         if extra > 0:
-            fee_count = sum(1 for t in all_txs if t.transaction_type == "technical")
+            fee_count = sum(1 for t in all_txs if t.transaction_type == "cost")
             non_fee_extra = extra - fee_count
             parts = []
             if fee_count:

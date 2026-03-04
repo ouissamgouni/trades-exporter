@@ -60,7 +60,7 @@ class TestSuiFixture:
 
         # Should yield exactly 1 transfer (inflow) — no fee tx since wallet didn't pay gas
         transfer_txs = [t for t in normalized if t.transaction_type == "transfer"]
-        fee_txs = [t for t in normalized if t.transaction_type == "technical"]
+        fee_txs = [t for t in normalized if t.transaction_type == "cost"]
 
         assert len(transfer_txs) == 1, "Should have 1 transfer record"
         assert len(fee_txs) == 0, "Wallet didn't pay gas, no fee tx"
@@ -89,7 +89,7 @@ class TestSuiFixture:
         normalized = list(connector.raw_to_normalized(outflow_tx))
 
         transfer_txs = [t for t in normalized if t.transaction_type == "transfer"]
-        fee_txs = [t for t in normalized if t.transaction_type == "technical"]
+        fee_txs = [t for t in normalized if t.transaction_type == "cost"]
 
         assert len(transfer_txs) == 1, "Should have 1 transfer record"
         assert len(fee_txs) == 1, "Should have 1 fee record"
@@ -111,7 +111,7 @@ class TestSuiFixture:
         # Verify fee transaction
         fee = fee_txs[0]
         assert fee.direction == "outflow"
-        assert fee.transaction_type == "technical"
+        assert fee.transaction_type == "cost"
         assert fee.quantity == Decimal(0)
         assert fee.fee == Decimal("0.0032")  # 3_200_000 MIST = 0.0032 SUI
         assert fee.include_fee is True
@@ -133,7 +133,7 @@ class TestSuiFixture:
         normalized = list(connector.raw_to_normalized(multi_tx))
 
         transfer_txs = [t for t in normalized if t.transaction_type == "transfer"]
-        fee_txs = [t for t in normalized if t.transaction_type == "technical"]
+        fee_txs = [t for t in normalized if t.transaction_type == "cost"]
 
         # Gas = 2_000_000 + 3_000_000 - 1_000_000 = 4_000_000 MIST
         # SUI balance change: -4_000_000. After gas adj: -4_000_000 + 4_000_000 = 0 → skipped
@@ -172,7 +172,7 @@ class TestSuiFixture:
         normalized = list(connector.raw_to_normalized(gas_only_tx))
 
         transfer_txs = [t for t in normalized if t.transaction_type == "transfer"]
-        fee_txs = [t for t in normalized if t.transaction_type == "technical"]
+        fee_txs = [t for t in normalized if t.transaction_type == "cost"]
 
         # Gas = 800_000 + 1_200_000 - 400_000 = 1_600_000 MIST
         # SUI balance change: -1_600_000. After gas adj: -1_600_000 + 1_600_000 = 0 → skipped
@@ -212,7 +212,7 @@ class TestSuiFixture:
                 ), f"source_tx_id should start with digest: {norm.source_transaction_id}"
 
                 # Should be either a transfer ID or _fee
-                if norm.transaction_type == "technical":
+                if norm.transaction_type == "cost":
                     assert norm.source_transaction_id == f"{digest}_fee"
                 else:
                     # Transfer IDs have format: {digest}_{coinType}_{index}
@@ -266,7 +266,7 @@ class TestSuiFixture:
         for tx in transactions:
             normalized = list(connector.raw_to_normalized(tx))
             for norm in normalized:
-                if norm.transaction_type == "technical":
+                if norm.transaction_type == "cost":
                     # Fee transactions: wallet pays, no recipient
                     assert norm.source_from_account == FIXTURE_WALLET, (
                         f"Fee tx {norm.source_transaction_id}: "

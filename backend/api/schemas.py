@@ -103,7 +103,9 @@ class AppliedFilters(BaseModel):
     account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
     from_account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
     to_account_ids: List[Any] = Field(default_factory=list)  # int IDs + "unmapped" sentinel
+    related_account_ids: List[Any] = Field(default_factory=list)  # matches account_id OR from_account_id OR to_account_id
     asset_ids: List[int] = Field(default_factory=list)
+    related_asset_ids: List[int] = Field(default_factory=list)  # matches asset_id OR price_quote_asset_id OR fee_quote_asset_id
     category_ids: List[int] = Field(default_factory=list)
     transaction_types: List[str] = Field(default_factory=list)
     directions: List[str] = Field(default_factory=list)
@@ -743,6 +745,7 @@ class PaginationMetadata(BaseModel):
     page: int = Field(..., description="Current page number")
     per_page: int = Field(..., description="Items per page")
     total_count: int = Field(..., description="Total number of items")
+    total_pages: Optional[int] = Field(None, description="Total number of pages")
 
 
 class LinkageIssuesResponse(BaseModel):

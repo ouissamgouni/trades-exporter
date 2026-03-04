@@ -144,18 +144,24 @@ class LotEventType(str, Enum):
 
 
 class TransactionType(str, Enum):
-    """Transaction type for P&L calculation and leg expansion.
-    
-    2-value enum:
-    - TRADE: Bilateral exchange (buy/sell) - expands to inflow + outflow legs
-    - TRANSFER: Movement (deposits, withdrawals, airdrops, internal transfers) - single leg
-    
-    Note: Internal transfers are detected at P&L calculation time using from_account_id/to_account_id,
-    not through transaction_type.
+    """High-level classification controlling PnL leg expansion behaviour.
+
+    * TRADE    – bilateral exchange (buy/sell); expanded to inflow + outflow legs.
+    * TRANSFER – asset movement between accounts (deposit, withdrawal, airdrop,
+                 internal transfer); single leg, from/to accounts expected.
+    * MARGIN   – derivative cash flow (funding rate, perp open/close PnL);
+                 single leg, no from/to, non-taxable by default.
+    * COST     – fee-only transaction (gas, management fee, approval cost);
+                 zero tracked value, neutral PnL impact.
+
+    Note: Internal transfers are detected at P&L calculation time using
+    from_account_id / to_account_id, not through transaction_type.
     """
-    
-    TRADE = "trade"  # Buy/sell - will be expanded to inflow + outflow legs
-    TRANSFER = "transfer"  # All transfers (external and internal)
+
+    TRADE = "trade"       # Buy/sell – expanded to inflow + outflow legs
+    TRANSFER = "transfer" # Asset movement – single leg, from/to expected
+    MARGIN = "margin"     # Derivative cash flow – single leg, no from/to
+    COST = "cost"         # Fee-only – neutral, zero tracked value
 
 
 class TaxabilityStatus(str, Enum):
@@ -762,7 +768,7 @@ class NormalizedTransaction(SQLModel, table=True):
     direction: str = Field(default="")  # 'inflow', 'outflow', 'neutral'
     transaction_type: str = Field(
         default=""
-    )  # 'trade', 'transfer', 'technical' (see TransactionType enum)
+    )  # 'trade', 'transfer', 'margin', 'cost' (see TransactionType enum)
 
     # Asset and quantity
     asset_id: Optional[int] = Field(default=None, foreign_key="assets.asset_id")
@@ -903,30 +909,34 @@ class NormalizedTransaction(SQLModel, table=True):
         },
     )
 
-    # Cascade relationships for cleanup upon deletion
+    # P&L traceability relationships — NOT lifecycle owners.
+    # These children are lifecycle-owned by CalculationUnit (which has delete-orphan).
+    # Using save-update/merge here so SQLAlchemy propagates new objects to the session
+    # but does NOT treat removal from this collection as an orphan-deletion trigger.
+    # This avoids the dual-delete-orphan anti-pattern that caused silent lot loss.
     cost_lots: List["CostLot"] = Relationship(
         back_populates="origin_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
     pnl_warnings: List["PnlWarning"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
     calculation_legs: List["CalculationUnitLeg"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
     realized_pnl: List["RealizedPnl"] = Relationship(
         back_populates="transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
     lot_settlements: List["LotSettlement"] = Relationship(
         back_populates="settling_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
     cost_lot_events: List["CostLotEvent"] = Relationship(
         back_populates="triggered_by_transaction",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+        sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
 
     # Derivative positions linked to this transaction (viewonly - managed by pipeline stage)
@@ -1193,9 +1203,9 @@ class CostLot(SQLModel, table=True):
     account: Optional[Account] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLot.account_id]"},
     )
-    origin_transaction: Optional["NormalizedTransaction"] = Relationship(
-        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_transaction_id]"},
-    )
+    # NOTE: origin_transaction is defined ONCE above (with back_populates="cost_lots").
+    # A duplicate definition here was overwriting the correct one, breaking
+    # back_populates symmetry. Removed to keep the single correct definition.
     # Owner relationship: CostLot belongs to CalculationUnit
     unit: Optional["CalculationUnit"] = Relationship(
         back_populates="cost_lots",

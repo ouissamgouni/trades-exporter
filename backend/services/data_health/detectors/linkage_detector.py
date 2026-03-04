@@ -16,22 +16,32 @@ from .base import IssueDetector
 class LinkageIssueDetector(IssueDetector):
     """Detector for linkage issues (unlinked asset/account/price_quote/fee_quote)."""
     
+    # Asset-related issue types (excludes unlinked_account which has its own tab)
+    ASSET_ISSUE_TYPES = [
+        IssueType.UNLINKED_ASSET.value,
+        IssueType.UNLINKED_PRICE_QUOTE.value,
+        IssueType.UNLINKED_FEE_QUOTE.value,
+    ]
+    
     def count(
         self,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        issue_types: Optional[List[str]] = None,
     ) -> int:
-        """Count all linkage issues.
+        """Count linkage issues, optionally filtered by issue type.
         
         Args:
             account_ids: Filter by specific account IDs
             include_dismissed: Not applicable for linkage issues (no dismissal mechanism)
+            issue_types: Optional list of issue type values to include.
+                         If None, includes all 4 types.
             
         Returns:
             Total count of linkage issues
         """
-        issues_union = self._build_issues_union(account_ids)
-        total_query = select(func.count()).select_from(issues_union)
+        issues_union = self._build_issues_union(account_ids, issue_types=issue_types)
+        total_query = select(func.count(func.distinct(issues_union.c.tx_id))).select_from(issues_union)
         return self.session.exec(total_query).one()
     
     def fetch(
@@ -40,6 +50,7 @@ class LinkageIssueDetector(IssueDetector):
         per_page: int = 50,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        issue_types: Optional[List[str]] = None,
     ) -> Tuple[List[TransactionIssue], int]:
         """Fetch paginated linkage issues with fuzzy match suggestions.
         
@@ -48,15 +59,16 @@ class LinkageIssueDetector(IssueDetector):
             per_page: Items per page
             account_ids: Filter by specific account IDs
             include_dismissed: Not applicable for linkage issues
+            issue_types: Optional list of issue type values to include.
             
         Returns:
             Tuple of (issues_list, total_count)
         """
         # Get total count
-        total_count = self.count(account_ids, include_dismissed)
+        total_count = self.count(account_ids, include_dismissed, issue_types=issue_types)
         
         # Build issues union
-        issues_union = self._build_issues_union(account_ids)
+        issues_union = self._build_issues_union(account_ids, issue_types=issue_types)
         
         # Fetch paginated issues with transaction details
         offset = (page - 1) * per_page
@@ -174,15 +186,19 @@ class LinkageIssueDetector(IssueDetector):
         
         return issues_list, total_count
     
-    def _build_issues_union(self, account_ids: Optional[List[int]] = None):
-        """Build the SQL UNION query for all linkage issue types.
+    def _build_issues_union(self, account_ids: Optional[List[int]] = None, issue_types: Optional[List[str]] = None):
+        """Build the SQL UNION query for linkage issue types.
         
         Args:
             account_ids: Optional account ID filter
+            issue_types: Optional list of issue type values to include.
+                         If None, includes all 4 types.
             
         Returns:
-            SQLAlchemy subquery with union of all linkage issues
+            SQLAlchemy subquery with union of selected linkage issues
         """
+        # Default to all types if not specified
+        types_set = set(issue_types) if issue_types else None
         # Subquery for unlinked asset
         missing_asset_subq = (
             select(
@@ -251,10 +267,19 @@ class LinkageIssueDetector(IssueDetector):
                 NormalizedTransaction.account_id.in_(account_ids)
             )
         
-        # Union all linkage issues
-        return union_all(
-            missing_asset_subq,
-            missing_account_subq,
-            missing_price_quote_subq,
-            missing_fee_quote_subq,
-        ).subquery()
+        # Collect subqueries based on requested issue types
+        subqueries = []
+        if types_set is None or IssueType.UNLINKED_ASSET.value in types_set:
+            subqueries.append(missing_asset_subq)
+        if types_set is None or IssueType.UNLINKED_ACCOUNT.value in types_set:
+            subqueries.append(missing_account_subq)
+        if types_set is None or IssueType.UNLINKED_PRICE_QUOTE.value in types_set:
+            subqueries.append(missing_price_quote_subq)
+        if types_set is None or IssueType.UNLINKED_FEE_QUOTE.value in types_set:
+            subqueries.append(missing_fee_quote_subq)
+        
+        if not subqueries:
+            # Fallback: return all types if empty filter somehow passed
+            subqueries = [missing_asset_subq, missing_account_subq, missing_price_quote_subq, missing_fee_quote_subq]
+        
+        return union_all(*subqueries).subquery()

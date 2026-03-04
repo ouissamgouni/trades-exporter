@@ -5,17 +5,20 @@
  * Fetches issues from /transactions/data-health-check/transfer-issues,
  * groups by transaction_id, and renders TransactionsTable with an
  * "Account Issue" badge column. Fixes happen via inline-edit cells.
+ * Supports bulk dismiss via checkboxes + floating action bar.
  */
 
-import React, { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Box, Badge, Spinner, Text, Flex } from '@chakra-ui/react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Box, Badge, Spinner, Text, Flex, Button } from '@chakra-ui/react';
+import { LuX, LuEyeOff } from 'react-icons/lu';
 import { TransactionsTable } from '../../TransactionsTable';
 import { defaultFilterState } from '../../TransactionFilters';
 import { ColumnPlugin, TableConfig } from '../types';
 import { presetToVisibility } from '../useTransactionsTable';
 import { API_URL, Account, Asset, Transaction, TransactionIssue } from '../../../types';
 import { Tooltip } from '../../ui/tooltip';
+import { toaster } from '../../ui/toaster';
 
 // ============================================================================
 // Types
@@ -43,6 +46,10 @@ const ACCOUNT_ISSUE_CONFIG: Record<string, { color: string; label: string }> = {
 export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     onFixed,
 }) => {
+    const queryClient = useQueryClient();
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [isDismissing, setIsDismissing] = useState(false);
+
     // Fetch all account linkage issues
     const { data: issuesData, isLoading } = useQuery({
         queryKey: ['accountLinkageIssues'],
@@ -88,6 +95,96 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
         [issues],
     );
 
+    // Track selection changes from TransactionsTable
+    const handleSelectionChange = useCallback((ids: Set<number>) => {
+        setSelectedIds(ids);
+    }, []);
+
+    // Bulk dismiss selected transactions
+    const handleBulkDismiss = useCallback(async () => {
+        if (selectedIds.size === 0) return;
+        setIsDismissing(true);
+
+        try {
+            // Split selected IDs by field (from vs to) based on their issue type
+            const fromIds: number[] = [];
+            const toIds: number[] = [];
+
+            for (const txId of selectedIds) {
+                const txIssues = issuesByTxId.get(txId) || [];
+                for (const issue of txIssues) {
+                    if (issue.issue_type.includes('_from_')) {
+                        if (!fromIds.includes(txId)) fromIds.push(txId);
+                    }
+                    if (issue.issue_type.includes('_to_')) {
+                        if (!toIds.includes(txId)) toIds.push(txId);
+                    }
+                }
+            }
+
+            const results = await Promise.all([
+                ...(fromIds.length > 0 ? [fetch(`${API_URL}/transactions/bulk-dismiss-transfer-issues`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transaction_ids: fromIds,
+                        field: 'source_from_account',
+                        reason: 'Bulk dismissed from data health panel',
+                    }),
+                })] : []),
+                ...(toIds.length > 0 ? [fetch(`${API_URL}/transactions/bulk-dismiss-transfer-issues`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transaction_ids: toIds,
+                        field: 'source_to_account',
+                        reason: 'Bulk dismissed from data health panel',
+                    }),
+                })] : []),
+            ]);
+
+            // Check results
+            let totalDismissed = 0;
+            const allErrors: string[] = [];
+            for (const res of results) {
+                if (!res.ok) {
+                    allErrors.push(`Request failed: ${res.status}`);
+                    continue;
+                }
+                const data = await res.json();
+                totalDismissed += data.dismissed_count ?? 0;
+                if (data.errors?.length) allErrors.push(...data.errors);
+            }
+
+            if (allErrors.length > 0) {
+                toaster.create({
+                    title: `Dismissed ${totalDismissed}, but ${allErrors.length} error(s)`,
+                    description: allErrors.slice(0, 3).join('; '),
+                    type: 'warning',
+                });
+            } else {
+                toaster.create({
+                    title: `Dismissed ${totalDismissed} issue(s)`,
+                    type: 'success',
+                });
+            }
+
+            // Refresh data
+            setSelectedIds(new Set());
+            queryClient.invalidateQueries({ queryKey: ['accountLinkageIssues'] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            queryClient.invalidateQueries({ queryKey: ['dataHealthStatus'] });
+            onFixed?.();
+        } catch (err) {
+            toaster.create({
+                title: err instanceof Error ? err.message : 'Failed to dismiss issues',
+                type: 'error',
+            });
+        } finally {
+            setIsDismissing(false);
+        }
+    }, [selectedIds, issuesByTxId, queryClient, onFixed]);
+
     // Account issue column plugin
     const additionalColumns: ColumnPlugin<Transaction>[] = useMemo(() => [
         {
@@ -128,7 +225,7 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
         shownColumns: ['accounts'],
         features: {
             filters: false,
-            selection: false,
+            selection: true,
             inlineEdit: true,
         },
     }), []);
@@ -156,24 +253,70 @@ export const AccountsLinkageTable: React.FC<AccountsLinkageTableProps> = ({
     }
 
     return (
-        <TransactionsTable
-            title="Account Linkage Issues"
-            subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
-            tableId="accountsLinkage"
-            initialColumnVisibility={initialColumnVisibility}
-            filters={{
-                ...defaultFilterState,
-                transactionIds,
-                reviewStatus: [],
-            }}
-            showFilters={false}
-            showBundles={false}
-            showSuggestions={false}
-            compact={true}
-            additionalColumns={additionalColumns}
-            config={tableConfig}
-            onDataChange={onFixed}
-        />
+        <Box position="relative">
+            {/* Bulk dismiss floating bar */}
+            {selectedIds.size > 0 && (
+                <Flex
+                    position="sticky"
+                    top={0}
+                    zIndex={20}
+                    bg="blue.50"
+                    borderRadius="md"
+                    px={4}
+                    py={2}
+                    mb={2}
+                    align="center"
+                    justify="space-between"
+                    boxShadow="sm"
+                    border="1px solid"
+                    borderColor="blue.200"
+                >
+                    <Text fontSize="xs" fontWeight="medium" color="blue.700">
+                        {selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''} selected
+                    </Text>
+                    <Flex gap={2}>
+                        <Button
+                            size="xs"
+                            variant="outline"
+                            colorPalette="gray"
+                            onClick={() => setSelectedIds(new Set())}
+                        >
+                            <LuX />
+                            Clear
+                        </Button>
+                        <Button
+                            size="xs"
+                            colorPalette="orange"
+                            onClick={handleBulkDismiss}
+                            loading={isDismissing}
+                        >
+                            <LuEyeOff />
+                            Dismiss Selected
+                        </Button>
+                    </Flex>
+                </Flex>
+            )}
+
+            <TransactionsTable
+                title="Account Linkage Issues"
+                subtitle={`${transactionIds.length} transaction${transactionIds.length !== 1 ? 's' : ''} with unlinked accounts`}
+                tableId="accountsLinkage"
+                initialColumnVisibility={initialColumnVisibility}
+                filters={{
+                    ...defaultFilterState,
+                    transactionIds,
+                    reviewStatus: [],
+                }}
+                showFilters={false}
+                showBundles={false}
+                showSuggestions={false}
+                compact={true}
+                additionalColumns={additionalColumns}
+                config={tableConfig}
+                onDataChange={onFixed}
+                onSelectionChange={handleSelectionChange}
+            />
+        </Box>
     );
 };
 

@@ -525,7 +525,7 @@ class TestRule3bOnchainSwapByNetworkTx:
             source_transaction_type="SWAP",
             quantity=Decimal("0.000005"),
             account_id=10,
-            transaction_type="technical",
+            transaction_type="cost",
             dt=now,
         )
 
@@ -731,7 +731,7 @@ class TestRule3bOnchainSwapByNetworkTx:
                 id=4, direction="outflow", symbol="SOL", account_id=10,
                 source_transaction_id=f"{sig}_fee",
                 network_transaction_id=sig, source_transaction_type="SWAP",
-                quantity=Decimal("0.000005"), transaction_type="technical",
+                quantity=Decimal("0.000005"), transaction_type="cost",
                 dt=now,
             ),
         ]
@@ -1560,7 +1560,7 @@ class TestMultiCollectRelated:
             source_transaction_id=f"{solana_sig}_fee",
             network_transaction_id=solana_sig,
             source_transaction_type="TRANSFER",
-            transaction_type="technical",
+            transaction_type="cost",
             quantity=Decimal("0.000005"),
             network="solana",
             dt=now,
@@ -1625,7 +1625,7 @@ class TestMultiCollectRelated:
             symbol="ETH",
             account_id=1,
             network_transaction_id=tx_hash,
-            transaction_type="technical",
+            transaction_type="cost",
             quantity=Decimal("0.001"),
             dt=now,
         )
@@ -1668,7 +1668,7 @@ class TestMultiCollectRelated:
             asset_id=3,
             account_id=5,
             network_transaction_id=net_hash,
-            transaction_type="technical",
+            transaction_type="cost",
             quantity=Decimal("0.00001"),
             dt=now,
         )
@@ -1707,7 +1707,7 @@ class TestMultiCollectRelated:
             symbol="ETH",
             account_id=1,
             network_transaction_id="0xdifferent",
-            transaction_type="technical",
+            transaction_type="cost",
             quantity=Decimal("0.001"),
             dt=now,
         )
@@ -1749,7 +1749,7 @@ class TestMultiCollectRelated:
             symbol="ETH",
             account_id=1,
             network_transaction_id=None,
-            transaction_type="technical",
+            transaction_type="cost",
             quantity=Decimal("0.001"),
             dt=now,
         )

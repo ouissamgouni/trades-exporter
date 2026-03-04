@@ -237,8 +237,9 @@ class ConnectorPolymarket(BaseConnector):
             if timestamp:
                 dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
-            # All types are transfers — prediction shares aren't tracked assets
-            transaction_type = "transfer"
+            # Trades and redemptions are 'trade' type — USDC ↔ outcome shares
+            # (prediction shares aren't tracked assets, but the USDC exchange is a trade)
+            transaction_type = "trade"
 
             if activity_type == "TRADE":
                 if side == "BUY":
@@ -255,7 +256,7 @@ class ConnectorPolymarket(BaseConnector):
                 source_transaction_type = "redeem"
             else:
                 direction = "neutral"
-                transaction_type = "technical"
+                transaction_type = "cost"
                 source_transaction_type = activity_type.lower() if activity_type else "unknown"
 
             # Build tags with market context

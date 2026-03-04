@@ -49,24 +49,24 @@ def _redeem(usdc=50, shares=50, condition_id="0xghi", tx_hash="0x333"):
 
 
 class TestNormalization:
-    """All activity types produce transfer-type single-leg USDC movements."""
+    """All activity types produce trade-type single-leg USDC movements."""
 
-    def test_buy_is_transfer_outflow(self):
+    def test_buy_is_trade_outflow(self):
         norm = _make_connector().raw_to_normalized(_trade_buy())
-        assert norm.transaction_type == "transfer"
+        assert norm.transaction_type == "trade"
         assert norm.direction == "outflow"
         assert norm.source_transaction_type == "buy"
         assert norm.source_asset_symbol == "USDC"
 
-    def test_sell_is_transfer_inflow(self):
+    def test_sell_is_trade_inflow(self):
         norm = _make_connector().raw_to_normalized(_trade_sell())
-        assert norm.transaction_type == "transfer"
+        assert norm.transaction_type == "trade"
         assert norm.direction == "inflow"
         assert norm.source_transaction_type == "sell"
 
-    def test_redeem_is_transfer_inflow(self):
+    def test_redeem_is_trade_inflow(self):
         norm = _make_connector().raw_to_normalized(_redeem())
-        assert norm.transaction_type == "transfer"
+        assert norm.transaction_type == "trade"
         assert norm.direction == "inflow"
         assert norm.source_transaction_type == "redeem"
 

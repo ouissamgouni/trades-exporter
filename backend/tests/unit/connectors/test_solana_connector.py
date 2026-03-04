@@ -69,7 +69,7 @@ class TestSolanaConnector:
         fee_tx = normalized[1]
         assert fee_tx.source_transaction_id == f"{raw_txs[0]['signature']}_fee"
         assert fee_tx.direction == "outflow"
-        assert fee_tx.transaction_type == "technical"
+        assert fee_tx.transaction_type == "cost"
         assert fee_tx.quantity == Decimal(0)
         assert fee_tx.fee == Decimal("0.000005")  # 5000 lamports
         assert fee_tx.include_fee is True
@@ -103,7 +103,7 @@ class TestSolanaConnector:
         # Check fee transaction
         fee_tx = normalized[2]
         assert fee_tx.source_transaction_id == f"{raw_txs[1]['signature']}_fee"
-        assert fee_tx.transaction_type == "technical"
+        assert fee_tx.transaction_type == "cost"
 
     def test_normalization_native_transfer_inflow(self, connector):
         """Test normalization of native SOL transfer (inflow)."""

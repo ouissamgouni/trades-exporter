@@ -84,7 +84,7 @@ class TestSuiIntegration:
 
         normalized = list(connector.raw_to_normalized(fee_tx_raw))
         fee_transactions = [
-            t for t in normalized if t.transaction_type == "technical" and t.include_fee
+            t for t in normalized if t.transaction_type == "cost" and t.include_fee
         ]
 
         assert len(fee_transactions) == 1

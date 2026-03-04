@@ -13,6 +13,7 @@ from .detectors import (
     DuplicateDetector,
     PendingDetector,
     MissingDataDetector,
+    UnmappedAccountDetector,
 )
 
 
@@ -31,6 +32,7 @@ class IssueService:
         self.transfer_detector = TransferIssueDetector(session)
         self.duplicate_detector = DuplicateDetector(session)
         self.pending_detector = PendingDetector(session)
+        self.unmapped_account_detector = UnmappedAccountDetector(session)
         self.suggestion_service = SuggestionService(session)
     
     def get_counts(
@@ -49,11 +51,15 @@ class IssueService:
         """
         return IssueCounts(
             missing_data_issues=self.missing_data_detector.count(account_ids, include_dismissed),
-            linkage_issues=self.linkage_detector.count(account_ids, include_dismissed),
+            linkage_issues=self.linkage_detector.count(
+                account_ids, include_dismissed,
+                issue_types=self.linkage_detector.ASSET_ISSUE_TYPES,
+            ),
             transfer_issues=self.transfer_detector.count(account_ids, include_dismissed),
             duplicates=self.duplicate_detector.count(account_ids, include_dismissed),
             pending_reviews=self.pending_detector.count(account_ids, include_dismissed),
             bundle_suggestions=self._count_bundle_suggestions(account_ids),
+            unmapped_accounts=self.unmapped_account_detector.count(account_ids, include_dismissed),
         )
     
     def get_health_summary(
@@ -99,6 +105,7 @@ class IssueService:
         per_page: int = 50,
         account_ids: Optional[List[int]] = None,
         include_dismissed: bool = False,
+        issue_types: Optional[List[str]] = None,
     ):
         """Get paginated linkage issues with fuzzy match suggestions.
         
@@ -107,11 +114,12 @@ class IssueService:
             per_page: Items per page
             account_ids: Filter by specific account IDs
             include_dismissed: Not applicable for linkage issues
+            issue_types: Optional list of issue type values to filter by.
             
         Returns:
             Tuple of (issues_list, total_count)
         """
-        return self.linkage_detector.fetch(page, per_page, account_ids, include_dismissed)
+        return self.linkage_detector.fetch(page, per_page, account_ids, include_dismissed, issue_types=issue_types)
     
     def get_transfer_issues(
         self,

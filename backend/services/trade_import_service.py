@@ -433,14 +433,14 @@ class TradeImportService:
         
         # Determine direction and transaction_type
         if parsed.is_fee_transaction:
-            # FEES transactions: technical with neutral direction
+            # FEES transactions: cost type with neutral direction
             # These represent account-level fees (frais de gestion) that the broker
             # collects by liquidating a portion of held assets. We track the fee
             # amount in the fee field for P&L purposes, with quantity=0 since we
             # don't know which specific assets were consumed.
             # Fee is paid in EUR - resolved to fee_quote_asset_id if EUR asset exists.
             direction = "neutral"
-            transaction_type = "technical"
+            transaction_type = "cost"
             quantity = Decimal(0)
             fee = parsed.quantity  # Fee amount from quantity field in CSV
             source_fee_quote_asset_symbol = "EUR"

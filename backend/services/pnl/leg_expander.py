@@ -92,14 +92,14 @@ def is_neutral_transaction(tx: NormalizedTransaction) -> bool:
     Check if transaction is neutral (no value movement, just fee).
     Examples: Token approval, failed transaction, contract interaction.
     """
-    # Check transaction_type for technical transactions
+    # Check transaction_type for cost (fee-only) transactions
     tx_type = (tx.transaction_type or "").lower()
-    is_technical = tx_type == "technical"
+    is_cost = tx_type == "cost"
     
     quantity = tx.quantity or 0
     is_zero_quantity = float(quantity) == 0
     
-    return is_technical or (is_zero_quantity and has_fee(tx))
+    return is_cost or (is_zero_quantity and has_fee(tx))
 
 
 # =============================================================================

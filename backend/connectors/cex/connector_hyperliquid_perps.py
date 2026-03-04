@@ -420,7 +420,7 @@ class HyperliquidPerpsConnector(BaseConnector):
                 source_transaction_id=oid,
                 date_time=dt,
                 direction=direction,
-                transaction_type="transfer",
+                transaction_type="margin",
                 source_transaction_type=source_trx_type,
                 source_asset_symbol=margin_currency,
                 quantity=quantity,

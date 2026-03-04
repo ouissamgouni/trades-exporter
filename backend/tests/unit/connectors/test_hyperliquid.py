@@ -57,7 +57,7 @@ class TestHyperliquidPerpsNormalization:
         tx = connector.raw_to_normalized(open_fill)
         assert tx.direction == "neutral"
         assert tx.quantity == 0.0
-        assert tx.transaction_type == "transfer"
+        assert tx.transaction_type == "margin"
         assert tx.source_transaction_type == "perp_open"
 
     def test_close_fill_direction_from_pnl(self, connector, fills):
@@ -160,7 +160,7 @@ class TestHyperliquidPerpsNormalization:
             assert isinstance(tx, NormalizedTransaction)
             assert tx.source_transaction_id
             assert tx.source_asset_symbol == fill["feeToken"]  # Margin currency from fill
-            assert tx.transaction_type == "transfer"
+            assert tx.transaction_type == "margin"
 
 
 # =========================================================================
@@ -441,7 +441,7 @@ class TestHyperliquidFundingNormalization:
             pytest.skip("No positive funding in fixtures")
         tx = connector.raw_to_normalized(pos)
         assert tx.direction == "inflow"
-        assert tx.transaction_type == "transfer"
+        assert tx.transaction_type == "margin"
         assert tx.source_asset_symbol == "USDC"
         assert tx.taxability_status == "non_taxable"
 

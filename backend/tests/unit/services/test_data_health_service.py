@@ -21,17 +21,21 @@ from backend.services.data_health.detectors import (
     TransferIssueDetector,
     DuplicateDetector,
     PendingDetector,
+    UnmappedAccountDetector,
 )
 
 
-# Always patch MissingDataDetector to avoid real DB calls during tests
+# Always patch MissingDataDetector and UnmappedAccountDetector to avoid real DB calls during tests
 @pytest.fixture(autouse=True)
-def _patch_missing_data_detector():
-    """Auto-patch MissingDataDetector for all tests in this module."""
-    with patch('backend.services.data_health.issue_service.MissingDataDetector') as mock_cls:
-        mock_cls.return_value.count.return_value = 0
-        mock_cls.return_value.fetch.return_value = ([], 0)
-        yield mock_cls
+def _patch_detectors_with_defaults():
+    """Auto-patch detectors that need special DB objects (RawAccount, etc.)."""
+    with patch('backend.services.data_health.issue_service.MissingDataDetector') as mock_missing, \
+         patch('backend.services.data_health.issue_service.UnmappedAccountDetector') as mock_unmapped:
+        mock_missing.return_value.count.return_value = 0
+        mock_missing.return_value.fetch.return_value = ([], 0)
+        mock_unmapped.return_value.count.return_value = 0
+        mock_unmapped.return_value.fetch.return_value = ([], 0)
+        yield mock_missing, mock_unmapped
 
 
 # =============================================================================
@@ -110,7 +114,10 @@ class TestIssueServiceGetCounts:
             counts = service.get_counts()
             
             # Verify all detectors were called
-            mock_linkage_detector.count.assert_called_once_with(None, False)
+            mock_linkage_detector.count.assert_called_once_with(
+                None, False,
+                issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
+            )
             mock_transfer_detector.count.assert_called_once_with(None, False)
             mock_duplicate_detector.count.assert_called_once_with(None, False)
             mock_pending_detector.count.assert_called_once_with(None, False)
@@ -142,7 +149,10 @@ class TestIssueServiceGetCounts:
             counts = service.get_counts(account_ids=account_ids)
             
             # Verify detectors were called with account filter
-            mock_linkage_detector.count.assert_called_once_with(account_ids, False)
+            mock_linkage_detector.count.assert_called_once_with(
+                account_ids, False,
+                issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
+            )
             mock_transfer_detector.count.assert_called_once_with(account_ids, False)
             mock_duplicate_detector.count.assert_called_once_with(account_ids, False)
             mock_pending_detector.count.assert_called_once_with(account_ids, False)
@@ -166,7 +176,10 @@ class TestIssueServiceGetCounts:
             counts = service.get_counts(include_dismissed=True)
             
             # Verify detectors were called with include_dismissed=True
-            mock_linkage_detector.count.assert_called_once_with(None, True)
+            mock_linkage_detector.count.assert_called_once_with(
+                None, True,
+                issue_types=mock_linkage_detector.ASSET_ISSUE_TYPES,
+            )
             mock_transfer_detector.count.assert_called_once_with(None, True)
             mock_duplicate_detector.count.assert_called_once_with(None, True)
             mock_pending_detector.count.assert_called_once_with(None, True)
@@ -348,7 +361,10 @@ class TestIssueServiceEdgeCases:
             counts = service.get_counts(account_ids=[])
             
             # Verify empty list was passed to detector
-            mock_linkage.count.assert_called_once_with([], False)
+            mock_linkage.count.assert_called_once_with(
+                [], False,
+                issue_types=mock_linkage.ASSET_ISSUE_TYPES,
+            )
     
     def test_get_health_summary_with_mixed_filters(self, mock_session):
         """Test get_health_summary() with both account_ids and include_dismissed."""
@@ -375,7 +391,10 @@ class TestIssueServiceEdgeCases:
             summary = service.get_health_summary(account_ids=account_ids, include_dismissed=True)
             
             # Verify filters were applied
-            mock_linkage.count.assert_called_once_with(account_ids, True)
+            mock_linkage.count.assert_called_once_with(
+                account_ids, True,
+                issue_types=mock_linkage.ASSET_ISSUE_TYPES,
+            )
             mock_transfer.count.assert_called_once_with(account_ids, True)
             mock_duplicate.count.assert_called_once_with(account_ids, True)
             mock_pending.count.assert_called_once_with(account_ids, True)

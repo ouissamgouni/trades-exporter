@@ -14,6 +14,7 @@ class IssueCounts:
     duplicates: int = 0
     pending_reviews: int = 0
     bundle_suggestions: int = 0
+    unmapped_accounts: int = 0
     
     @property
     def data_quality_total(self) -> int:

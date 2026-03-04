@@ -521,8 +521,14 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (filters.toAccountIds && filters.toAccountIds.length > 0) {
                 params.append('to_account_id', filters.toAccountIds.join(','));
             }
+            if (filters.relatedAccountIds && filters.relatedAccountIds.length > 0) {
+                params.append('related_account_id', filters.relatedAccountIds.join(','));
+            }
             if (filters.assetIds.length > 0) {
                 params.append('asset_id', filters.assetIds.join(','));
+            }
+            if (filters.relatedAssetIds && filters.relatedAssetIds.length > 0) {
+                params.append('related_asset_id', filters.relatedAssetIds.join(','));
             }
             if (filters.categoryIds.length > 0) {
                 params.append('category_id', filters.categoryIds.join(','));
@@ -2189,7 +2195,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                                     <Table.Body>
                                                         {importPreview.transactions.slice(0, 20).map((tx, i) => {
                                                             // Compute transformed values (what will actually be stored in DB)
-                                                            const dbType = tx.is_fee_transaction ? 'technical' : 'trade';
+                                                            const dbType = tx.is_fee_transaction ? 'cost' : 'trade';
                                                             const direction = tx.is_fee_transaction
                                                                 ? 'neutral'
                                                                 : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');

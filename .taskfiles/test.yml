@@ -83,6 +83,8 @@ tasks:
         TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
           .venv/bin/python -m pytest \
             tests/integration/test_int_data_health_detectors.py \
+            tests/integration/test_int_transfer_dismiss.py \
+            tests/integration/test_int_issue_service_counts.py \
             tests/integration/test_int_seeding_and_connectors.py \
             tests/integration/test_bulk_update.py \
             -v -m integration --timeout=120

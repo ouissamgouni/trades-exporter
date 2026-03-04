@@ -24,7 +24,8 @@ export enum UnitPattern {
 export enum TransactionType {
   TRADE = 'trade',
   TRANSFER = 'transfer',
-  INTERNAL_TRANSFER = 'internal_transfer',
+  MARGIN = 'margin',
+  COST = 'cost',
 }
 
 /**
@@ -139,7 +140,8 @@ export function getTransactionTypeLabel(type: TransactionType | string): string 
   const labels: Record<string, string> = {
     [TransactionType.TRADE]: 'Trade',
     [TransactionType.TRANSFER]: 'Transfer',
-    [TransactionType.INTERNAL_TRANSFER]: 'Internal Transfer',
+    [TransactionType.MARGIN]: 'Margin',
+    [TransactionType.COST]: 'Cost',
   };
   return labels[type] || type;
 }

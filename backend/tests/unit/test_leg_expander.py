@@ -401,7 +401,7 @@ class TestPrepareTransactionsForPnl:
         """Fee-only tx should create a CalculationUnit with fee leg."""
         tx = make_tx(
             source_transaction_type="approval",
-            transaction_type="technical",  # Approval is a technical transaction
+            transaction_type="cost",  # Approval is a technical transaction
             quantity=Decimal("0"),
             fee=Decimal("0.001"),
             fee_quote_asset_id=1,

@@ -6,6 +6,7 @@ from .linkage_detector import LinkageIssueDetector
 from .transfer_detector import TransferIssueDetector
 from .duplicate_detector import DuplicateDetector
 from .pending_detector import PendingDetector
+from .unmapped_account_detector import UnmappedAccountDetector
 
 __all__ = [
     "IssueDetector",
@@ -14,4 +15,5 @@ __all__ = [
     "TransferIssueDetector",
     "DuplicateDetector",
     "PendingDetector",
+    "UnmappedAccountDetector",
 ]

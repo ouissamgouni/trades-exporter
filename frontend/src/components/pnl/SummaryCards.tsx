@@ -33,11 +33,6 @@ const formatCurrency = (value: number, currency: string): string => {
     }).format(value);
 };
 
-const formatPct = (value: number): string => {
-    const sign = value >= 0 ? '+' : '';
-    return `${sign}${(value * 100).toFixed(2)}%`;
-};
-
 interface MetricCardProps {
     label: string;
     value: string;

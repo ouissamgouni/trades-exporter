@@ -986,8 +986,10 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     <BiTransfer color="#805AD5" size={12} title="Transfer" />
                                 ) : tx.transaction_type === 'trade' ? (
                                     <RiExchangeFundsLine color="#3182CE" size={12} title="Trade" />
-                                ) : tx.transaction_type === 'technical' ? (
-                                    <FaQuestion color="#A0AEC0" size={10} title="Technical (approval, contract call)" />
+                                ) : tx.transaction_type === 'margin' ? (
+                                    <RiExchangeFundsLine color="#D69E2E" size={12} title="Margin (derivative)" />
+                                ) : tx.transaction_type === 'cost' ? (
+                                    <FaQuestion color="#A0AEC0" size={10} title="Cost (fee-only)" />
                                 ) : (
                                     <FaQuestion color="#718096" size={10} title="Other" />
                                 )}

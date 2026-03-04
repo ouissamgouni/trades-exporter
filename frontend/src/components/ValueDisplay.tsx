@@ -72,15 +72,16 @@ export const ValueDisplay: React.FC<ValueDisplayProps> = ({
   const formattedValue = currency
     ? formatQuantityWithCurrency(value, currency, options)
     : formatQuantity(value, options);
-  
-  const showTooltip = shouldShowTooltip(value, options);
+
+  // Show tooltip when display is truncated: exponential, K/M/B suffixes, or reduced decimals
+  const fullPrecisionValue = currency
+    ? formatQuantityWithCurrency(value, currency, { ...options, forceFullPrecision: true })
+    : formatQuantityFullPrecision(value);
+
+  const showTooltip = shouldShowTooltip(value, options) || formattedValue !== fullPrecisionValue;
 
   // If tooltip should be shown, wrap in Tooltip component
   if (showTooltip) {
-    const fullPrecisionValue = currency
-      ? formatQuantityWithCurrency(value, currency, { ...options, forceFullPrecision: true })
-      : formatQuantityFullPrecision(value);
-    
     return (
       <Tooltip content={fullPrecisionValue} openDelay={200} closeDelay={100}>
         <span className={className} style={{ ...style, cursor: 'help', textDecoration: 'underline dotted' }}>

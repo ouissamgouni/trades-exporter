@@ -85,15 +85,16 @@ export interface TransactionSidePanelProps {
 // Helpers ported from ManualTransactionForm
 // ============================================================================
 
-type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER;
+type SimplifiedType = typeof TransactionType.TRADE | typeof TransactionType.TRANSFER | typeof TransactionType.MARGIN | typeof TransactionType.COST;
 
 const deriveTransactionType = (simplifiedType: SimplifiedType, _direction: string): string => {
-    if (simplifiedType === TransactionType.TRANSFER) return TransactionType.TRANSFER;
-    return TransactionType.TRADE;
+    return simplifiedType;
 };
 
 const deriveSimplifiedType = (transactionType: string): SimplifiedType => {
     if (transactionType === TransactionType.TRANSFER) return TransactionType.TRANSFER;
+    if (transactionType === TransactionType.MARGIN) return TransactionType.MARGIN;
+    if (transactionType === TransactionType.COST) return TransactionType.COST;
     return TransactionType.TRADE;
 };
 
@@ -674,7 +675,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         label="Type"
                         value={simplifiedType}
                         displayValue={
-                            <Badge size="xs" colorPalette={tx.transaction_type === 'transfer' ? 'purple' : 'blue'} fontSize="9px">
+                            <Badge size="xs" colorPalette={tx.transaction_type === 'transfer' ? 'purple' : tx.transaction_type === 'margin' ? 'yellow' : tx.transaction_type === 'cost' ? 'gray' : 'blue'} fontSize="9px">
                                 {tx.transaction_type || '-'}
                             </Badge>
                         }
@@ -682,6 +683,8 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         options={[
                             { label: 'Trade', value: TransactionType.TRADE },
                             { label: 'Transfer', value: TransactionType.TRANSFER },
+                            { label: 'Margin', value: TransactionType.MARGIN },
+                            { label: 'Cost', value: TransactionType.COST },
                         ]}
                         onSave={async (v) => { await saveTypeOrDirection('transaction_type', v); }}
                     />

@@ -667,7 +667,7 @@ class ConnectorSui(BaseConnector):
                     # Core transaction data
                     date_time=dt,
                     direction="outflow",
-                    transaction_type="technical",
+                    transaction_type="cost",
                     source_transaction_type=source_tx_type,
                     # Asset and amounts (quantity=0 for fee transaction)
                     source_asset_symbol="SUI",

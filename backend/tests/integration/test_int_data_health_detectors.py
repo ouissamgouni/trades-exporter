@@ -369,7 +369,7 @@ class TestTransferIssueDetector:
             from_account_id=None,
             source_from_account=None,
             review_status=ReviewStatus.VALID,
-            tags={"sys_transfer_dismissed": True},  # Mark as dismissed using tag
+            tags=[{"sys_transfer_dismissed": "source_from_account"}],
         )
         pg_session.add(tx)
         pg_session.commit()

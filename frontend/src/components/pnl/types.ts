@@ -668,7 +668,7 @@ export interface PnLTransaction {
 
     // Source info
     source?: string;
-    transaction_type?: string;  // "trade", "transfer", "technical"
+    transaction_type?: string;  // "trade", "transfer", "margin", "cost"
     source_transaction_type?: string;  // From source: "SPOT_TRADE", "deposit", etc.
     direction?: string;  // "inflow", "outflow", "neutral"
 

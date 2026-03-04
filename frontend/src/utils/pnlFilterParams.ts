@@ -13,7 +13,9 @@ export interface PnLFilterParams {
     account_id?: string;
     from_account_id?: string;
     to_account_id?: string;
+    related_account_id?: string;
     asset_id?: string;
+    related_asset_id?: string;
     category_id?: string;
     transaction_type?: string;
     direction?: string;
@@ -36,7 +38,9 @@ export function buildPnLFilterParams(
     if (filters.accountIds.length > 0) params.account_id = filters.accountIds.join(',');
     if (filters.fromAccountIds.length > 0) params.from_account_id = filters.fromAccountIds.join(',');
     if (filters.toAccountIds.length > 0) params.to_account_id = filters.toAccountIds.join(',');
+    if (filters.relatedAccountIds.length > 0) params.related_account_id = filters.relatedAccountIds.join(',');
     if (filters.assetIds.length > 0) params.asset_id = filters.assetIds.join(',');
+    if (filters.relatedAssetIds.length > 0) params.related_asset_id = filters.relatedAssetIds.join(',');
     if (filters.categoryIds.length > 0) params.category_id = filters.categoryIds.join(',');
     if (filters.transactionTypes.length > 0) params.transaction_type = filters.transactionTypes.join(',');
     if (filters.directions.length > 0) params.direction = filters.directions.join(',');
@@ -64,7 +68,9 @@ export function hasActivePnLFilters(
         filters.accountIds.length > 0 ||
         filters.fromAccountIds.length > 0 ||
         filters.toAccountIds.length > 0 ||
+        filters.relatedAccountIds.length > 0 ||
         filters.assetIds.length > 0 ||
+        filters.relatedAssetIds.length > 0 ||
         filters.categoryIds.length > 0 ||
         filters.transactionTypes.length > 0 ||
         filters.directions.length > 0 ||

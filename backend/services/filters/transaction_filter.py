@@ -132,12 +132,35 @@ def build_transaction_filter_predicates(
         if cond is not None:
             predicates.append(cond)
 
-    # Asset filter
+    # Related account filter (matches account_id OR from_account_id OR to_account_id)
+    if filters.related_account_ids:
+        sub_conditions = []
+        for col in (
+            NormalizedTransaction.account_id,
+            NormalizedTransaction.from_account_id,
+            NormalizedTransaction.to_account_id,
+        ):
+            cond = build_account_filter_condition(col, filters.related_account_ids)
+            if cond is not None:
+                sub_conditions.append(cond)
+        if sub_conditions:
+            predicates.append(or_(*sub_conditions))
+
+    # Asset filter (base asset only)
     if filters.asset_ids:
         if len(filters.asset_ids) == 1:
             predicates.append(NormalizedTransaction.asset_id == filters.asset_ids[0])
         else:
             predicates.append(NormalizedTransaction.asset_id.in_(filters.asset_ids))
+
+    # Related asset filter (matches base asset OR price quote OR fee quote)
+    if filters.related_asset_ids:
+        ids = filters.related_asset_ids
+        predicates.append(or_(
+            NormalizedTransaction.asset_id.in_(ids),
+            NormalizedTransaction.price_quote_asset_id.in_(ids),
+            NormalizedTransaction.fee_quote_asset_id.in_(ids),
+        ))
 
     # Category filter — filter by assets belonging to the selected categories
     if filters.category_ids:
@@ -285,7 +308,9 @@ def has_active_filters(
         or filters.account_ids
         or filters.from_account_ids
         or filters.to_account_ids
+        or filters.related_account_ids
         or filters.asset_ids
+        or filters.related_asset_ids
         or filters.category_ids
         or filters.transaction_types
         or filters.directions

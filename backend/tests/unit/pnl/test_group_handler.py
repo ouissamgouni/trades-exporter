@@ -428,6 +428,81 @@ class TestTransferScenarios:
         assert new_lots[0].account_id == 2
         assert new_lots[1].account_id == 2
 
+    def test_transfer_preserves_three_slices(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """Transfer consuming 3 lots creates 3 destination lots.
+        
+        Regression test for bug where only the first transfer lot was persisted
+        due to dual delete-orphan cascade conflict between CalculationUnit.cost_lots
+        and NormalizedTransaction.cost_lots on CostLot.
+        
+        Setup mirrors the real PLAY (asset_id=254) bug:
+        - 3 source lots at different costs/dates
+        - 1 outflow consumes all 3
+        - 1 inflow on different account
+        Expected: 3 new lots on destination account, one per consumed slice
+        """
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        lot1 = create_lot(
+            asset_id=2, account_id=1,
+            qty=Decimal("2205.85"), unit_cost=Decimal("0.005"),
+            acquired_at=base_datetime - timedelta(days=100),
+        )
+        lot2 = create_lot(
+            asset_id=2, account_id=1,
+            qty=Decimal("1900"), unit_cost=Decimal("0.006"),
+            acquired_at=base_datetime - timedelta(days=60),
+        )
+        lot3 = create_lot(
+            asset_id=2, account_id=1,
+            qty=Decimal("2700"), unit_cost=Decimal("0.007"),
+            acquired_at=base_datetime - timedelta(days=30),
+        )
+        seed_lot(lot_manager, lot1)
+        seed_lot(lot_manager, lot2)
+        seed_lot(lot_manager, lot3)
+
+        # Transfer 6799.07 = 2205.85 + 1900 + 2693.22 (partial from lot3)
+        group = create_transfer_group(
+            base_dt=base_datetime,
+            asset_id=2,
+            qty=Decimal("6799.07"),
+            from_account_id=1,
+            to_account_id=2,
+        )
+
+        result = handle_unit(group, lot_manager, fmv_service, fifo_config)
+
+        # No P&L on transfers
+        assert len(result.realized_pnl_records) == 0
+
+        # Must create 3 lots — one per consumed slice
+        assert len(result.cost_lots) == 3, (
+            f"Expected 3 transfer lots (one per consumed slice), got {len(result.cost_lots)}. "
+            "This was the dual-cascade bug: only the first lot survived autoflush."
+        )
+
+        # Verify total quantity matches
+        total_qty = sum(lot.qty for lot in result.cost_lots)
+        assert abs(total_qty - Decimal("6799.07")) < Decimal("0.01")
+
+        # All on destination account
+        for lot in result.cost_lots:
+            assert lot.account_id == 2
+
+        # Verify individual slice preservation (FIFO order)
+        lots_sorted = sorted(result.cost_lots, key=lambda l: l.acquired_at)
+        assert lots_sorted[0].qty == Decimal("2205.85")
+        assert lots_sorted[0].unit_cost == Decimal("0.005")
+        assert lots_sorted[1].qty == Decimal("1900")
+        assert lots_sorted[1].unit_cost == Decimal("0.006")
+        # Third slice is partial: 2693.22 from lot3
+        assert abs(lots_sorted[2].qty - Decimal("2693.22")) < Decimal("0.01")
+        assert lots_sorted[2].unit_cost == Decimal("0.007")
+
 
 class TestSplitScenarios:
     """Test SPLIT scenarios (same asset, qty changes)."""

@@ -67,7 +67,9 @@ export interface TransactionFilterState {
     accountIds: string[];
     fromAccountIds: string[];
     toAccountIds: string[];
+    relatedAccountIds: string[];
     assetIds: string[];
+    relatedAssetIds: string[];
     categoryIds: string[];
     transactionTypes: string[];
     directions: string[];
@@ -97,7 +99,9 @@ export const defaultFilterState: TransactionFilterState = {
     accountIds: [],
     fromAccountIds: [],
     toAccountIds: [],
+    relatedAccountIds: [],
     assetIds: [],
+    relatedAssetIds: [],
     categoryIds: [],
     transactionTypes: [],
     directions: [],
@@ -160,12 +164,14 @@ const FILTER_DEFS: FilterDef[] = [
     { key: 'accountIds', label: 'Account', icon: '👤', type: 'multi', optionsKey: 'accounts', color: 'cyan' },
     { key: 'fromAccountIds', label: 'From Account', icon: '⬅️', type: 'multi', optionsKey: 'from_accounts', color: 'teal', isDropdown: true },
     { key: 'toAccountIds', label: 'To Account', icon: '➡️', type: 'multi', optionsKey: 'to_accounts', color: 'cyan', isDropdown: true },
+    { key: 'relatedAccountIds', label: 'Related Account', icon: '🔗', type: 'multi', optionsKey: 'accounts', color: 'cyan', isDropdown: true },
     { key: 'sources', label: 'Source', icon: '🔌', type: 'multi', optionsKey: 'sources', color: 'blue', searchable: true },
     { key: 'transactionTypes', label: 'Type', icon: '🏷️', type: 'multi', optionsKey: 'transaction_types', color: 'teal' },
     { key: 'directions', label: 'Direction', icon: '↔️', type: 'multi', optionsKey: 'directions', color: 'yellow' },
     { key: 'taxability', label: 'Taxability', icon: '💰', type: 'multi', optionsKey: 'taxability_statuses', color: 'red' },
     { key: 'reviewStatus', label: 'Status', icon: '🔄', type: 'multi', optionsKey: 'review_statuses', color: 'green' },
     { key: 'assetIds', label: 'Asset', icon: '💎', type: 'multi', optionsKey: 'assets', color: 'orange', isDropdown: true },
+    { key: 'relatedAssetIds', label: 'Related Asset', icon: '🔗', type: 'multi', optionsKey: 'assets', color: 'orange', isDropdown: true },
     { key: 'networks', label: 'Network', icon: '🌐', type: 'multi', optionsKey: 'networks', color: 'emerald', isDropdown: true },
     { key: 'tagKeys', label: 'Tags', icon: '🏷️', type: 'multi', optionsKey: 'tags', color: 'purple', isDropdown: true },
     { key: 'categoryIds', label: 'Category', icon: '📁', type: 'multi', optionsKey: 'categories_by_dimension', color: 'pink', isDropdown: true },
@@ -956,7 +962,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if (filters.accountIds.length > 0) params.append('account_id', filters.accountIds.join(','));
         if (filters.fromAccountIds?.length) params.append('from_account_id', filters.fromAccountIds.join(','));
         if (filters.toAccountIds?.length) params.append('to_account_id', filters.toAccountIds.join(','));
+        if (filters.relatedAccountIds?.length) params.append('related_account_id', filters.relatedAccountIds.join(','));
         if (filters.assetIds.length > 0) params.append('asset_id', filters.assetIds.join(','));
+        if (filters.relatedAssetIds.length > 0) params.append('related_asset_id', filters.relatedAssetIds.join(','));
         if (filters.categoryIds.length > 0) params.append('category_id', filters.categoryIds.join(','));
         if (filters.transactionTypes.length > 0) params.append('transaction_type', filters.transactionTypes.join(','));
         if (filters.directions.length > 0) params.append('direction', filters.directions.join(','));
@@ -1094,7 +1102,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             account_ids: localFilters.accountIds,
             from_account_ids: localFilters.fromAccountIds,
             to_account_ids: localFilters.toAccountIds,
+            related_account_ids: localFilters.relatedAccountIds,
             asset_ids: localFilters.assetIds,
+            related_asset_ids: localFilters.relatedAssetIds,
             category_ids: localFilters.categoryIds,
             transaction_types: localFilters.transactionTypes,
             directions: localFilters.directions,
@@ -1180,8 +1190,12 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                 values = sourceFilters.from_account_ids || [];
             } else if (def.key === 'toAccountIds') {
                 values = sourceFilters.to_account_ids || [];
+            } else if (def.key === 'relatedAccountIds') {
+                values = sourceFilters.related_account_ids || [];
             } else if (def.key === 'assetIds') {
                 values = sourceFilters.asset_ids || [];
+            } else if (def.key === 'relatedAssetIds') {
+                values = sourceFilters.related_asset_ids || [];
             } else if (def.key === 'categoryIds') {
                 values = sourceFilters.category_ids || [];
             } else if (def.key === 'transactionTypes') {
@@ -1442,6 +1456,36 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                     color="orange"
                                     isOpen={openDropdown === 'assetIds'}
                                     onToggle={() => setOpenDropdown(openDropdown === 'assetIds' ? null : 'assetIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
+
+                            {/* Related Asset Dropdown Card (matches base, price quote, fee quote) */}
+                            {!hiddenSet.has('relatedAssetIds') && (
+                                <DropdownCard
+                                    label="Related Asset"
+                                    icon="🔗"
+                                    options={filterOptions?.assets || []}
+                                    selected={localFilters.relatedAssetIds || []}
+                                    onChange={(v) => updateLocalFilter('relatedAssetIds', v)}
+                                    color="orange"
+                                    isOpen={openDropdown === 'relatedAssetIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'relatedAssetIds' ? null : 'relatedAssetIds')}
+                                    onClose={() => setOpenDropdown(null)}
+                                />
+                            )}
+
+                            {/* Related Account Dropdown Card (matches account, from account, to account) */}
+                            {!hiddenSet.has('relatedAccountIds') && (
+                                <DropdownCard
+                                    label="Related Account"
+                                    icon="🔗"
+                                    options={filterOptions?.accounts || []}
+                                    selected={localFilters.relatedAccountIds || []}
+                                    onChange={(v) => updateLocalFilter('relatedAccountIds', v)}
+                                    color="cyan"
+                                    isOpen={openDropdown === 'relatedAccountIds'}
+                                    onToggle={() => setOpenDropdown(openDropdown === 'relatedAccountIds' ? null : 'relatedAccountIds')}
                                     onClose={() => setOpenDropdown(null)}
                                 />
                             )}
