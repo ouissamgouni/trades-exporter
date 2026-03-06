@@ -19,7 +19,7 @@ from typing import List, Optional
 from sqlmodel import Session
 from sqlalchemy import text
 
-from backend.db.models import Account, AccountConnector
+from backend.db.models import Account, AccountConnector, Asset
 from backend.config.loader import configure_logging
 
 log = configure_logging("data_cleanup_service")
@@ -394,4 +394,166 @@ class DataCleanupService:
         # Delete the account itself
         self.session.delete(account)
 
+        return result
+
+    # =========================================================================
+    # Asset deletion
+    # =========================================================================
+
+    def preview_asset_delete(self, asset_id: int) -> dict:
+        """
+        Preview the impact of deleting an asset.
+        Returns counts of all dependent rows without modifying anything.
+        """
+        p = {"aid": asset_id}
+
+        return {
+            # Cascade deletions (light children deleted with the asset)
+            "asset_categories": self._count(
+                "SELECT COUNT(*) FROM asset_categories WHERE asset_id = :aid", p
+            ),
+            "price_getters": self._count(
+                "SELECT COUNT(*) FROM asset_price_getters WHERE asset_id = :aid", p
+            ),
+            "raw_assets": self._count(
+                "SELECT COUNT(*) FROM raw_assets WHERE asset_id = :aid", p
+            ),
+            "price_snapshots": self._count(
+                "SELECT COUNT(*) FROM price_snapshots WHERE asset_id = :aid", p
+            ),
+            # Heavy data (require force=true)
+            "transactions": self._count(
+                "SELECT COUNT(*) FROM normalized_transactions "
+                "WHERE asset_id = :aid OR price_quote_asset_id = :aid OR fee_quote_asset_id = :aid", p
+            ),
+            "cost_lots": self._count(
+                "SELECT COUNT(*) FROM cost_lots WHERE asset_id = :aid", p
+            ),
+            "realized_pnl": self._count(
+                "SELECT COUNT(*) FROM realized_pnl WHERE asset_id = :aid", p
+            ),
+            "calculation_unit_legs": self._count(
+                "SELECT COUNT(*) FROM calculation_unit_legs WHERE asset_id = :aid", p
+            ),
+            "fee_entries": self._count(
+                "SELECT COUNT(*) FROM fee_entries WHERE related_asset_id = :aid", p
+            ),
+            "pnl_warnings": self._count(
+                "SELECT COUNT(*) FROM pnl_warnings WHERE asset_id = :aid", p
+            ),
+        }
+
+    def execute_asset_delete(self, asset_id: int) -> dict:
+        """
+        Force-delete an asset and ALL its dependent data.
+        Handles the full FK dependency tree in correct order.
+        """
+        asset = self.session.get(Asset, asset_id)
+        if not asset:
+            raise ValueError(f"Asset {asset_id} not found")
+
+        p = {"aid": asset_id}
+        result = {}
+
+        log.info("asset_delete_start", asset_id=asset_id, symbol=asset.symbol)
+
+        # ── 1. Delete P&L warnings referencing this asset ──
+        result["pnl_warnings_deleted"] = self._exec(
+            "DELETE FROM pnl_warnings WHERE asset_id = :aid", p
+        )
+
+        # ── 2. Delete fee entries referencing this asset ──
+        result["fee_entries_deleted"] = self._exec(
+            "DELETE FROM fee_entries WHERE related_asset_id = :aid", p
+        )
+
+        # ── 3. Delete calculation unit legs referencing this asset ──
+        result["calc_legs_deleted"] = self._exec(
+            "DELETE FROM calculation_unit_legs WHERE asset_id = :aid", p
+        )
+
+        # ── 4. Handle realized P&L referencing this asset ──
+        # First detach consumed_lot_slices that reference these realized_pnl rows
+        pnl_sub = "(SELECT pnl_id FROM realized_pnl WHERE asset_id = :aid)"
+        self._exec(
+            f"DELETE FROM consumed_lot_slices WHERE realized_pnl_id IN {pnl_sub}", p
+        )
+        result["realized_pnl_deleted"] = self._exec(
+            "DELETE FROM realized_pnl WHERE asset_id = :aid", p
+        )
+
+        # ── 5. Handle cost lots referencing this asset ──
+        lot_sub = "(SELECT cost_lot_id FROM cost_lots WHERE asset_id = :aid)"
+        # Detach self-references and children
+        self._exec(f"UPDATE cost_lots SET settled_by_lot_id = NULL WHERE settled_by_lot_id IN {lot_sub}", p)
+        self._exec(f"DELETE FROM consumed_lot_slices WHERE cost_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE lot_settlements SET negative_lot_id = NULL WHERE negative_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE lot_settlements SET settling_lot_id = NULL WHERE settling_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE cost_lot_events SET lot_id = NULL WHERE lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE cost_lot_events SET related_lot_id = NULL WHERE related_lot_id IN {lot_sub}", p)
+        result["cost_lots_deleted"] = self._exec(
+            "DELETE FROM cost_lots WHERE asset_id = :aid", p
+        )
+
+        # ── 6. Handle transactions referencing this asset ──
+        # Transactions can reference asset via asset_id, price_quote_asset_id, fee_quote_asset_id
+        # We nullify the FK columns rather than deleting the whole transaction,
+        # unless the transaction's primary asset_id matches.
+        # First: nullify quote/fee references
+        result["txs_quote_cleared"] = self._exec(
+            "UPDATE normalized_transactions SET price_quote_asset_id = NULL WHERE price_quote_asset_id = :aid", p
+        )
+        result["txs_fee_cleared"] = self._exec(
+            "UPDATE normalized_transactions SET fee_quote_asset_id = NULL WHERE fee_quote_asset_id = :aid", p
+        )
+
+        # For transactions whose primary asset IS this asset, we need to delete them
+        # (they become meaningless without an asset)
+        tx_sub = "(SELECT id FROM normalized_transactions WHERE asset_id = :aid)"
+
+        # Detach P&L children of these transactions
+        self._exec(f"DELETE FROM calculation_unit_legs WHERE transaction_id IN {tx_sub}", p)
+        self._exec(f"UPDATE cost_lots SET origin_transaction_id = NULL WHERE origin_transaction_id IN {tx_sub}", p)
+        self._exec(f"UPDATE realized_pnl SET transaction_id = NULL WHERE transaction_id IN {tx_sub}", p)
+        self._exec(f"UPDATE lot_settlements SET settling_transaction_id = NULL WHERE settling_transaction_id IN {tx_sub}", p)
+        self._exec(f"UPDATE pnl_warnings SET transaction_id = NULL WHERE transaction_id IN {tx_sub}", p)
+        self._exec(f"UPDATE cost_lot_events SET triggered_by_transaction_id = NULL WHERE triggered_by_transaction_id IN {tx_sub}", p)
+
+        # Detach derivative positions opening on these transactions
+        self._exec(f"UPDATE derivative_positions SET open_transaction_id = NULL WHERE open_transaction_id IN {tx_sub}", p)
+
+        # Detach raw_transaction FK
+        raw_sub = f"(SELECT raw_transaction_id FROM normalized_transactions WHERE asset_id = :aid AND raw_transaction_id IS NOT NULL)"
+        self._exec(f"UPDATE normalized_transactions SET raw_transaction_id = NULL WHERE raw_transaction_id IN {raw_sub}", p)
+
+        # Delete raw transactions linked to these normalized transactions
+        self._exec(f"DELETE FROM raw_transactions WHERE id IN {raw_sub}", p)
+
+        # Nullify sync_connector_run_id before deleting
+        self._exec(
+            f"UPDATE normalized_transactions SET sync_connector_run_id = NULL WHERE asset_id = :aid AND sync_connector_run_id IS NOT NULL", p
+        )
+
+        # Delete the transactions themselves
+        result["transactions_deleted"] = self._exec(
+            "DELETE FROM normalized_transactions WHERE asset_id = :aid", p
+        )
+
+        # ── 7. Nullify calculation_versions base_currency_id ──
+        self._exec(
+            "UPDATE calculation_versions SET base_currency_id = NULL WHERE base_currency_id = :aid", p
+        )
+
+        # ── 8. Delete light children (handled by DB cascade, but explicit for safety) ──
+        self._exec("DELETE FROM asset_categories WHERE asset_id = :aid", p)
+        self._exec("DELETE FROM asset_price_getters WHERE asset_id = :aid", p)
+        self._exec("UPDATE raw_assets SET asset_id = NULL WHERE asset_id = :aid", p)
+        self._exec("DELETE FROM price_snapshots WHERE asset_id = :aid", p)
+        # Also nullify price_snapshots quote_asset_id references
+        self._exec("UPDATE price_snapshots SET quote_asset_id = NULL WHERE quote_asset_id = :aid", p)
+
+        # ── 9. Delete the asset itself ──
+        self.session.delete(asset)
+
+        log.info("asset_delete_complete", asset_id=asset_id, result=result)
         return result

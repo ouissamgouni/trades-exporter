@@ -892,6 +892,30 @@ class AccountDeletePreviewResponse(BaseModel):
 
 
 # =============================================================================
+# Asset delete preview
+# =============================================================================
+
+
+class AssetDeletePreviewResponse(BaseModel):
+    """Preview of what will be affected when deleting an asset."""
+
+    asset_id: int
+    asset_symbol: str
+    # Cascade deletions (auto-deleted with the asset)
+    asset_categories: int = 0
+    price_getters: int = 0
+    raw_assets: int = 0
+    price_snapshots: int = 0
+    # Heavy data (require force=true)
+    transactions: int = 0
+    cost_lots: int = 0
+    realized_pnl: int = 0
+    calculation_unit_legs: int = 0
+    fee_entries: int = 0
+    pnl_warnings: int = 0
+
+
+# =============================================================================
 # Data Cleanup (Connector / Account purge)
 # =============================================================================
 
@@ -980,6 +1004,8 @@ __all__ = [
     "DerivativePositionResponse",
     # Account delete preview
     "AccountDeletePreviewResponse",
+    # Asset delete preview
+    "AssetDeletePreviewResponse",
     # Data cleanup
     "CleanupRequest",
     "CleanupPreviewResponse",

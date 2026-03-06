@@ -282,19 +282,13 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
   };
 
   return (
-    <Container maxW="container.xl" py={8}>
-      <VStack align="stretch" gap={6}>
+    <Container maxW="container.xl" py={1}>
+      <VStack align="stretch" gap={1}>
         {/* Header with overall progress */}
-        <Flex justify="space-between" align="center" mb={2} flexWrap="wrap" gap={3}>
-          <Box>
-            <Heading size="lg">Setup & Configuration</Heading>
-            <Text color="gray.600" fontSize="sm" mt={1} display={{ base: "none", md: "block" }}>
-              Configure your accounts, connectors, and assets to get started
-            </Text>
-          </Box>
+        <Flex justify="space-between" align="right" mb={2} flexWrap="wrap" gap={3}>
           <Badge
             colorScheme={completionPercentage === 100 ? "green" : "orange"}
-            fontSize="md"
+            fontSize="xs"
             px={3}
             py={1}
             borderRadius="md"

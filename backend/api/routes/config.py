@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
-from backend.db.models import Account, Asset, AccountConnector, AppSettings
+from backend.db.models import Account, Asset, AssetPriceGetter, AccountConnector, AppSettings
 
 
 router = APIRouter(prefix="/config", tags=["Config"])
@@ -28,12 +28,14 @@ class AppSettingsResponse(BaseModel):
     """Response model for app settings."""
 
     base_currency: str
+    mock_mode_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
     """Request model for updating app settings."""
 
     base_currency: str | None = None
+    mock_mode_enabled: bool | None = None
 
 
 class SetupStatusResponse(BaseModel):
@@ -96,7 +98,10 @@ def get_app_settings(session: Session = Depends(get_db)):
     Returns the base currency and other app-wide settings.
     """
     settings = get_or_create_app_settings(session)
-    return AppSettingsResponse(base_currency=settings.base_currency)
+    return AppSettingsResponse(
+        base_currency=settings.base_currency,
+        mock_mode_enabled=settings.mock_mode_enabled,
+    )
 
 
 @router.put("/settings", response_model=AppSettingsResponse)
@@ -127,6 +132,16 @@ def update_app_settings(
         
         settings.base_currency = update.base_currency.upper()
     
+    # Handle mock mode toggle — bulk-flip all mock getter rows
+    if update.mock_mode_enabled is not None:
+        settings.mock_mode_enabled = update.mock_mode_enabled
+        mock_getters = session.exec(
+            select(AssetPriceGetter).where(AssetPriceGetter.price_getter == "mock")
+        ).all()
+        for mg in mock_getters:
+            mg.enabled = update.mock_mode_enabled
+            session.add(mg)
+
     from datetime import datetime, timezone
     settings.updated_at = datetime.now(timezone.utc)
     
@@ -134,7 +149,10 @@ def update_app_settings(
     session.commit()
     session.refresh(settings)
     
-    return AppSettingsResponse(base_currency=settings.base_currency)
+    return AppSettingsResponse(
+        base_currency=settings.base_currency,
+        mock_mode_enabled=settings.mock_mode_enabled,
+    )
 
 
 @router.get("/setup-status", response_model=SetupStatusResponse)

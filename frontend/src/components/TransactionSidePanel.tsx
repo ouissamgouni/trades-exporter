@@ -21,6 +21,8 @@ import {
     Button,
     Flex,
     Input,
+    NativeSelect,
+    Spinner,
     Text,
 } from '@chakra-ui/react';
 import {
@@ -36,8 +38,8 @@ import {
     FiArrowUp,
 } from 'react-icons/fi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Transaction, Account, Asset, API_URL, DerivativePosition } from '../types';
-import { Direction, ReviewStatus, TransactionType } from '../enums';
+import { Transaction, Account, Asset, API_URL, DerivativePosition, Bundle } from '../types';
+import { Direction, ReviewStatus, TransactionType, TaxabilityStatus, UnitPattern } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { AccountBadge } from './AccountBadge';
 import { ComboSelect, SOURCE_OPTIONS } from './ComboSelect';
@@ -58,6 +60,8 @@ import { usePositions } from '../hooks/usePositions';
 import { getAssetSuggestions, getConfidenceColor, formatConfidence } from '../utils/similarity';
 import { Tooltip } from './ui/tooltip';
 import { ConnectorRunDetailDrawer } from './ConnectorRunDetailDrawer';
+import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { toaster } from './ui/toaster';
 import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
 import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
 
@@ -276,8 +280,11 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     const [newTagValue, setNewTagValue] = useState('');
 
     // ------- Bundle state -------
-    const [bundleData, setBundleData] = useState<{ id: number; pattern: string | null; label: string | null } | null>(null);
+    const [bundleData, setBundleData] = useState<Bundle | null>(null);
     const [bundleLoading, setBundleLoading] = useState(false);
+    const [bundleError, setBundleError] = useState<string | null>(null);
+    const [bundleTaxability, setBundleTaxability] = useState<string>(TaxabilityStatus.UNKNOWN);
+    const [taxabilityLoading, setTaxabilityLoading] = useState(false);
 
     // ------- Raw data state -------
     const [rawData, setRawData] = useState<RawTransactionData | null>(null);
@@ -476,13 +483,17 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         const fetchBundle = async () => {
             if (!tx.user_calculation_unit_id) { setBundleData(null); return; }
             setBundleLoading(true);
+            setBundleError(null);
             try {
                 const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    setBundleData({ id: data.id, pattern: data.pattern || null, label: data.label || null });
-                }
-            } catch (err) { console.error('Failed to fetch bundle:', err); }
+                if (!response.ok) throw new Error('Failed to fetch bundle');
+                const data = await response.json();
+                setBundleData(data);
+                setBundleTaxability(data.taxability_override || TaxabilityStatus.UNKNOWN);
+            } catch (err) {
+                console.error('Failed to fetch bundle:', err);
+                setBundleError(err instanceof Error ? err.message : 'Unknown error');
+            }
             finally { setBundleLoading(false); }
         };
         fetchBundle();
@@ -572,6 +583,48 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
             console.error('Failed to unbundle:', err);
         } finally {
             setUnbundling(false);
+        }
+    };
+
+    // ============================================================
+    // Bundle taxability handler
+    // ============================================================
+
+    const patternColors: Record<string, string> = {
+        [UnitPattern.INTERNAL_TRANSFER]: 'blue',
+        [UnitPattern.SWAP]: 'orange',
+        [UnitPattern.SPLIT]: 'purple',
+        [UnitPattern.FLOW]: 'cyan',
+        [UnitPattern.CUSTOM]: 'purple',
+    };
+
+    const handleBundleTaxabilityChange = async (newValue: string) => {
+        if (!bundleData) return;
+        setBundleTaxability(newValue);
+        setTaxabilityLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleData.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue,
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to update taxability');
+            queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            toaster.success({
+                title: 'Taxability updated',
+                description: `Bundle #${bundleData.id} set to ${newValue}`,
+            });
+        } catch (err) {
+            setBundleTaxability(bundleData.taxability_override || TaxabilityStatus.UNKNOWN);
+            toaster.error({
+                title: 'Error',
+                description: err instanceof Error ? err.message : 'Failed to update taxability',
+            });
+        } finally {
+            setTaxabilityLoading(false);
         }
     };
 
@@ -1071,34 +1124,101 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                 {/* ============================================================ */}
                 {tx.user_calculation_unit_id && (
                     <Section title="Bundle" icon="📦" defaultOpen={false} colorScheme="blue">
-                        <InfoRow
-                            label="Bundle ID"
-                            value={
-                                bundleLoading ? (
-                                    <Text fontSize="9px" color="gray.400">Loading...</Text>
-                                ) : bundleData ? (
-                                    <Badge size="xs" colorPalette="blue" fontSize="9px" variant="subtle">
-                                        #{bundleData.id} {bundleData.pattern ? `• ${bundleData.pattern}` : ''}
+                        {bundleLoading ? (
+                            <Flex align="center" gap={2} py={2}>
+                                <Spinner size="xs" />
+                                <Text fontSize="9px" color="gray.400">Loading bundle...</Text>
+                            </Flex>
+                        ) : bundleError ? (
+                            <Text fontSize="9px" color="red.400">{bundleError}</Text>
+                        ) : bundleData ? (
+                            <>
+                                {/* Header: pattern badge + bundle ID */}
+                                <Flex justify="space-between" align="center" mb={1}>
+                                    <Badge
+                                        colorPalette={patternColors[bundleData.pattern || ''] || 'gray'}
+                                        size="xs"
+                                        fontSize="9px"
+                                    >
+                                        {bundleData.pattern || 'unknown'}
                                     </Badge>
-                                ) : (
-                                    <Badge size="xs" colorPalette="gray" fontSize="9px">
-                                        #{tx.user_calculation_unit_id}
+                                    <Badge size="xs" colorPalette="purple" variant="subtle" fontSize="9px">
+                                        📦 #{bundleData.id}
                                     </Badge>
-                                )
-                            }
-                        />
-                        <Button
-                            size="xs"
-                            variant="outline"
-                            colorPalette="red"
-                            mt={1}
-                            fontSize="9px"
-                            onClick={unbundleTransaction}
-                            disabled={unbundling}
-                            w="100%"
-                        >
-                            {unbundling ? 'Removing...' : '🔗 Remove from Bundle'}
-                        </Button>
+                                </Flex>
+
+                                {/* Label */}
+                                <Text fontWeight="bold" fontSize="10px" color="gray.200" mb={0.5}>
+                                    {bundleData.label || `Bundle #${bundleData.id}`}
+                                </Text>
+
+                                {/* Notes */}
+                                {bundleData.notes && (
+                                    <Text fontSize="9px" color="gray.400" mb={1}>
+                                        {bundleData.notes}
+                                    </Text>
+                                )}
+
+                                {/* Taxability Override */}
+                                <Flex align="center" gap={2} mb={2}>
+                                    <Text fontSize="9px" color="gray.500" flexShrink={0}>
+                                        Taxability:
+                                    </Text>
+                                    <NativeSelect.Root size="sm" width="120px">
+                                        <NativeSelect.Field
+                                            value={bundleTaxability}
+                                            onChange={(e) => handleBundleTaxabilityChange(e.target.value)}
+                                            _disabled={{ opacity: 0.5 }}
+                                            style={{
+                                                fontSize: '10px',
+                                                padding: '2px 6px',
+                                                backgroundColor:
+                                                    bundleTaxability === TaxabilityStatus.TAXABLE
+                                                        ? '#FED7AA'
+                                                        : bundleTaxability === TaxabilityStatus.NON_TAXABLE
+                                                            ? '#C6F6D5'
+                                                            : '#FEFCBF',
+                                                borderRadius: '4px',
+                                            }}
+                                        >
+                                            <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                            <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                            <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                        </NativeSelect.Field>
+                                    </NativeSelect.Root>
+                                    {taxabilityLoading && <Spinner size="xs" />}
+                                </Flex>
+
+                                {/* Transaction count + embedded table */}
+                                <Text fontSize="9px" color="gray.500" mb={1} fontWeight="medium">
+                                    {bundleData.transaction_count} transaction
+                                    {bundleData.transaction_count !== 1 ? 's' : ''}
+                                </Text>
+                                <Box maxH="250px" overflowY="auto" mb={2}>
+                                    <BundleMemberTransactionsTable
+                                        transactionIds={bundleData.transactions.map(t => t.id)}
+                                    />
+                                </Box>
+
+                                {/* Remove from bundle */}
+                                <Button
+                                    size="xs"
+                                    variant="outline"
+                                    colorPalette="red"
+                                    mt={1}
+                                    fontSize="9px"
+                                    onClick={unbundleTransaction}
+                                    disabled={unbundling}
+                                    w="100%"
+                                >
+                                    {unbundling ? 'Removing...' : '🔗 Remove from Bundle'}
+                                </Button>
+                            </>
+                        ) : (
+                            <Badge size="xs" colorPalette="gray" fontSize="9px">
+                                #{tx.user_calculation_unit_id}
+                            </Badge>
+                        )}
                     </Section>
                 )}
 

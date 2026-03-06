@@ -212,6 +212,32 @@ def _process_disposals(
                 unit.cost_lots.append(negative_lot)
 
         if not slices:
+            # ═══════════════════════════════════════════════════════════
+            # FEE WITH NO LOTS — Base currency fees (EUR) and crypto fees
+            # with insufficient lots still need FeeEntry tracking.
+            # Without this, the fee is silently dropped and invisible
+            # to the /fees endpoint and total_fee_in_base.
+            # ═══════════════════════════════════════════════════════════
+            if disposal.is_fee:
+                fee_value = _compute_fee_value_no_slices(
+                    disposal=disposal,
+                    fmv_service=fmv_service,
+                    config=config,
+                )
+                _create_fee_entry(
+                    disposal=disposal,
+                    unit=unit,
+                    realized_pnl=None,
+                    base_currency_id=config.base_currency_id,
+                    fee_value_in_base=fee_value,
+                )
+                log.debug(
+                    "fee_tracked_no_slices",
+                    asset_id=disposal.asset_id,
+                    asset_symbol=disposal.asset_symbol,
+                    qty=float(qty),
+                    fee_value_in_base=float(fee_value),
+                )
             continue
 
         # ═══════════════════════════════════════════════════════════════
@@ -228,13 +254,22 @@ def _process_disposals(
                 # Absorb fee cost into transfer: accumulate cost basis from
                 # fee slices, but do NOT add them to all_consumed_slices
                 # (they would create phantom lots in _handle_cost_basis_transfer).
-                absorbed_fee_cost += sum(s.total_cost_in_base for s in slices)
+                absorbed_cost = sum(s.total_cost_in_base for s in slices)
+                absorbed_fee_cost += absorbed_cost
+                # Still create FeeEntry for reporting (no RealizedPnl)
+                _create_fee_entry(
+                    disposal=disposal,
+                    unit=unit,
+                    realized_pnl=None,
+                    base_currency_id=config.base_currency_id,
+                    fee_value_in_base=absorbed_cost,
+                )
                 log.debug(
                     "fee_absorbed_into_transfer",
                     asset_id=disposal.asset_id,
                     asset_symbol=disposal.asset_symbol,
                     qty=float(qty),
-                    absorbed_cost=float(sum(s.total_cost_in_base for s in slices)),
+                    absorbed_cost=float(absorbed_cost),
                 )
             else:
                 # Fee creates a separate RealizedPnl disposal event.
@@ -707,6 +742,37 @@ def _compute_residuals(
                 },
             )
         )
+
+
+def _compute_fee_value_no_slices(
+    disposal: CalculationUnitLeg,
+    fmv_service: FMVService,
+    config: PnLConfig,
+) -> Decimal:
+    """
+    Compute fee value in base currency when no lots were consumed.
+    
+    This handles two cases:
+    - Base currency fees (EUR): value = quantity (1:1 with base)
+    - Non-base-currency fees with no lots: value = FMV lookup
+    
+    Args:
+        disposal: The fee leg
+        fmv_service: For FMV lookups
+        config: P&L configuration
+        
+    Returns:
+        Fee value in base currency
+    """
+    qty = Decimal(disposal.quantity) if disposal.quantity else Decimal(0)
+    
+    if disposal.asset_id == config.base_currency_id:
+        # Base currency fee: value = quantity directly
+        return qty
+    
+    # Non-base-currency fee: use FMV
+    fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
+    return fmv_result.value
 
 
 def _create_fee_entry(

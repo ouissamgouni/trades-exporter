@@ -1,14 +1,16 @@
 import {
     Badge, Box,
     Button, Checkbox, Dialog, Flex,
-    Heading, Icon, IconButton, Input, NativeSelect, Portal, Spinner,
+    Heading, Icon, IconButton, Input, NativeSelect, Portal, SimpleGrid, Slider, Spinner, Switch,
     Table, Tabs, Tag, Text, Textarea, Progress
 } from '@chakra-ui/react';
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { LuTags, LuSettings } from 'react-icons/lu';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import { LuChevronDown, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2 } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { DeleteAssetDialog } from './DeleteAssetDialog';
+import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 
 // Use ASSET_TYPE_OPTIONS but it now only has 3 values: crypto, stock, fiat
@@ -136,14 +138,43 @@ export const AssetsEditor: React.FC = () => {
     const [replacePriceGetters, setReplacePriceGetters] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Filter section
+    const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+    // Mock mode
+    const [mockModeEnabled, setMockModeEnabled] = useState(false);
+    const [mockModeLoading, setMockModeLoading] = useState(false);
+
+    // Price getter test modal
+    const [showTestModal, setShowTestModal] = useState(false);
+    const [testModalGetter, setTestModalGetter] = useState<AssetPriceGetter | null>(null);
+    const [testDate, setTestDate] = useState<string>(() => {
+        const d = new Date(); d.setDate(d.getDate() - 1);
+        return d.toISOString().slice(0, 10);
+    });
+    const [testResult, setTestResult] = useState<{ success: boolean; price?: number; error?: string; quote_currency?: string; source?: string; ticker_used?: string } | null>(null);
+    const [testLoading, setTestLoading] = useState(false);
+
+    // Auto-test results: map from getter id -> test result
+    const [autoTestResults, setAutoTestResults] = useState<Record<number, { success: boolean; price?: number; error?: string; loading?: boolean }>>({});
+
+    // Test for unsaved getter (add form)
+    const [newGetterTestResult, setNewGetterTestResult] = useState<{ success: boolean; price?: number; error?: string } | null>(null);
+    const [newGetterTestLoading, setNewGetterTestLoading] = useState(false);
+
+    // Click-to-edit: which cell is being edited { assetId, field }
+    const [editingCell, setEditingCell] = useState<{ assetId: number; field: string } | null>(null);
+    const [cellValue, setCellValue] = useState<string>('');
+
     // Confirmation dialogs
-    const deleteAssetConfirm = useConfirmDialog<number>();
+    const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string } | null>(null);
     const deletePriceGetterConfirm = useConfirmDialog<number>();
 
     useEffect(() => {
         fetchAllAssets();
         fetchAvailableGetters();
         fetchCategories();
+        fetchMockMode();
     }, []);
 
     // Client-side filtering derived from allAssets (no separate state copy)
@@ -243,6 +274,169 @@ export const AssetsEditor: React.FC = () => {
         await fetchAllAssets();
     };
 
+    // ------------------------------------------------------------------
+    // Mock mode
+    // ------------------------------------------------------------------
+    const fetchMockMode = async () => {
+        try {
+            const res = await fetch(`${API_URL}/config/settings`);
+            if (res.ok) {
+                const data = await res.json();
+                setMockModeEnabled(!!data.mock_mode_enabled);
+            }
+        } catch { /* ignore */ }
+    };
+
+    const toggleMockMode = async () => {
+        setMockModeLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/config/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mock_mode_enabled: !mockModeEnabled }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle mock mode');
+            setMockModeEnabled(!mockModeEnabled);
+            await refreshAssets(); // refresh to get updated getter enabled states
+            toaster.success({ title: `Mock mode ${!mockModeEnabled ? 'enabled' : 'disabled'}` });
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed' });
+        } finally {
+            setMockModeLoading(false);
+        }
+    };
+
+    // ------------------------------------------------------------------
+    // Test price getter (modal-based)
+    // ------------------------------------------------------------------
+    const openTestModal = (pg: AssetPriceGetter) => {
+        setTestModalGetter(pg);
+        setTestResult(null);
+        setShowTestModal(true);
+    };
+
+    const runTestFromModal = async () => {
+        if (!selectedAsset || !testModalGetter) return;
+        setTestResult(null);
+        setTestLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/assets/${selectedAsset.asset_id}/price-getters/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    price_getter: testModalGetter.price_getter,
+                    external_id: testModalGetter.external_id || undefined,
+                    params: testModalGetter.params || {},
+                    date: testDate || undefined,
+                }),
+            });
+            const data = await res.json();
+            setTestResult(data);
+        } catch (err) {
+            setTestResult({ success: false, error: err instanceof Error ? err.message : 'Network error' });
+        } finally {
+            setTestLoading(false);
+        }
+    };
+
+    // Auto-test all getters when dialog opens
+    const runAutoTests = useCallback(async (asset: Asset) => {
+        if (!asset.price_getters || asset.price_getters.length === 0) return;
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const dateStr = yesterday.toISOString().slice(0, 10);
+
+        // Initialize loading states
+        const initialResults: Record<number, { success: boolean; price?: number; error?: string; loading?: boolean }> = {};
+        for (const pg of asset.price_getters) {
+            initialResults[pg.id] = { success: false, loading: true };
+        }
+        setAutoTestResults(initialResults);
+
+        // Run tests in parallel
+        const promises = asset.price_getters.map(async (pg) => {
+            try {
+                const res = await fetch(`${API_URL}/assets/${asset.asset_id}/price-getters/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        price_getter: pg.price_getter,
+                        external_id: pg.external_id || undefined,
+                        params: pg.params || {},
+                        date: dateStr,
+                    }),
+                });
+                const data = await res.json();
+                setAutoTestResults(prev => ({ ...prev, [pg.id]: { success: data.success, price: data.price, error: data.error } }));
+            } catch (err) {
+                setAutoTestResults(prev => ({ ...prev, [pg.id]: { success: false, error: 'Network error' } }));
+            }
+        });
+        await Promise.all(promises);
+    }, []);
+
+    // Test unsaved getter (from the Add form)
+    const testNewGetter = async () => {
+        if (!selectedAsset || !newGetter.price_getter) return;
+        setNewGetterTestResult(null);
+        setNewGetterTestLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/assets/${selectedAsset.asset_id}/price-getters/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    price_getter: newGetter.price_getter,
+                    external_id: newGetter.external_id || undefined,
+                    params: newGetter.params || {},
+                    date: testDate || undefined,
+                }),
+            });
+            const data = await res.json();
+            setNewGetterTestResult(data);
+        } catch (err) {
+            setNewGetterTestResult({ success: false, error: err instanceof Error ? err.message : 'Network error' });
+        } finally {
+            setNewGetterTestLoading(false);
+        }
+    };
+
+    // ------------------------------------------------------------------
+    // Click-to-edit cell helpers
+    // ------------------------------------------------------------------
+    const startCellEdit = useCallback((assetId: number, field: string, currentValue: string) => {
+        setEditingCell({ assetId, field });
+        setCellValue(currentValue);
+    }, []);
+
+    const cancelCellEdit = useCallback(() => {
+        setEditingCell(null);
+        setCellValue('');
+    }, []);
+
+    const saveCellEdit = useCallback(async () => {
+        if (!editingCell) return;
+        const { assetId, field } = editingCell;
+        try {
+            const res = await fetch(`${API_URL}/assets/${assetId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [field]: field === 'status' ? parseInt(cellValue) : cellValue }),
+            });
+            if (!res.ok) throw new Error('Failed to save');
+            // Optimistic update
+            setAllAssets(prev => prev.map(a => a.asset_id === assetId ? { ...a, [field]: field === 'status' ? parseInt(cellValue) : cellValue } : a));
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
+        }
+        setEditingCell(null);
+        setCellValue('');
+    }, [editingCell, cellValue]);
+
+    const handleCellKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') { e.preventDefault(); saveCellEdit(); }
+        if (e.key === 'Escape') cancelCellEdit();
+    }, [saveCellEdit, cancelCellEdit]);
+
     const startEditing = (asset: Asset) => {
         setEditingId(asset.asset_id!);
         setEditValues({
@@ -293,38 +487,26 @@ export const AssetsEditor: React.FC = () => {
         }
     };
 
-    const deleteAsset = (id: number) => {
-        deleteAssetConfirm.open(id);
+    const deleteAsset = (id: number, symbol: string) => {
+        setDeleteTarget({ id, symbol });
     };
 
-    const executeDeleteAsset = async () => {
-        if (!deleteAssetConfirm.data) return;
-        const id = deleteAssetConfirm.data;
-        try {
-            const response = await fetch(`${API_URL}/assets/${id}`, { method: 'DELETE' });
-            if (!response.ok) {
-                const errData = await response.json();
-                // Check if it's a blocker error with details
-                if (errData.detail?.blockers) {
-                    const blockers = errData.detail.blockers;
-                    const blockerMessages = Object.entries(blockers).map(([key, count]) =>
-                        `${count} ${key.replace(/_/g, ' ')}`
-                    ).join(', ');
-                    throw new Error(`Cannot delete: Asset has ${blockerMessages}. Delete transactions first.`);
-                }
-                throw new Error(errData.detail?.message || errData.detail || 'Failed to delete asset');
-            }
-            await refreshAssets();
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete asset' });
-        }
+    const handleAssetDeleted = async () => {
+        setDeleteTarget(null);
+        await refreshAssets();
+        toaster.success({ title: 'Asset deleted' });
     };
 
     // Price getter CRUD
     const openGettersDialog = (asset: Asset) => {
         setSelectedAsset(asset);
         setShowGettersDialog(true);
-        setNewGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100, enabled: true, params: {} });
+        setAutoTestResults({});
+        setNewGetterTestResult(null);
+        const firstNonMock = availableGetters.find(g => g !== 'mock') || '';
+        setNewGetter({ price_getter: firstNonMock, external_id: '', priority: 100, enabled: true, params: {} });
+        // Auto-test all getters
+        runAutoTests(asset);
     };
 
     const addPriceGetter = async () => {
@@ -392,12 +574,24 @@ export const AssetsEditor: React.FC = () => {
     };
 
     // Inline editing functions for price getters
+    const MOCK_DEFAULTS: Record<string, { min_price: number; max_price: number }> = {
+        crypto: { min_price: 100, max_price: 50000 },
+        stock: { min_price: 10, max_price: 500 },
+        fiat: { min_price: 0.5, max_price: 2 },
+    };
+
     const startEditingGetter = (pg: AssetPriceGetter) => {
         setEditingGetterId(pg.id);
+        let params = pg.params || {};
+        // For mock getters with empty range, populate asset-type defaults
+        if (pg.price_getter === 'mock' && params.min_price == null && params.max_price == null && selectedAsset) {
+            const defaults = MOCK_DEFAULTS[selectedAsset.price_type || 'crypto'] || MOCK_DEFAULTS.crypto;
+            params = { ...params, ...defaults };
+        }
         setEditingValues({
             external_id: pg.external_id || '',
             priority: pg.priority,
-            params: JSON.stringify(pg.params || {}, null, 2)
+            params: JSON.stringify(params, null, 2)
         });
     };
 
@@ -513,6 +707,7 @@ export const AssetsEditor: React.FC = () => {
     };
 
     const hasActiveFilters = searchFilter || statusFilter !== '' || typeFilter || categoryFilter.size > 0 || priceGetterFilter;
+    const activeFilterCount = (searchFilter ? 1 : 0) + (statusFilter !== '' ? 1 : 0) + (typeFilter ? 1 : 0) + categoryFilter.size + (priceGetterFilter ? 1 : 0);
 
     const toggleFilterDimension = (dimension: string) => {
         setExpandedDimensions(prev => {
@@ -905,7 +1100,22 @@ export const AssetsEditor: React.FC = () => {
                         Manage assets and their price getter configurations.
                     </Text>
                 </Box>
-                <Flex gap={2}>
+                <Flex gap={2} align="center">
+                    {/* Global Mock Mode Toggle */}
+                    <Flex align="center" gap={2} px={3} py={1.5} bg={mockModeEnabled ? 'orange.50' : 'gray.50'} borderRadius="md" border="1px solid" borderColor={mockModeEnabled ? 'orange.200' : 'gray.200'}>
+                        <Switch.Root
+                            checked={mockModeEnabled}
+                            onCheckedChange={() => toggleMockMode()}
+                            disabled={mockModeLoading}
+                            size="sm"
+                        >
+                            <Switch.HiddenInput />
+                            <Switch.Control />
+                        </Switch.Root>
+                        <Text fontSize="xs" fontWeight="medium" whiteSpace="nowrap">
+                            Mock {mockModeEnabled ? '🟢' : '⚪'}
+                        </Text>
+                    </Flex>
                     <Button colorPalette="green" onClick={openImportDialog}>
                         📥 Import CSV
                     </Button>
@@ -918,176 +1128,264 @@ export const AssetsEditor: React.FC = () => {
                 </Flex>
             </Flex>
 
-            {/* Enhanced Filter Bar */}
-            <Box mb={6} p={4} bg="gray.50" borderRadius="md">
-                <Flex gap={4} align="flex-start" flexWrap="wrap">
-                    {/* Search (Symbol + Label) */}
-                    <Flex direction="column" gap={1}>
-                        <Text fontWeight="medium" fontSize="xs" color="gray.600">Search</Text>
-                        <Input
-                            size="sm"
-                            width="180px"
-                            placeholder="Symbol or label..."
-                            value={searchFilter}
-                            onChange={e => setSearchFilter(e.target.value)}
-                        />
+            {/* ============ Collapsible Filter Section ============ */}
+            <Box
+                mb={4}
+                bg="gray.50"
+                borderRadius="md"
+                border="1px solid"
+                borderColor={hasActiveFilters ? 'blue.300' : 'gray.200'}
+                overflow="visible"
+            >
+                {/* Clickable header */}
+                <Flex
+                    align="center"
+                    justify="space-between"
+                    p={3}
+                    cursor="pointer"
+                    _hover={{ bg: 'gray.100' }}
+                    onClick={() => setFiltersExpanded(!filtersExpanded)}
+                    borderRadius="md"
+                >
+                    <Flex align="center" gap={1.5}>
+                        <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                            <LuChevronDown size={14} />
+                        </Box>
+                        <LuFilter size={12} />
+                        <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                        {activeFilterCount > 0 && (
+                            <Badge size="xs" colorPalette="blue">{activeFilterCount} active</Badge>
+                        )}
                     </Flex>
-
-                    {/* Status Filter */}
-                    <Flex direction="column" gap={1}>
-                        <Text fontWeight="medium" fontSize="xs" color="gray.600">Status</Text>
-                        <NativeSelect.Root size="sm" width="120px">
-                            <NativeSelect.Field
-                                value={statusFilter}
-                                onChange={e => setStatusFilter(e.target.value)}
-                            >
-                                <option value="">All</option>
-                                <option value="0">Active</option>
-                                <option value="1">Inactive</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-
-                    {/* Type Filter */}
-                    <Flex direction="column" gap={1}>
-                        <Text fontWeight="medium" fontSize="xs" color="gray.600">Type</Text>
-                        <NativeSelect.Root size="sm" width="120px">
-                            <NativeSelect.Field
-                                value={typeFilter}
-                                onChange={e => setTypeFilter(e.target.value)}
-                            >
-                                <option value="">All</option>
-                                <option value="crypto">Crypto</option>
-                                <option value="stock">Stock</option>
-                                <option value="fiat">Fiat</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-
-                    {/* Price Getter Filter */}
-                    <Flex direction="column" gap={1}>
-                        <Text fontWeight="medium" fontSize="xs" color="gray.600">Price Getters</Text>
-                        <NativeSelect.Root size="sm" width="140px">
-                            <NativeSelect.Field
-                                value={priceGetterFilter}
-                                onChange={e => setPriceGetterFilter(e.target.value)}
-                            >
-                                <option value="">All</option>
-                                <option value="has">Has any</option>
-                                <option value="none">None configured</option>
-                                {availableGetters.map(g => (
-                                    <option key={g} value={g}>Has: {g}</option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                    </Flex>
-
-                    {/* Clear Filters */}
-                    {hasActiveFilters && (
-                        <Flex direction="column" gap={1} justifyContent="flex-end">
-                            <Text fontWeight="medium" fontSize="xs" color="transparent">.</Text>
-                            <Button size="sm" variant="outline" onClick={clearFilters}>
-                                ✕ Clear Filters
-                            </Button>
-                        </Flex>
-                    )}
-                </Flex>
-
-                {/* Hierarchical Category Filter */}
-                <Box mt={4} pt={4} borderTop="1px" borderColor="gray.200">
-                    <Flex justify="space-between" align="center" mb={2}>
-                        <Text fontWeight="medium" fontSize="xs" color="gray.600">Categories Filter</Text>
-                        {categoryFilter.size > 0 && (
-                            <Button size="xs" variant="ghost" onClick={() => setCategoryFilter(new Set())}>
-                                Clear ({categoryFilter.size})
+                    <Flex gap={1.5} onClick={e => e.stopPropagation()}>
+                        {hasActiveFilters && (
+                            <Button size="xs" variant="ghost" onClick={clearFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                                ✕ Clear All
                             </Button>
                         )}
                     </Flex>
-                    {dimensionData.length === 0 ? (
-                        <Text fontSize="sm" color="gray.400">No categories available</Text>
-                    ) : (
-                        <Flex direction="column" gap={2}>
-                            {dimensionData.map(dim => (
-                                <Box key={dim.id}>
-                                    <Flex
-                                        align="center"
-                                        gap={2}
-                                        cursor="pointer"
-                                        onClick={() => toggleFilterDimension(String(dim.id))}
-                                        _hover={{ bg: 'gray.100' }}
-                                        p={1}
-                                        borderRadius="sm"
-                                    >
-                                        <Text fontSize="sm">{expandedDimensions.has(String(dim.id)) ? '▼' : '▶'}</Text>
-                                        <Text fontSize="sm" fontWeight="medium">{dim.label}</Text>
-                                        {dim.categories.some(c => categoryFilter.has(c.id)) && (
-                                            <Badge size="sm" colorPalette="blue">
-                                                {dim.categories.filter(c => categoryFilter.has(c.id)).length}
-                                            </Badge>
-                                        )}
-                                    </Flex>
-                                    {expandedDimensions.has(String(dim.id)) && (
-                                        <Flex gap={1} flexWrap="wrap" ml={6} mt={1}>
-                                            {dim.categories.map(cat => (
-                                                <Badge
-                                                    key={cat.id}
-                                                    fontSize="xs"
-                                                    cursor="pointer"
-                                                    onClick={() => toggleFilterCategory(cat.id)}
-                                                    style={categoryFilter.has(cat.id)
-                                                        ? { backgroundColor: cat.color || '#3182ce', color: '#fff' }
-                                                        : { backgroundColor: '#E2E8F0', color: '#4A5568' }
-                                                    }
-                                                    _hover={{ opacity: 0.8 }}
-                                                >
-                                                    {categoryFilter.has(cat.id) && '✓ '}
-                                                    {cat.label}
-                                                </Badge>
-                                            ))}
-                                        </Flex>
-                                    )}
-                                </Box>
-                            ))}
+                </Flex>
+
+                {/* Chip summary when collapsed but filters active */}
+                {hasActiveFilters && !filtersExpanded && (
+                    <Box px={3} pb={3}>
+                        <Flex flexWrap="wrap" gap={1}>
+                            {searchFilter && <Badge size="sm" colorPalette="blue" variant="outline">Search: {searchFilter}</Badge>}
+                            {statusFilter !== '' && <Badge size="sm" colorPalette="green" variant="outline">Status: {statusFilter === '0' ? 'Active' : 'Inactive'}</Badge>}
+                            {typeFilter && <Badge size="sm" colorPalette="purple" variant="outline">Type: {typeFilter}</Badge>}
+                            {priceGetterFilter && <Badge size="sm" colorPalette="orange" variant="outline">Getter: {priceGetterFilter}</Badge>}
+                            {categoryFilter.size > 0 && <Badge size="sm" colorPalette="teal" variant="outline">{categoryFilter.size} categories</Badge>}
                         </Flex>
-                    )}
-                </Box>
+                    </Box>
+                )}
+
+                {!hasActiveFilters && !filtersExpanded && (
+                    <Box px={3} pb={3}>
+                        <Text fontSize="xs" color="gray.500" fontStyle="italic">No filters applied</Text>
+                    </Box>
+                )}
+
+                {/* Filter Cards Grid */}
+                {filtersExpanded && (
+                    <Box p={3} pt={1}>
+                        <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4, xl: 5 }} gap={2}>
+                            {/* Search Card */}
+                            <Box bg="white" border="1px solid" borderColor={searchFilter ? 'blue.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
+                                <Flex align="center" gap={1} mb={1.5}>
+                                    <Text fontSize="xs">🔍</Text>
+                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Search</Text>
+                                </Flex>
+                                <Flex align="center" gap={1} px={1} py={1} bg="gray.50" borderRadius="sm">
+                                    <LuSearch size={10} color="#A0AEC0" />
+                                    <input
+                                        type="text"
+                                        placeholder="Symbol or label..."
+                                        value={searchFilter}
+                                        onChange={e => setSearchFilter(e.target.value)}
+                                        style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '11px', width: '100%', color: '#4A5568' }}
+                                    />
+                                </Flex>
+                            </Box>
+
+                            {/* Status Card */}
+                            <Box bg="white" border="1px solid" borderColor={statusFilter !== '' ? 'green.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
+                                <Flex align="center" gap={1} mb={1.5}>
+                                    <Text fontSize="xs">📋</Text>
+                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Status</Text>
+                                    {statusFilter !== '' && <Badge size="xs" colorPalette="green" borderRadius="full">1</Badge>}
+                                </Flex>
+                                <Flex flexWrap="wrap" gap={1}>
+                                    {[{ v: '', l: 'All' }, { v: '0', l: 'Active' }, { v: '1', l: 'Inactive' }].map(opt => (
+                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
+                                            bg={statusFilter === opt.v ? 'green.100' : 'gray.50'}
+                                            color={statusFilter === opt.v ? 'green.700' : 'gray.600'}
+                                            border="1px solid" borderColor={statusFilter === opt.v ? 'green.300' : 'gray.200'}
+                                            _hover={{ bg: statusFilter === opt.v ? 'green.200' : 'gray.100' }}
+                                            onClick={() => setStatusFilter(opt.v)}
+                                        >
+                                            {statusFilter === opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
+                                            {opt.l}
+                                        </Box>
+                                    ))}
+                                </Flex>
+                            </Box>
+
+                            {/* Type Card */}
+                            <Box bg="white" border="1px solid" borderColor={typeFilter ? 'purple.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
+                                <Flex align="center" gap={1} mb={1.5}>
+                                    <Text fontSize="xs">🏷️</Text>
+                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Type</Text>
+                                    {typeFilter && <Badge size="xs" colorPalette="purple" borderRadius="full">1</Badge>}
+                                </Flex>
+                                <Flex flexWrap="wrap" gap={1}>
+                                    {[{ v: '', l: 'All' }, { v: 'crypto', l: 'Crypto' }, { v: 'stock', l: 'Stock' }, { v: 'fiat', l: 'Fiat' }].map(opt => (
+                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
+                                            bg={typeFilter === opt.v ? 'purple.100' : 'gray.50'}
+                                            color={typeFilter === opt.v ? 'purple.700' : 'gray.600'}
+                                            border="1px solid" borderColor={typeFilter === opt.v ? 'purple.300' : 'gray.200'}
+                                            _hover={{ bg: typeFilter === opt.v ? 'purple.200' : 'gray.100' }}
+                                            onClick={() => setTypeFilter(opt.v)}
+                                        >
+                                            {typeFilter === opt.v && opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
+                                            {opt.l}
+                                        </Box>
+                                    ))}
+                                </Flex>
+                            </Box>
+
+                            {/* Price Getter Card */}
+                            <Box bg="white" border="1px solid" borderColor={priceGetterFilter ? 'orange.200' : 'gray.200'} borderRadius="md" p={2} minH="70px">
+                                <Flex align="center" gap={1} mb={1.5}>
+                                    <Text fontSize="xs">💰</Text>
+                                    <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Price Getters</Text>
+                                    {priceGetterFilter && <Badge size="xs" colorPalette="orange" borderRadius="full">1</Badge>}
+                                </Flex>
+                                <Flex flexWrap="wrap" gap={1}>
+                                    {[{ v: '', l: 'All' }, { v: 'has', l: 'Has any' }, { v: 'none', l: 'None' }, ...availableGetters.map(g => ({ v: g, l: g }))].map(opt => (
+                                        <Box key={opt.v} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
+                                            bg={priceGetterFilter === opt.v ? 'orange.100' : 'gray.50'}
+                                            color={priceGetterFilter === opt.v ? 'orange.700' : 'gray.600'}
+                                            border="1px solid" borderColor={priceGetterFilter === opt.v ? 'orange.300' : 'gray.200'}
+                                            _hover={{ bg: priceGetterFilter === opt.v ? 'orange.200' : 'gray.100' }}
+                                            onClick={() => setPriceGetterFilter(opt.v)}
+                                        >
+                                            {priceGetterFilter === opt.v && opt.v && <LuCheck size={8} style={{ display: 'inline', marginRight: 2 }} />}
+                                            {opt.l}
+                                        </Box>
+                                    ))}
+                                </Flex>
+                            </Box>
+
+                            {/* Categories Card (spans 2 cols) */}
+                            <Box
+                                bg="white" border="1px solid" borderColor={categoryFilter.size > 0 ? 'teal.200' : 'gray.200'}
+                                borderRadius="md" p={2} minH="70px"
+                                gridColumn={{ base: 'span 1', md: 'span 2' }}
+                            >
+                                <Flex align="center" justify="space-between" mb={1.5}>
+                                    <Flex align="center" gap={1}>
+                                        <Text fontSize="xs">📁</Text>
+                                        <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">Categories</Text>
+                                        {categoryFilter.size > 0 && <Badge size="xs" colorPalette="teal" borderRadius="full">{categoryFilter.size}</Badge>}
+                                    </Flex>
+                                    {categoryFilter.size > 0 && (
+                                        <Button size="xs" variant="ghost" onClick={() => setCategoryFilter(new Set())} fontSize="2xs">Clear</Button>
+                                    )}
+                                </Flex>
+                                {dimensionData.length === 0 ? (
+                                    <Text fontSize="xs" color="gray.400">No categories available</Text>
+                                ) : (
+                                    <Flex direction="column" gap={1.5}>
+                                        {dimensionData.map(dim => (
+                                            <Box key={dim.id}>
+                                                <Flex align="center" gap={1} cursor="pointer" onClick={() => toggleFilterDimension(String(dim.id))} _hover={{ bg: 'gray.50' }} p={0.5} borderRadius="sm">
+                                                    <Text fontSize="2xs">{expandedDimensions.has(String(dim.id)) ? '▼' : '▶'}</Text>
+                                                    <Text fontSize="2xs" fontWeight="medium">{dim.label}</Text>
+                                                    {dim.categories.some(c => categoryFilter.has(c.id)) && (
+                                                        <Badge size="xs" colorPalette="teal">{dim.categories.filter(c => categoryFilter.has(c.id)).length}</Badge>
+                                                    )}
+                                                </Flex>
+                                                {expandedDimensions.has(String(dim.id)) && (
+                                                    <Flex gap={1} flexWrap="wrap" ml={4} mt={0.5}>
+                                                        {dim.categories.map(cat => (
+                                                            <Box key={cat.id} as="button" px={1.5} py={0.5} borderRadius="sm" fontSize="2xs" fontWeight="medium" cursor="pointer"
+                                                                style={categoryFilter.has(cat.id) ? { backgroundColor: cat.color || '#319795', color: '#fff' } : { backgroundColor: '#EDF2F7', color: '#4A5568' }}
+                                                                onClick={() => toggleFilterCategory(cat.id)}
+                                                            >
+                                                                {categoryFilter.has(cat.id) && '✓ '}{cat.label}
+                                                            </Box>
+                                                        ))}
+                                                    </Flex>
+                                                )}
+                                            </Box>
+                                        ))}
+                                    </Flex>
+                                )}
+                            </Box>
+                        </SimpleGrid>
+                    </Box>
+                )}
             </Box>
 
-            {/* Bulk Actions Bar */}
+            {/* ============ Floating Bulk Actions Bar ============ */}
             {selectedIds.size > 0 && (
-                <Box mb={4} p={4} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-                    <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                        <Text fontWeight="medium" color="blue.700">
-                            {selectedIds.size} asset{selectedIds.size > 1 ? 's' : ''} selected
-                        </Text>
-                        <Flex gap={2} flexWrap="wrap">
-                            <Button size="sm" colorPalette="blue" variant="outline" onClick={() => { setBulkStatus(0); setShowBulkStatusDialog(true); }}>
-                                ✓ Set Status
-                            </Button>
-                            <Button size="sm" colorPalette="purple" variant="outline" onClick={() => { setBulkType(''); setShowBulkTypeDialog(true); }}>
-                                🏷️ Set Type
-                            </Button>
-                            <Button size="sm" colorPalette="teal" variant="outline" onClick={() => { setBulkCategoryIds(new Set()); setBulkCategoryMode('add'); setShowBulkCategoriesDialog(true); }}>
-                                📁 Assign Categories
-                            </Button>
-                            <Button size="sm" colorPalette="orange" variant="outline" onClick={() => { setBulkPriceGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100 }); setShowBulkPriceGettersDialog(true); }}>
-                                💰 Assign Price Getters
-                            </Button>
-                            <Button size="sm" colorPalette="red" variant="outline" onClick={() => {
-                                fetchDeletionImpact(Array.from(selectedIds));
-                                setShowBulkDeleteDialog(true);
-                            }}>
-                                🗑️ Delete
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-                                ✕ Clear Selection
-                            </Button>
-                        </Flex>
-                    </Flex>
-                </Box>
+                <Portal>
+                    <Box
+                        position="fixed"
+                        bottom={0}
+                        left={0}
+                        right={0}
+                        zIndex={1000}
+                        bg="rgba(255, 255, 255, 0.85)"
+                        backdropFilter="blur(8px)"
+                        borderTop="1px solid"
+                        borderColor="gray.200"
+                        boxShadow="0 -2px 8px rgba(0,0,0,0.08)"
+                        animation="slideUp 150ms ease-out"
+                        css={{
+                            '@keyframes slideUp': {
+                                from: { transform: 'translateY(100%)' },
+                                to: { transform: 'translateY(0)' },
+                            },
+                        }}
+                    >
+                        <Box maxW="1400px" mx="auto" px={4} py={1.5}>
+                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={1.5}>
+                                <Text fontWeight="semibold" color="blue.700" fontSize="xs">
+                                    {selectedIds.size} asset{selectedIds.size > 1 ? 's' : ''} selected
+                                </Text>
+                                <Flex gap={1} flexWrap="wrap" align="center">
+                                    <Button size="2xs" fontSize="xs" colorPalette="blue" variant="outline" onClick={() => { setBulkStatus(0); setShowBulkStatusDialog(true); }}>
+                                        ✓ Status
+                                    </Button>
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
+                                    <Button size="2xs" fontSize="xs" colorPalette="purple" variant="outline" onClick={() => { setBulkType(''); setShowBulkTypeDialog(true); }}>
+                                        🏷️ Type
+                                    </Button>
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
+                                    <Button size="2xs" fontSize="xs" colorPalette="teal" variant="outline" onClick={() => { setBulkCategoryIds(new Set()); setBulkCategoryMode('add'); setShowBulkCategoriesDialog(true); }}>
+                                        📁 Categories
+                                    </Button>
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
+                                    <Button size="2xs" fontSize="xs" colorPalette="orange" variant="outline" onClick={() => { setBulkPriceGetter({ price_getter: availableGetters[0] || '', external_id: '', priority: 100 }); setShowBulkPriceGettersDialog(true); }}>
+                                        💰 Getters
+                                    </Button>
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
+                                    <Button size="2xs" fontSize="xs" colorPalette="red" variant="outline" onClick={() => { fetchDeletionImpact(Array.from(selectedIds)); setShowBulkDeleteDialog(true); }}>
+                                        🗑️ Delete
+                                    </Button>
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" />
+                                    <Button size="2xs" fontSize="xs" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                                        ✕
+                                    </Button>
+                                </Flex>
+                            </Flex>
+                        </Box>
+                    </Box>
+                </Portal>
             )}
 
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" fontSize="xs">
+            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" fontSize="xs" pb={selectedIds.size > 0 ? '48px' : '0'}>
                 <Table.Root size="sm">
                     <Table.Header>
                         <Table.Row>
@@ -1107,7 +1405,7 @@ export const AssetsEditor: React.FC = () => {
                             <Table.ColumnHeader width="280px">Categories</Table.ColumnHeader>
                             <Table.ColumnHeader width="100px">Getters</Table.ColumnHeader>
                             <Table.ColumnHeader width="60px">Status</Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px">Actions</Table.ColumnHeader>
+                            <Table.ColumnHeader width="40px"></Table.ColumnHeader>
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
@@ -1132,37 +1430,37 @@ export const AssetsEditor: React.FC = () => {
                                         </Checkbox.Root>
                                     </Table.Cell>
                                     <Table.Cell>{asset.asset_id}</Table.Cell>
-                                    <Table.Cell>
-                                        {editingId === asset.asset_id ? (
-                                            <Input
-                                                size="sm"
-                                                value={editValues.symbol || ''}
-                                                onChange={e => setEditValues({ ...editValues, symbol: e.target.value })}
-                                            />
+                                    {/* Click-to-edit: Symbol */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'symbol', asset.symbol)}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'symbol' ? (
+                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                                onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
                                         ) : (
                                             <Badge colorPalette="blue">{asset.symbol}</Badge>
                                         )}
                                     </Table.Cell>
-                                    <Table.Cell>
-                                        {editingId === asset.asset_id ? (
-                                            <Input
-                                                size="sm"
-                                                value={editValues.label || ''}
-                                                onChange={e => setEditValues({ ...editValues, label: e.target.value })}
-                                            />
+                                    {/* Click-to-edit: Label */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'label', asset.label || '')}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'label' ? (
+                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                                onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
                                         ) : (
-                                            <Text>{asset.label || '-'}</Text>
+                                            <Text _hover={{ color: 'blue.600' }}>{asset.label || '-'}</Text>
                                         )}
                                     </Table.Cell>
-                                    <Table.Cell>
-                                        {editingId === asset.asset_id ? (
-                                            <ComboSelect
-                                                value={editValues.price_type || ''}
-                                                onChange={val => setEditValues({ ...editValues, price_type: val })}
-                                                options={PRICE_TYPE_OPTIONS}
-                                                placeholder="Type..."
-                                                width="100px"
-                                            />
+                                    {/* Click-to-edit: Type */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'price_type', asset.price_type || '')}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'price_type' ? (
+                                            <NativeSelect.Root size="sm">
+                                                <NativeSelect.Field autoFocus value={cellValue}
+                                                    onChange={e => { setCellValue(e.target.value); }}
+                                                    onBlur={saveCellEdit}
+                                                >
+                                                    <option value="crypto">Crypto</option>
+                                                    <option value="stock">Stock</option>
+                                                    <option value="fiat">Fiat</option>
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
                                         ) : (
                                             <Tag.Root size="sm" colorPalette={
                                                 asset.price_type === 'crypto' ? 'orange' :
@@ -1200,12 +1498,13 @@ export const AssetsEditor: React.FC = () => {
                                             </IconButton>
                                         </Flex>
                                     </Table.Cell>
-                                    <Table.Cell>
-                                        {editingId === asset.asset_id ? (
+                                    {/* Click-to-edit: Status */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'status', String(asset.status ?? 0))}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'status' ? (
                                             <NativeSelect.Root size="sm">
-                                                <NativeSelect.Field
-                                                    value={String(editValues.status ?? 0)}
-                                                    onChange={e => setEditValues({ ...editValues, status: parseInt(e.target.value) })}
+                                                <NativeSelect.Field autoFocus value={cellValue}
+                                                    onChange={e => setCellValue(e.target.value)}
+                                                    onBlur={saveCellEdit}
                                                 >
                                                     <option value="0">Active</option>
                                                     <option value="1">Inactive</option>
@@ -1218,27 +1517,15 @@ export const AssetsEditor: React.FC = () => {
                                         )}
                                     </Table.Cell>
                                     <Table.Cell>
-                                        <Flex gap={1}>
-                                            {editingId === asset.asset_id ? (
-                                                <>
-                                                    <Button size="xs" colorPalette="blue" onClick={() => saveAsset(asset.asset_id!)}>
-                                                        💾
-                                                    </Button>
-                                                    <Button size="xs" variant="outline" onClick={() => { setEditingId(null); setEditValues({}); }}>
-                                                        ✗
-                                                    </Button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Button size="xs" variant="outline" onClick={() => startEditing(asset)}>
-                                                        ✏️
-                                                    </Button>
-                                                    <Button size="xs" colorPalette="red" variant="outline" onClick={() => deleteAsset(asset.asset_id!)}>
-                                                        🗑️
-                                                    </Button>
-                                                </>
-                                            )}
-                                        </Flex>
+                                        <IconButton
+                                            size="xs"
+                                            variant="ghost"
+                                            colorPalette="red"
+                                            aria-label="Delete asset"
+                                            onClick={() => deleteAsset(asset.asset_id!, asset.symbol)}
+                                        >
+                                            <Icon as={LuTrash2} boxSize={3.5} />
+                                        </IconButton>
                                     </Table.Cell>
                                 </Table.Row>
                             ))
@@ -1336,7 +1623,7 @@ export const AssetsEditor: React.FC = () => {
                 <Portal>
                     <Dialog.Backdrop />
                     <Dialog.Positioner>
-                        <Dialog.Content maxWidth="700px">
+                        <Dialog.Content maxWidth="750px">
                             <Dialog.Header>
                                 <Dialog.Title>
                                     Price Getters for {selectedAsset?.symbol}
@@ -1352,108 +1639,207 @@ export const AssetsEditor: React.FC = () => {
                                 {selectedAsset?.price_getters && selectedAsset.price_getters.length > 0 && (
                                     <Box mb={6}>
                                         <Text fontWeight="medium" mb={2}>Current Price Getters:</Text>
-                                        <Table.Root size="sm">
-                                            <Table.Header>
-                                                <Table.Row>
-                                                    <Table.ColumnHeader>Source</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>External ID</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Parameters</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Priority</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Enabled</Table.ColumnHeader>
-                                                    <Table.ColumnHeader>Actions</Table.ColumnHeader>
-                                                </Table.Row>
-                                            </Table.Header>
-                                            <Table.Body>
-                                                {selectedAsset.price_getters.map(pg => {
-                                                    const isEditing = editingGetterId === pg.id;
-                                                    const paramsEntries = Object.entries(pg.params || {});
-                                                    const hasParams = paramsEntries.length > 0;
+                                        <Box overflowX="auto">
+                                            <Table.Root size="sm">
+                                                <Table.Header>
+                                                    <Table.Row>
+                                                        <Table.ColumnHeader>Source</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>External ID</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>Parameters</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>Priority</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>Enabled</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>Test</Table.ColumnHeader>
+                                                        <Table.ColumnHeader>Actions</Table.ColumnHeader>
+                                                    </Table.Row>
+                                                </Table.Header>
+                                                <Table.Body>
+                                                    {selectedAsset.price_getters.map(pg => {
+                                                        const isEditing = editingGetterId === pg.id;
+                                                        const isMock = pg.price_getter === 'mock';
+                                                        const autoResult = autoTestResults[pg.id];
 
-                                                    return (
-                                                        <Table.Row key={pg.id}>
-                                                            <Table.Cell>
-                                                                <Badge colorPalette="purple">{pg.price_getter}</Badge>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                {isEditing ? (
-                                                                    <Input
-                                                                        size="sm"
-                                                                        value={editingValues.external_id}
-                                                                        onChange={(e) => setEditingValues(v => ({ ...v, external_id: e.target.value }))}
-                                                                        placeholder="e.g. BTC-USD"
-                                                                        fontFamily="mono"
-                                                                        width="120px"
-                                                                    />
-                                                                ) : (
-                                                                    <Text fontSize="sm" fontFamily="mono">
-                                                                        {pg.external_id || <Text as="span" color="gray.400">(auto)</Text>}
-                                                                    </Text>
-                                                                )}
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                {isEditing ? (
-                                                                    <Textarea
-                                                                        size="sm"
-                                                                        value={editingValues.params}
-                                                                        onChange={(e) => setEditingValues(v => ({ ...v, params: e.target.value }))}
-                                                                        placeholder='{"key": "value"}'
-                                                                        fontFamily="mono"
-                                                                        fontSize="xs"
-                                                                        rows={2}
-                                                                        width="150px"
-                                                                    />
-                                                                ) : hasParams ? (
-                                                                    <Flex gap={1} flexWrap="wrap">
-                                                                        {paramsEntries.map(([k, v]) => (
-                                                                            <Badge key={k} colorPalette="gray" fontSize="xs">
-                                                                                {k}: {String(v)}
-                                                                            </Badge>
-                                                                        ))}
+                                                        // For mock getters, show min/max params specially
+                                                        const mockMin = pg.params?.min_price;
+                                                        const mockMax = pg.params?.max_price;
+
+                                                        // Non-mock params display
+                                                        const paramsEntries = Object.entries(pg.params || {}).filter(
+                                                            ([k]) => !isMock || (k !== 'min_price' && k !== 'max_price')
+                                                        );
+                                                        const hasParams = isMock ? (mockMin != null || mockMax != null) : paramsEntries.length > 0;
+
+                                                        return (
+                                                            <Table.Row key={pg.id}>
+                                                                <Table.Cell>
+                                                                    <Badge colorPalette={isMock ? 'orange' : 'purple'}>{pg.price_getter}</Badge>
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    {isEditing ? (
+                                                                        <Input
+                                                                            size="sm"
+                                                                            value={editingValues.external_id}
+                                                                            onChange={(e) => setEditingValues(v => ({ ...v, external_id: e.target.value }))}
+                                                                            placeholder="e.g. BTC-USD"
+                                                                            fontFamily="mono"
+                                                                            width="120px"
+                                                                        />
+                                                                    ) : (
+                                                                        <Text fontSize="sm" fontFamily="mono">
+                                                                            {pg.external_id || <Text as="span" color="gray.400">(auto)</Text>}
+                                                                        </Text>
+                                                                    )}
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    {isEditing && isMock ? (
+                                                                        /* Mock getter: min/max text boxes */
+                                                                        (() => {
+                                                                            let minVal: number | string = '', maxVal: number | string = '';
+                                                                            try { const p = JSON.parse(editingValues.params); minVal = p.min_price ?? ''; maxVal = p.max_price ?? ''; } catch { /* ignore */ }
+                                                                            return (
+                                                                                <Flex gap={1} align="center">
+                                                                                    <Input
+                                                                                        size="sm"
+                                                                                        type="number"
+                                                                                        placeholder="Min"
+                                                                                        width="80px"
+                                                                                        fontSize="xs"
+                                                                                        value={minVal}
+                                                                                        onChange={(e) => {
+                                                                                            try {
+                                                                                                const p = JSON.parse(editingValues.params || '{}');
+                                                                                                p.min_price = e.target.value ? parseFloat(e.target.value) : 0;
+                                                                                                setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
+                                                                                            } catch { /* ignore */ }
+                                                                                        }}
+                                                                                    />
+                                                                                    <Text fontSize="xs" color="gray.400">–</Text>
+                                                                                    <Input
+                                                                                        size="sm"
+                                                                                        type="number"
+                                                                                        placeholder="Max"
+                                                                                        width="80px"
+                                                                                        fontSize="xs"
+                                                                                        value={maxVal}
+                                                                                        onChange={(e) => {
+                                                                                            try {
+                                                                                                const p = JSON.parse(editingValues.params || '{}');
+                                                                                                p.max_price = e.target.value ? parseFloat(e.target.value) : 0;
+                                                                                                setEditingValues(v => ({ ...v, params: JSON.stringify(p) }));
+                                                                                            } catch { /* ignore */ }
+                                                                                        }}
+                                                                                    />
+                                                                                </Flex>
+                                                                            );
+                                                                        })()
+                                                                    ) : isEditing ? (
+                                                                        <Textarea
+                                                                            size="sm"
+                                                                            value={editingValues.params}
+                                                                            onChange={(e) => setEditingValues(v => ({ ...v, params: e.target.value }))}
+                                                                            placeholder='{"key": "value"}'
+                                                                            fontFamily="mono"
+                                                                            fontSize="xs"
+                                                                            rows={2}
+                                                                            width="150px"
+                                                                        />
+                                                                    ) : isMock ? (
+                                                                        /* Mock getter: display range */
+                                                                        <Text fontSize="xs" fontFamily="mono" color="orange.600">
+                                                                            {mockMin != null && mockMax != null
+                                                                                ? `${mockMin} – ${mockMax}`
+                                                                                : <Text as="span" color="gray.400">no range</Text>}
+                                                                        </Text>
+                                                                    ) : hasParams ? (
+                                                                        <Flex gap={1} flexWrap="wrap">
+                                                                            {paramsEntries.map(([k, v]) => (
+                                                                                <Badge key={k} colorPalette="gray" fontSize="xs">
+                                                                                    {k}: {String(v)}
+                                                                                </Badge>
+                                                                            ))}
+                                                                        </Flex>
+                                                                    ) : (
+                                                                        <Text fontSize="xs" color="gray.400">—</Text>
+                                                                    )}
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    {isEditing ? (
+                                                                        <Input
+                                                                            size="sm"
+                                                                            type="number"
+                                                                            value={editingValues.priority}
+                                                                            onChange={(e) => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))}
+                                                                            width="60px"
+                                                                        />
+                                                                    ) : (
+                                                                        pg.priority
+                                                                    )}
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    <Badge
+                                                                        colorPalette={pg.enabled ? 'green' : 'gray'}
+                                                                        cursor="pointer"
+                                                                        onClick={() => togglePriceGetter(pg)}
+                                                                    >
+                                                                        {pg.enabled ? 'Yes' : 'No'}
+                                                                    </Badge>
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    <Flex align="center" gap={1}>
+                                                                        {/* Auto-test status icon */}
+                                                                        {autoResult && (
+                                                                            <Tooltip
+                                                                                content={
+                                                                                    autoResult.loading
+                                                                                        ? 'Testing...'
+                                                                                        : autoResult.success
+                                                                                            ? `✅ ${autoResult.price?.toFixed(6) ?? 'OK'}`
+                                                                                            : `❌ ${autoResult.error || 'Failed'}`
+                                                                                }
+                                                                                showArrow
+                                                                            >
+                                                                                <Box cursor="default">
+                                                                                    {autoResult.loading ? (
+                                                                                        <Spinner size="xs" />
+                                                                                    ) : autoResult.success ? (
+                                                                                        <Text color="green.500" fontSize="sm">✅</Text>
+                                                                                    ) : (
+                                                                                        <Text color="red.500" fontSize="sm">❌</Text>
+                                                                                    )}
+                                                                                </Box>
+                                                                            </Tooltip>
+                                                                        )}
+                                                                        <IconButton
+                                                                            size="xs"
+                                                                            variant="ghost"
+                                                                            colorPalette="blue"
+                                                                            aria-label="Test getter"
+                                                                            onClick={() => openTestModal(pg)}
+                                                                        >
+                                                                            <LuPlay size={12} />
+                                                                        </IconButton>
                                                                     </Flex>
-                                                                ) : (
-                                                                    <Text fontSize="xs" color="gray.400">—</Text>
-                                                                )}
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                {isEditing ? (
-                                                                    <Input
-                                                                        size="sm"
-                                                                        type="number"
-                                                                        value={editingValues.priority}
-                                                                        onChange={(e) => setEditingValues(v => ({ ...v, priority: parseInt(e.target.value) || 100 }))}
-                                                                        width="60px"
-                                                                    />
-                                                                ) : (
-                                                                    pg.priority
-                                                                )}
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                <Badge
-                                                                    colorPalette={pg.enabled ? 'green' : 'gray'}
-                                                                    cursor="pointer"
-                                                                    onClick={() => togglePriceGetter(pg)}
-                                                                >
-                                                                    {pg.enabled ? 'Yes' : 'No'}
-                                                                </Badge>
-                                                            </Table.Cell>
-                                                            <Table.Cell>
-                                                                {isEditing ? (
-                                                                    <Flex gap={1}>
-                                                                        <Button size="xs" colorPalette="green" variant="ghost" onClick={saveEditingGetter}>✓</Button>
-                                                                        <Button size="xs" colorPalette="gray" variant="ghost" onClick={cancelEditingGetter}>✕</Button>
-                                                                    </Flex>
-                                                                ) : (
-                                                                    <Flex gap={1}>
-                                                                        <Button size="xs" colorPalette="blue" variant="ghost" onClick={() => startEditingGetter(pg)}>✏️</Button>
-                                                                        <Button size="xs" colorPalette="red" variant="ghost" onClick={() => deletePriceGetter(pg.id)}>🗑️</Button>
-                                                                    </Flex>
-                                                                )}
-                                                            </Table.Cell>
-                                                        </Table.Row>
-                                                    );
-                                                })}
-                                            </Table.Body>
-                                        </Table.Root>
+                                                                </Table.Cell>
+                                                                <Table.Cell>
+                                                                    {isEditing ? (
+                                                                        <Flex gap={1}>
+                                                                            <Button size="xs" colorPalette="green" variant="ghost" onClick={saveEditingGetter}>✓</Button>
+                                                                            <Button size="xs" colorPalette="gray" variant="ghost" onClick={cancelEditingGetter}>✕</Button>
+                                                                        </Flex>
+                                                                    ) : (
+                                                                        <Flex gap={1}>
+                                                                            <Button size="xs" colorPalette="blue" variant="ghost" onClick={() => startEditingGetter(pg)}>✏️</Button>
+                                                                            {!isMock && (
+                                                                                <Button size="xs" colorPalette="red" variant="ghost" onClick={() => deletePriceGetter(pg.id)}>🗑️</Button>
+                                                                            )}
+                                                                        </Flex>
+                                                                    )}
+                                                                </Table.Cell>
+                                                            </Table.Row>
+                                                        );
+                                                    })}
+                                                </Table.Body>
+                                            </Table.Root>
+                                        </Box>
                                     </Box>
                                 )}
 
@@ -1469,7 +1855,7 @@ export const AssetsEditor: React.FC = () => {
                                                         value={newGetter.price_getter}
                                                         onChange={e => setNewGetter({ ...newGetter, price_getter: e.target.value })}
                                                     >
-                                                        {availableGetters.map(g => (
+                                                        {availableGetters.filter(g => g !== 'mock').map(g => (
                                                             <option key={g} value={g}>{g}</option>
                                                         ))}
                                                     </NativeSelect.Field>
@@ -1494,13 +1880,18 @@ export const AssetsEditor: React.FC = () => {
                                             </Text>
                                             <Input
                                                 size="sm"
-                                                placeholder="Leave empty to use asset symbol"
+                                                placeholder={selectedAsset?.symbol || 'Leave empty to use asset symbol'}
                                                 value={newGetter.external_id || ''}
                                                 onChange={e => setNewGetter({
                                                     ...newGetter,
                                                     external_id: e.target.value || ''
                                                 })}
                                             />
+                                            {!newGetter.external_id && selectedAsset?.symbol && (
+                                                <Text fontSize="xs" color="gray.400" mt={0.5}>
+                                                    Will use "{selectedAsset.symbol}" by default
+                                                </Text>
+                                            )}
                                         </Box>
                                         <Box>
                                             <Text fontSize="sm" mb={1}>
@@ -1523,14 +1914,104 @@ export const AssetsEditor: React.FC = () => {
                                                 }}
                                             />
                                         </Box>
-                                        <Button colorPalette="blue" size="sm" onClick={addPriceGetter}>
-                                            ➕ Add Price Getter
-                                        </Button>
+                                        <Flex gap={2}>
+                                            <Button colorPalette="blue" size="sm" onClick={addPriceGetter} flex={1}>
+                                                ➕ Add Price Getter
+                                            </Button>
+                                            <Button
+                                                colorPalette="teal"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={testNewGetter}
+                                                disabled={!newGetter.price_getter || newGetterTestLoading}
+                                            >
+                                                {newGetterTestLoading ? <Spinner size="xs" /> : '🧪 Test'}
+                                            </Button>
+                                        </Flex>
+                                        {newGetterTestResult && (
+                                            <Box p={2} bg={newGetterTestResult.success ? 'green.50' : 'red.50'} borderRadius="sm" fontSize="xs">
+                                                {newGetterTestResult.success ? (
+                                                    <Text color="green.700">
+                                                        ✅ Price: <strong>{newGetterTestResult.price?.toFixed(6)}</strong>
+                                                    </Text>
+                                                ) : (
+                                                    <Text color="red.700">❌ {newGetterTestResult.error}</Text>
+                                                )}
+                                            </Box>
+                                        )}
                                     </Flex>
                                 </Box>
                             </Dialog.Body>
                             <Dialog.Footer>
                                 <Button variant="outline" onClick={() => setShowGettersDialog(false)}>
+                                    Close
+                                </Button>
+                            </Dialog.Footer>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
+
+            {/* Test Price Getter Modal */}
+            <Dialog.Root open={showTestModal} onOpenChange={(e) => { setShowTestModal(e.open); if (!e.open) { setTestResult(null); setTestModalGetter(null); } }}>
+                <Portal>
+                    <Dialog.Backdrop />
+                    <Dialog.Positioner>
+                        <Dialog.Content maxWidth="420px">
+                            <Dialog.Header>
+                                <Dialog.Title fontSize="md">
+                                    🧪 Test: {testModalGetter?.price_getter}
+                                    {testModalGetter?.external_id && (
+                                        <Text as="span" fontWeight="normal" fontSize="sm" color="gray.500"> ({testModalGetter.external_id})</Text>
+                                    )}
+                                </Dialog.Title>
+                            </Dialog.Header>
+                            <Dialog.Body>
+                                <Flex direction="column" gap={3}>
+                                    <Box>
+                                        <Text fontSize="sm" fontWeight="medium" mb={1}>Test Date</Text>
+                                        <Input
+                                            size="sm"
+                                            type="date"
+                                            value={testDate}
+                                            onChange={e => setTestDate(e.target.value)}
+                                        />
+                                    </Box>
+                                    <Button
+                                        colorPalette="blue"
+                                        size="sm"
+                                        onClick={runTestFromModal}
+                                        disabled={testLoading}
+                                    >
+                                        {testLoading ? <Spinner size="xs" mr={2} /> : null}
+                                        Run Test
+                                    </Button>
+                                    {testResult && (
+                                        <Box p={3} bg={testResult.success ? 'green.50' : 'red.50'} borderRadius="md" border="1px solid" borderColor={testResult.success ? 'green.200' : 'red.200'}>
+                                            {testResult.success ? (
+                                                <Flex direction="column" gap={1}>
+                                                    <Text color="green.700" fontWeight="medium">
+                                                        ✅ Price: {testResult.price?.toFixed(6)}
+                                                    </Text>
+                                                    {testResult.source && (
+                                                        <Text fontSize="xs" color="gray.600">Source: {testResult.source}</Text>
+                                                    )}
+                                                    {testResult.quote_currency && (
+                                                        <Text fontSize="xs" color="gray.600">Quote: {testResult.quote_currency}</Text>
+                                                    )}
+                                                    {testResult.ticker_used && (
+                                                        <Text fontSize="xs" color="gray.600">Ticker: {testResult.ticker_used}</Text>
+                                                    )}
+                                                </Flex>
+                                            ) : (
+                                                <Text color="red.700" fontSize="sm">❌ {testResult.error}</Text>
+                                            )}
+                                        </Box>
+                                    )}
+                                </Flex>
+                            </Dialog.Body>
+                            <Dialog.Footer>
+                                <Button variant="outline" size="sm" onClick={() => setShowTestModal(false)}>
                                     Close
                                 </Button>
                             </Dialog.Footer>
@@ -2441,15 +2922,13 @@ export const AssetsEditor: React.FC = () => {
                 </Portal>
             </Dialog.Root>
 
-            {/* Delete Asset Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteAssetConfirm.isOpen}
-                onClose={deleteAssetConfirm.close}
-                onConfirm={executeDeleteAsset}
-                title="Delete Asset"
-                message="Are you sure you want to delete this asset?"
-                confirmLabel="Delete"
-                isDestructive
+            {/* Delete Asset Dialog with cascade preview */}
+            <DeleteAssetDialog
+                isOpen={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                assetId={deleteTarget?.id ?? null}
+                assetSymbol={deleteTarget?.symbol ?? ''}
+                onDeleted={handleAssetDeleted}
             />
 
             {/* Delete Price Getter Confirmation Dialog */}

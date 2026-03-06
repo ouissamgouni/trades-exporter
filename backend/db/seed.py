@@ -30,7 +30,9 @@ from sqlmodel import Session, select
 from backend.db.models import (
     Account,
     AccountConnector,
+    AppSettings,
     Asset,
+    AssetPriceGetter,
     FileImport,
     FileImportStatus,
     NormalizedTransaction,
@@ -428,6 +430,7 @@ class DatabaseSeeder:
             Number of assets created or updated
         """
         processed = 0
+        new_assets: List[Asset] = []
         for asset_data in assets_config:
             symbol = asset_data.get("symbol")
             if not symbol:
@@ -456,13 +459,54 @@ class DatabaseSeeder:
                     tags=tags,
                 )
                 self.session.add(asset)
+                new_assets.append(asset)
                 log.debug(f"➕ Created asset: {symbol}")
             processed += 1
 
         self.session.commit()
+
+        # Auto-create mock price getters for newly created assets
+        if new_assets:
+            self._ensure_mock_getters(new_assets)
+            self.session.commit()
         if processed > 0:
             log.info(f"✅ Seeded {processed} assets")
         return processed
+
+    # ------------------------------------------------------------------
+    # Mock getter helpers
+    # ------------------------------------------------------------------
+    _MOCK_RANGES = {
+        "crypto": {"min_price": 100.0, "max_price": 50000.0},
+        "stock": {"min_price": 10.0, "max_price": 500.0},
+        "fiat": {"min_price": 0.5, "max_price": 2.0},
+    }
+    _MOCK_DEFAULT = {"min_price": 1.0, "max_price": 1000.0}
+
+    def _ensure_mock_getters(self, assets: List[Asset]) -> None:
+        """Create disabled mock price getter rows for a batch of assets (idempotent)."""
+        settings = self.session.get(AppSettings, 1)
+        mock_enabled = settings.mock_mode_enabled if settings else False
+        for asset in assets:
+            existing = self.session.exec(
+                select(AssetPriceGetter).where(
+                    AssetPriceGetter.asset_id == asset.asset_id,
+                    AssetPriceGetter.price_getter == "mock",
+                )
+            ).first()
+            if existing:
+                continue
+            pt = (asset.price_type or "crypto").lower()
+            params = dict(self._MOCK_RANGES.get(pt, self._MOCK_DEFAULT))
+            self.session.add(
+                AssetPriceGetter(
+                    asset_id=asset.asset_id,
+                    price_getter="mock",
+                    priority=0,
+                    enabled=mock_enabled,
+                    params=params,
+                )
+            )
 
     def seed_assets_from_yaml(
         self, assets_path: Optional[Path] = None

@@ -274,6 +274,7 @@ class AppSettings(SQLModel, table=True):
 
     id: int = Field(default=1, primary_key=True)
     base_currency: str = Field(default="EUR")  # Default base currency symbol
+    mock_mode_enabled: bool = Field(default=False)  # Global mock pricing toggle
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

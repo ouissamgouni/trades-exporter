@@ -65,24 +65,25 @@ def _get_price_getter_classes() -> List[Type["BasePriceGetter"]]:
     Add new price getter classes to this list.
     """
     from backend.services.price_getters.yahoo import YahooPriceGetter
+    from backend.services.price_getters.yahoo_direct import YahooDirectPriceGetter
     from backend.services.price_getters.coingecko import CoinGeckoPriceGetter
     from backend.services.price_getters.datareader import DataReaderPriceGetter
     from backend.services.price_getters.forex import ForexPriceGetter
+    from backend.services.price_getters.alphavantage import AlphaVantagePriceGetter
+    from backend.services.price_getters.marketstack import MarketstackPriceGetter
+
+    from backend.services.price_getters.mock_getter import MockPriceGetter
 
     classes = [
         DataReaderPriceGetter,  # Default for stocks - uses pandas_datareader with Stooq
-        YahooPriceGetter,
+        YahooPriceGetter,       # Yahoo via yfinance (requires fc.yahoo.com DNS)
+        YahooDirectPriceGetter, # Yahoo via Chart API v8 (no yfinance, no crumb needed)
         CoinGeckoPriceGetter,
         ForexPriceGetter,  # For fiat currency conversion
-        # Add new price getters here:
-        # BinancePriceGetter,
-        # KrakenPriceGetter,
+        AlphaVantagePriceGetter,  # Alpha Vantage (free tier: 25 req/day)
+        MarketstackPriceGetter,  # Marketstack (free tier: 100 req/month)
+        MockPriceGetter,  # Always registered — enabled/disabled per-asset via DB
     ]
-    
-    # Conditionally add MockPriceGetter when mock mode is enabled
-    if get_price_getter_override() == "mock":
-        from backend.services.price_getters.mock_getter import MockPriceGetter
-        classes.append(MockPriceGetter)
     
     return classes
 

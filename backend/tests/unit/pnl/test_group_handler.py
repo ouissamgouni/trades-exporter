@@ -19,6 +19,7 @@ from decimal import Decimal
 
 from backend.services.pnl.group_handler import handle_unit
 from backend.services.pnl.lot_manager import LotManager
+from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
 
 from backend.services.pnl.fmv_service import FMVService
 from backend.db.models import LegType
@@ -1819,3 +1820,236 @@ class TestBug5IsIncompleteTransfer:
         assert computed_pattern == UnitPattern.FLOW.value, (
             f"Expected flow for non-owned counterparty, got {computed_pattern} ({reason})"
         )
+
+
+class TestFeeTrackingNoSlices:
+    """
+    Test that FeeEntry records are created even when fee legs have no lots to consume.
+    
+    This covers the bug where:
+    - Base currency fees (EUR) had no lots → slices empty → FeeEntry never created
+    - Fees on cost-basis transfers were absorbed but no FeeEntry created for reporting
+    - Non-base-currency fees with no lots were silently dropped
+    """
+
+    def test_base_currency_fee_creates_fee_entry(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        EUR fee (base currency) should create FeeEntry even without lots.
+        
+        Scenario: Sell 1 BTC for 49,990 EUR, with 10 EUR fee
+        EUR has no lot tracking → slices empty for EUR fee leg.
+        FeeEntry should still be created with fee_value_in_base = 10.
+        """
+        from tests.unit.pnl.conftest import make_leg, make_unit, make_transaction
+        from backend.db.models import FeeEntry
+        
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Pre-fund BTC
+        btc_lot = create_lot(
+            asset_id=2,
+            account_id=1,
+            qty=Decimal("1"),
+            unit_cost=Decimal("30000"),
+            acquired_at=base_datetime - timedelta(days=365),
+        )
+        seed_lot(lot_manager, btc_lot)
+
+        # Sell 1 BTC for 49,990 EUR with 10 EUR fee
+        outflow_tx = make_transaction(id=500, asset_id=2, quantity=Decimal("1"), date_time=base_datetime)
+        inflow_tx = make_transaction(id=501, asset_id=1, quantity=Decimal("49990"), date_time=base_datetime)
+        fee_tx = make_transaction(id=502, asset_id=1, quantity=Decimal("10"), date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=2, leg_type=LegType.OUTFLOW, quantity=Decimal("1"), transaction=outflow_tx),
+            make_leg(asset_id=1, leg_type=LegType.INFLOW, quantity=Decimal("49990"), transaction=inflow_tx),
+            make_leg(asset_id=1, leg_type=LegType.FEE, quantity=Decimal("10"), transaction=fee_tx),
+        ]
+        group = make_unit(legs=legs, pattern="swap", unit_label="Sell BTC with EUR fee")
+
+        result = handle_unit(group, lot_manager, fmv_service, fifo_config)
+
+        # BTC sale should create RealizedPnl
+        assert len(result.realized_pnl_records) == 1
+        assert result.realized_pnl_records[0].asset_id == 2
+
+        # EUR fee should create FeeEntry (on the fee leg)
+        fee_leg = result.fee_legs[0]
+        assert fee_leg.asset_id == 1  # EUR
+        assert fee_leg.fee_entries is not None
+        assert len(fee_leg.fee_entries) == 1
+        
+        fe = fee_leg.fee_entries[0]
+        assert fe.fee_value_in_base == Decimal("10")
+        assert fe.realized_pnl is None  # No RealizedPnl for base currency fee
+
+    def test_absorbed_transfer_fee_creates_fee_entry(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        Absorbed fee on cost-basis transfer should still create FeeEntry for reporting.
+        
+        Scenario: Transfer 100 USDT with 0.01 ETH fee (fee_taxable_by_default=False)
+        Fee cost is absorbed into transfer lot, but FeeEntry should exist.
+        """
+        from tests.unit.pnl.conftest import make_leg, make_unit, make_transaction
+        from backend.db.models import FeeEntry
+        
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Pre-fund USDT
+        usdt_lot = create_lot(
+            asset_id=4, account_id=1, qty=Decimal("100"),
+            unit_cost=Decimal("1"),
+            acquired_at=base_datetime - timedelta(days=60),
+        )
+        seed_lot(lot_manager, usdt_lot)
+
+        # Pre-fund ETH for fee
+        eth_lot = create_lot(
+            asset_id=3, account_id=1, qty=Decimal("0.01"),
+            unit_cost=Decimal("2500"),
+            acquired_at=base_datetime - timedelta(days=90),
+        )
+        seed_lot(lot_manager, eth_lot)
+
+        outflow_tx = make_transaction(id=510, asset_id=4, quantity=Decimal("100"), account_id=1, date_time=base_datetime)
+        inflow_tx = make_transaction(id=511, asset_id=4, quantity=Decimal("99.5"), account_id=2, date_time=base_datetime)
+        fee_tx = make_transaction(id=512, asset_id=3, quantity=Decimal("0.01"), account_id=1, date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=4, leg_type=LegType.OUTFLOW, quantity=Decimal("100"), transaction=outflow_tx),
+            make_leg(asset_id=4, leg_type=LegType.INFLOW, quantity=Decimal("99.5"), transaction=inflow_tx),
+            make_leg(asset_id=3, leg_type=LegType.FEE, quantity=Decimal("0.01"), transaction=fee_tx),
+        ]
+        group = make_unit(legs=legs, pattern="internal_transfer", unit_label="Transfer USDT with ETH fee")
+
+        result = handle_unit(group, lot_manager, fmv_service, fifo_config)
+
+        # No RealizedPnl (fee absorbed, transfer is non-taxable)
+        assert len(result.realized_pnl_records) == 0
+
+        # Transfer lot should exist with absorbed cost
+        transfer_lots = [l for l in result.cost_lots if l.asset_id == 4]
+        assert len(transfer_lots) == 1
+        expected_cost = Decimal("100") + Decimal("25")  # USDT cost + ETH fee cost
+        assert abs(transfer_lots[0].total_cost - expected_cost) < Decimal("0.01")
+
+        # FeeEntry should be created for reporting despite absorption
+        fee_leg = result.fee_legs[0]
+        assert fee_leg.asset_id == 3  # ETH
+        assert fee_leg.fee_entries is not None
+        assert len(fee_leg.fee_entries) == 1
+        
+        fe = fee_leg.fee_entries[0]
+        assert fe.fee_value_in_base == Decimal("25")  # 0.01 ETH * 2500 cost basis
+        assert fe.realized_pnl is None  # No RealizedPnl for absorbed fee
+
+    def test_crypto_fee_no_lots_creates_fee_entry_with_fmv(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        Crypto fee with no lots (e.g., gas fee in token with zero balance)
+        should create FeeEntry using FMV.
+        """
+        from tests.unit.pnl.conftest import make_leg, make_unit, make_transaction
+        from backend.db.models import FeeEntry
+        
+        # Config with allow_negative_balances=False (default)
+        config = PnLConfig(
+            lot_method=fifo_config.lot_method,
+            lot_mode=fifo_config.lot_mode,
+            base_currency_id=1,
+            base_currency_symbol="EUR",
+            allow_negative_balances=False,
+        )
+        
+        lot_manager = LotManager(config)
+        fmv_service = FMVService(mock_price_service, config)
+
+        # Pre-fund BTC for the sale
+        btc_lot = create_lot(
+            asset_id=2, account_id=1, qty=Decimal("1"),
+            unit_cost=Decimal("30000"),
+            acquired_at=base_datetime - timedelta(days=365),
+        )
+        seed_lot(lot_manager, btc_lot)
+
+        # Sell BTC with ETH fee — but we have NO ETH lots
+        outflow_tx = make_transaction(id=520, asset_id=2, quantity=Decimal("1"), date_time=base_datetime)
+        inflow_tx = make_transaction(id=521, asset_id=1, quantity=Decimal("50000"), date_time=base_datetime)
+        fee_tx = make_transaction(id=522, asset_id=3, quantity=Decimal("0.01"), date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=2, leg_type=LegType.OUTFLOW, quantity=Decimal("1"), transaction=outflow_tx),
+            make_leg(asset_id=1, leg_type=LegType.INFLOW, quantity=Decimal("50000"), transaction=inflow_tx),
+            make_leg(asset_id=3, leg_type=LegType.FEE, quantity=Decimal("0.01"), transaction=fee_tx),
+        ]
+        group = make_unit(legs=legs, pattern="swap", unit_label="Sell BTC with ETH fee (no ETH lots)")
+
+        result = handle_unit(group, lot_manager, fmv_service, config)
+
+        # BTC sale creates RealizedPnl
+        assert len(result.realized_pnl_records) == 1
+
+        # ETH fee → no slices consumed, but FeeEntry should exist via FMV
+        fee_leg = result.fee_legs[0]
+        assert fee_leg.asset_id == 3  # ETH
+        assert fee_leg.fee_entries is not None
+        assert len(fee_leg.fee_entries) == 1
+        
+        fe = fee_leg.fee_entries[0]
+        # FMV: 0.01 ETH * 2500 = 25 EUR
+        assert fe.fee_value_in_base == Decimal("25")
+        assert fe.realized_pnl is None  # No lots consumed → no RealizedPnl
+
+    def test_existing_crypto_fee_with_lots_still_works(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        Regression test: crypto fee WITH lots should still create both
+        RealizedPnl AND FeeEntry (existing behavior preserved).
+        """
+        from tests.unit.pnl.conftest import create_sell_with_fee_group
+        
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Pre-fund BTC (enough for sale + fee)
+        btc_lot = create_lot(
+            asset_id=2,
+            account_id=1,
+            qty=Decimal("1.001"),
+            unit_cost=Decimal("30000"),
+            acquired_at=base_datetime - timedelta(days=365),
+        )
+        seed_lot(lot_manager, btc_lot)
+
+        group = create_sell_with_fee_group(
+            base_dt=base_datetime,
+            asset_id=2,
+            qty=Decimal("1"),
+            proceeds_in_base=Decimal("50000"),
+            fee_asset_id=2,  # BTC fee
+            fee_qty=Decimal("0.001"),
+        )
+
+        result = handle_unit(group, lot_manager, fmv_service, fifo_config)
+
+        # Should have 2 RealizedPnl: 1 for sale, 1 for fee
+        assert len(result.realized_pnl_records) == 2
+
+        # Fee leg should have FeeEntry
+        fee_leg = result.fee_legs[0]
+        assert fee_leg.fee_entries is not None
+        assert len(fee_leg.fee_entries) == 1
+        
+        fe = fee_leg.fee_entries[0]
+        # FMV: 0.001 BTC * 40,000 = 40 EUR
+        assert fe.fee_value_in_base == Decimal("40")
+        # This one HAS a RealizedPnl (lots were consumed)
+        assert fe.realized_pnl is not None

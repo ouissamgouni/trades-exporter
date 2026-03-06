@@ -18,6 +18,7 @@ from backend.db.database import get_db
 from backend.db.models import (
     Asset,
     AssetPriceGetter,
+    AppSettings,
     Category,
     AssetCategory,
     Dimension,
@@ -30,8 +31,53 @@ from backend.db.models import (
 from backend.services.price_getters import list_price_getters
 from backend.file_loaders.asset_csv_loader import AssetCSVLoader
 from backend.services.asset_import_service import AssetImportService
+from backend.services.data_cleanup_service import DataCleanupService
+from backend.api.schemas import AssetDeletePreviewResponse
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
+
+
+# ============================================================================
+# Mock Getter Defaults
+# ============================================================================
+
+MOCK_RANGES_BY_TYPE = {
+    "crypto": {"min_price": 100.0, "max_price": 50000.0},
+    "stock": {"min_price": 10.0, "max_price": 500.0},
+    "fiat": {"min_price": 0.5, "max_price": 2.0},
+}
+MOCK_DEFAULT_RANGE = {"min_price": 1.0, "max_price": 1000.0}
+
+
+def _get_mock_range_for_type(price_type: str | None) -> dict:
+    """Get the default mock price range params for an asset type."""
+    pt = (price_type or "crypto").lower()
+    return dict(MOCK_RANGES_BY_TYPE.get(pt, MOCK_DEFAULT_RANGE))
+
+
+def _create_mock_getter(session: Session, asset_id: int, price_type: str | None) -> None:
+    """Create a disabled mock price getter row for an asset (if not exists)."""
+    existing = session.exec(
+        select(AssetPriceGetter).where(
+            AssetPriceGetter.asset_id == asset_id,
+            AssetPriceGetter.price_getter == "mock",
+        )
+    ).first()
+    if existing:
+        return
+
+    # Check if mock mode is globally enabled
+    settings = session.get(AppSettings, 1)
+    mock_enabled = settings.mock_mode_enabled if settings else False
+
+    getter = AssetPriceGetter(
+        asset_id=asset_id,
+        price_getter="mock",
+        priority=0,
+        enabled=mock_enabled,
+        params=_get_mock_range_for_type(price_type),
+    )
+    session.add(getter)
 
 
 # ============================================================================
@@ -295,6 +341,10 @@ def create_asset(
         session.add(asset)
         session.commit()
         session.refresh(asset)
+
+        # Auto-create disabled mock price getter for the new asset
+        _create_mock_getter(session, asset.asset_id, asset.price_type)
+        session.commit()
 
         return _asset_to_response(asset)
 
@@ -734,19 +784,52 @@ def bulk_delete_assets(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@router.get("/{asset_id}/delete-preview", response_model=AssetDeletePreviewResponse)
+def delete_asset_preview(asset_id: int, session: Session = Depends(get_db)):
+    """
+    Preview what will be affected when deleting an asset.
+    Returns counts of all dependent rows without modifying anything.
+    """
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+
+    service = DataCleanupService(session)
+    counts = service.preview_asset_delete(asset_id)
+
+    return AssetDeletePreviewResponse(
+        asset_id=asset_id,
+        asset_symbol=asset.symbol,
+        **counts,
+    )
+
+
 @router.delete("/{asset_id}")
 def delete_asset(
     asset_id: int,
+    force: bool = Query(False, description="Force delete with cascade (removes all dependent data)"),
     session: Session = Depends(get_db),
 ):
-    """Delete an asset by ID."""
+    """
+    Delete an asset by ID.
+
+    Without force=true, rejects deletion if the asset has transactions, cost lots, or P&L data.
+    With force=true, cascades and deletes all dependent data.
+    """
     try:
         asset = session.get(Asset, asset_id)
 
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
-        
-        # Check for blocking relationships
+
+        if force:
+            # Force delete: cascade everything via DataCleanupService
+            service = DataCleanupService(session)
+            result = service.execute_asset_delete(asset_id)
+            session.commit()
+            return {"message": f"Asset '{asset.symbol}' and all dependent data deleted", "asset_id": asset_id, "cascade": result}
+
+        # Non-force: check for blocking relationships
         blockers = {}
         
         # Check for transactions
@@ -797,6 +880,7 @@ def delete_asset(
     except HTTPException:
         raise
     except Exception as e:
+        session.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
@@ -994,6 +1078,88 @@ def delete_asset_price_getter(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ============================================================================
+# Test Price Getter Endpoint
+# ============================================================================
+
+
+class TestPriceGetterRequest(BaseModel):
+    """Request to test a specific price getter for an asset."""
+    price_getter: str
+    external_id: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+    date: Optional[str] = None  # ISO date string, e.g. "2024-06-15". Null = current price.
+
+
+class TestPriceGetterResponse(BaseModel):
+    """Result of a price getter test."""
+    success: bool
+    price: Optional[float] = None
+    quote_currency: Optional[str] = None
+    source: Optional[str] = None
+    ticker_used: Optional[str] = None
+    timestamp: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post(
+    "/{asset_id}/price-getters/test",
+    response_model=TestPriceGetterResponse,
+)
+def test_asset_price_getter(
+    asset_id: int,
+    body: TestPriceGetterRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Test a price getter for an asset without persisting anything.
+
+    Accepts a getter name, optional external_id / params, and an optional date.
+    Returns the fetched price or the error message.
+    """
+    from backend.services.price_getters import get_price_getter
+    from backend.services.price_getters.base import PriceGetterConfig
+
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    try:
+        getter = get_price_getter(body.price_getter)
+    except (ValueError, KeyError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown price getter: '{body.price_getter}'",
+        )
+
+    config = PriceGetterConfig(
+        external_id=body.external_id or asset.symbol,
+        extra=body.params or {},
+    )
+
+    try:
+        if body.date:
+            from datetime import datetime as _dt, timezone as _tz
+            dt = _dt.fromisoformat(body.date).replace(tzinfo=_tz.utc)
+            result = getter.get_historical_price(asset, dt, config)
+        else:
+            result = getter.get_current_price(asset, config)
+
+        return TestPriceGetterResponse(
+            success=True,
+            price=result.price,
+            quote_currency=result.quote_currency,
+            source=result.source,
+            ticker_used=result.ticker_used,
+            timestamp=result.timestamp.isoformat() if result.timestamp else None,
+        )
+    except Exception as exc:
+        return TestPriceGetterResponse(
+            success=False,
+            error=str(exc),
+        )
 
 
 # ============================================================================

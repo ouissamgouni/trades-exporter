@@ -44,13 +44,13 @@ log = configure_logging("price_service")
 # Default price getters by price_type (simplified to 3 types)
 # Each price type has a list of getters to try in order
 ASSET_TYPE_PRICE_GETTERS: Dict[str, List[str]] = {
-    "crypto": ["coingecko", "yahoo"],  # All crypto: tokens, stablecoins, NFTs, etc.
-    "stock": ["datareader", "yahoo"],  # All traditional: stocks, ETFs, indices, commodities
+    "crypto": ["coingecko", "yahoo_direct", "yahoo"],  # All crypto: tokens, stablecoins, NFTs, etc.
+    "stock": ["yahoo_direct", "datareader", "yahoo"],  # All traditional: stocks, ETFs, indices, commodities
     "fiat": ["forex"],  # Fiat currencies
 }
 
 # Fallback getter when price type is unknown
-DEFAULT_GETTERS = ["yahoo", "coingecko"]
+DEFAULT_GETTERS = ["yahoo_direct", "yahoo", "coingecko"]
 
 
 class PriceGetterResolver:
