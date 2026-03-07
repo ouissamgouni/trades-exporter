@@ -21,16 +21,19 @@
  */
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Badge, Box, Button, Dialog, Flex, Heading, Switch, Text } from '@chakra-ui/react';
-import { FiRefreshCw } from 'react-icons/fi';
+import { Badge, Box, Button, Collapsible, Dialog, Flex, Heading, Spinner, Switch, Text } from '@chakra-ui/react';
+import { FiRefreshCw, FiChevronDown, FiChevronRight, FiClock, FiSliders } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
 import { useDataHealth } from '../../contexts/DataHealthContext';
 import { useBalance } from '../../hooks/useBalance';
+import { useAssets } from '../../hooks/useAssets';
+import { usePnLCalculationStatus } from '../../hooks/usePnLCalculationStatus';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
+import { PnLStatusBadge } from './PnLStatusBadge';
 
 // P&L Components
 import { CalculationContext, CalculationMode } from './CalculationContext';
@@ -87,6 +90,14 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const isCalculatingRef = useRef(false);
     const skipHealthCheckRef = useRef(false);  // Flag to skip health check after user confirms
 
+    // --- Custom Calculation Drawer & History Panel state ---
+    const [showCustomCalcDrawer, setShowCustomCalcDrawer] = useState(false);
+    const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+
+    // --- P&L Calculation Service polling ---
+    // loadVersionByIdRef prevents stale closure in onNewVersion callback
+    const loadVersionByIdRef = useRef<(versionId: number) => Promise<void>>();
+
     // Read account_ids from URL on init (for shareable links)
     const getInitialAccountIds = (): number[] => {
         const params = new URLSearchParams(window.location.search);
@@ -124,6 +135,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Version management (Option D: CQRS-Lite)
     const [currentVersionId, setCurrentVersionId] = useState<number | null>(null);
     const [currentVersionStatus, setCurrentVersionStatus] = useState<'draft' | 'committed' | null>(null);
+    const [loadedVersionCreatedAt, setLoadedVersionCreatedAt] = useState<string | null>(null);
     const [availableVersions, setAvailableVersions] = useState<VersionListItem[]>([]);
     const [isLoadingVersions, setIsLoadingVersions] = useState(false);
 
@@ -135,9 +147,15 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         setConfig(prev => ({ ...prev, base_currency_symbol: baseCurrency, base_currency_id: baseCurrencyId }));
     }, [baseCurrency, baseCurrencyId]);
 
+    // Fetch all assets for showing non-P&L assets in table
+    const { assets: allDbAssets } = useAssets();
+
     // Display filter: show/hide unsettled negative lots (e.g., base currency debt)
     const [showUnsettledNegative, setShowUnsettledNegative] = useState(false);
     const [totalUnsettledNegativeCount, setTotalUnsettledNegativeCount] = useState(0);
+
+    // Charts section collapsed state
+    const [chartsExpanded, setChartsExpanded] = useState(true);
 
     // Unified filter state for Portfolio View (accounts + categories + options)
     const [filterState, setFilterState] = useState<PnLFilterState>({
@@ -314,12 +332,46 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
     // Result data
     const [summary, setSummary] = useState<PnLSummary | null>(null);
-    const [assets, setAssets] = useState<AssetPnLRow[]>([]);
+    const [pnlAssets, setPnlAssets] = useState<AssetPnLRow[]>([]);
+
+    // Merge P&L assets with all DB assets (non-P&L get placeholder rows)
+    const assets = useMemo((): AssetPnLRow[] => {
+        if (pnlAssets.length === 0) return [];
+        const pnlAssetIds = new Set(pnlAssets.map(a => a.asset.id).filter(Boolean));
+        const pnlSymbols = new Set(pnlAssets.map(a => a.asset.symbol?.toUpperCase()).filter(Boolean));
+
+        const nonPnlRows: AssetPnLRow[] = allDbAssets
+            .filter(dbAsset => {
+                // Skip if already in P&L results (by ID or symbol)
+                if (dbAsset.asset_id != null && pnlAssetIds.has(dbAsset.asset_id)) return false;
+                if (dbAsset.symbol && pnlSymbols.has(dbAsset.symbol.toUpperCase())) return false;
+                return true;
+            })
+            .map(dbAsset => ({
+                asset: { id: dbAsset.asset_id ?? null, symbol: dbAsset.symbol, label: dbAsset.label ?? null },
+                account_ids: [],
+                category_ids: [],
+                quantity: 0,
+                market_value: 0,
+                cost_basis: 0,
+                unrealized_pnl: 0,
+                unrealized_pnl_pct: 0,
+                realized_pnl: 0,
+                total_fees: 0,
+                lot_count: 0,
+                realized_event_count: 0,
+                warning_count: 0,
+                has_lots: false,
+            }));
+
+        return [...pnlAssets, ...nonPnlRows];
+    }, [pnlAssets, allDbAssets]);
 
     // Filter assets client-side by selected accounts and categories
     // An asset matches if:
     // - No account filter OR asset has at least one account_id in selectedAccountIds
     // - No category filter OR asset has at least one category_id in selectedCategoryIds
+    // Non-P&L assets (has_lots=false) are excluded when account/category filters are active
     const filteredAssets = useMemo(() => {
         let result = assets;
 
@@ -532,6 +584,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             lot_count: balance.lot_count,
             realized_event_count: balance.realized_event_count,
             warning_count: balance.warning_count,
+            has_lots: true,
         }));
     }, []);
 
@@ -632,7 +685,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     };
                 });
 
-                setAssets(assetsWithPrices);
+                setPnlAssets(assetsWithPrices);
 
                 // Recalculate summary metrics
                 const totalUnrealized = assetsWithPrices.reduce((sum, a) => sum + (a.unrealized_pnl || 0), 0);
@@ -865,7 +918,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         setSummary(newSummary);
 
         // Set assets from pre-built rows (built from balances endpoint)
-        setAssets(assetRows);
+        setPnlAssets(assetRows);
     }, []);
 
     // Calculate P&L using Option D workflow with lazy loading:
@@ -987,6 +1040,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             // Store version info
             setCurrentVersionId(versionId);
             setCurrentVersionStatus(calcResult.status === 'draft' ? 'draft' : 'committed');
+            setLoadedVersionCreatedAt(calcResult.created_at ?? new Date().toISOString());
 
             // Initialize ID counts from calculation response ID lists
             setIdCounts({
@@ -1104,6 +1158,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             // Store version info
             setCurrentVersionId(versionId);
             setCurrentVersionStatus(versionData.status === 'draft' ? 'draft' : 'committed');
+            setLoadedVersionCreatedAt(versionData.created_at ?? null);
 
             // Update config from version
             setConfig(prev => ({
@@ -1166,6 +1221,57 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             setIsCalculating(false);
         }
     }, [transformResult, loadBalances, transformBalances, fetchPrices, config.base_currency_symbol, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
+
+    // Keep loadVersionByIdRef in sync for the polling hook's onNewVersion callback
+    useEffect(() => {
+        loadVersionByIdRef.current = loadVersionById;
+    }, [loadVersionById]);
+
+    // --- P&L Calculation Service Polling Hook ---
+    const {
+        status: calcServiceStatus,
+        isStale: isCalcStale,
+        isCalculating: isCalcServiceCalculating,
+        staleSince,
+        staleReasons,
+        currentVersionId: serviceVersionId,
+        lastCalculatedAt,
+        error: calcServiceError,
+        triggerRefresh: triggerPnLRefresh,
+        refetchStatus,
+    } = usePnLCalculationStatus({
+        isActive,
+        onNewVersion: (versionId) => {
+            // Auto-load the new version when background calculation completes
+            loadVersionByIdRef.current?.(versionId);
+            // Also refresh the versions list
+            fetchAvailableVersions();
+        },
+    });
+
+    // Auto-load latest version on first mount when in idle state
+    // Uses the service's current_version_id if available, otherwise loads first available version
+    const hasAutoLoaded = useRef(false);
+    useEffect(() => {
+        if (hasAutoLoaded.current) return;
+        if (!isActive) return;
+
+        // Wait for versions to be loaded
+        if (isLoadingVersions) return;
+
+        // If service reports a version, load it
+        if (serviceVersionId && status === 'idle') {
+            hasAutoLoaded.current = true;
+            loadVersionById(serviceVersionId);
+            return;
+        }
+
+        // Fallback: load the first available version
+        if (availableVersions.length > 0 && status === 'idle') {
+            hasAutoLoaded.current = true;
+            loadVersionById(availableVersions[0].version_id);
+        }
+    }, [isActive, serviceVersionId, availableVersions, isLoadingVersions, status, loadVersionById]);
 
     // Commit (save) the current draft version
     const commitVersion = useCallback(async () => {
@@ -1294,6 +1400,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             fetchAvailableVersions();
             if (currentVersionId === versionId) {
                 setCurrentVersionId(null);
+                setLoadedVersionCreatedAt(null);
                 setStatus('idle');
             }
         } finally {
@@ -1324,7 +1431,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             const assetId = p.asset.id;
             if (assetId != null) priceMap.set(assetId, p);
         }
-        setAssets(prevAssets => prevAssets.map(assetpnlrow => {
+        setPnlAssets(prevAssets => prevAssets.map(assetpnlrow => {
             const assetId = assetpnlrow.asset.id;
             const priceObj = assetId != null ? priceMap.get(assetId) : undefined;
             if (!priceObj || priceObj.price == null) {
@@ -1374,41 +1481,96 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
     return (
         <Box p={4}>
-            <Flex justify="space-between" align="center" mb={4}>
-                <Heading size="lg">📊 P&L Calculator</Heading>
+            {/* Header: Title + Status Badge + Action Buttons */}
+            <Flex justify="space-between" align="center" mb={4} flexWrap="wrap" gap={2}>
+                <Flex align="center" gap={3}>
+                    <Heading size="lg">📊 P&L</Heading>
+                    <PnLStatusBadge
+                        status={
+                            // When service is idle but a version is loaded, show as completed
+                            calcServiceStatus === 'idle' && currentVersionId != null
+                                ? 'completed'
+                                : calcServiceStatus
+                        }
+                        staleReasons={staleReasons}
+                        lastCalculatedAt={lastCalculatedAt ?? loadedVersionCreatedAt}
+                        currentVersionId={serviceVersionId ?? currentVersionId}
+                    />
+                </Flex>
+                <Flex gap={2} align="center">
+                    {/* Refresh P&L Button - triggers background recalculation */}
+                    <Button
+                        size="sm"
+                        colorPalette={isCalcStale ? 'orange' : 'blue'}
+                        variant={isCalcStale ? 'solid' : 'outline'}
+                        onClick={async () => {
+                            const started = await triggerPnLRefresh();
+                            if (started) {
+                                toaster.success({ title: 'P&L recalculation started' });
+                            } else {
+                                toaster.info({ title: 'Calculation already in progress' });
+                            }
+                        }}
+                        disabled={isCalcServiceCalculating}
+                        loading={isCalcServiceCalculating}
+                    >
+                        <FiRefreshCw />
+                        <Text ml={1}>{isCalcStale ? 'Refresh P&L' : 'Recalculate'}</Text>
+                    </Button>
+
+                    {/* Custom Calculation Button */}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowCustomCalcDrawer(true)}
+                    >
+                        <FiSliders />
+                        <Text ml={1}>Custom Calculation</Text>
+                    </Button>
+
+                    {/* History Button */}
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                            setShowHistoryPanel(true);
+                            fetchAvailableVersions();
+                        }}
+                    >
+                        <FiClock />
+                        <Text ml={1}>History</Text>
+                    </Button>
+                </Flex>
             </Flex>
 
-            {/* Calculation Context */}
-            <CalculationContext
-                status={status}
-                config={config}
-                onConfigChange={handleConfigChange}
-                onCalculate={runCalculation}
-                mode={calculationMode}
-                onModeChange={handleModeChange}
-                accounts={accounts}
-                isLoadingAccounts={isLoadingAccounts}
-                availableVersions={availableVersions}
-                isLoadingVersions={isLoadingVersions}
-                selectedVersionId={currentVersionId ?? undefined}
-                onLoadVersion={handleLoadVersion}
-                onPersist={handlePersistVersion}
-                onDeleteVersion={handleDeleteVersion}
-                isCalculating={isCalculating}
-                isPersisting={isPersisting}
-                isDeleting={isDeleting}
-                error={error}
-            />
+            {/* Show loading state while auto-loading initial version */}
+            {status === 'idle' && !hasAutoLoaded.current && (
+                <Flex justify="center" align="center" py={16} bg="gray.50" borderRadius="md" direction="column" gap={3}>
+                    <Spinner size="lg" />
+                    <Text color="gray.500">Loading P&L...</Text>
+                </Flex>
+            )}
 
-            {/* Show content based on calculation status */}
-            {status === 'idle' && (
+            {/* Show empty state only if no versions exist at all */}
+            {status === 'idle' && hasAutoLoaded.current && availableVersions.length === 0 && (
                 <Box textAlign="center" py={16} bg="gray.50" borderRadius="md">
                     <Heading size="md" color="gray.500" mb={2}>
                         No P&L Calculation Yet
                     </Heading>
-                    <Box color="gray.400">
-                        Configure your settings above and click "Calculate" to generate P&L report.
-                    </Box>
+                    <Text color="gray.400" mb={4}>
+                        Click "Refresh P&L" to calculate using your default settings, or "Custom Calculation" for advanced options.
+                    </Text>
+                    <Button
+                        colorPalette="blue"
+                        onClick={async () => {
+                            const started = await triggerPnLRefresh();
+                            if (started) {
+                                toaster.success({ title: 'P&L calculation started' });
+                            }
+                        }}
+                    >
+                        Calculate P&L
+                    </Button>
                 </Box>
             )}
 
@@ -1557,33 +1719,53 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         />
                     )}
 
-                    {/* Charts Section: Pie Chart + Performance Bar Chart side by side */}
+                    {/* Charts Section: Collapsible Pie Chart + Performance Bar Chart */}
                     {currentView !== 'asset-detail' && viewMode === 'portfolio' && dimensions.length > 0 && filteredAssets.length > 0 && (
-                        <Box
-                            display="grid"
-                            gridTemplateColumns={{ base: '1fr', lg: '6fr 3fr' }}
-                            gap={4}
-                            mb={4}
-                        >
-                            <MarketValuePieChart
-                                assets={filteredAssets}
-                                dimensions={dimensions}
-                                baseCurrency={config.base_currency_symbol}
-                                selectedCategoryIds={filterState.selectedCategoryIds}
-                                onCategoryClick={handlePieCategoryClick}
-                            />
-                            <PerformanceBarChart
-                                assets={filteredAssets}
-                                dimensions={dimensions}
-                                baseCurrency={config.base_currency_symbol}
-                                onItemClick={(itemId: number, type: 'asset' | 'category') => {
-                                    if (type === 'asset') {
-                                        handleAssetClick(itemId);
-                                    } else {
-                                        handlePieCategoryClick(itemId);
-                                    }
-                                }}
-                            />
+                        <Box mb={4}>
+                            <Flex
+                                align="center"
+                                gap={2}
+                                cursor="pointer"
+                                py={2}
+                                px={1}
+                                onClick={() => setChartsExpanded(prev => !prev)}
+                                _hover={{ bg: 'gray.50' }}
+                                borderRadius="md"
+                                userSelect="none"
+                            >
+                                {chartsExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                                <Text fontSize="sm" fontWeight="semibold" color="gray.600">Charts</Text>
+                            </Flex>
+                            <Collapsible.Root open={chartsExpanded}>
+                                <Collapsible.Content>
+                                    <Box
+                                        display="grid"
+                                        gridTemplateColumns={{ base: '1fr', lg: '6fr 3fr' }}
+                                        gap={4}
+                                        mt={1}
+                                    >
+                                        <MarketValuePieChart
+                                            assets={filteredAssets}
+                                            dimensions={dimensions}
+                                            baseCurrency={config.base_currency_symbol}
+                                            selectedCategoryIds={filterState.selectedCategoryIds}
+                                            onCategoryClick={handlePieCategoryClick}
+                                        />
+                                        <PerformanceBarChart
+                                            assets={filteredAssets}
+                                            dimensions={dimensions}
+                                            baseCurrency={config.base_currency_symbol}
+                                            onItemClick={(itemId: number, type: 'asset' | 'category') => {
+                                                if (type === 'asset') {
+                                                    handleAssetClick(itemId);
+                                                } else {
+                                                    handlePieCategoryClick(itemId);
+                                                }
+                                            }}
+                                        />
+                                    </Box>
+                                </Collapsible.Content>
+                            </Collapsible.Root>
                         </Box>
                     )}
 
@@ -1609,6 +1791,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             liveAccountBalances={liveAccountBalanceMap}
                             liveBalanceLoading={liveBalanceLoading}
                             unmappedLiveAssets={unmappedLiveAssets}
+                            liveAccountErrors={liveAccountErrors}
+                            liveFetchedAccountIds={liveFetchedAccountIds}
                         />
                     )}
 
@@ -1753,6 +1937,123 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     </Dialog.Content>
                 </Dialog.Positioner>
             </Dialog.Root>
+
+            {/* Custom Calculation Drawer */}
+            <SlidePanel
+                isOpen={showCustomCalcDrawer}
+                onClose={() => setShowCustomCalcDrawer(false)}
+                title="Custom P&L Calculation"
+                width="480px"
+            >
+                <CalculationContext
+                    status={status}
+                    config={config}
+                    onConfigChange={handleConfigChange}
+                    onCalculate={() => {
+                        setShowCustomCalcDrawer(false);
+                        runCalculation();
+                    }}
+                    mode={calculationMode}
+                    onModeChange={handleModeChange}
+                    accounts={accounts}
+                    isLoadingAccounts={isLoadingAccounts}
+                    availableVersions={availableVersions}
+                    isLoadingVersions={isLoadingVersions}
+                    selectedVersionId={currentVersionId ?? undefined}
+                    onLoadVersion={(versionId) => {
+                        setShowCustomCalcDrawer(false);
+                        handleLoadVersion(versionId);
+                    }}
+                    onPersist={handlePersistVersion}
+                    onDeleteVersion={handleDeleteVersion}
+                    isCalculating={isCalculating}
+                    isPersisting={isPersisting}
+                    isDeleting={isDeleting}
+                    error={error}
+                />
+            </SlidePanel>
+
+            {/* History Panel Drawer */}
+            <SlidePanel
+                isOpen={showHistoryPanel}
+                onClose={() => setShowHistoryPanel(false)}
+                title="P&L Calculation History"
+                width="600px"
+            >
+                <Box>
+                    {isLoadingVersions ? (
+                        <Flex justify="center" py={8}>
+                            <Spinner size="lg" />
+                        </Flex>
+                    ) : availableVersions.length === 0 ? (
+                        <Text color="gray.500" textAlign="center" py={8}>
+                            No calculation history yet
+                        </Text>
+                    ) : (
+                        <Box display="flex" flexDirection="column" gap={2}>
+                            {availableVersions.map((version) => (
+                                <Box
+                                    key={version.version_id}
+                                    p={3}
+                                    borderWidth={1}
+                                    borderRadius="md"
+                                    borderColor={currentVersionId === version.version_id ? 'blue.400' : 'gray.200'}
+                                    bg={currentVersionId === version.version_id ? 'blue.50' : 'white'}
+                                    cursor="pointer"
+                                    _hover={{ borderColor: 'blue.300', bg: currentVersionId === version.version_id ? 'blue.50' : 'gray.50' }}
+                                    onClick={() => {
+                                        setShowHistoryPanel(false);
+                                        handleLoadVersion(version.version_id);
+                                    }}
+                                >
+                                    <Flex justify="space-between" align="center">
+                                        <Flex gap={2} align="center">
+                                            <Badge
+                                                colorPalette={version.status === 'committed' ? 'green' : 'gray'}
+                                                size="sm"
+                                                variant="subtle"
+                                            >
+                                                {version.status}
+                                            </Badge>
+                                            {version.trigger && (
+                                                <Badge
+                                                    colorPalette={
+                                                        version.trigger === 'refresh' ? 'blue' :
+                                                            version.trigger === 'manual' ? 'purple' : 'gray'
+                                                    }
+                                                    size="sm"
+                                                    variant="outline"
+                                                >
+                                                    {version.trigger}
+                                                </Badge>
+                                            )}
+                                            <Text fontSize="sm" fontWeight="medium">
+                                                {version.lot_method} / {version.lot_mode}
+                                            </Text>
+                                        </Flex>
+                                        <Text fontSize="xs" color="gray.500">
+                                            {version.created_at
+                                                ? new Date(version.created_at).toLocaleString()
+                                                : 'Unknown date'}
+                                        </Text>
+                                    </Flex>
+                                    {version.description && (
+                                        <Text fontSize="xs" color="gray.600" mt={1}>{version.description}</Text>
+                                    )}
+                                    <Flex gap={3} mt={1}>
+                                        <Text fontSize="xs" color="gray.400">
+                                            Base: {version.base_currency_symbol || '—'}
+                                        </Text>
+                                        <Text fontSize="xs" color="gray.400">
+                                            ID: {version.version_id}
+                                        </Text>
+                                    </Flex>
+                                </Box>
+                            ))}
+                        </Box>
+                    )}
+                </Box>
+            </SlidePanel>
         </Box>
     );
 };

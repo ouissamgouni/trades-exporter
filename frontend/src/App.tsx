@@ -9,6 +9,7 @@ import { defaultFilterState } from './components/TransactionFilters';
 import { FiActivity, FiCheckCircle } from 'react-icons/fi';
 import { DataHealthCheckDrawer } from './components/DataHealthCheckDrawer';
 import { useAssets } from './hooks/useAssets';
+import type { PnLCalcStatus } from './components/pnl/types';
 
 // Setup status interface
 interface SetupStatus {
@@ -139,6 +140,23 @@ const AppContent = () => {
     // Check if there are setup issues
     const [activeTab, setActiveTab] = useState('setup');
 
+    // Lightweight P&L status polling for tab badge (30s interval)
+    const [pnlCalcStatus, setPnlCalcStatus] = useState<PnLCalcStatus>('idle');
+    useEffect(() => {
+        const fetchPnlStatus = async () => {
+            try {
+                const response = await fetch(`${API_URL}/pnl/calculation-status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setPnlCalcStatus(data.status as PnLCalcStatus);
+                }
+            } catch { /* ignore */ }
+        };
+        fetchPnlStatus();
+        const interval = setInterval(fetchPnlStatus, 30_000);
+        return () => clearInterval(interval);
+    }, []);
+
     const hasSetupIssues = setupStatus && (
         !setupStatus.base_currency_set ||
         setupStatus.accounts_count === 0 ||
@@ -224,7 +242,17 @@ const AppContent = () => {
                             <Tabs.Trigger value="positions">🎯 Positions</Tabs.Trigger>
 
                             {/* Step 4: Analysis */}
-                            <Tabs.Trigger value="pnl">📊 P&L</Tabs.Trigger>
+                            <Tabs.Trigger value="pnl">
+                                <Flex align="center" gap={1}>
+                                    📊 P&L
+                                    {pnlCalcStatus === 'stale' && (
+                                        <Box w={2} h={2} borderRadius="full" bg="orange.400" />
+                                    )}
+                                    {pnlCalcStatus === 'calculating' && (
+                                        <Spinner size="xs" />
+                                    )}
+                                </Flex>
+                            </Tabs.Trigger>
 
                             {/* Reference */}
                             <Tabs.Trigger value="prices">📈 Prices</Tabs.Trigger>

@@ -10,6 +10,21 @@
 import { CostMethod, LotMode, AssetRef, Asset } from '../../types';
 
 
+// ============================================================================
+// P&L Calculation Service Status (polling endpoint)
+// ============================================================================
+
+export type PnLCalcStatus = 'idle' | 'stale' | 'calculating' | 'completed' | 'error';
+
+export interface PnLCalculationStatusResponse {
+    status: PnLCalcStatus;
+    stale_since: string | null;
+    stale_reasons: string[];
+    current_version_id: number | null;
+    last_calculated_at: string | null;
+    error: string | null;
+}
+
 
 // ============================================================================
 // Calculation Context Types
@@ -71,6 +86,7 @@ export interface VersionListItem {
     created_at?: string;
     expires_at?: string;
     status: 'draft' | 'committed' | 'active';
+    trigger?: 'auto' | 'manual' | 'refresh';
     // Config fields
     lot_method: string;
     lot_mode: string;
@@ -97,6 +113,7 @@ export interface PnLVersionResponse {
     created_at?: string;  // Optional for fresh calculation
     expires_at?: string;
     status: 'draft' | 'committed' | 'active' | 'not_persisted';
+    trigger?: 'auto' | 'manual' | 'refresh';
 
     // Config
     lot_method: string;
@@ -194,6 +211,12 @@ export interface AssetPnLRow {
     lot_count: number;
     realized_event_count: number;
     warning_count: number;
+
+    // Whether this asset has cost lots in the P&L calculation
+    has_lots?: boolean;
+
+    // Whether this asset is unmapped (appears in live balance but has no DB entry)
+    is_unmapped?: boolean;
 
     // Unit values
     unit_cost?: number;              // Average cost basis per unit (from lots)

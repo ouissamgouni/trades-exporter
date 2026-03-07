@@ -287,6 +287,48 @@ def get_transaction_counts_by_symbol(session: Session = Depends(get_db)):
     return {symbol: cnt for symbol, cnt in rows}
 
 
+@router.get("/transaction-counts-by-id", response_model=Dict[int, int])
+def get_transaction_counts_by_asset_id(session: Session = Depends(get_db)):
+    """Return {asset_id: count} for non-invalid transactions.
+
+    Uses the "related asset" logic: counts transactions where the asset appears
+    as the primary asset_id, the price_quote_asset_id, or the fee_quote_asset_id.
+    """
+    from sqlalchemy import union_all, literal_column as lit
+
+    # Build three sub-selects for each asset-id column
+    q_asset = (
+        select(NormalizedTransaction.asset_id.label("aid"))
+        .where(
+            NormalizedTransaction.review_status != "invalid",
+            NormalizedTransaction.asset_id.isnot(None),
+        )
+    )
+    q_price = (
+        select(NormalizedTransaction.price_quote_asset_id.label("aid"))
+        .where(
+            NormalizedTransaction.review_status != "invalid",
+            NormalizedTransaction.price_quote_asset_id.isnot(None),
+        )
+    )
+    q_fee = (
+        select(NormalizedTransaction.fee_quote_asset_id.label("aid"))
+        .where(
+            NormalizedTransaction.review_status != "invalid",
+            NormalizedTransaction.fee_quote_asset_id.isnot(None),
+        )
+    )
+
+    combined = union_all(q_asset, q_price, q_fee).subquery("combined")
+    statement = (
+        select(combined.c.aid, func.count().label("cnt"))
+        .group_by(combined.c.aid)
+        .order_by(func.count().desc())
+    )
+    rows = session.execute(statement).all()
+    return {int(aid): cnt for aid, cnt in rows}
+
+
 @router.get("/{asset_id}", response_model=AssetResponse)
 def get_asset(
     asset_id: int,
@@ -827,7 +869,7 @@ def delete_asset(
             service = DataCleanupService(session)
             result = service.execute_asset_delete(asset_id)
             session.commit()
-            return {"message": f"Asset '{asset.symbol}' and all dependent data deleted", "asset_id": asset_id, "cascade": result}
+            return {"message": f"Asset and all dependent data deleted", "asset_id": asset_id, "cascade": result}
 
         # Non-force: check for blocking relationships
         blockers = {}
@@ -871,6 +913,14 @@ def delete_asset(
                     "blockers": blockers,
                 }
             )
+
+        # Delete NOT-NULL FK children before ORM delete to avoid
+        # SQLAlchemy setting asset_id=NULL (which violates NOT NULL constraints)
+        from sqlalchemy import text
+        session.exec(text("DELETE FROM asset_price_getters WHERE asset_id = :aid"), params={"aid": asset_id})
+        session.exec(text("DELETE FROM asset_categories WHERE asset_id = :aid"), params={"aid": asset_id})
+        session.exec(text("DELETE FROM price_snapshots WHERE asset_id = :aid"), params={"aid": asset_id})
+        session.exec(text("UPDATE raw_assets SET asset_id = NULL WHERE asset_id = :aid"), params={"aid": asset_id})
 
         session.delete(asset)
         session.commit()

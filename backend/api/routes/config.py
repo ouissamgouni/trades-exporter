@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
-from backend.db.models import Account, Asset, AssetPriceGetter, AccountConnector, AppSettings
+from backend.db.models import Account, Asset, AssetPriceGetter, AccountConnector, AppSettings, PriceSnapshot
 
 
 router = APIRouter(prefix="/config", tags=["Config"])
@@ -29,6 +29,15 @@ class AppSettingsResponse(BaseModel):
 
     base_currency: str
     mock_mode_enabled: bool = False
+    # P&L default configuration
+    pnl_lot_method: str = "FIFO"
+    pnl_lot_mode: str = "LOT_TRAVEL"
+    pnl_residual_tolerance_pct: float = 0.05
+    pnl_allow_negative_balances: bool = True
+    pnl_crypto_swap_taxable: bool = False
+    pnl_fee_taxable: bool = False
+    pnl_use_price_fallback: bool = True
+    pnl_price_staleness_days: int = 7
 
 
 class AppSettingsUpdate(BaseModel):
@@ -36,6 +45,15 @@ class AppSettingsUpdate(BaseModel):
 
     base_currency: str | None = None
     mock_mode_enabled: bool | None = None
+    # P&L default configuration
+    pnl_lot_method: str | None = None
+    pnl_lot_mode: str | None = None
+    pnl_residual_tolerance_pct: float | None = None
+    pnl_allow_negative_balances: bool | None = None
+    pnl_crypto_swap_taxable: bool | None = None
+    pnl_fee_taxable: bool | None = None
+    pnl_use_price_fallback: bool | None = None
+    pnl_price_staleness_days: int | None = None
 
 
 class SetupStatusResponse(BaseModel):
@@ -101,6 +119,14 @@ def get_app_settings(session: Session = Depends(get_db)):
     return AppSettingsResponse(
         base_currency=settings.base_currency,
         mock_mode_enabled=settings.mock_mode_enabled,
+        pnl_lot_method=settings.pnl_lot_method,
+        pnl_lot_mode=settings.pnl_lot_mode,
+        pnl_residual_tolerance_pct=float(settings.pnl_residual_tolerance_pct),
+        pnl_allow_negative_balances=settings.pnl_allow_negative_balances,
+        pnl_crypto_swap_taxable=settings.pnl_crypto_swap_taxable,
+        pnl_fee_taxable=settings.pnl_fee_taxable,
+        pnl_use_price_fallback=settings.pnl_use_price_fallback,
+        pnl_price_staleness_days=settings.pnl_price_staleness_days,
     )
 
 
@@ -142,6 +168,31 @@ def update_app_settings(
             mg.enabled = update.mock_mode_enabled
             session.add(mg)
 
+        # When disabling mock mode, purge cached mock price snapshots
+        # so the price service doesn't keep serving stale mock prices
+        if not update.mock_mode_enabled:
+            mock_snapshots = session.exec(
+                select(PriceSnapshot).where(PriceSnapshot.source == "mock")
+            ).all()
+            for snap in mock_snapshots:
+                session.delete(snap)
+
+    # Update P&L default configuration fields
+    pnl_fields = [
+        'pnl_lot_method', 'pnl_lot_mode', 'pnl_residual_tolerance_pct',
+        'pnl_allow_negative_balances', 'pnl_crypto_swap_taxable', 'pnl_fee_taxable',
+        'pnl_use_price_fallback', 'pnl_price_staleness_days',
+    ]
+    for field_name in pnl_fields:
+        value = getattr(update, field_name, None)
+        if value is not None:
+            # Validate enum values
+            if field_name == 'pnl_lot_method' and value not in ('FIFO', 'LIFO', 'HIFO'):
+                raise HTTPException(status_code=400, detail=f"Invalid lot method: {value}")
+            if field_name == 'pnl_lot_mode' and value not in ('LOT_TRAVEL', 'MEGA_WALLET'):
+                raise HTTPException(status_code=400, detail=f"Invalid lot mode: {value}")
+            setattr(settings, field_name, value)
+
     from datetime import datetime, timezone
     settings.updated_at = datetime.now(timezone.utc)
     
@@ -152,6 +203,14 @@ def update_app_settings(
     return AppSettingsResponse(
         base_currency=settings.base_currency,
         mock_mode_enabled=settings.mock_mode_enabled,
+        pnl_lot_method=settings.pnl_lot_method,
+        pnl_lot_mode=settings.pnl_lot_mode,
+        pnl_residual_tolerance_pct=float(settings.pnl_residual_tolerance_pct),
+        pnl_allow_negative_balances=settings.pnl_allow_negative_balances,
+        pnl_crypto_swap_taxable=settings.pnl_crypto_swap_taxable,
+        pnl_fee_taxable=settings.pnl_fee_taxable,
+        pnl_use_price_fallback=settings.pnl_use_price_fallback,
+        pnl_price_staleness_days=settings.pnl_price_staleness_days,
     )
 
 

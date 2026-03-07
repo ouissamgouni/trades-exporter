@@ -118,7 +118,13 @@ class LotManager:
         
         event = CostLotEvent(
             event_type=event_type.value,
-            lot=lot,
+            # NOTE: Do NOT set lot=lot here. In SQLAlchemy 2.0, setting a
+            # relationship in the constructor only fires back_populates (adding
+            # the event to lot.events in-memory) but does NOT trigger the
+            # save-update cascade on the parent collection. This means the event
+            # is never added to the session and silently drops on commit.
+            # Instead, we explicitly append to lot.events below, which IS a
+            # direct collection mutation that triggers the cascade properly.
             related_lot=related_lot_relationship,
             quantity_delta=quantity_delta,
             cost_basis_delta=cost_basis_delta,
@@ -133,9 +139,14 @@ class LotManager:
             timestamp=event_timestamp,
         )
         
-        # Note: event is automatically added to lot.events via the SQLAlchemy
-        # back_populates relationship when lot=lot is set in CostLotEvent().
-        # No explicit lot.events.append() needed.
+        # CRITICAL: Explicitly append to lot.events for proper cascade persistence.
+        # In SQLAlchemy 2.0, setting lot=lot in the CostLotEvent constructor fires
+        # back_populates (adding event to lot.events in-memory) but does NOT trigger
+        # the save-update cascade — the event is never registered with the session.
+        # Direct collection append (lot.events.append) DOES trigger the cascade,
+        # ensuring the event is tracked by the session and persisted on commit.
+        # This also sets event.lot = lot via back_populates automatically.
+        lot.events.append(event)
         
         log.debug(
             "lot_event_emitted",

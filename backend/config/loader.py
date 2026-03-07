@@ -67,50 +67,7 @@ def get_database_path() -> str:
     return get_database_url()
 
 
-def get_price_getter_override() -> Optional[str]:
-    """
-    Get price getter override from environment or settings.
-    
-    Returns:
-        Price getter override string (e.g., "mock") or None for default behavior.
-    """
-    # Check environment variable first
-    env_override = os.getenv("PRICE_GETTER_OVERRIDE")
-    if env_override:
-        return env_override
-    
-    # Fall back to settings.yaml
-    settings = load_settings()
-    return settings.get("price_getter_override")
 
-
-def get_mock_prices_seed() -> Optional[int]:
-    """
-    Get mock prices seed from environment or settings.
-    
-    Returns:
-        Seed integer for deterministic mock prices, or None for random behavior.
-    """
-    # Check environment variable first
-    env_seed = os.getenv("MOCK_PRICES_SEED")
-    if env_seed:
-        try:
-            return int(env_seed)
-        except ValueError:
-            # Invalid seed value, fall back to settings or None
-            pass
-    
-    # Fall back to settings.yaml
-    settings = load_settings()
-    seed = settings.get("mock_prices_seed")
-    if seed is not None:
-        try:
-            return int(seed)
-        except (ValueError, TypeError):
-            # Invalid seed value, use random behavior
-            pass
-    
-    return None
 
 
 def get_uvicorn_access_log_exclude_paths() -> Optional[List[str]]:

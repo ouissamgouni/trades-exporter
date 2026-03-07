@@ -16,7 +16,7 @@ import { RawAccountsEditor } from "./RawAccountsEditor";
 import { AssetsEditor } from "./AssetsEditor";
 import { RawAssetsEditor } from "./RawAssetsEditor";
 import { CategoriesEditor } from "./CategoriesEditor";
-import { BaseCurrencySelector } from "./BaseCurrencySelector";
+import { PnLDefaultsEditor } from "./PnLDefaultsEditor";
 import { API_URL } from "../types";
 
 interface SetupStatus {
@@ -124,13 +124,13 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
       description: "Organize assets by sector, region, etc.",
     },
     {
-      id: "base-currency",
-      label: "Base Currency",
-      icon: "💵",
-      component: BaseCurrencySelector,
+      id: "pnl-defaults",
+      label: "P&L Defaults",
+      icon: "📊",
+      component: PnLDefaultsEditor,
       status: setupStatus?.base_currency_set,
       badge: setupStatus?.base_currency_symbol || undefined,
-      description: "Set currency for P&L calculations",
+      description: "Base currency & default P&L calculation settings",
     },
   ];
 
@@ -149,22 +149,22 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
       status: setupStatus?.assets_configured && !setupStatus?.unmapped_raw_assets_count,
     },
     {
-      id: "base-currency",
-      label: "Base Currency",
-      icon: "💵",
+      id: "pnl-defaults",
+      label: "P&L Settings",
+      icon: "📊",
       status: setupStatus?.base_currency_set,
     },
   ];
 
   // Get secondary items for current primary tab
   const getSecondaryItems = () => {
-    if (activePrimaryTab === "base-currency") return [];
+    if (activePrimaryTab === "pnl-defaults") return [];
     return navItems.filter((item) => item.group === activePrimaryTab);
   };
 
   const secondaryItems = getSecondaryItems();
 
-  const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || BaseCurrencySelector;
+  const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || PnLDefaultsEditor;
 
   // Calculate completion percentage
   const completionPercentage = setupStatus
@@ -179,8 +179,8 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
   // Handle primary tab change
   const handlePrimaryTabChange = (tabId: string) => {
     setActivePrimaryTab(tabId);
-    if (tabId === "base-currency") {
-      setActiveItem("base-currency");
+    if (tabId === "pnl-defaults") {
+      setActiveItem(tabId);
     } else {
       // Set to first item in the group
       const firstItem = navItems.find((item) => item.group === tabId);
@@ -192,7 +192,7 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
   const renderPrimaryTab = (tab: PrimaryTab) => {
     const isActive = activePrimaryTab === tab.id;
     const hasWarning = tab.status === false;
-    const hasSubItems = tab.id !== "base-currency";
+    const hasSubItems = tab.id !== "pnl-defaults";
 
     return (
       <Box

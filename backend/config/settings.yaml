@@ -19,18 +19,6 @@ use_database_connectors: true
 # Environment variable UVICORN_ACCESS_LOG_EXCLUDE_PATHS (JSON list) takes precedence
 uvicorn_access_log_exclude_paths: null
 
-# ============================================================================
-# Mock Price Service Configuration (for testing)
-# ============================================================================
-# Set to "mock" to force ALL assets to use random mock prices.
-# Useful for quick manual testing without hitting external price APIs.
-# Environment variable PRICE_GETTER_OVERRIDE takes precedence.
-price_getter_override: null # Options: null (disabled), "mock"
-
-# Seed for mock price generator (optional, for reproducible tests)
-# Environment variable MOCK_PRICES_SEED takes precedence.
-mock_prices_seed: null # Options: null (random), any integer (deterministic)
-
 # Grouping Engine Configuration
 grouping_engine:
   # Time windows (in seconds)

@@ -5,8 +5,10 @@ import {
     Table, Tabs, Tag, Text, Textarea, Progress
 } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { LuChevronDown, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2 } from 'react-icons/lu';
+import { LuChevronDown, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2, LuX } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
+import { TransactionsTable } from './TransactionsTable';
+import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { DeleteAssetDialog } from './DeleteAssetDialog';
@@ -170,11 +172,34 @@ export const AssetsEditor: React.FC = () => {
     const [deleteTarget, setDeleteTarget] = useState<{ id: number; symbol: string } | null>(null);
     const deletePriceGetterConfirm = useConfirmDialog<number>();
 
+    // Transaction counts per asset_id
+    const [txCountsByAssetId, setTxCountsByAssetId] = useState<Record<number, number>>({});
+
+    // Asset transactions drawer state
+    const [drawerAsset, setDrawerAsset] = useState<{ id: number; symbol: string } | null>(null);
+    const drawerFilters = useMemo<TransactionFilterState | undefined>(() => {
+        if (!drawerAsset) return undefined;
+        return { ...defaultFilterState, relatedAssetIds: [String(drawerAsset.id)] };
+    }, [drawerAsset]);
+
+    const fetchTransactionCounts = async () => {
+        try {
+            const response = await fetch(`${API_URL}/assets/transaction-counts-by-id`);
+            if (response.ok) {
+                const data: Record<number, number> = await response.json();
+                setTxCountsByAssetId(data);
+            }
+        } catch (err) {
+            console.error('Failed to fetch transaction counts:', err);
+        }
+    };
+
     useEffect(() => {
         fetchAllAssets();
         fetchAvailableGetters();
         fetchCategories();
         fetchMockMode();
+        fetchTransactionCounts();
     }, []);
 
     // Client-side filtering derived from allAssets (no separate state copy)
@@ -1404,6 +1429,7 @@ export const AssetsEditor: React.FC = () => {
                             <Table.ColumnHeader width="60px">Type</Table.ColumnHeader>
                             <Table.ColumnHeader width="280px">Categories</Table.ColumnHeader>
                             <Table.ColumnHeader width="100px">Getters</Table.ColumnHeader>
+                            <Table.ColumnHeader width="70px">Txns</Table.ColumnHeader>
                             <Table.ColumnHeader width="60px">Status</Table.ColumnHeader>
                             <Table.ColumnHeader width="40px"></Table.ColumnHeader>
                         </Table.Row>
@@ -1411,7 +1437,7 @@ export const AssetsEditor: React.FC = () => {
                     <Table.Body>
                         {assets.length === 0 ? (
                             <Table.Row>
-                                <Table.Cell colSpan={9}>
+                                <Table.Cell colSpan={10}>
                                     <Text textAlign="center" py={8} color="gray.500">
                                         {allAssets.length === 0 ? 'No assets found' : 'No assets match filters'}
                                     </Text>
@@ -1497,6 +1523,25 @@ export const AssetsEditor: React.FC = () => {
                                                 <Icon as={LuSettings} boxSize={3.5} />
                                             </IconButton>
                                         </Flex>
+                                    </Table.Cell>
+                                    {/* Transaction count */}
+                                    <Table.Cell>
+                                        {(() => {
+                                            const count = txCountsByAssetId[asset.asset_id!] ?? 0;
+                                            return count > 0 ? (
+                                                <Badge
+                                                    colorPalette="purple"
+                                                    cursor="pointer"
+                                                    _hover={{ opacity: 0.8 }}
+                                                    onClick={() => setDrawerAsset({ id: asset.asset_id!, symbol: asset.symbol })}
+                                                    title={`View ${count} transactions for ${asset.symbol}`}
+                                                >
+                                                    {count}
+                                                </Badge>
+                                            ) : (
+                                                <Text color="gray.400" fontSize="xs">0</Text>
+                                            );
+                                        })()}
                                     </Table.Cell>
                                     {/* Click-to-edit: Status */}
                                     <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'status', String(asset.status ?? 0))}>
@@ -2941,6 +2986,84 @@ export const AssetsEditor: React.FC = () => {
                 confirmLabel="Delete"
                 isDestructive
             />
+
+            {/* Asset Transactions Drawer */}
+            {drawerAsset && drawerFilters && (
+                <>
+                    {/* Backdrop */}
+                    <Box
+                        position="fixed"
+                        inset={0}
+                        bg="blackAlpha.400"
+                        zIndex={2000}
+                        onClick={() => setDrawerAsset(null)}
+                        cursor="pointer"
+                    />
+
+                    {/* Panel */}
+                    <Box
+                        position="fixed"
+                        right={0}
+                        top={0}
+                        bottom={0}
+                        width="75vw"
+                        maxW="1400px"
+                        bg="white"
+                        boxShadow="xl"
+                        zIndex={2001}
+                        overflowY="auto"
+                        borderLeft="1px solid"
+                        borderColor="gray.200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Sticky header */}
+                        <Flex
+                            justify="space-between"
+                            align="center"
+                            px={4}
+                            py={3}
+                            borderBottom="1px solid"
+                            borderColor="gray.200"
+                            bg="white"
+                            position="sticky"
+                            top={0}
+                            zIndex={1}
+                        >
+                            <Flex align="center" gap={2}>
+                                <Badge colorPalette="purple" fontSize="sm">
+                                    {drawerAsset.symbol}
+                                </Badge>
+                                <Heading size="sm">
+                                    Transactions ({txCountsByAssetId[drawerAsset.id] ?? 0})
+                                </Heading>
+                            </Flex>
+                            <IconButton
+                                size="sm"
+                                variant="ghost"
+                                aria-label="Close drawer"
+                                onClick={() => setDrawerAsset(null)}
+                            >
+                                <LuX />
+                            </IconButton>
+                        </Flex>
+
+                        {/* Transactions Table */}
+                        <Box p={4}>
+                            <TransactionsTable
+                                key={`asset-txns-${drawerAsset.id}`}
+                                tableId={`assetTxns-${drawerAsset.id}`}
+                                title=""
+                                subtitle=""
+                                filters={drawerFilters}
+                                showFilters={true}
+                                defaultFiltersCollapsed={true}
+                                showBundles={false}
+                                compact={true}
+                            />
+                        </Box>
+                    </Box>
+                </>
+            )}
         </Box>
     );
 };

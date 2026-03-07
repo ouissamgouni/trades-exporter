@@ -1,26 +1,21 @@
 """Mock Price Getter for Testing.
 
 Returns random prices within configurable ranges per asset type.
-Can be enabled per-asset via the mock_mode_enabled DB setting, or globally
-via PRICE_GETTER_OVERRIDE=mock environment variable.
+Enabled/disabled via the mock_mode_enabled DB setting (UI toggle).
 
 Features:
 - Per-asset-type price ranges (crypto, stock, fiat)
 - Per-asset range overrides via params: {"min_price": X, "max_price": Y}
-- Deterministic seed support via MOCK_PRICES_SEED for reproducible tests
 
 Usage:
-    # Enable mock prices globally via env var (dev/CI only)
-    PRICE_GETTER_OVERRIDE=mock python -m backend.api.run
-    
-    # Or enable per-asset via the UI mock pricing toggle
+    # Enable per-asset via the UI mock pricing toggle in Assets Editor
 """
 
 import random
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 
-from backend.config.loader import configure_logging, get_mock_prices_seed
+from backend.config.loader import configure_logging
 from backend.db.models import Asset
 from backend.services.price_getters.base import (
     BasePriceGetter,
@@ -63,17 +58,8 @@ class MockPriceGetter(BasePriceGetter):
     initial_delay = 0.0
 
     def __init__(self):
-        """Initialize mock price getter with optional seed."""
+        """Initialize mock price getter."""
         super().__init__()
-        
-        # Initialize random seed if configured
-        seed = get_mock_prices_seed()
-        if seed is not None:
-            random.seed(seed)
-            log.info(
-                f"🎲 MockPriceGetter initialized with seed={seed} "
-                f"(prices will be deterministic)"
-            )
 
     def _get_price_range(
         self, asset: Asset, config: Optional[PriceGetterConfig] = None

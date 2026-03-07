@@ -18,6 +18,8 @@ from decimal import Decimal
 from unittest.mock import Mock, MagicMock, patch
 from uuid import uuid4
 
+from backend.services.pnl_calculation_service import PnLCalculationService
+
 from fastapi.testclient import TestClient
 
 from api.schemas import AppliedFilters
@@ -79,6 +81,9 @@ def mock_version():
     version.lots_created = 3
     version.lots_consumed = 2
     version.warning_count = 1
+    version.trigger = None
+    version.allow_negative_balances = True
+    version.residual_tolerance_pct = Decimal("0.05")
     return version
 
 
@@ -410,6 +415,112 @@ class TestDeleteVersion:
             delete_version(version_id=999, session=mock_session)
         
         assert exc_info.value.status_code == 404
+
+
+# =============================================================================
+# Background Calculation Status & Refresh Endpoints
+# =============================================================================
+
+
+# The endpoints do lazy imports:
+#   from backend.services.pnl_calculation_service import PnLCalculationService
+# So we must patch at the source module.
+_SVC_PATCH = "backend.services.pnl_calculation_service.PnLCalculationService"
+
+
+class TestGetCalculationStatus:
+    """Tests for GET /pnl/calculation-status endpoint."""
+
+    def test_returns_service_status(self):
+        """GET /calculation-status delegates to PnLCalculationService.get_status()."""
+        from backend.api.routes.pnl import get_calculation_status
+
+        mock_service = MagicMock()
+        mock_service.get_status.return_value = {
+            "status": "stale",
+            "is_stale": True,
+            "stale_since": "2026-03-06T12:00:00+00:00",
+            "stale_reasons": ["Asset updated"],
+            "current_version_id": 5,
+            "last_calculated_at": "2026-03-06T11:30:00+00:00",
+            "error": None,
+        }
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = get_calculation_status()
+
+        mock_cls.get_instance.assert_called_once()
+        mock_service.get_status.assert_called_once()
+        assert result["status"] == "stale"
+        assert result["is_stale"] is True
+        assert result["current_version_id"] == 5
+
+    def test_returns_idle_when_no_calculation(self):
+        """GET /calculation-status with fresh service returns idle."""
+        from backend.api.routes.pnl import get_calculation_status
+
+        mock_service = MagicMock()
+        mock_service.get_status.return_value = {
+            "status": "idle",
+            "is_stale": True,
+            "stale_since": "2026-03-06T12:00:00+00:00",
+            "stale_reasons": ["Server started"],
+            "current_version_id": None,
+            "last_calculated_at": None,
+            "error": None,
+        }
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = get_calculation_status()
+
+        assert result["status"] == "idle"
+        assert result["current_version_id"] is None
+
+
+class TestRefreshPnl:
+    """Tests for POST /pnl/refresh endpoint."""
+
+    def test_refresh_starts_calculation(self):
+        """POST /refresh starts calculation and returns started=True."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = True
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = refresh_pnl()
+
+        mock_service.start_calculation.assert_called_once_with(trigger="refresh")
+        assert result == {"started": True}
+
+    def test_refresh_returns_false_when_already_calculating(self):
+        """POST /refresh when calculation already running returns started=False."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = False
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = refresh_pnl()
+
+        assert result == {"started": False, "reason": "already_calculating"}
+
+    def test_refresh_passes_refresh_trigger(self):
+        """POST /refresh passes trigger='refresh' to the service."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = True
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            refresh_pnl()
+
+        mock_service.start_calculation.assert_called_once_with(trigger="refresh")
 
 
 # Note: TestPersistResultsSavesBalances was removed because AssetBalance is no longer

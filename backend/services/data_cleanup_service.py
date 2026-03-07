@@ -552,8 +552,8 @@ class DataCleanupService:
         # Also nullify price_snapshots quote_asset_id references
         self._exec("UPDATE price_snapshots SET quote_asset_id = NULL WHERE quote_asset_id = :aid", p)
 
-        # ── 9. Delete the asset itself ──
-        self.session.delete(asset)
+        # ── 9. Delete the asset itself (raw SQL to avoid SQLAlchemy cascade setting NULLs) ──
+        self._exec("DELETE FROM assets WHERE asset_id = :aid", p)
 
         log.info("asset_delete_complete", asset_id=asset_id, result=result)
         return result

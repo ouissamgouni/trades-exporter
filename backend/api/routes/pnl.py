@@ -647,6 +647,53 @@ def pnl_status():
 
 
 # =============================================================================
+# Background Calculation Status & Refresh
+# =============================================================================
+
+
+@router.get("/calculation-status")
+def get_calculation_status():
+    """
+    Get the current P&L background calculation status.
+    
+    Used by the frontend to poll for:
+    - Whether P&L is stale (data changed since last calculation)
+    - Whether a calculation is in progress
+    - The latest auto-calculated version ID
+    - Error information if last calculation failed
+    
+    Recommended polling interval: 5s when P&L tab is active, 30s otherwise.
+    """
+    from backend.services.pnl_calculation_service import PnLCalculationService
+    service = PnLCalculationService.get_instance()
+    return service.get_status()
+
+
+@router.post("/refresh")
+def refresh_pnl():
+    """
+    Trigger a background P&L recalculation using default settings.
+    
+    Returns immediately — calculation runs in a background thread.
+    Poll GET /pnl/calculation-status to track progress.
+    
+    Uses the default P&L configuration from AppSettings.
+    The previous auto-draft is kept until the new one succeeds.
+    
+    Returns:
+        {"started": true} if calculation was started
+        {"started": false, "reason": "already_calculating"} if already running
+    """
+    from backend.services.pnl_calculation_service import PnLCalculationService
+    service = PnLCalculationService.get_instance()
+    started = service.start_calculation(trigger="refresh")
+    if started:
+        return {"started": True}
+    else:
+        return {"started": False, "reason": "already_calculating"}
+
+
+# =============================================================================
 # Option D: Calculate and Persist
 # =============================================================================
 # This is the new preferred endpoint for P&L calculation.
@@ -682,6 +729,7 @@ class PnLVersionResponse(BaseModel):
     created_at: Optional[datetime] = None  # None for fresh calculation
     expires_at: Optional[datetime] = None
     status: str  # 'draft', 'committed', 'active'
+    trigger: Optional[str] = None  # 'auto', 'manual', 'refresh'
     
     # Config
     lot_method: str
@@ -722,6 +770,7 @@ class VersionListItem(BaseModel):
     created_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     status: str
+    trigger: Optional[str] = None  # 'auto', 'manual', 'refresh'
     # Config fields for display and filtering
     lot_method: str
     lot_mode: str
@@ -890,6 +939,7 @@ def build_version_response(
         created_at=version.created_at,
         expires_at=version.expires_at,
         status=version.status,
+        trigger=version.trigger,
         lot_method=version.method,
         lot_mode=version.lot_mode,
         base_currency_id=version.base_currency_id,
@@ -982,6 +1032,9 @@ def calculate_pnl(
         
         # Persist as draft (auto-expires in 1 hour)
         version = engine.persist_results(result, status="draft", expires_in_hours=1)
+        version.trigger = "manual"
+        session.add(version)
+        session.commit()
 
         log.info(
             "pnl_calculation_complete",
@@ -1256,6 +1309,7 @@ def list_versions(
             created_at=v.created_at,
             expires_at=v.expires_at,
             status=v.status,
+            trigger=v.trigger,
             lot_method=v.method,
             lot_mode=v.lot_mode,
             base_currency_id=v.base_currency_id,

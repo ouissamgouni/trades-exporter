@@ -265,6 +265,7 @@ class AppSettings(SQLModel, table=True):
     
     Stores user preferences that can be modified via UI:
     - base_currency: Default currency for P&L calculations
+    - pnl_*: Default P&L calculation configuration
     - theme preferences, etc.
     
     This is a single-row table (id=1 always).
@@ -277,6 +278,19 @@ class AppSettings(SQLModel, table=True):
     mock_mode_enabled: bool = Field(default=False)  # Global mock pricing toggle
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+    # Default P&L calculation configuration
+    pnl_lot_method: str = Field(default="FIFO")  # FIFO, LIFO, HIFO
+    pnl_lot_mode: str = Field(default="LOT_TRAVEL")  # LOT_TRAVEL, MEGA_WALLET
+    pnl_residual_tolerance_pct: Decimal = Field(
+        default=Decimal("0"),
+        sa_column=Column(Numeric(10, 4), nullable=False, default=0, name="pnl_residual_tolerance_pct")
+    )
+    pnl_allow_negative_balances: bool = Field(default=True)
+    pnl_crypto_swap_taxable: bool = Field(default=False)
+    pnl_fee_taxable: bool = Field(default=False)
+    pnl_use_price_fallback: bool = Field(default=True)
+    pnl_price_staleness_days: int = Field(default=7)
 
 
 # ============================================================================
@@ -1123,6 +1137,8 @@ class CalculationVersion(SQLModel, table=True):
     status: str = Field(
         default="draft", index=True
     )  # draft, committed, active
+    # Trigger source: "auto" (background refresh), "manual" (ad-hoc custom), "refresh" (user-clicked refresh)
+    trigger: Optional[str] = Field(default="manual")  # auto, manual, refresh
     # Account filter - stores which accounts were included in this calculation
     # NULL means all accounts, empty array means none (though that would be unusual)
     account_ids: Optional[List[int]] = Field(

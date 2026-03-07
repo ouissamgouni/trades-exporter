@@ -25,13 +25,12 @@ Adding New Price Getters:
     5. Add to PRICE_GETTER_CLASSES below
 
 Mock Price Getter for Testing:
-    Set PRICE_GETTER_OVERRIDE=mock to enable mock prices.
-    The MockPriceGetter is automatically registered when this override is set.
+    MockPriceGetter is always registered; enabled/disabled per-asset via the DB mock_mode_enabled toggle.
 """
 
 from typing import Dict, List, Type, Optional
 
-from backend.config.loader import configure_logging, get_price_getter_override
+from backend.config.loader import configure_logging
 
 log = configure_logging("price_getter_registry")
 
