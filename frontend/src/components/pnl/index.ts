@@ -18,7 +18,10 @@ export { PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 export { SlidePanel } from './SlidePanel';
 export { CategoryFilterBar } from './CategoryFilterBar';
 export { MarketValuePieChart } from './MarketValuePieChart';
-export { PerformanceBarChart } from './PerformanceBarChart';
+export { ChartsDashboard } from './ChartsDashboard';
+export { TotalReturnScorecard } from './TotalReturnScorecard';
+export { CostBasisVsMarketValueChart } from './CostBasisVsMarketValueChart';
+export { AllocationTreemap } from './AllocationTreemap';
 // Re-export from unified hooks
 export { getPersistedPageSize, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 

@@ -127,7 +127,8 @@ export function getUnitPatternLabel(pattern: UnitPattern | string): string {
     [UnitPattern.SWAP]: 'Swap',
     [UnitPattern.SPLIT]: 'Split',
     [UnitPattern.FLOW]: 'Flow',
-    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Internal Transfer',
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
+    [UnitPattern.CUSTOM]: 'Custom',
     [UnitPattern.UNKNOWN]: 'Unknown',
   };
   return labels[pattern] || pattern;

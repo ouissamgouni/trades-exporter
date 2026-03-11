@@ -716,6 +716,12 @@ export interface PnLTransaction {
  * Different from global CalculationUnit which represents user-created bundles.
  * Mapped from backend ProcessedUnitResponse via mapProcessedUnitToCalculationUnit().
  */
+export interface AssetBalanceSnapshot {
+    asset: { id: number; symbol: string };
+    balance: number;
+    accounts?: Array<{ account_id: number; account_name: string; balance: number }>;
+}
+
 export interface PnLCalculationUnit {
     // Core fields (from backend)
     unit_id: number;
@@ -766,6 +772,9 @@ export interface PnLCalculationUnit {
 
     // Event IDs (from backend - for lazy loading)
     event_ids?: number[];
+
+    // Balance snapshots (computed client-side for Activity Feed)
+    balance_snapshots?: AssetBalanceSnapshot[];
 }
 
 // Backward compatibility alias

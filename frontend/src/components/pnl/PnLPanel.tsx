@@ -21,8 +21,8 @@
  */
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Badge, Box, Button, Collapsible, Dialog, Flex, Heading, Spinner, Switch, Text } from '@chakra-ui/react';
-import { FiRefreshCw, FiChevronDown, FiChevronRight, FiClock, FiSliders } from 'react-icons/fi';
+import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Switch, Text } from '@chakra-ui/react';
+import { FiRefreshCw, FiClock, FiSliders } from 'react-icons/fi';
 import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
 import type { BalanceEntry } from '../../types';
@@ -34,18 +34,22 @@ import { usePnLCalculationStatus } from '../../hooks/usePnLCalculationStatus';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
 import { PnLStatusBadge } from './PnLStatusBadge';
+import { computeDelta } from './deltaUtils';
 
 // P&L Components
 import { CalculationContext, CalculationMode } from './CalculationContext';
-import { SummaryCards, SummaryBar } from './SummaryCards';
+import { SummaryCards, SummaryBar, CompactStatusBar, RefreshPricesCard, WarningsCard, BalanceHealthCard, BalanceHealthData } from './SummaryCards';
 import { AssetPnLTable } from './AssetPnLTable';
 import AssetDetailView from './AssetDetailView';
 import { PnLImpactPanel } from './PnLImpactPanel';
 import { PnLAuditView } from './DataExplorerPanel';
 import { PnLFilterBar } from './PnLFilterBar';
-import { MarketValuePieChart } from './MarketValuePieChart';
-import { PerformanceBarChart } from './PerformanceBarChart';
 import { PriceStatusList } from './PriceStatusList';
+import { ChartsDashboard } from './ChartsDashboard';
+import { TotalReturnScorecard, AllTimeIndicators, TimeframeIndicators } from './TotalReturnScorecard';
+import type { Range } from './TotalReturnScorecard';
+import { usePortfolioTimeline, usePeriodSummary } from '../../hooks/useChartData';
+import type { RangeKey } from '../../hooks/useChartData';
 import { SlidePanel } from './SlidePanel';
 import { TransactionDetailDrawer } from '../TransactionDetailDrawer';
 
@@ -154,9 +158,6 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const [showUnsettledNegative, setShowUnsettledNegative] = useState(false);
     const [totalUnsettledNegativeCount, setTotalUnsettledNegativeCount] = useState(0);
 
-    // Charts section collapsed state
-    const [chartsExpanded, setChartsExpanded] = useState(true);
-
     // Unified filter state for Portfolio View (accounts + categories + options)
     const [filterState, setFilterState] = useState<PnLFilterState>({
         selectedAccountIds: [],
@@ -234,8 +235,14 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         return map;
     }, [liveAccountBalancesRaw]);
 
-    // Main view mode: 'portfolio' (filtered view) or 'audit' (full unfiltered audit)
-    const [viewMode, setViewMode] = useState<'portfolio' | 'audit'>('portfolio');
+    // Main view mode: 'portfolio' (filtered view), 'charts' (dashboard), or 'audit' (full unfiltered audit)
+    const [viewMode, setViewMode] = useState<'portfolio' | 'charts' | 'audit'>('portfolio');
+
+    // Portfolio timeline data — always enabled so React Query caches across tab switches
+    const heroTimeline = usePortfolioTimeline(currentVersionId, { granularity: 'daily' }, !!currentVersionId);
+
+    // Period summary data (all ranges at once) — always enabled, cached across tabs
+    const periodSummary = usePeriodSummary(currentVersionId, {}, !!currentVersionId);
 
     // Update URL when account filter changes (for shareable links)
     useEffect(() => {
@@ -421,6 +428,79 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         };
     }, [summary, filteredAssets, hasActiveFilters]);
 
+    // Delta threshold percentage for balance health (configurable via card slider)
+    const [deltaThreshold, setDeltaThreshold] = useState(5);
+
+    // Timeframe range for the period section (default: last 30 days)
+    const [timeframeRange, setTimeframeRange] = useState<Range>('1m');
+
+    // Compute balance health data from live deltas (P&L qty vs exchange qty)
+    // Only report discrepancies where |pct| > deltaThreshold
+    const balanceHealth: BalanceHealthData | undefined = useMemo(() => {
+        if (pnlAssets.length === 0 || liveBalanceMap.size === 0) return undefined;
+        const issues: { symbol: string; delta: number; pct: number }[] = [];
+        let totalCompared = 0;
+        for (const row of pnlAssets) {
+            const sym = row.asset.symbol?.toUpperCase() ?? '';
+            const liveQty = liveBalanceMap.get(sym);
+            const d = computeDelta(row.quantity, liveQty);
+            if (!d) continue;
+            totalCompared++;
+            if (!d.matched && Math.abs(d.pct) > deltaThreshold) {
+                issues.push({ symbol: sym, delta: d.delta, pct: d.pct });
+            }
+        }
+        issues.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+
+        // Asset-level counts: how many P&L assets have corresponding live balance data
+        const assetsTotal = pnlAssets.length;
+        const assetsFetched = totalCompared; // assets where both P&L and live exist
+
+        // Assets with no live balance data at all (symbol not in any exchange response)
+        const uncoveredAssets: string[] = [];
+        for (const row of pnlAssets) {
+            const sym = row.asset.symbol?.toUpperCase() ?? '';
+            if (sym && !liveBalanceMap.has(sym)) {
+                uncoveredAssets.push(sym);
+            }
+        }
+        uncoveredAssets.sort();
+
+        // Failed accounts (non-empty connector errors)
+        const failedAssets: string[] = [];
+        for (const [acctId, errors] of liveAccountErrors.entries()) {
+            const acct = accounts.find(a => a.id === acctId);
+            failedAssets.push(acct ? `${acct.name}: ${errors[0]}` : `Account #${acctId}: ${errors[0]}`);
+        }
+
+        return { mismatchCount: issues.length, totalCompared, issues, assetsFetched, assetsTotal, failedAssets, uncoveredAssets };
+    }, [pnlAssets, liveBalanceMap, deltaThreshold, accounts, liveFetchedAccountIds, liveAccountErrors]);
+
+    // Asset balance map for Activity Feed: symbol (uppercase) → total P&L quantity
+    const assetBalanceMap = useMemo(() => {
+        const map = new Map<string, number>();
+        for (const row of pnlAssets) {
+            const sym = row.asset.symbol?.toUpperCase() ?? '';
+            if (sym) map.set(sym, row.quantity);
+        }
+        return map;
+    }, [pnlAssets]);
+
+    // State: filter asset table to only mismatched (set by Balance Health card click)
+    const [showMismatchedOnly, setShowMismatchedOnly] = useState(false);
+
+    // Apply mismatch filter when Balance Health card is clicked
+    const displayAssets = useMemo(() => {
+        if (!showMismatchedOnly) return filteredAssets;
+        return filteredAssets.filter(row => {
+            const sym = row.asset.symbol?.toUpperCase() ?? '';
+            const liveQty = liveBalanceMap.get(sym);
+            if (liveQty === undefined) return false;
+            const d = computeDelta(row.quantity, liveQty);
+            return d !== null && !d.matched && Math.abs(d.pct) > deltaThreshold;
+        });
+    }, [filteredAssets, showMismatchedOnly, liveBalanceMap, deltaThreshold]);
+
     // Build unmapped live assets list (symbols in live balance but not in P&L assets)
     const unmappedLiveAssets = useMemo<UnmappedLiveAsset[]>(() => {
         if (liveBalanceMap.size === 0 || assets.length === 0) return [];
@@ -499,6 +579,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Fees and warnings data
     const [fees, setFees] = useState<FeeEntry[]>([]);
     const [warnings, setWarnings] = useState<PnLWarningItem[]>([]);
+    // Per-type warning counts (fetched from backend)
+    const [warningTypeCounts, setWarningTypeCounts] = useState<Record<string, number>>({});
     // ID arrays for tab title counts (from calculation result, before data loads)
     const [idCounts, setIdCounts] = useState<{
         unitCount: number;
@@ -1054,6 +1136,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                 eventCount: calcResult.cost_lot_event_ids?.length ?? 0,
             });
 
+            // Fetch warning type counts (fire-and-forget, non-blocking)
+            fetch(`${API_URL}/pnl/versions/${versionId}/warnings/type-counts`)
+                .then(r => r.ok ? r.json() : {})
+                .then(data => setWarningTypeCounts(data))
+                .catch(() => setWarningTypeCounts({}));
+
             // Step 2: Load balances from dedicated endpoint (group_by_asset=true)
             const balances = await loadBalances(versionId, showUnsettledNegative);
             const assetRows = transformBalances(balances);
@@ -1180,6 +1268,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                 settlementCount: 0,  // Will be set from settlements pagination
                 eventCount: versionData.cost_lot_event_ids?.length ?? 0,
             });
+
+            // Fetch warning type counts (fire-and-forget, non-blocking)
+            fetch(`${API_URL}/pnl/versions/${versionId}/warnings/type-counts`)
+                .then(r => r.ok ? r.json() : {})
+                .then(data => setWarningTypeCounts(data))
+                .catch(() => setWarningTypeCounts({}));
 
             // Fetch balances from dedicated endpoint (group_by_asset=true)
             const balances = await loadBalances(versionId, showUnsettledNegative);
@@ -1576,7 +1670,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
             {(status === 'preview' || status === 'persisted') && summary && (
                 <>
-                    {/* Toolbar: View toggle, Price Status and Refresh - above summary cards */}
+                    {/* Toolbar: View toggle only */}
                     {currentView !== 'asset-detail' && (
                         <Flex
                             align="center"
@@ -1589,7 +1683,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             border="1px solid"
                             borderColor="gray.200"
                         >
-                            {/* Left side: View toggle */}
+                            {/* View toggle */}
                             <Flex gap={2} align="center">
                                 <Button
                                     size="sm"
@@ -1604,59 +1698,19 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                 </Button>
                                 <Button
                                     size="sm"
+                                    variant={viewMode === 'charts' ? 'solid' : 'outline'}
+                                    colorPalette={viewMode === 'charts' ? 'blue' : 'gray'}
+                                    onClick={() => setViewMode('charts')}
+                                >
+                                    📉 Charts
+                                </Button>
+                                <Button
+                                    size="sm"
                                     variant={viewMode === 'audit' ? 'solid' : 'outline'}
                                     colorPalette={viewMode === 'audit' ? 'blue' : 'gray'}
                                     onClick={() => setViewMode('audit')}
                                 >
                                     📋 Full Audit
-                                </Button>
-                            </Flex>
-
-                            {/* Right side: Price Status and Refresh button */}
-                            <Flex gap={2} align="center">
-                                {/* Price Status Badges */}
-                                {prices.length > 0 && (
-                                    <Flex gap={2} align="center">
-                                        <Badge
-                                            colorPalette="green"
-                                            variant="solid"
-                                            cursor="pointer"
-                                            onClick={() => setShowPriceDrawer(true)}
-                                            _hover={{ opacity: 0.8 }}
-                                        >
-                                            <Flex align="center" gap={1}>
-                                                <Box as="span">✅</Box>
-                                                <Text>{prices.filter(p => !p.error && p.price != null).length}</Text>
-                                            </Flex>
-                                        </Badge>
-
-                                        {prices.some(p => !!p.error || p.price == null) && (
-                                            <Badge
-                                                colorPalette="red"
-                                                variant="solid"
-                                                cursor="pointer"
-                                                onClick={() => setShowPriceDrawer(true)}
-                                                _hover={{ opacity: 0.8 }}
-                                            >
-                                                <Flex align="center" gap={1}>
-                                                    <Box as="span">⚠️</Box>
-                                                    <Text>{prices.filter(p => !!p.error || p.price == null).length}</Text>
-                                                </Flex>
-                                            </Badge>
-                                        )}
-                                    </Flex>
-                                )}
-
-                                <Button
-                                    onClick={handleRefreshPrices}
-                                    loading={isRefreshingPrices || isLoadingBalances}
-                                    colorPalette="blue"
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={!currentVersionId}
-                                >
-                                    <FiRefreshCw />
-                                    <Text ml={2}>Refresh Prices</Text>
                                 </Button>
                             </Flex>
                         </Flex>
@@ -1703,69 +1757,89 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         </Box>
                     )}
 
-                    {/* Summary Cards (only in Portfolio view, not in asset detail or audit) */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && filteredSummary && (
-                        <SummaryCards
-                            summary={filteredSummary}
-                            baseCurrency={config.base_currency_symbol}
-                            onFeesClick={() => {
-                                setViewMode('audit');
-                                setAuditSubTab('fees');
-                            }}
-                            onWarningsClick={() => {
-                                setViewMode('audit');
-                                setAuditSubTab('warnings');
-                            }}
-                        />
+                    {/* ═══════ ROW 1: All-Time Indicators + Status Cards ═══════ */}
+                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && filteredSummary && filteredAssets.length > 0 && (
+                        <Box
+                            display="grid"
+                            gridTemplateColumns={{ base: '1fr', md: '1fr 1fr' }}
+                            gap={4}
+                            mb={4}
+                        >
+                            {/* Left: All-time indicators */}
+                            <AllTimeIndicators
+                                summary={{
+                                    portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
+                                    costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
+                                    unrealizedPnl: filteredSummary.total_unrealized_pnl,
+                                    realizedPnl: filteredSummary.total_realized_pnl,
+                                    totalFees: filteredSummary.total_fees,
+                                    feeEntryCount: filteredSummary.fee_entry_count,
+                                }}
+                                baseCurrency={config.base_currency_symbol}
+                                isLoading={heroTimeline.isLoading}
+                                onFeesClick={() => {
+                                    setViewMode('audit');
+                                    setAuditSubTab('fees');
+                                }}
+                            />
+
+                            {/* Right: 3 full-size status cards */}
+                            <Box
+                                display="grid"
+                                gridTemplateColumns="1fr 1fr 1fr"
+                                gap={2}
+                            >
+                                <RefreshPricesCard
+                                    onRefreshPrices={handleRefreshPrices}
+                                    isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
+                                    priceSuccessCount={prices.filter(p => !p.error && p.price != null && !p.is_stale).length}
+                                    priceStaleCount={prices.filter(p => !p.error && p.price != null && p.is_stale).length}
+                                    priceErrorCount={prices.filter(p => !!p.error || p.price == null).length}
+                                    onPriceBadgeClick={() => setShowPriceDrawer(true)}
+                                    refreshDisabled={!currentVersionId}
+                                />
+                                <WarningsCard
+                                    summary={filteredSummary}
+                                    onWarningsClick={() => {
+                                        setViewMode('audit');
+                                        setAuditSubTab('warnings');
+                                    }}
+                                    warningTypeCounts={warningTypeCounts}
+                                />
+                                <BalanceHealthCard
+                                    balanceHealth={balanceHealth}
+                                    onBalanceHealthClick={() => {
+                                        setShowMismatchedOnly(prev => !prev);
+                                    }}
+                                    deltaThreshold={deltaThreshold}
+                                    onDeltaThresholdChange={setDeltaThreshold}
+                                />
+                            </Box>
+                        </Box>
                     )}
 
-                    {/* Charts Section: Collapsible Pie Chart + Performance Bar Chart */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && dimensions.length > 0 && filteredAssets.length > 0 && (
+                    {/* ═══════ ROW 2: Timeframe Indicators (includes Best & Worst) ═══════ */}
+                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && filteredAssets.length > 0 && (
                         <Box mb={4}>
-                            <Flex
-                                align="center"
-                                gap={2}
-                                cursor="pointer"
-                                py={2}
-                                px={1}
-                                onClick={() => setChartsExpanded(prev => !prev)}
-                                _hover={{ bg: 'gray.50' }}
-                                borderRadius="md"
-                                userSelect="none"
-                            >
-                                {chartsExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                                <Text fontSize="sm" fontWeight="semibold" color="gray.600">Charts</Text>
-                            </Flex>
-                            <Collapsible.Root open={chartsExpanded}>
-                                <Collapsible.Content>
-                                    <Box
-                                        display="grid"
-                                        gridTemplateColumns={{ base: '1fr', lg: '6fr 3fr' }}
-                                        gap={4}
-                                        mt={1}
-                                    >
-                                        <MarketValuePieChart
-                                            assets={filteredAssets}
-                                            dimensions={dimensions}
-                                            baseCurrency={config.base_currency_symbol}
-                                            selectedCategoryIds={filterState.selectedCategoryIds}
-                                            onCategoryClick={handlePieCategoryClick}
-                                        />
-                                        <PerformanceBarChart
-                                            assets={filteredAssets}
-                                            dimensions={dimensions}
-                                            baseCurrency={config.base_currency_symbol}
-                                            onItemClick={(itemId: number, type: 'asset' | 'category') => {
-                                                if (type === 'asset') {
-                                                    handleAssetClick(itemId);
-                                                } else {
-                                                    handlePieCategoryClick(itemId);
-                                                }
-                                            }}
-                                        />
-                                    </Box>
-                                </Collapsible.Content>
-                            </Collapsible.Root>
+                            <TimeframeIndicators
+                                points={heroTimeline.data?.points || []}
+                                baseCurrency={config.base_currency_symbol}
+                                isLoading={heroTimeline.isLoading || periodSummary.isLoading}
+                                summary={filteredSummary ? {
+                                    portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
+                                    costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
+                                    unrealizedPnl: filteredSummary.total_unrealized_pnl,
+                                    realizedPnl: filteredSummary.total_realized_pnl,
+                                    totalFees: filteredSummary.total_fees,
+                                    feeEntryCount: filteredSummary.fee_entry_count,
+                                } : null}
+                                periodSummaryData={periodSummary.data ?? undefined}
+                                range={timeframeRange}
+                                onRangeChange={setTimeframeRange}
+                                topPerformers={periodSummary.data?.ranges?.[timeframeRange as RangeKey]?.top_performers}
+                                flopPerformers={periodSummary.data?.ranges?.[timeframeRange as RangeKey]?.flop_performers}
+                                onAssetClick={handleAssetClick}
+                            />
                         </Box>
                     )}
 
@@ -1777,23 +1851,77 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         />
                     )}
 
+                    {/* Charts Dashboard View — full analytics when Charts tab is active */}
+                    {currentView === 'assets' && viewMode === 'charts' && currentVersionId && (
+                        <ChartsDashboard
+                            versionId={currentVersionId}
+                            baseCurrency={config.base_currency_symbol}
+                            dimensions={dimensions}
+                            accounts={accounts}
+                            assets={filteredAssets}
+                            selectedAccountIds={filterState.selectedAccountIds}
+                            selectedCategoryIds={filterState.selectedCategoryIds}
+                            onCategoryClick={handlePieCategoryClick}
+                            onItemClick={(itemId: number, type: 'asset' | 'category') => {
+                                if (type === 'asset') {
+                                    handleAssetClick(itemId);
+                                } else {
+                                    handlePieCategoryClick(itemId);
+                                }
+                            }}
+                            /* Shared data from PnLPanel — avoids duplicate fetches */
+                            sharedTimeline={heroTimeline}
+                            periodSummaryData={periodSummary.data ?? undefined}
+                            summary={filteredSummary ? {
+                                portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
+                                costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
+                                unrealizedPnl: filteredSummary.total_unrealized_pnl,
+                                realizedPnl: filteredSummary.total_realized_pnl,
+                                totalFees: filteredSummary.total_fees,
+                                feeEntryCount: filteredSummary.fee_entry_count,
+                            } : undefined}
+                            timeframeRange={timeframeRange}
+                            onTimeframeRangeChange={setTimeframeRange}
+                            onAssetClick={handleAssetClick}
+                        />
+                    )}
+
                     {/* Main content based on view - Portfolio View (assets table) */}
                     {currentView === 'assets' && viewMode === 'portfolio' && (
-                        <AssetPnLTable
-                            assets={filteredAssets}
-                            baseCurrency={config.base_currency_symbol}
-                            onAssetClick={handleAssetClick}
-                            onAccountClick={handleAccountClick}
-                            accountBalances={accountBalances}
-                            accounts={accounts}
-                            onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
-                            liveBalances={liveBalanceMap}
-                            liveAccountBalances={liveAccountBalanceMap}
-                            liveBalanceLoading={liveBalanceLoading}
-                            unmappedLiveAssets={unmappedLiveAssets}
-                            liveAccountErrors={liveAccountErrors}
-                            liveFetchedAccountIds={liveFetchedAccountIds}
-                        />
+                        <>
+                            {showMismatchedOnly && (
+                                <Flex align="center" gap={2} mb={3} px={1}>
+                                    <Badge colorPalette="orange" size="sm">
+                                        Showing {displayAssets.length} mismatched asset{displayAssets.length !== 1 ? 's' : ''} only
+                                    </Badge>
+                                    <Text
+                                        as="span"
+                                        fontSize="xs"
+                                        color="blue.500"
+                                        cursor="pointer"
+                                        _hover={{ textDecoration: 'underline' }}
+                                        onClick={() => setShowMismatchedOnly(false)}
+                                    >
+                                        Clear filter
+                                    </Text>
+                                </Flex>
+                            )}
+                            <AssetPnLTable
+                                assets={displayAssets}
+                                baseCurrency={config.base_currency_symbol}
+                                onAssetClick={handleAssetClick}
+                                onAccountClick={handleAccountClick}
+                                accountBalances={accountBalances}
+                                accounts={accounts}
+                                onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
+                                liveBalances={liveBalanceMap}
+                                liveAccountBalances={liveAccountBalanceMap}
+                                liveBalanceLoading={liveBalanceLoading}
+                                unmappedLiveAssets={unmappedLiveAssets}
+                                liveAccountErrors={liveAccountErrors}
+                                liveFetchedAccountIds={liveFetchedAccountIds}
+                            />
+                        </>
                     )}
 
                     {/* Full Audit View - only shown when viewMode is 'audit' */}
@@ -1825,6 +1953,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                 quoteAssetId={config.base_currency_id ?? undefined}
                                 onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
                                 assets={assets.map(a => a.asset)}
+                                assetBalanceMap={assetBalanceMap}
                             />
                         </>
                     )}

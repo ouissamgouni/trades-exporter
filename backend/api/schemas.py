@@ -959,6 +959,54 @@ class CleanupResultResponse(BaseModel):
 
 
 # =============================================================================
+# Portfolio Timeline & Fee Summary (Charts Dashboard)
+# =============================================================================
+
+class PortfolioTimelineBreakdownItem(BaseModel):
+    asset_id: int
+    symbol: str
+    value_in_base: float
+    qty: float
+    cost_basis_in_base: float
+    realized_pnl_to_date: float
+
+
+class PortfolioTimelinePoint(BaseModel):
+    date: str
+    total_value_in_base: float
+    cost_basis_in_base: float
+    unrealized_pnl: float
+    cumulative_realized_pnl: float
+    breakdown: list[PortfolioTimelineBreakdownItem] = []
+
+
+class PortfolioTimelineResponse(BaseModel):
+    version_id: int
+    granularity: str
+    points: list[PortfolioTimelinePoint] = []
+
+
+class FeeBreakdownItemResponse(BaseModel):
+    key: str
+    key_id: int
+    fees_in_base: float
+
+
+class FeePeriodBucketResponse(BaseModel):
+    period: str
+    total_fees_in_base: float
+    count: int
+    breakdown: list[FeeBreakdownItemResponse] = []
+
+
+class FeeSummaryByPeriodResponse(BaseModel):
+    version_id: int
+    granularity: str
+    group_by: str
+    periods: list[FeePeriodBucketResponse] = []
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -1010,4 +1058,11 @@ __all__ = [
     "CleanupRequest",
     "CleanupPreviewResponse",
     "CleanupResultResponse",
+    # Charts dashboard
+    "PortfolioTimelineBreakdownItem",
+    "PortfolioTimelinePoint",
+    "PortfolioTimelineResponse",
+    "FeeBreakdownItemResponse",
+    "FeePeriodBucketResponse",
+    "FeeSummaryByPeriodResponse",
 ]

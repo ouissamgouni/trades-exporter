@@ -47,7 +47,9 @@ export interface AppliedFilters {
     account_ids: (number | string)[];
     from_account_ids: (number | string)[];
     to_account_ids: (number | string)[];
+    related_account_ids: (number | string)[];
     asset_ids: number[];
+    related_asset_ids: number[];
     category_ids: number[];
     transaction_types: string[];
     directions: string[];
@@ -83,6 +85,7 @@ export interface Account {
     tags: Record<string, any>[];
     owned: boolean;
     enabled: boolean;
+    live_balance_eligible?: boolean;
     color?: string;
     created_at: string;
 }

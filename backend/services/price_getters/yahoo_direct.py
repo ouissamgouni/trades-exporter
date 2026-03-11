@@ -20,8 +20,8 @@ Quote Currency Handling:
 - Configure native_quote_currency in AssetPriceGetter.params to override if needed
 """
 
-from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
+from datetime import datetime, date, timedelta
+from typing import Optional, Tuple, Dict, Any, List
 
 import requests
 
@@ -357,3 +357,57 @@ class YahooDirectPriceGetter(BasePriceGetter):
             timestamp=dt,
             ticker_used=ticker_symbol,
         )
+
+    # -----------------------------------------------------------------
+    # Bulk daily series (for benchmark comparisons)
+    # -----------------------------------------------------------------
+
+    def get_daily_series(
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch daily close prices for a Yahoo Finance ticker over a date range.
+
+        This bypasses the Asset-based workflow and fetches directly by ticker.
+        Intended for external benchmark indices (^GSPC, ^IXIC, BTC-USD, etc.).
+
+        Args:
+            ticker: Yahoo Finance ticker (e.g., "^GSPC", "BTC-USD").
+            start_date: First date (inclusive).
+            end_date: Last date (inclusive).
+
+        Returns:
+            List of {"date": "YYYY-MM-DD", "close": float} dicts, sorted by date.
+
+        Raises:
+            PriceGetterError: On API failure.
+        """
+        period1 = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        period2 = int(datetime.combine(end_date + timedelta(days=1), datetime.min.time()).timestamp())
+
+        log.info(
+            f"[yahoo_direct] Fetching daily series: ticker={ticker}, "
+            f"range={start_date} → {end_date}"
+        )
+
+        result = self._fetch_chart(
+            ticker,
+            {"interval": "1d", "period1": period1, "period2": period2},
+        )
+
+        timestamps = result.get("timestamp", [])
+        quotes = result.get("indicators", {}).get("quote", [{}])[0]
+        closes = quotes.get("close", [])
+
+        points: List[Dict[str, Any]] = []
+        for ts, close in zip(timestamps, closes):
+            if close is None:
+                continue
+            bar_date = datetime.utcfromtimestamp(ts).date()
+            points.append({"date": bar_date.isoformat(), "close": round(float(close), 4)})
+
+        log.info(f"[yahoo_direct] ✓ Got {len(points)} daily bars for {ticker}")
+        return points

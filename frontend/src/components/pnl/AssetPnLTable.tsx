@@ -31,7 +31,9 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiUsers, FiFilter, FiX } from 'react-icons/fi';
+import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiUsers, FiFilter, FiX, FiList } from 'react-icons/fi';
+import { AssetPnLCard } from './AssetPnLCard';
+import { AccountPnLCard } from './AccountPnLCard';
 import { AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
 import { Account } from '../../types';
 import { Tooltip } from '../ui/tooltip';
@@ -55,6 +57,7 @@ const DEFAULT_PAGE_SIZE = 25;
 const XS: { fontSize: string } = { fontSize: 'xs' };
 
 type GroupBy = 'asset' | 'account';
+type DisplayMode = 'cards' | 'table';
 
 /** Filter values for the unified filter section */
 type PnlStatusFilter = 'all' | 'with_pnl' | 'no_pnl';
@@ -248,6 +251,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     const [expandedAssetIds, setExpandedAssetIds] = useState<Set<number>>(new Set());
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const [groupBy, setGroupBy] = useState<GroupBy>('asset');
+    const [displayMode, setDisplayMode] = useState<DisplayMode>('cards');
 
     // --- Unified filter state ---
     const [search, setSearch] = useState('');
@@ -512,8 +516,28 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         return byAccountRows.slice(start, start + pageSize);
     }, [byAccountRows, safePage, pageSize]);
 
+    // Compute per-account aggregated live balance value (for card mode)
+    const accountLiveBalanceValues = useMemo((): Map<number, number> => {
+        if (!liveAccountBalances) return new Map();
+        const result = new Map<number, number>();
+
+        // Iterate all symbols in liveAccountBalances: symbol → (accountId → qty)
+        for (const [sym, accountMap] of liveAccountBalances.entries()) {
+            // Find the asset row to get unit_value for this symbol
+            const assetRow = allAssets.find(a => (a.asset.symbol?.toUpperCase() ?? '') === sym);
+            const unitPrice = assetRow?.unit_value;
+            if (unitPrice == null) continue;
+
+            for (const [accountId, qty] of accountMap.entries()) {
+                const value = qty * unitPrice;
+                result.set(accountId, (result.get(accountId) ?? 0) + value);
+            }
+        }
+        return result;
+    }, [liveAccountBalances, allAssets]);
+
     // Reset page when filters/sort/grouping change
-    useEffect(() => { resetPage(); }, [search, minMarketValue, pnlStatus, balanceStatus, sortField, sortDir, groupBy, resetPage]);
+    useEffect(() => { resetPage(); }, [search, minMarketValue, pnlStatus, balanceStatus, sortField, sortDir, groupBy, displayMode, resetPage]);
 
     // Trigger load of per-account data when switching to "by account" mode
     const handleGroupByChange = (newGroupBy: GroupBy) => {
@@ -589,35 +613,66 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                         }
                     </Text>
 
-                    {/* Group by toggle — top right corner */}
-                    <Flex
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor="gray.200"
-                        overflow="hidden"
-                    >
-                        <Button
-                            size="xs"
-                            variant={groupBy === 'asset' ? 'solid' : 'ghost'}
-                            colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
-                            borderRadius="0"
-                            onClick={() => handleGroupByChange('asset')}
-                            gap={1}
+                    <Flex align="center" gap={2}>
+                        {/* Display mode toggle — Cards vs Table */}
+                        <Flex
+                            borderRadius="md"
+                            border="1px solid"
+                            borderColor="gray.200"
+                            overflow="hidden"
                         >
-                            <FiGrid size={12} />
-                            By Asset
-                        </Button>
-                        <Button
-                            size="xs"
-                            variant={groupBy === 'account' ? 'solid' : 'ghost'}
-                            colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
-                            borderRadius="0"
-                            onClick={() => handleGroupByChange('account')}
-                            gap={1}
+                            <Button
+                                size="xs"
+                                variant={displayMode === 'cards' ? 'solid' : 'ghost'}
+                                colorPalette={displayMode === 'cards' ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => setDisplayMode('cards')}
+                                px={2}
+                                title="Card view"
+                            >
+                                <FiGrid size={12} />
+                            </Button>
+                            <Button
+                                size="xs"
+                                variant={displayMode === 'table' ? 'solid' : 'ghost'}
+                                colorPalette={displayMode === 'table' ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => setDisplayMode('table')}
+                                px={2}
+                                title="Table view"
+                            >
+                                <FiList size={12} />
+                            </Button>
+                        </Flex>
+
+                        {/* Group by toggle */}
+                        <Flex
+                            borderRadius="md"
+                            border="1px solid"
+                            borderColor="gray.200"
+                            overflow="hidden"
                         >
-                            <FiUsers size={12} />
-                            By Account
-                        </Button>
+                            <Button
+                                size="xs"
+                                variant={groupBy === 'asset' ? 'solid' : 'ghost'}
+                                colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => handleGroupByChange('asset')}
+                                gap={1}
+                            >
+                                By Asset
+                            </Button>
+                            <Button
+                                size="xs"
+                                variant={groupBy === 'account' ? 'solid' : 'ghost'}
+                                colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => handleGroupByChange('account')}
+                                gap={1}
+                            >
+                                By Account
+                            </Button>
+                        </Flex>
                     </Flex>
                 </Flex>
 
@@ -736,500 +791,621 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 />
                             </Box>
                         </SimpleGrid>
+                        {/* Sort-by dropdown (visible in card mode) */}
+                        {displayMode === 'cards' && (
+                            <Flex align="center" gap={2} mt={2}>
+                                <Text fontSize="2xs" fontWeight="medium" color="gray.500">Sort by</Text>
+                                <Flex
+                                    borderRadius="md"
+                                    border="1px solid"
+                                    borderColor="gray.200"
+                                    overflow="hidden"
+                                    display="inline-flex"
+                                >
+                                    {[
+                                        { value: 'market_value', label: 'Value' },
+                                        { value: 'cost_basis', label: 'Cost' },
+                                        { value: 'unrealized_pnl', label: 'Unrealized' },
+                                        { value: 'realized_pnl', label: 'Realized' },
+                                        { value: 'asset_symbol', label: 'Symbol' },
+                                        { value: 'quantity', label: 'Qty' },
+                                    ].map((opt) => (
+                                        <Button
+                                            key={opt.value}
+                                            size="2xs"
+                                            variant={sortField === opt.value ? 'solid' : 'ghost'}
+                                            colorPalette={sortField === opt.value ? 'blue' : 'gray'}
+                                            borderRadius="0"
+                                            onClick={() => handleSort(opt.value as SortField)}
+                                            px={2}
+                                            fontSize="xs"
+                                        >
+                                            {opt.label}
+                                            {sortField === opt.value && (
+                                                <Text as="span" ml={0.5}>{sortDir === 'asc' ? '↑' : '↓'}</Text>
+                                            )}
+                                        </Button>
+                                    ))}
+                                </Flex>
+                            </Flex>
+                        )}
                     </Collapsible.Content>
                 </Collapsible.Root>
             </Card.Header>
 
             <Card.Body p={0}>
-                <Box overflowX="auto">
-                    <Table.Root size="sm">
-                        <Table.Header>
-                            <Table.Row>
-                                {groupBy === 'account' ? (
-                                    <>
-                                        <Table.ColumnHeader>Account</Table.ColumnHeader>
-                                        <Table.ColumnHeader>Assets</Table.ColumnHeader>
-                                        <Table.ColumnHeader>Cost</Table.ColumnHeader>
-                                        <Table.ColumnHeader>Value</Table.ColumnHeader>
-                                        <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
-                                        <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
-                                        <Table.ColumnHeader></Table.ColumnHeader>
-                                    </>
-                                ) : (
-                                    <>
-                                        <SortHeader field="asset_symbol">Asset</SortHeader>
-                                        <SortHeader field="quantity">Qty</SortHeader>
-                                        <Table.ColumnHeader>
-                                            <Flex align="center" gap={1}>
-                                                Δ
-                                                {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
-                                            </Flex>
-                                        </Table.ColumnHeader>
-                                        <SortHeader field="cost_basis">Cost</SortHeader>
-                                        <SortHeader field="market_value">Value</SortHeader>
-                                        <SortHeader field="unrealized_pnl">Unrealized</SortHeader>
-                                        <SortHeader field="realized_pnl">Realized</SortHeader>
-                                        <Table.ColumnHeader>Fees</Table.ColumnHeader>
-                                        <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
-                                        <Table.ColumnHeader></Table.ColumnHeader>
-                                    </>
-                                )}
-                            </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                            {(() => {
-                                const colSpan = groupBy === 'account' ? TOTAL_COLUMNS_BY_ACCOUNT : TOTAL_COLUMNS_BY_ASSET;
-                                if (loading) {
-                                    return (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={colSpan}>
-                                                <Text textAlign="center" py={8} color="gray.500">Loading...</Text>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    );
-                                }
-                                if (groupBy === 'account' && byAccountRows.length === 0) {
-                                    return (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={colSpan}>
-                                                <Text textAlign="center" py={8} color="gray.500">
-                                                    {accountBalances && accountBalances.size > 0
-                                                        ? 'No rows match your criteria'
-                                                        : 'Loading account breakdown...'}
-                                                </Text>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    );
-                                }
-                                if (groupBy === 'asset' && filtered.length === 0) {
-                                    return (
-                                        <Table.Row>
-                                            <Table.Cell colSpan={colSpan}>
-                                                <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    );
-                                }
-
-                                // ---- By Account view (aggregated) ----
-                                if (groupBy === 'account') {
-                                    return paginatedByAccount.map((row) => {
-                                        const { account_id, account_name, asset_count, total_cost_basis, total_market_value, total_unrealized_pnl, total_lot_count } = row;
-                                        const accountColor = getAccountColor(account_id);
-                                        const unrealizedPct = total_cost_basis > 0 ? total_unrealized_pnl / total_cost_basis : 0;
-                                        const isAcctExpanded = expandedAccountIds.has(account_id);
-                                        const details = accountAssetDetails.get(account_id) ?? [];
+                {/* ── Card mode ── */}
+                {displayMode === 'cards' ? (
+                    <Box p={3}>
+                        {loading ? (
+                            <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                                {Array.from({ length: 8 }).map((_, i) => (
+                                    <Card.Root key={i} size="sm">
+                                        <Card.Body py={6}>
+                                            <Text textAlign="center" color="gray.400" fontSize="xs">Loading...</Text>
+                                        </Card.Body>
+                                    </Card.Root>
+                                ))}
+                            </SimpleGrid>
+                        ) : groupBy === 'account' ? (
+                            byAccountRows.length === 0 ? (
+                                <Text textAlign="center" py={8} color="gray.500">
+                                    {accountBalances && accountBalances.size > 0
+                                        ? 'No rows match your criteria'
+                                        : 'Loading account breakdown...'}
+                                </Text>
+                            ) : (
+                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                                    {paginatedByAccount.map((row) => (
+                                        <AccountPnLCard
+                                            key={row.account_id}
+                                            row={row}
+                                            baseCurrency={baseCurrency}
+                                            isExpanded={expandedAccountIds.has(row.account_id)}
+                                            onToggleExpand={toggleAccountExpanded}
+                                            onAssetClick={onAssetClick}
+                                            details={accountAssetDetails.get(row.account_id) ?? []}
+                                            liveBalanceValue={accountLiveBalanceValues.get(row.account_id)}
+                                            liveBalanceLoading={liveBalanceLoading}
+                                        />
+                                    ))}
+                                </SimpleGrid>
+                            )
+                        ) : (
+                            filtered.length === 0 ? (
+                                <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                            ) : (
+                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                                    {paginatedFiltered.map((assetpnlrow) => {
+                                        const assetId = assetpnlrow.asset.id;
+                                        const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
+                                        const liveQty = liveBalances?.get(sym);
+                                        const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
+                                        const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
+                                            ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
+                                            : [];
+                                        const isUnmapped = !!assetpnlrow.is_unmapped;
+                                        const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
 
                                         return (
-                                            <Fragment key={account_id}>
-                                                <Table.Row
-                                                    _hover={{ bg: 'blue.50' }}
-                                                    css={{ '& td': { py: '2px', px: '4px' } }}
-                                                    bg={isAcctExpanded ? 'blue.50' : undefined}
-                                                    cursor="pointer"
-                                                    onClick={(e) => toggleAccountExpanded(account_id, e)}
-                                                >
-                                                    {/* Account */}
-                                                    <Table.Cell>
-                                                        <Flex align="center" gap={1}>
-                                                            <Box
-                                                                as="button"
-                                                                p={0.5}
-                                                                borderRadius="sm"
-                                                                _hover={{ bg: 'gray.200' }}
-                                                                onClick={(e: React.MouseEvent) => toggleAccountExpanded(account_id, e)}
-                                                            >
-                                                                {isAcctExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                                            </Box>
-                                                            <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                            <Text {...XS} fontWeight="medium" truncate maxW="140px" title={account_name}>
-                                                                {account_name}
-                                                            </Text>
-                                                        </Flex>
-                                                    </Table.Cell>
-                                                    {/* Assets count */}
-                                                    <Table.Cell>
-                                                        <Badge size="xs" variant="subtle">{asset_count}</Badge>
-                                                    </Table.Cell>
-                                                    {/* Cost */}
-                                                    <Table.Cell>
-                                                        <Text {...XS}><ValueDisplay value={total_cost_basis} currency={baseCurrency} /></Text>
-                                                    </Table.Cell>
-                                                    {/* Value */}
-                                                    <Table.Cell>
-                                                        <Text {...XS} fontWeight="medium">
-                                                            <ValueDisplay value={total_market_value} currency={baseCurrency} />
-                                                        </Text>
-                                                    </Table.Cell>
-                                                    {/* Unrealized P&L */}
-                                                    <Table.Cell>
-                                                        <Flex direction="column">
-                                                            <Text {...XS} color={total_unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                <ValueDisplay value={total_unrealized_pnl} currency={baseCurrency} />
-                                                            </Text>
-                                                            <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPct)}</Text>
-                                                        </Flex>
-                                                    </Table.Cell>
-                                                    {/* Info */}
-                                                    <Table.Cell textAlign="center">
-                                                        <Badge size="xs" variant="subtle">{total_lot_count} lots</Badge>
-                                                    </Table.Cell>
-                                                    {/* Chevron */}
-                                                    <Table.Cell></Table.Cell>
-                                                </Table.Row>
-
-                                                {/* Expanded asset detail rows */}
-                                                {isAcctExpanded && details.map((d) => {
-                                                    const dUnrealizedPct = d.cost_basis > 0 ? d.unrealized_pnl / d.cost_basis : 0;
-                                                    return (
-                                                        <Table.Row
-                                                            key={`${account_id}-${d.asset_symbol}`}
-                                                            bg="gray.50"
-                                                            _hover={{ bg: 'gray.100' }}
-                                                            css={{ '& td': { py: '1px', px: '4px' } }}
-                                                            cursor="pointer"
-                                                            onClick={() => onAssetClick(d.asset_id)}
-                                                        >
-                                                            {/* Asset (indented) */}
-                                                            <Table.Cell pl={10}>
-                                                                <Badge size="xs" colorPalette="blue" fontWeight="bold" maxW="80px" truncate>
-                                                                    {d.asset_symbol}
-                                                                </Badge>
-                                                            </Table.Cell>
-                                                            {/* Qty */}
-                                                            <Table.Cell>
-                                                                <Text {...XS} color="gray.600"><ValueDisplay value={d.qty} /></Text>
-                                                            </Table.Cell>
-                                                            {/* Cost */}
-                                                            <Table.Cell>
-                                                                {renderCost(d.cost_basis, d.unit_cost, baseCurrency)}
-                                                            </Table.Cell>
-                                                            {/* Value */}
-                                                            <Table.Cell>
-                                                                <Text {...XS} color="gray.600">
-                                                                    <ValueDisplay value={d.market_value} currency={baseCurrency} />
-                                                                </Text>
-                                                            </Table.Cell>
-                                                            {/* Unrealized */}
-                                                            <Table.Cell>
-                                                                <Flex direction="column">
-                                                                    <Text {...XS} color={d.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                        <ValueDisplay value={d.unrealized_pnl} currency={baseCurrency} />
-                                                                    </Text>
-                                                                    <Text fontSize="2xs" color="gray.500">{formatPct(dUnrealizedPct)}</Text>
-                                                                </Flex>
-                                                            </Table.Cell>
-                                                            {/* Info */}
-                                                            <Table.Cell textAlign="center">
-                                                                <Badge size="xs" variant="subtle">{d.lot_count} lots</Badge>
-                                                            </Table.Cell>
-                                                            {/* Chevron */}
-                                                            <Table.Cell>
-                                                                <FiChevronRight size={12} color="gray" />
-                                                            </Table.Cell>
-                                                        </Table.Row>
-                                                    );
-                                                })}
-                                            </Fragment>
+                                            <AssetPnLCard
+                                                key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}
+                                                row={assetpnlrow}
+                                                baseCurrency={baseCurrency}
+                                                onAssetClick={onAssetClick}
+                                                onAccountClick={onAccountClick}
+                                                isExpanded={assetId != null && expandedAssetIds.has(assetId)}
+                                                onToggleExpand={toggleExpanded}
+                                                accountBalances={assetId != null ? accountBalances?.get(assetId) : undefined}
+                                                accounts={accounts}
+                                                liveQty={liveQty}
+                                                deltaInfo={deltaInfo}
+                                                liveBalanceLoading={liveBalanceLoading}
+                                                liveAccountBalanceMap={liveAccountBalances?.get(sym)}
+                                                liveAccountErrors={liveAccountErrors}
+                                                assetErrorAccounts={assetErrorAccounts}
+                                                hasLiveErrors={!!hasLiveErrors}
+                                            />
                                         );
-                                    });
-                                }
+                                    })}
+                                </SimpleGrid>
+                            )
+                        )}
+                    </Box>
+                ) : (
+                    /* ── Table mode (original) ── */
+                    <Box overflowX="auto">
+                        <Table.Root size="sm">
+                            <Table.Header>
+                                <Table.Row>
+                                    {groupBy === 'account' ? (
+                                        <>
+                                            <Table.ColumnHeader>Account</Table.ColumnHeader>
+                                            <Table.ColumnHeader>Assets</Table.ColumnHeader>
+                                            <Table.ColumnHeader>Cost</Table.ColumnHeader>
+                                            <Table.ColumnHeader>Value</Table.ColumnHeader>
+                                            <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
+                                            <Table.ColumnHeader></Table.ColumnHeader>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <SortHeader field="asset_symbol">Asset</SortHeader>
+                                            <SortHeader field="quantity">Qty</SortHeader>
+                                            <Table.ColumnHeader>
+                                                <Flex align="center" gap={1}>
+                                                    Δ
+                                                    {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
+                                                </Flex>
+                                            </Table.ColumnHeader>
+                                            <SortHeader field="cost_basis">Cost</SortHeader>
+                                            <SortHeader field="market_value">Value</SortHeader>
+                                            <SortHeader field="unrealized_pnl">Unrealized</SortHeader>
+                                            <SortHeader field="realized_pnl">Realized</SortHeader>
+                                            <Table.ColumnHeader>Fees</Table.ColumnHeader>
+                                            <Table.ColumnHeader textAlign="center">Info</Table.ColumnHeader>
+                                            <Table.ColumnHeader></Table.ColumnHeader>
+                                        </>
+                                    )}
+                                </Table.Row>
+                            </Table.Header>
+                            <Table.Body>
+                                {(() => {
+                                    const colSpan = groupBy === 'account' ? TOTAL_COLUMNS_BY_ACCOUNT : TOTAL_COLUMNS_BY_ASSET;
+                                    if (loading) {
+                                        return (
+                                            <Table.Row>
+                                                <Table.Cell colSpan={colSpan}>
+                                                    <Text textAlign="center" py={8} color="gray.500">Loading...</Text>
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        );
+                                    }
+                                    if (groupBy === 'account' && byAccountRows.length === 0) {
+                                        return (
+                                            <Table.Row>
+                                                <Table.Cell colSpan={colSpan}>
+                                                    <Text textAlign="center" py={8} color="gray.500">
+                                                        {accountBalances && accountBalances.size > 0
+                                                            ? 'No rows match your criteria'
+                                                            : 'Loading account breakdown...'}
+                                                    </Text>
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        );
+                                    }
+                                    if (groupBy === 'asset' && filtered.length === 0) {
+                                        return (
+                                            <Table.Row>
+                                                <Table.Cell colSpan={colSpan}>
+                                                    <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        );
+                                    }
 
-                                // ---- By Asset view (default) ----
-                                return (
-                                    <>
-                                        {paginatedFiltered.map((assetpnlrow) => {
-                                            const assetId = assetpnlrow.asset.id;
-                                            const isNoPnl = !assetpnlrow.has_lots;
-                                            const isUnmapped = !!assetpnlrow.is_unmapped;
-                                            const isExpandable = !isNoPnl && hasAccountData(assetpnlrow);
-                                            const isExpanded = assetId != null && expandedAssetIds.has(assetId);
-                                            const assetAccountBalances = assetId != null ? accountBalances?.get(assetId) : undefined;
-
-                                            // Live balance data
-                                            const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
-                                            const liveQty = liveBalances?.get(sym);
-                                            const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
-
-                                            // Check if any of this asset's accounts had live balance errors
-                                            const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
-                                                ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
-                                                : [];
-                                            const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+                                    // ---- By Account view (aggregated) ----
+                                    if (groupBy === 'account') {
+                                        return paginatedByAccount.map((row) => {
+                                            const { account_id, account_name, asset_count, total_cost_basis, total_market_value, total_unrealized_pnl, total_lot_count } = row;
+                                            const accountColor = getAccountColor(account_id);
+                                            const unrealizedPct = total_cost_basis > 0 ? total_unrealized_pnl / total_cost_basis : 0;
+                                            const isAcctExpanded = expandedAccountIds.has(account_id);
+                                            const details = accountAssetDetails.get(account_id) ?? [];
 
                                             return (
-                                                <Fragment key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}>
+                                                <Fragment key={account_id}>
                                                     <Table.Row
-                                                        cursor={isNoPnl ? 'default' : 'pointer'}
-                                                        _hover={{ bg: isNoPnl ? 'gray.100' : 'blue.50' }}
-                                                        onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}
-                                                        bg={isExpanded ? 'blue.50' : isNoPnl ? 'gray.50' : undefined}
+                                                        _hover={{ bg: 'blue.50' }}
                                                         css={{ '& td': { py: '2px', px: '4px' } }}
-                                                        opacity={isUnmapped ? 0.6 : undefined}
+                                                        bg={isAcctExpanded ? 'blue.50' : undefined}
+                                                        cursor="pointer"
+                                                        onClick={(e) => toggleAccountExpanded(account_id, e)}
                                                     >
-                                                        {/* Asset */}
+                                                        {/* Account */}
                                                         <Table.Cell>
                                                             <Flex align="center" gap={1}>
-                                                                {isExpandable ? (
-                                                                    <Box
-                                                                        as="button"
-                                                                        onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)}
-                                                                        p={0.5}
-                                                                        borderRadius="sm"
-                                                                        _hover={{ bg: 'gray.200' }}
-                                                                    >
-                                                                        {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                                                    </Box>
-                                                                ) : (
-                                                                    <Box w="18px" />
-                                                                )}
-                                                                <Badge
-                                                                    size="xs"
-                                                                    colorPalette={isUnmapped ? 'gray' : 'blue'}
-                                                                    variant={isUnmapped ? 'outline' : 'solid'}
-                                                                    fontWeight="bold"
-                                                                    maxW="80px"
-                                                                    truncate
+                                                                <Box
+                                                                    as="button"
+                                                                    p={0.5}
+                                                                    borderRadius="sm"
+                                                                    _hover={{ bg: 'gray.200' }}
+                                                                    onClick={(e: React.MouseEvent) => toggleAccountExpanded(account_id, e)}
                                                                 >
-                                                                    {assetpnlrow.asset.symbol}
-                                                                </Badge>
-                                                                {isUnmapped && (
-                                                                    <Tooltip content="This asset is not mapped in the database" openDelay={200}>
-                                                                        <Text color="orange.500" fontSize="xs" cursor="help">⚠</Text>
-                                                                    </Tooltip>
-                                                                )}
+                                                                    {isAcctExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                                                                </Box>
+                                                                <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
+                                                                <Text {...XS} fontWeight="medium" truncate maxW="140px" title={account_name}>
+                                                                    {account_name}
+                                                                </Text>
                                                             </Flex>
                                                         </Table.Cell>
-                                                        {/* Qty */}
+                                                        {/* Assets count */}
                                                         <Table.Cell>
-                                                            {isNoPnl
-                                                                ? <Text {...XS} color="gray.400">—</Text>
-                                                                : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>
-                                                            }
+                                                            <Badge size="xs" variant="subtle">{asset_count}</Badge>
                                                         </Table.Cell>
-                                                        {/* Δ (combined) */}
+                                                        {/* Cost */}
                                                         <Table.Cell>
-                                                            {liveBalanceLoading
-                                                                ? <Spinner size="xs" color="gray.400" />
-                                                                : (
-                                                                    <Flex align="center" gap={0.5}>
-                                                                        <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={assetpnlrow.quantity} size="xs" />
-                                                                        {hasLiveErrors && (
-                                                                            <Tooltip
-                                                                                content={
-                                                                                    <Box fontSize="xs">
-                                                                                        <Text fontWeight="medium" mb={1}>Some accounts had fetch errors — balance may be incomplete</Text>
-                                                                                        {assetErrorAccounts.map(accId => {
-                                                                                            const errs = liveAccountErrors!.get(accId) ?? [];
-                                                                                            const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
-                                                                                            return errs.map((err, i) => (
-                                                                                                <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
-                                                                                            ));
-                                                                                        })}
-                                                                                    </Box>
-                                                                                }
-                                                                                openDelay={200}
-                                                                            >
-                                                                                <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
-                                                                            </Tooltip>
-                                                                        )}
-                                                                    </Flex>
-                                                                )
-                                                            }
+                                                            <Text {...XS}><ValueDisplay value={total_cost_basis} currency={baseCurrency} /></Text>
                                                         </Table.Cell>
-                                                        {/* Cost (combined) */}
+                                                        {/* Value */}
                                                         <Table.Cell>
-                                                            {isNoPnl
-                                                                ? <Text {...XS} color="gray.400">N/A</Text>
-                                                                : renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency)
-                                                            }
-                                                        </Table.Cell>
-                                                        {/* Value (combined) */}
-                                                        <Table.Cell>
-                                                            {renderValue(assetpnlrow, baseCurrency)}
+                                                            <Text {...XS} fontWeight="medium">
+                                                                <ValueDisplay value={total_market_value} currency={baseCurrency} />
+                                                            </Text>
                                                         </Table.Cell>
                                                         {/* Unrealized P&L */}
                                                         <Table.Cell>
-                                                            {isNoPnl ? (
-                                                                <Text {...XS} color="gray.400">N/A</Text>
-                                                            ) : (
-                                                                <Flex direction="column">
-                                                                    <Text {...XS} fontWeight="medium" color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                        <ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} />
-                                                                    </Text>
-                                                                    <Text fontSize="2xs" color="gray.500">{formatPct(assetpnlrow.unrealized_pnl_pct)}</Text>
-                                                                </Flex>
-                                                            )}
-                                                        </Table.Cell>
-                                                        {/* Realized P&L */}
-                                                        <Table.Cell>
-                                                            {isNoPnl ? (
-                                                                <Text {...XS} color="gray.400">N/A</Text>
-                                                            ) : (
-                                                                <Text {...XS} fontWeight="medium" color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                    <ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} />
+                                                            <Flex direction="column">
+                                                                <Text {...XS} color={total_unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                    <ValueDisplay value={total_unrealized_pnl} currency={baseCurrency} />
                                                                 </Text>
-                                                            )}
-                                                        </Table.Cell>
-                                                        {/* Fees */}
-                                                        <Table.Cell>
-                                                            {isNoPnl ? (
-                                                                <Text {...XS} color="gray.400">N/A</Text>
-                                                            ) : (
-                                                                <Text {...XS} color="gray.600">
-                                                                    <ValueDisplay value={assetpnlrow.total_fees} currency={baseCurrency} />
-                                                                </Text>
-                                                            )}
+                                                                <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPct)}</Text>
+                                                            </Flex>
                                                         </Table.Cell>
                                                         {/* Info */}
                                                         <Table.Cell textAlign="center">
-                                                            {isNoPnl ? (
-                                                                isUnmapped
-                                                                    ? <Badge size="xs" colorPalette="orange" variant="subtle">Unmapped</Badge>
-                                                                    : <Badge size="xs" colorPalette="yellow" variant="subtle">No P&L</Badge>
-                                                            ) : (
-                                                                <Flex gap={0.5} justify="center" align="center">
-                                                                    {assetAccountBalances && assetAccountBalances.length > 1 && (
-                                                                        <Flex gap={0.5} mr={0.5}>
-                                                                            {assetAccountBalances.slice(0, 3).map((bal) => (
-                                                                                <Box
-                                                                                    key={bal.account_id}
-                                                                                    w="6px"
-                                                                                    h="6px"
-                                                                                    borderRadius="full"
-                                                                                    bg={getAccountColor(bal.account_id)}
-                                                                                    title={bal.account_name}
-                                                                                />
-                                                                            ))}
-                                                                            {assetAccountBalances.length > 3 && (
-                                                                                <Text fontSize="2xs" color="gray.500">+{assetAccountBalances.length - 3}</Text>
-                                                                            )}
-                                                                        </Flex>
-                                                                    )}
-                                                                    <Badge size="xs" variant="subtle">{assetpnlrow.lot_count} lots</Badge>
-                                                                    {assetpnlrow.warning_count > 0 && (
-                                                                        <Badge size="xs" colorPalette="orange">{assetpnlrow.warning_count} ⚠</Badge>
-                                                                    )}
-                                                                </Flex>
-                                                            )}
+                                                            <Badge size="xs" variant="subtle">{total_lot_count} lots</Badge>
                                                         </Table.Cell>
                                                         {/* Chevron */}
-                                                        <Table.Cell>
-                                                            {!isNoPnl && <FiChevronRight size={12} color="gray" />}
-                                                        </Table.Cell>
+                                                        <Table.Cell></Table.Cell>
                                                     </Table.Row>
 
-                                                    {/* Expanded account breakdown rows */}
-                                                    {isExpanded && assetAccountBalances && assetAccountBalances.map((balance) => {
-                                                        const accountColor = getAccountColor(balance.account_id);
-                                                        const unitPrice = assetpnlrow.unit_value;
-                                                        const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
-                                                        const unrealizedPnl = marketValue - balance.cost_basis_in_base;
-                                                        const unrealizedPnlPct = balance.cost_basis_in_base > 0
-                                                            ? unrealizedPnl / balance.cost_basis_in_base
-                                                            : 0;
-
-                                                        const acctLiveQty = liveAccountBalances?.get(sym)?.get(balance.account_id);
-                                                        const acctDelta = computeDelta(balance.qty, acctLiveQty);
-                                                        const acctErrors = liveAccountErrors?.get(balance.account_id);
-                                                        const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
-
+                                                    {/* Expanded asset detail rows */}
+                                                    {isAcctExpanded && details.map((d) => {
+                                                        const dUnrealizedPct = d.cost_basis > 0 ? d.unrealized_pnl / d.cost_basis : 0;
                                                         return (
                                                             <Table.Row
-                                                                key={`${assetpnlrow.asset.id}-${balance.account_id}`}
+                                                                key={`${account_id}-${d.asset_symbol}`}
                                                                 bg="gray.50"
                                                                 _hover={{ bg: 'gray.100' }}
-                                                                css={{ '& td': { py: '1px', px: '4px' }, '& td:first-of-type': { borderLeft: '2px solid', borderLeftColor: accountColor, pl: '28px' } }}
+                                                                css={{ '& td': { py: '1px', px: '4px' } }}
+                                                                cursor="pointer"
+                                                                onClick={() => onAssetClick(d.asset_id)}
                                                             >
-                                                                {/* Account name (indented, border starts right of parent asset name) */}
-                                                                <Table.Cell>
-                                                                    <Flex align="center" gap={1}>
-                                                                        <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
-                                                                        <Text
-                                                                            {...XS}
-                                                                            color="gray.700"
-                                                                            cursor={onAccountClick ? 'pointer' : undefined}
-                                                                            _hover={onAccountClick ? { textDecoration: 'underline', color: 'blue.600' } : undefined}
-                                                                            onClick={(e) => {
-                                                                                if (onAccountClick && assetId != null) {
-                                                                                    e.stopPropagation();
-                                                                                    onAccountClick(assetId, balance.account_id);
-                                                                                }
-                                                                            }}
-                                                                        >
-                                                                            {balance.account_name}
-                                                                        </Text>
-                                                                    </Flex>
+                                                                {/* Asset (indented) */}
+                                                                <Table.Cell pl={10}>
+                                                                    <Badge size="xs" colorPalette="blue" fontWeight="bold" maxW="80px" truncate>
+                                                                        {d.asset_symbol}
+                                                                    </Badge>
                                                                 </Table.Cell>
                                                                 {/* Qty */}
                                                                 <Table.Cell>
-                                                                    <Text {...XS} color="gray.600"><ValueDisplay value={balance.qty} /></Text>
+                                                                    <Text {...XS} color="gray.600"><ValueDisplay value={d.qty} /></Text>
                                                                 </Table.Cell>
-                                                                {/* Δ (combined) */}
+                                                                {/* Cost */}
                                                                 <Table.Cell>
-                                                                    {acctHasError ? (
-                                                                        <Tooltip
-                                                                            content={
-                                                                                <Box fontSize="xs">
-                                                                                    <Text fontWeight="medium" mb={1}>Fetch error:</Text>
-                                                                                    {acctErrors!.map((err, i) => <Text key={i} color="red.300">{err}</Text>)}
-                                                                                </Box>
-                                                                            }
-                                                                            openDelay={200}
-                                                                        >
-                                                                            <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
-                                                                        </Tooltip>
-                                                                    ) : (
-                                                                        <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
-                                                                    )}
+                                                                    {renderCost(d.cost_basis, d.unit_cost, baseCurrency)}
                                                                 </Table.Cell>
-                                                                {/* Cost (combined) */}
-                                                                <Table.Cell>
-                                                                    {renderCost(balance.cost_basis_in_base, balance.avg_unit_cost_in_base, baseCurrency)}
-                                                                </Table.Cell>
-                                                                {/* Value (combined) */}
+                                                                {/* Value */}
                                                                 <Table.Cell>
                                                                     <Text {...XS} color="gray.600">
-                                                                        {unitPrice != null
-                                                                            ? <ValueDisplay value={marketValue} currency={baseCurrency} />
-                                                                            : '—'}
+                                                                        <ValueDisplay value={d.market_value} currency={baseCurrency} />
                                                                     </Text>
                                                                 </Table.Cell>
                                                                 {/* Unrealized */}
                                                                 <Table.Cell>
-                                                                    {unitPrice != null ? (
-                                                                        <Flex direction="column">
-                                                                            <Text {...XS} color={unrealizedPnl >= 0 ? 'green.600' : 'red.600'}>
-                                                                                <ValueDisplay value={unrealizedPnl} currency={baseCurrency} />
-                                                                            </Text>
-                                                                            <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPnlPct)}</Text>
-                                                                        </Flex>
-                                                                    ) : (
-                                                                        <Text {...XS} color="gray.500">—</Text>
-                                                                    )}
+                                                                    <Flex direction="column">
+                                                                        <Text {...XS} color={d.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                            <ValueDisplay value={d.unrealized_pnl} currency={baseCurrency} />
+                                                                        </Text>
+                                                                        <Text fontSize="2xs" color="gray.500">{formatPct(dUnrealizedPct)}</Text>
+                                                                    </Flex>
                                                                 </Table.Cell>
-                                                                {/* Realized */}
-                                                                <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
-                                                                {/* Fees */}
-                                                                <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
                                                                 {/* Info */}
                                                                 <Table.Cell textAlign="center">
-                                                                    <Badge size="xs" variant="subtle">{balance.lot_count} lots</Badge>
+                                                                    <Badge size="xs" variant="subtle">{d.lot_count} lots</Badge>
                                                                 </Table.Cell>
                                                                 {/* Chevron */}
-                                                                <Table.Cell></Table.Cell>
+                                                                <Table.Cell>
+                                                                    <FiChevronRight size={12} color="gray" />
+                                                                </Table.Cell>
                                                             </Table.Row>
                                                         );
                                                     })}
                                                 </Fragment>
                                             );
-                                        })}
-                                    </>
-                                );
-                            })()}
-                        </Table.Body>
-                    </Table.Root>
-                </Box>
+                                        });
+                                    }
+
+                                    // ---- By Asset view (default) ----
+                                    return (
+                                        <>
+                                            {paginatedFiltered.map((assetpnlrow) => {
+                                                const assetId = assetpnlrow.asset.id;
+                                                const isNoPnl = !assetpnlrow.has_lots;
+                                                const isUnmapped = !!assetpnlrow.is_unmapped;
+                                                const isExpandable = !isNoPnl && hasAccountData(assetpnlrow);
+                                                const isExpanded = assetId != null && expandedAssetIds.has(assetId);
+                                                const assetAccountBalances = assetId != null ? accountBalances?.get(assetId) : undefined;
+
+                                                // Live balance data
+                                                const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
+                                                const liveQty = liveBalances?.get(sym);
+                                                const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
+
+                                                // Check if any of this asset's accounts had live balance errors
+                                                const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
+                                                    ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
+                                                    : [];
+                                                const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+
+                                                return (
+                                                    <Fragment key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}>
+                                                        <Table.Row
+                                                            cursor={isNoPnl ? 'default' : 'pointer'}
+                                                            _hover={{ bg: isNoPnl ? 'gray.100' : 'blue.50' }}
+                                                            onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}
+                                                            bg={isExpanded ? 'blue.50' : isNoPnl ? 'gray.50' : undefined}
+                                                            css={{ '& td': { py: '2px', px: '4px' } }}
+                                                            opacity={isUnmapped ? 0.6 : undefined}
+                                                        >
+                                                            {/* Asset */}
+                                                            <Table.Cell>
+                                                                <Flex align="center" gap={1}>
+                                                                    {isExpandable ? (
+                                                                        <Box
+                                                                            as="button"
+                                                                            onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)}
+                                                                            p={0.5}
+                                                                            borderRadius="sm"
+                                                                            _hover={{ bg: 'gray.200' }}
+                                                                        >
+                                                                            {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                                                                        </Box>
+                                                                    ) : (
+                                                                        <Box w="18px" />
+                                                                    )}
+                                                                    <Tooltip content={assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : (assetpnlrow.asset.symbol || '')} openDelay={300}>
+                                                                        <Badge
+                                                                            size="xs"
+                                                                            colorPalette={isUnmapped ? 'gray' : 'blue'}
+                                                                            variant={isUnmapped ? 'outline' : 'solid'}
+                                                                            fontWeight="bold"
+                                                                            maxW="120px"
+                                                                            truncate
+                                                                        >
+                                                                            {assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : assetpnlrow.asset.symbol}
+                                                                        </Badge>
+                                                                    </Tooltip>
+                                                                    {isUnmapped && (
+                                                                        <Tooltip content="This asset is not mapped in the database" openDelay={200}>
+                                                                            <Text color="orange.500" fontSize="xs" cursor="help">⚠</Text>
+                                                                        </Tooltip>
+                                                                    )}
+                                                                </Flex>
+                                                            </Table.Cell>
+                                                            {/* Qty */}
+                                                            <Table.Cell>
+                                                                {isNoPnl
+                                                                    ? <Text {...XS} color="gray.400">—</Text>
+                                                                    : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>
+                                                                }
+                                                            </Table.Cell>
+                                                            {/* Δ (combined) */}
+                                                            <Table.Cell>
+                                                                {liveBalanceLoading
+                                                                    ? <Spinner size="xs" color="gray.400" />
+                                                                    : (
+                                                                        <Flex align="center" gap={0.5}>
+                                                                            <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={assetpnlrow.quantity} size="xs" />
+                                                                            {hasLiveErrors && (
+                                                                                <Tooltip
+                                                                                    content={
+                                                                                        <Box fontSize="xs">
+                                                                                            <Text fontWeight="medium" mb={1}>Some accounts had fetch errors — balance may be incomplete</Text>
+                                                                                            {assetErrorAccounts.map(accId => {
+                                                                                                const errs = liveAccountErrors!.get(accId) ?? [];
+                                                                                                const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
+                                                                                                return errs.map((err, i) => (
+                                                                                                    <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
+                                                                                                ));
+                                                                                            })}
+                                                                                        </Box>
+                                                                                    }
+                                                                                    openDelay={200}
+                                                                                >
+                                                                                    <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
+                                                                                </Tooltip>
+                                                                            )}
+                                                                        </Flex>
+                                                                    )
+                                                                }
+                                                            </Table.Cell>
+                                                            {/* Cost (combined) */}
+                                                            <Table.Cell>
+                                                                {isNoPnl
+                                                                    ? <Text {...XS} color="gray.400">N/A</Text>
+                                                                    : renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency)
+                                                                }
+                                                            </Table.Cell>
+                                                            {/* Value (combined) */}
+                                                            <Table.Cell>
+                                                                {renderValue(assetpnlrow, baseCurrency)}
+                                                            </Table.Cell>
+                                                            {/* Unrealized P&L */}
+                                                            <Table.Cell>
+                                                                {isNoPnl ? (
+                                                                    <Text {...XS} color="gray.400">N/A</Text>
+                                                                ) : (
+                                                                    <Flex direction="column">
+                                                                        <Text {...XS} fontWeight="medium" color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                            <ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} />
+                                                                        </Text>
+                                                                        <Text fontSize="2xs" color="gray.500">{formatPct(assetpnlrow.unrealized_pnl_pct)}</Text>
+                                                                    </Flex>
+                                                                )}
+                                                            </Table.Cell>
+                                                            {/* Realized P&L */}
+                                                            <Table.Cell>
+                                                                {isNoPnl ? (
+                                                                    <Text {...XS} color="gray.400">N/A</Text>
+                                                                ) : (
+                                                                    <Text {...XS} fontWeight="medium" color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                        <ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} />
+                                                                    </Text>
+                                                                )}
+                                                            </Table.Cell>
+                                                            {/* Fees */}
+                                                            <Table.Cell>
+                                                                {isNoPnl ? (
+                                                                    <Text {...XS} color="gray.400">N/A</Text>
+                                                                ) : (
+                                                                    <Text {...XS} color="gray.600">
+                                                                        <ValueDisplay value={assetpnlrow.total_fees} currency={baseCurrency} />
+                                                                    </Text>
+                                                                )}
+                                                            </Table.Cell>
+                                                            {/* Info */}
+                                                            <Table.Cell textAlign="center">
+                                                                {isNoPnl ? (
+                                                                    isUnmapped
+                                                                        ? <Badge size="xs" colorPalette="orange" variant="subtle">Unmapped</Badge>
+                                                                        : <Badge size="xs" colorPalette="yellow" variant="subtle">No P&L</Badge>
+                                                                ) : (
+                                                                    <Flex gap={0.5} justify="center" align="center">
+                                                                        {assetAccountBalances && assetAccountBalances.length > 1 && (
+                                                                            <Flex gap={0.5} mr={0.5}>
+                                                                                {assetAccountBalances.slice(0, 3).map((bal) => (
+                                                                                    <Box
+                                                                                        key={bal.account_id}
+                                                                                        w="6px"
+                                                                                        h="6px"
+                                                                                        borderRadius="full"
+                                                                                        bg={getAccountColor(bal.account_id)}
+                                                                                        title={bal.account_name}
+                                                                                    />
+                                                                                ))}
+                                                                                {assetAccountBalances.length > 3 && (
+                                                                                    <Text fontSize="2xs" color="gray.500">+{assetAccountBalances.length - 3}</Text>
+                                                                                )}
+                                                                            </Flex>
+                                                                        )}
+                                                                        <Badge size="xs" variant="subtle">{assetpnlrow.lot_count} lots</Badge>
+                                                                        {assetpnlrow.warning_count > 0 && (
+                                                                            <Badge size="xs" colorPalette="orange">{assetpnlrow.warning_count} ⚠</Badge>
+                                                                        )}
+                                                                    </Flex>
+                                                                )}
+                                                            </Table.Cell>
+                                                            {/* Chevron */}
+                                                            <Table.Cell>
+                                                                {!isNoPnl && <FiChevronRight size={12} color="gray" />}
+                                                            </Table.Cell>
+                                                        </Table.Row>
+
+                                                        {/* Expanded account breakdown rows */}
+                                                        {isExpanded && assetAccountBalances && assetAccountBalances.map((balance) => {
+                                                            const accountColor = getAccountColor(balance.account_id);
+                                                            const unitPrice = assetpnlrow.unit_value;
+                                                            const marketValue = unitPrice != null ? balance.qty * unitPrice : 0;
+                                                            const unrealizedPnl = marketValue - balance.cost_basis_in_base;
+                                                            const unrealizedPnlPct = balance.cost_basis_in_base > 0
+                                                                ? unrealizedPnl / balance.cost_basis_in_base
+                                                                : 0;
+
+                                                            const acctLiveQty = liveAccountBalances?.get(sym)?.get(balance.account_id);
+                                                            const acctDelta = computeDelta(balance.qty, acctLiveQty);
+                                                            const acctErrors = liveAccountErrors?.get(balance.account_id);
+                                                            const acctHasError = acctErrors && acctErrors.length > 0 && acctLiveQty == null;
+
+                                                            return (
+                                                                <Table.Row
+                                                                    key={`${assetpnlrow.asset.id}-${balance.account_id}`}
+                                                                    bg="gray.50"
+                                                                    _hover={{ bg: 'gray.100' }}
+                                                                    css={{ '& td': { py: '1px', px: '4px' }, '& td:first-of-type': { borderLeft: '2px solid', borderLeftColor: accountColor, pl: '28px' } }}
+                                                                >
+                                                                    {/* Account name (indented, border starts right of parent asset name) */}
+                                                                    <Table.Cell>
+                                                                        <Flex align="center" gap={1}>
+                                                                            <Box w="8px" h="8px" borderRadius="full" bg={accountColor} flexShrink={0} />
+                                                                            <Text
+                                                                                {...XS}
+                                                                                color="gray.700"
+                                                                                cursor={onAccountClick ? 'pointer' : undefined}
+                                                                                _hover={onAccountClick ? { textDecoration: 'underline', color: 'blue.600' } : undefined}
+                                                                                onClick={(e) => {
+                                                                                    if (onAccountClick && assetId != null) {
+                                                                                        e.stopPropagation();
+                                                                                        onAccountClick(assetId, balance.account_id);
+                                                                                    }
+                                                                                }}
+                                                                            >
+                                                                                {balance.account_name}
+                                                                            </Text>
+                                                                        </Flex>
+                                                                    </Table.Cell>
+                                                                    {/* Qty */}
+                                                                    <Table.Cell>
+                                                                        <Text {...XS} color="gray.600"><ValueDisplay value={balance.qty} /></Text>
+                                                                    </Table.Cell>
+                                                                    {/* Δ (combined) */}
+                                                                    <Table.Cell>
+                                                                        {acctHasError ? (
+                                                                            <Tooltip
+                                                                                content={
+                                                                                    <Box fontSize="xs">
+                                                                                        <Text fontWeight="medium" mb={1}>Fetch error:</Text>
+                                                                                        {acctErrors!.map((err, i) => <Text key={i} color="red.300">{err}</Text>)}
+                                                                                    </Box>
+                                                                                }
+                                                                                openDelay={200}
+                                                                            >
+                                                                                <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
+                                                                            </Tooltip>
+                                                                        ) : (
+                                                                            <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={balance.qty} size="xs" />
+                                                                        )}
+                                                                    </Table.Cell>
+                                                                    {/* Cost (combined) */}
+                                                                    <Table.Cell>
+                                                                        {renderCost(balance.cost_basis_in_base, balance.avg_unit_cost_in_base, baseCurrency)}
+                                                                    </Table.Cell>
+                                                                    {/* Value (combined) */}
+                                                                    <Table.Cell>
+                                                                        <Text {...XS} color="gray.600">
+                                                                            {unitPrice != null
+                                                                                ? <ValueDisplay value={marketValue} currency={baseCurrency} />
+                                                                                : '—'}
+                                                                        </Text>
+                                                                    </Table.Cell>
+                                                                    {/* Unrealized */}
+                                                                    <Table.Cell>
+                                                                        {unitPrice != null ? (
+                                                                            <Flex direction="column">
+                                                                                <Text {...XS} color={unrealizedPnl >= 0 ? 'green.600' : 'red.600'}>
+                                                                                    <ValueDisplay value={unrealizedPnl} currency={baseCurrency} />
+                                                                                </Text>
+                                                                                <Text fontSize="2xs" color="gray.500">{formatPct(unrealizedPnlPct)}</Text>
+                                                                            </Flex>
+                                                                        ) : (
+                                                                            <Text {...XS} color="gray.500">—</Text>
+                                                                        )}
+                                                                    </Table.Cell>
+                                                                    {/* Realized */}
+                                                                    <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
+                                                                    {/* Fees */}
+                                                                    <Table.Cell><Text {...XS} color="gray.500">—</Text></Table.Cell>
+                                                                    {/* Info */}
+                                                                    <Table.Cell textAlign="center">
+                                                                        <Badge size="xs" variant="subtle">{balance.lot_count} lots</Badge>
+                                                                    </Table.Cell>
+                                                                    {/* Chevron */}
+                                                                    <Table.Cell></Table.Cell>
+                                                                </Table.Row>
+                                                            );
+                                                        })}
+                                                    </Fragment>
+                                                );
+                                            })}
+                                        </>
+                                    );
+                                })()}
+                            </Table.Body>
+                        </Table.Root>
+                    </Box>
+                )}
             </Card.Body>
 
             {/* Pagination footer */}

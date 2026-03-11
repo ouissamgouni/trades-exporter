@@ -100,7 +100,7 @@ export function useBalance(): UseBalanceReturn {
             if (!accountsRes.ok) throw new Error('Failed to fetch accounts');
             const accounts: Account[] = await accountsRes.json();
 
-            const enabled = accounts.filter((a) => a.enabled !== false);
+            const enabled = accounts.filter((a) => a.enabled !== false && a.live_balance_eligible !== false);
             if (enabled.length === 0) {
                 setIsLoading(false);
                 return;

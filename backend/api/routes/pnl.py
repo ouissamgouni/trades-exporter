@@ -511,15 +511,15 @@ def build_transaction_summary(tx: NormalizedTransaction) -> TransactionSummary:
         source_transaction_id=tx.source_transaction_id,
         direction=tx.direction,
         # asset
-        asset=AssetRef(id=tx.asset.asset_id, symbol=tx.asset.symbol, source_symbol=tx.source_asset_symbol) if tx.asset_id else None,
+        asset=AssetRef(id=tx.asset.asset_id, symbol=tx.asset.symbol, label=tx.asset.label, source_symbol=tx.source_asset_symbol) if tx.asset_id else None,
         quantity=float(tx.quantity) if tx.quantity else None,
         # Pricing
         price=float(tx.price) if tx.price else None,
-        price_quote_asset=AssetRef(id=tx.price_quote_asset.asset_id, symbol=tx.price_quote_asset.symbol) if tx.price_quote_asset_id else None,
+        price_quote_asset=AssetRef(id=tx.price_quote_asset.asset_id, symbol=tx.price_quote_asset.symbol, label=tx.price_quote_asset.label) if tx.price_quote_asset_id else None,
         total=float(tx.total) if tx.total else None,
         # Fee
         fee=float(tx.fee) if tx.fee else None,
-        fee_quote_asset=AssetRef(id=tx.fee_quote_asset.asset_id, symbol=tx.fee_quote_asset.symbol) if tx.fee_quote_asset_id else None,
+        fee_quote_asset=AssetRef(id=tx.fee_quote_asset.asset_id, symbol=tx.fee_quote_asset.symbol, label=tx.fee_quote_asset.label) if tx.fee_quote_asset_id else None,
         # Transfer-specific
         from_account_name=tx.from_account.name if tx.from_account else None,
         to_account_name=tx.to_account.name if tx.to_account else None,
@@ -536,7 +536,7 @@ def build_cost_lot_response(lot: CostLot) -> CostLotResponse:
     """Build CostLotResponse from CostLot model."""
     return CostLotResponse(
         cost_lot_id=lot.cost_lot_id,
-        asset=AssetRef(id=lot.asset.asset_id, symbol=lot.asset.symbol),
+        asset=AssetRef(id=lot.asset.asset_id, symbol=lot.asset.symbol, label=lot.asset.label),
         account_id=lot.account_id,
         account_name=lot.account.name if lot.account else None,
         qty_original=float(lot.qty),
@@ -561,7 +561,7 @@ def build_consumed_slice_response(
     """Build ConsumedSliceResponse from ConsumedLotSlice model."""
     asset_ref = None
     if slice.cost_lot and slice.cost_lot.asset:
-        asset_ref = AssetRef(id=slice.cost_lot.asset.asset_id, symbol=slice.cost_lot.asset.symbol)
+        asset_ref = AssetRef(id=slice.cost_lot.asset.asset_id, symbol=slice.cost_lot.asset.symbol, label=slice.cost_lot.asset.label)
     elif slice.cost_lot:
         asset_ref = AssetRef(id=slice.cost_lot.asset_id, symbol=f"#{slice.cost_lot.asset_id}")
     
@@ -582,7 +582,7 @@ def build_consumed_slice_response(
 def build_realized_entry_response(entry: RealizedPnl, is_fee: bool = False) -> RealizedEntryDetailResponse:
     """Build RealizedEntryDetailResponse from RealizedPnl model."""
     return RealizedEntryDetailResponse(
-        asset=AssetRef(id=entry.asset.asset_id, symbol=entry.asset.symbol),
+        asset=AssetRef(id=entry.asset.asset_id, symbol=entry.asset.symbol, label=entry.asset.label),
         qty=float(entry.qty),
         proceeds_in_base=float(entry.proceeds_in_base),
         cost_basis_in_base=float(entry.cost_basis_in_base),
@@ -798,7 +798,7 @@ def _determine_related_asset(
     - If multiple non-base outflows → use the largest value leg
     
     Returns:
-        Tuple of (asset_id, asset_symbol) or None if not determinable
+        Tuple of (asset_id, asset_symbol, asset_label) or None if not determinable
     """
     if not unit_legs:
         return None
@@ -815,24 +815,24 @@ def _determine_related_asset(
     if non_base_outflows and not non_base_inflows:
         # Outflow is non-base (e.g., sell BTC for EUR)
         leg, asset = max(non_base_outflows, key=lambda x: float(x[0].quantity) * float(getattr(x[0].transaction, 'price', 1) or 1))
-        return (asset.asset_id, asset.symbol)
+        return (asset.asset_id, asset.symbol, asset.label)
     
     if non_base_inflows and not non_base_outflows:
         # Inflow is non-base (e.g., buy BTC with EUR)
         leg, asset = max(non_base_inflows, key=lambda x: float(x[0].quantity) * float(getattr(x[0].transaction, 'price', 1) or 1))
-        return (asset.asset_id, asset.symbol)
+        return (asset.asset_id, asset.symbol, asset.label)
     
     # Case 2: Both sides are non-base (crypto-to-crypto) → use outflow
     if non_base_outflows:
         # Use largest value outflow
         leg, asset = max(non_base_outflows, key=lambda x: float(x[0].quantity) * float(getattr(x[0].transaction, 'price', 1) or 1))
-        return (asset.asset_id, asset.symbol)
+        return (asset.asset_id, asset.symbol, asset.label)
     
     # Case 3: All are base currency (edge case) → use largest leg
     all_legs = outflows + inflows
     if all_legs:
         leg, asset = max(all_legs, key=lambda x: float(x[0].quantity))
-        return (asset.asset_id, asset.symbol)
+        return (asset.asset_id, asset.symbol, asset.label)
     
     return None
 
@@ -1129,7 +1129,7 @@ def get_asset_price(
             warning_msg = f"Using stale price from {result.actual_price_date.strftime('%Y-%m-%d') if result.actual_price_date else 'unknown'} ({result.staleness_days} days old)"
         
         return PriceResponse(
-            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}"),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}", label=asset.label),
             price=result.price,
             price_quote=base_currency,
             fetched_at=result.timestamp,
@@ -1144,7 +1144,7 @@ def get_asset_price(
     except Exception as e:
         log.error(f"Failed to fetch price for asset {asset_id}: {e}")
         return PriceResponse(
-            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}"),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol or f"#{asset.asset_id}", label=asset.label),
             price=None,
             price_quote=base_currency,
             error=str(e),
@@ -1221,7 +1221,7 @@ def get_current_prices(
                 stale_count += 1
             
             prices.append(PriceResponse(
-                asset=AssetRef(id=asset_id, symbol=asset.symbol),
+                asset=AssetRef(id=asset_id, symbol=asset.symbol, label=asset.label),
                 price=result.price,
                 price_quote=request.base_currency,
                 fetched_at=result.timestamp or fetched_at,
@@ -1236,7 +1236,7 @@ def get_current_prices(
         except Exception as e:
             log.warning("price_fetch_failed", asset_symbol=asset.symbol, error=str(e))
             prices.append(PriceResponse(
-                asset=AssetRef(id=asset_id, symbol=asset.symbol),
+                asset=AssetRef(id=asset_id, symbol=asset.symbol, label=asset.label),
                 price=None,
                 price_quote=request.base_currency,
                 error=str(e),
@@ -1345,6 +1345,17 @@ def get_version(
     # Compute total realized P&L via SQL aggregation
     total_pnl = compute_total_realized_pnl(session, version_id)
     
+    # Compute fee summary from FeeEntry records
+    fee_summary = session.exec(
+        select(
+            func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0).label("total_fees"),
+            func.count(FeeEntry.id).label("fee_count"),
+        )
+        .where(FeeEntry.version_id == version_id)
+    ).first()
+    total_fees_in_base = float(fee_summary.total_fees) if fee_summary else 0.0
+    fee_entry_count = fee_summary.fee_count if fee_summary else 0
+    
     # Fetch entity IDs for frontend count displays
     entity_ids = fetch_version_entity_ids(session, version_id)
     
@@ -1352,6 +1363,8 @@ def get_version(
         version=version,
         base_currency_symbol=base_currency_symbol,
         total_realized_pnl=float(total_pnl),
+        total_fees_in_base=total_fees_in_base,
+        fee_entry_count=fee_entry_count,
         calculation_unit_ids=entity_ids["calculation_unit_ids"],
         warning_ids=entity_ids["warning_ids"],
         cost_lot_ids=entity_ids["cost_lot_ids"],
@@ -1452,7 +1465,8 @@ def get_version_lots(
             cost_lot_id=lot.cost_lot_id,
             asset=AssetRef(
                 id=lot.asset.asset_id if lot.asset else lot.asset_id,
-                symbol=lot.asset.symbol if lot.asset else f"#{lot.asset_id}"
+                symbol=lot.asset.symbol if lot.asset else f"#{lot.asset_id}",
+                label=lot.asset.label if lot.asset else None
             ),
             account_id=lot.account_id,
             account_name=lot.account.name if lot.account else None,
@@ -1513,7 +1527,8 @@ def get_version_consumed_slices(
             cost_lot_id=s.cost_lot.cost_lot_id if s.cost_lot else 0,
             asset=AssetRef(
                 id=s.cost_lot.asset.asset_id if s.cost_lot and s.cost_lot.asset else (s.cost_lot.asset_id if s.cost_lot else 0),
-                symbol=s.cost_lot.asset.symbol if s.cost_lot and s.cost_lot.asset else f"#{s.cost_lot.asset_id if s.cost_lot else 0}"
+                symbol=s.cost_lot.asset.symbol if s.cost_lot and s.cost_lot.asset else f"#{s.cost_lot.asset_id if s.cost_lot else 0}",
+                label=s.cost_lot.asset.label if s.cost_lot and s.cost_lot.asset else None
             ) if s.cost_lot else None,
             quantity=float(s.quantity),
             unit_cost_in_base=float(s.unit_cost_in_base),
@@ -1581,7 +1596,8 @@ def get_version_realized_pnl(
         RealizedPnLResponse(
             asset=AssetRef(
                 id=e.asset.asset_id if e.asset else e.asset_id,
-                symbol=e.asset.symbol if e.asset else f"#{e.asset_id}"
+                symbol=e.asset.symbol if e.asset else f"#{e.asset_id}",
+                label=e.asset.label if e.asset else None
             ),
             qty=float(e.qty),
             proceeds_in_base=float(e.proceeds_in_base),
@@ -1663,7 +1679,7 @@ def get_version_fees(
     
     # Query non-fee legs for these units to determine related asset per unit
     # Related asset = non-base-currency asset (outflows preferred for crypto-to-crypto)
-    related_asset_map: Dict[int, tuple] = {}  # unit_id -> (asset_id, asset_symbol)
+    related_asset_map: Dict[int, tuple] = {}  # unit_id -> (asset_id, asset_symbol, asset_label)
     
     if unit_ids:
         # Get all non-fee legs for these units with their assets
@@ -1721,7 +1737,7 @@ def get_version_fees(
         fee_responses.append(FeeEntryResponse(
             id=fee_entry.id,
             date=rpnl.realized_at if rpnl else leg.date_time,
-            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol),
+            asset=AssetRef(id=asset.asset_id, symbol=asset.symbol, label=asset.label),
             fee_amount=float(leg.quantity) if leg.quantity else 0.0,
             fee_in_base=float(fee_entry.fee_value_in_base),
             transaction_id=leg.transaction_id,
@@ -1730,7 +1746,7 @@ def get_version_fees(
             transaction_type=tx.transaction_type if tx else None,
             cost_basis_consumed=float(rpnl.cost_basis_in_base) if rpnl else 0.0,
             realized_pnl=float(rpnl.pnl_in_base) if rpnl else 0.0,
-            related_asset=AssetRef(id=related[0], symbol=related[1]) if related else None,
+            related_asset=AssetRef(id=related[0], symbol=related[1], label=related[2]) if related else None,
         ))
     
     return FeesResponse(
@@ -1900,7 +1916,8 @@ def get_version_balances(
             BalanceResponse(
                 asset=AssetRef(
                     id=data["asset"].asset_id if data["asset"] else asset_id,
-                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}"
+                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}",
+                    label=data["asset"].label if data["asset"] else None
                 ),
                 account_id=None,  # Aggregated across accounts
                 account_name=None,
@@ -1956,7 +1973,8 @@ def get_version_balances(
             BalanceResponse(
                 asset=AssetRef(
                     id=data["asset"].asset_id if data["asset"] else asset_id,
-                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}"
+                    symbol=data["asset"].symbol if data["asset"] else f"#{asset_id}",
+                    label=data["asset"].label if data["asset"] else None
                 ),
                 account_id=account_id,
                 account_name=data["account"].name if data["account"] else None,
@@ -2020,6 +2038,30 @@ def get_version_warnings(
     ]
     
     return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/versions/{version_id}/warnings/type-counts")
+def get_version_warning_type_counts(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get per-type warning counts for a specific version.
+
+    Returns: dict mapping warning_type → count, e.g. {"missing_price": 5, "unmatched": 2}
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    rows = session.exec(
+        select(PnlWarning.warning_type, func.count())
+        .join(PnlWarning.unit)
+        .where(CalculationUnit.version_id == version_id)
+        .group_by(PnlWarning.warning_type)
+    ).all()
+
+    return {wtype: count for wtype, count in rows}
 
 
 @router.get("/versions/{version_id}/settlements", response_model=List[SettlementResponse])
@@ -2197,7 +2239,7 @@ def get_version_lot_events(
             event_id=e.event_id,
             event_type=e.event_type,
             lot_id=e.lot_id,
-            asset=AssetRef(id=e.lot.asset.asset_id, symbol=e.lot.asset.symbol) if e.lot and e.lot.asset else None,
+            asset=AssetRef(id=e.lot.asset.asset_id, symbol=e.lot.asset.symbol, label=e.lot.asset.label) if e.lot and e.lot.asset else None,
             account_id=e.lot.account_id if e.lot else None,
             account_name=e.lot.account.name if e.lot and e.lot.account else None,
             quantity_delta=float(e.quantity_delta),
@@ -2759,7 +2801,7 @@ def get_unit_realized_pnl(
     
     return [
         RealizedEntryDetailResponse(
-            asset=AssetRef(id=e.asset_id, symbol=e.asset.symbol if e.asset else f"#{e.asset_id}"),
+            asset=AssetRef(id=e.asset_id, symbol=e.asset.symbol if e.asset else f"#{e.asset_id}", label=e.asset.label if e.asset else None),
             qty=float(e.qty),
             proceeds_in_base=float(e.proceeds_in_base),
             cost_basis_in_base=float(e.cost_basis_in_base),
@@ -2941,7 +2983,7 @@ def get_version_units(
         # Build legs with transaction references (now by index)
         legs = [
             LegWithTransaction(
-                asset=AssetRef(id=leg.asset.asset_id, symbol=leg.asset.symbol),
+                asset=AssetRef(id=leg.asset.asset_id, symbol=leg.asset.symbol, label=leg.asset.label),
                 qty=float(leg.quantity),
                 leg_type=leg.leg_type,
                 direction=leg.direction,
@@ -3105,3 +3147,280 @@ def delete_version(
     log.info("version_deleted", version_id=version_id)
     
     return {"status": "deleted", "version_id": version_id}
+
+
+# =============================================================================
+# Portfolio Timeline (Charts Dashboard)
+# =============================================================================
+
+@router.get("/versions/{version_id}/portfolio-timeline")
+def get_portfolio_timeline(
+    version_id: int,
+    granularity: str = Query("daily"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    session: Session = Depends(get_session_dependency),
+):
+    """Get portfolio value timeline for charts."""
+    from backend.services.pnl.portfolio_timeline import compute_portfolio_timeline
+    from datetime import datetime as dt_cls
+
+    parsed_date_from = dt_cls.fromisoformat(date_from) if date_from else None
+    parsed_date_to = dt_cls.fromisoformat(date_to) if date_to else None
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    points = compute_portfolio_timeline(
+        session=session,
+        version_id=version_id,
+        granularity=granularity,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+    )
+
+    return {
+        "version_id": version_id,
+        "granularity": granularity,
+        "points": [
+            {
+                "date": p.date,
+                "total_value_in_base": p.total_value_in_base,
+                "cost_basis_in_base": p.cost_basis_in_base,
+                "unrealized_pnl": p.unrealized_pnl,
+                "cumulative_realized_pnl": p.cumulative_realized_pnl,
+                "breakdown": [
+                    {
+                        "asset_id": b.asset_id,
+                        "symbol": b.symbol,
+                        "label": b.label,
+                        "value_in_base": b.value_in_base,
+                        "qty": b.qty,
+                        "cost_basis_in_base": b.cost_basis_in_base,
+                        "realized_pnl_to_date": b.realized_pnl_to_date,
+                    }
+                    for b in p.breakdown
+                ],
+            }
+            for p in points
+        ],
+    }
+
+
+# =============================================================================
+# Period Summary (All ranges at once: all, 1y, 6m, 3m, 1m)
+# =============================================================================
+
+@router.get("/versions/{version_id}/period-summary")
+def get_period_summary(
+    version_id: int,
+    top_n: int = Query(5, ge=1, le=20),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Compute portfolio performance for all standard ranges (all, 1y, 6m, 3m, 1m).
+
+    Returns per-range: total_return, roi%, value, cost basis, unrealized/realized PnL,
+    and top/flop performers ranked by total return.
+    """
+    from backend.services.pnl.portfolio_timeline import compute_period_summary
+
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    ranges = compute_period_summary(
+        session=session,
+        version_id=version_id,
+        top_n=top_n,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+    )
+
+    return {
+        "version_id": version_id,
+        "ranges": {
+            key: {
+                "total_return": m.total_return,
+                "roi_pct": m.roi_pct,
+                "current_value": m.current_value,
+                "cost_basis": m.cost_basis,
+                "unrealized_pnl": m.unrealized_pnl,
+                "realized_pnl": m.realized_pnl,
+                "realized_in_period": m.realized_in_period,
+                "top_performers": [
+                    {
+                        "asset_id": p.asset_id,
+                        "symbol": p.symbol,
+                        "label": p.label,
+                        "total_return": p.total_return,
+                        "roi_pct": p.roi_pct,
+                    }
+                    for p in m.top_performers
+                ],
+                "flop_performers": [
+                    {
+                        "asset_id": p.asset_id,
+                        "symbol": p.symbol,
+                        "label": p.label,
+                        "total_return": p.total_return,
+                        "roi_pct": p.roi_pct,
+                    }
+                    for p in m.flop_performers
+                ],
+            }
+            for key, m in ranges.items()
+        },
+    }
+
+
+# =============================================================================
+# Fee Summary by Period (Charts Dashboard)
+# =============================================================================
+
+@router.get("/versions/{version_id}/fee-summary-by-period")
+def get_fee_summary_by_period(
+    version_id: int,
+    granularity: str = Query("monthly"),
+    group_by: str = Query("asset"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    session: Session = Depends(get_session_dependency),
+):
+    """Get fee summary aggregated by time period for charts."""
+    from backend.services.pnl.fee_summary import compute_fee_summary_by_period
+    from datetime import datetime as dt_cls
+
+    parsed_date_from = dt_cls.fromisoformat(date_from) if date_from else None
+    parsed_date_to = dt_cls.fromisoformat(date_to) if date_to else None
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    periods = compute_fee_summary_by_period(
+        session=session,
+        version_id=version_id,
+        granularity=granularity,
+        group_by=group_by,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+    )
+
+    return {
+        "version_id": version_id,
+        "granularity": granularity,
+        "group_by": group_by,
+        "periods": [
+            {
+                "period": bucket.period,
+                "total_fees_in_base": bucket.total_fees_in_base,
+                "count": bucket.count,
+                "breakdown": [
+                    {
+                        "key": item.key,
+                        "key_id": item.key_id,
+                        "fees_in_base": item.fees_in_base,
+                    }
+                    for item in bucket.breakdown
+                ],
+            }
+            for bucket in periods
+        ],
+    }
+
+
+# =============================================================================
+# Benchmark Series (External Index Data)
+# =============================================================================
+
+# Whitelisted benchmark tickers (prevent arbitrary Yahoo Finance queries)
+BENCHMARK_PRESETS: Dict[str, str] = {
+    "^GSPC": "S&P 500",
+    "^IXIC": "NASDAQ Composite",
+    "^STOXX50E": "Euro Stoxx 50",
+    "BTC-USD": "Bitcoin",
+    "ETH-USD": "Ethereum",
+    "GC=F": "Gold",
+}
+
+# Simple in-memory cache: (ticker, start, end) -> (timestamp, data)
+_benchmark_cache: Dict[tuple, tuple] = {}
+_BENCHMARK_CACHE_TTL = 300  # 5 minutes
+
+
+@router.get("/benchmark-series")
+def get_benchmark_series(
+    ticker: str = Query(..., description="Yahoo Finance ticker (e.g., ^GSPC)"),
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD"),
+):
+    """
+    Fetch daily close prices for an external benchmark index.
+
+    Returns rebased-ready daily price series from Yahoo Finance.
+    Only whitelisted tickers are allowed.
+    """
+    import time as _time
+    from datetime import date as date_cls
+
+    if ticker not in BENCHMARK_PRESETS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ticker '{ticker}' not in allowed benchmarks. "
+                   f"Available: {list(BENCHMARK_PRESETS.keys())}",
+        )
+
+    try:
+        parsed_start = date_cls.fromisoformat(start_date)
+        parsed_end = date_cls.fromisoformat(end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    # Check cache
+    cache_key = (ticker, start_date, end_date)
+    now = _time.time()
+    if cache_key in _benchmark_cache:
+        cached_at, cached_data = _benchmark_cache[cache_key]
+        if now - cached_at < _BENCHMARK_CACHE_TTL:
+            return cached_data
+
+    # Fetch from Yahoo Direct
+    from backend.services.price_getters.registry import get_price_getter
+    from backend.services.price_getters.base import PriceGetterError
+
+    try:
+        getter = get_price_getter("yahoo_direct")
+        points = getter.get_daily_series(ticker, parsed_start, parsed_end)
+    except PriceGetterError as e:
+        log.warning(f"Benchmark fetch failed for {ticker}: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch benchmark data: {e.message}")
+    except Exception as e:
+        log.error(f"Unexpected error fetching benchmark {ticker}: {e}")
+        raise HTTPException(status_code=500, detail="Internal error fetching benchmark data.")
+
+    response = {
+        "ticker": ticker,
+        "label": BENCHMARK_PRESETS[ticker],
+        "points": points,
+    }
+
+    # Store in cache
+    _benchmark_cache[cache_key] = (now, response)
+
+    return response

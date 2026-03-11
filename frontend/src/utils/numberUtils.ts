@@ -15,6 +15,8 @@ export interface QuantityFormatOptions {
   largeNumberThreshold?: number;
   /** If true, show full precision without truncation or suffixes */
   forceFullPrecision?: boolean;
+  /** If true, use aggressive rounding for card/compact display */
+  compact?: boolean;
 }
 
 const DEFAULT_OPTIONS: Required<QuantityFormatOptions> = {
@@ -23,6 +25,7 @@ const DEFAULT_OPTIONS: Required<QuantityFormatOptions> = {
   useLargeNumberSuffixes: true,
   largeNumberThreshold: 1000,
   forceFullPrecision: false,
+  compact: false,
 };
 
 /**
@@ -53,6 +56,21 @@ export function formatQuantity(
 
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const absValue = Math.abs(value);
+
+  // Compact mode: aggressive rounding for card display
+  if (opts.compact) {
+    if (absValue < opts.exponentialThreshold) {
+      return value.toExponential(1);
+    }
+    if (absValue >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+    if (absValue >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+    if (absValue >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+    if (absValue >= 100) return Math.round(value).toString();
+    if (absValue >= 1) return value.toFixed(2).replace(/\.?0+$/, '');
+    // < 1: 2 significant digits
+    const sigDigits = Number(value.toPrecision(2));
+    return sigDigits.toString();
+  }
 
   // Very small values: use exponential notation
   if (absValue < opts.exponentialThreshold) {
@@ -124,6 +142,23 @@ export function formatQuantityWithCurrency(
   // Get currency symbol
   const parts = currencyFormatter.formatToParts(0);
   const currencySymbol = parts.find(p => p.type === 'currency')?.value || currency;
+
+  // Compact mode: aggressive rounding for card display
+  if (opts.compact) {
+    if (absValue < opts.exponentialThreshold) {
+      return `${currencySymbol}${value.toExponential(1)}`;
+    }
+    if (absValue >= 1_000_000_000) return `${currencySymbol}${(value / 1_000_000_000).toFixed(1)}B`;
+    if (absValue >= 1_000_000) return `${currencySymbol}${(value / 1_000_000).toFixed(1)}M`;
+    if (absValue >= 1_000) return `${currencySymbol}${(value / 1_000).toFixed(1)}K`;
+    if (absValue >= 10) {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 0,
+      }).format(value);
+    }
+    // < $10: show 2 decimals
+    return currencyFormatter.format(value);
+  }
 
   // Very small values: use exponential notation with currency
   if (absValue < opts.exponentialThreshold) {

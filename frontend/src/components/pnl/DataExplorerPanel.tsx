@@ -50,6 +50,7 @@ import {
     WarningsTabWrapper,
     TransactionsTabWrapper,
 } from './AuditTabWrappers';
+import { ActivityFeed } from './ActivityFeed';
 // Re-export for backwards compatibility
 export { getPersistedPageSize } from '../../hooks/usePagination';
 
@@ -421,7 +422,7 @@ interface UnitDetailRowProps {
     onTransactionClick?: (txId: number) => void;
 }
 
-const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
+export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
     // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
         return unit.transactions.map(tx => tx.id);
@@ -2254,6 +2255,8 @@ interface PnLAuditViewProps {
     quoteAssetId?: number;
     onPriceAdded?: (assetId: number, warningId: string) => void;
     assets?: Array<AssetRef>;
+    /** Current P&L balance per asset: symbol (uppercase) → qty */
+    assetBalanceMap?: Map<string, number>;
     // Pagination props per tab
     unitsPagination?: { page: number; pageSize: number; total: number };
     lotsPagination?: { page: number; pageSize: number; total: number };
@@ -2296,6 +2299,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
     quoteAssetId,
     onPriceAdded,
     assets,
+    assetBalanceMap,
     // Pagination props
     unitsPagination,
     lotsPagination,
@@ -2386,7 +2390,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                 <Tabs.List mb={4}>
                     <Tabs.Trigger value="units">
                         <FiLayers style={{ marginRight: 4 }} />
-                        Calculation Units ({unitsCount})
+                        Activity Feed ({unitsCount})
                     </Tabs.Trigger>
                     <Tabs.Trigger value="lots">
                         <FiDatabase style={{ marginRight: 4 }} />
@@ -2415,23 +2419,12 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
 
                 <Tabs.Content value="units">
                     {versionId ? (
-                        <UnitsTabWrapper
+                        <ActivityFeed
                             versionId={versionId}
                             baseCurrency={baseCurrency}
                             onTransactionClick={onTransactionClick}
-                            lazy={true}
-                            enabled={activeTab === 'units'}
                             txFilterParams={txFilterParams}
-                            renderTab={({ units, baseCurrency, versionId, onTransactionClick }) => (
-                                <UnitsTab
-                                    units={units}
-                                    baseCurrency={baseCurrency}
-                                    costLots={[]}
-                                    versionId={versionId}
-                                    onTransactionClick={onTransactionClick}
-                                    hidePagination={true}
-                                />
-                            )}
+                            assetBalanceMap={assetBalanceMap}
                         />
                     ) : (
                         <Box p={4} textAlign="center" color="gray.500">
