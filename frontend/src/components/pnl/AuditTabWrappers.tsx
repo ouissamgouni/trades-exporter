@@ -37,6 +37,8 @@ interface BaseTabWrapperProps {
     onTransactionClick?: (txId: number) => void;
     lazy?: boolean;
     enabled?: boolean;
+    /** Transaction-level filter query params to send to the P&L endpoints */
+    txFilterParams?: Record<string, string | number | boolean | undefined>;
 }
 
 // ============================================================================
@@ -121,6 +123,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
     onUnitClick,
     lazy: lazyProp = false,
     enabled = true,
+    txFilterParams,
     renderTab,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_units' });
@@ -129,6 +132,7 @@ export const UnitsTabWrapper: React.FC<UnitsTabWrapperProps> = ({
         endpoint: `/pnl/versions/${versionId}/units`,
         page: pagination.page,
         limit: pagination.pageSize,
+        params: { ...txFilterParams },
         lazy: lazyProp,
         enabled,
     });
@@ -183,6 +187,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
     accountId,
     lazy: lazyProp = false,
     enabled = true,
+    txFilterParams,
     renderTab,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_lots' });
@@ -194,6 +199,7 @@ export const LotsTabWrapper: React.FC<LotsTabWrapperProps> = ({
         params: {
             asset_id: assetId,
             account_id: accountId,
+            ...txFilterParams,
         },
         lazy: lazyProp,
         enabled,
@@ -246,6 +252,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
     assetId,
     lazy: lazyProp = false,
     enabled = true,
+    txFilterParams,
     renderTab,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_realized' });
@@ -256,6 +263,7 @@ export const RealizedTabWrapper: React.FC<RealizedTabWrapperProps> = ({
         limit: pagination.pageSize,
         params: {
             asset_id: assetId,
+            ...txFilterParams,
         },
         lazy: lazyProp,
         enabled,
@@ -309,6 +317,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
     onUnitClick,
     lazy: lazyProp = false,
     enabled = true,
+    txFilterParams,
     renderTab,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_fees' });
@@ -318,6 +327,7 @@ export const FeesTabWrapper: React.FC<FeesTabWrapperProps> = ({
         endpoint: `/pnl/versions/${versionId}/fees`,
         page: pagination.page,
         limit: pagination.pageSize,
+        params: { ...txFilterParams },
         lazy: lazyProp,
         enabled,
     });
@@ -394,6 +404,7 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
     assets,
     lazy: lazyProp = false,
     enabled = true,
+    txFilterParams,
     renderTab,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_audit_warnings' });
@@ -402,6 +413,7 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
         endpoint: `/pnl/versions/${versionId}/warnings`,
         page: pagination.page,
         limit: pagination.pageSize,
+        params: { ...txFilterParams },
         lazy: lazyProp,
         enabled,
     });
@@ -466,6 +478,44 @@ export const WarningsTabWrapper: React.FC<WarningsTabWrapperProps> = ({
                 onPageChange={pagination.setPage}
                 onPageSizeChange={pagination.setPageSize}
             />
+        </Box>
+    );
+};
+
+// ============================================================================
+// Transactions Tab Wrapper
+// ============================================================================
+
+interface TransactionsTabWrapperProps extends BaseTabWrapperProps {
+    renderTab: (props: {
+        versionId: number;
+        baseCurrency: string;
+        onTransactionClick?: (txId: number) => void;
+    }) => React.ReactNode;
+}
+
+export const TransactionsTabWrapper: React.FC<TransactionsTabWrapperProps> = ({
+    versionId,
+    baseCurrency,
+    onTransactionClick,
+    lazy: lazyProp = false,
+    enabled = true,
+    renderTab,
+}) => {
+    // TransactionsTable handles its own data fetching
+    // We just control when it's rendered based on enabled prop
+
+    if (!enabled && lazyProp) {
+        return null;
+    }
+
+    return (
+        <Box>
+            {renderTab({
+                versionId,
+                baseCurrency,
+                onTransactionClick,
+            })}
         </Box>
     );
 };

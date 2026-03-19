@@ -67,44 +67,30 @@ def get_database_path() -> str:
     return get_database_url()
 
 
-# Legacy functions for backward compatibility during migration
-# TODO: Remove these after full migration to DATABASE_URL
-
-_test_mode_override: bool | None = None
 
 
-def set_test_mode(enabled: bool):
+
+def get_uvicorn_access_log_exclude_paths() -> Optional[List[str]]:
     """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Set global test mode override.
+    Get uvicorn access log exclude paths configuration.
+    
+    Returns:
+        - None: Access logs fully disabled (default)
+        - []: Access logs enabled for all endpoints
+        - List[str]: Access logs enabled, excluding specified paths
     """
-    global _test_mode_override
-    _test_mode_override = enabled
-    # Log deprecation warning
-    logging.warning(
-        "set_test_mode() is deprecated. Use DATABASE_URL environment variable instead."
-    )
-
-
-def is_test_mode() -> bool:
-    """
-    DEPRECATED: Use DATABASE_URL environment variable instead.
-    Check if test mode is enabled (via override, env var, or settings).
-    """
-    global _test_mode_override
-    if _test_mode_override is not None:
-        return _test_mode_override
-
-    # Check environment variable first
-    env_test_mode = os.getenv("TEST_MODE", "").lower()
-    if env_test_mode in ("true", "1", "yes"):
-        return True
-    if env_test_mode in ("false", "0", "no"):
-        return False
-
+    # Check environment variable first (expects JSON list)
+    env_paths = os.getenv("UVICORN_ACCESS_LOG_EXCLUDE_PATHS")
+    if env_paths:
+        try:
+            return json.loads(env_paths)
+        except (json.JSONDecodeError, TypeError):
+            # Invalid JSON, fall back to settings
+            pass
+    
     # Fall back to settings.yaml
     settings = load_settings()
-    return settings.get("test_mode", False)
+    return settings.get("uvicorn_access_log_exclude_paths")
 
 
 def load_settings(path: str | None = None) -> dict:
@@ -232,6 +218,17 @@ def get_etherscan_api_key() -> Optional[str]:
     return web3_config.get("etherscan_api_key")
 
 
+def get_bscscan_api_key() -> Optional[str]:
+    """Get BscScan API key from environment or settings."""
+    env_key = os.getenv("BSCSCAN_API_KEY")
+    if env_key:
+        return env_key
+
+    settings = load_settings()
+    web3_config = settings.get("web3_wallets", {})
+    return web3_config.get("bscscan_api_key")
+
+
 def get_web3_wallets() -> List[Dict[str, Any]]:
     """
     Get Web3 wallet configurations from environment or settings.
@@ -284,6 +281,7 @@ def configure_logging(logger_name: str = "backend") -> structlog.stdlib.BoundLog
     - Returns a logger bound with the module name
     - Uses rich console for dev, JSON for production
     - Outputs to sys.stderr for compatibility with uvicorn
+    - Respects LOG_LEVEL environment variable
     
     Args:
         logger_name: Name to identify the logger in output (e.g., "pnl_engine")
@@ -308,12 +306,21 @@ def configure_logging(logger_name: str = "backend") -> structlog.stdlib.BoundLog
         os.getenv("LOG_LEVEL") or settings.get("log_level", "INFO")
     ).upper()
     log_format = os.getenv("LOG_FORMAT") or settings.get("log_format", "rich")
+    numeric_level = getattr(logging, log_level, logging.INFO)
+
+    # Set stdlib logging level FIRST (structlog will use this for filtering)
+    logging.basicConfig(
+        format="%(message)s",
+        level=numeric_level,
+        force=True,  # Force reconfiguration if already configured
+    )
 
     # Configure structlog only once
     if not structlog.is_configured():
         # Shared processors for both formats
         shared_processors = [
             structlog.contextvars.merge_contextvars,
+            structlog.stdlib.filter_by_level,  # Filter based on stdlib log level
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso" if log_format == "json" else "%H:%M:%S"),
             structlog.processors.StackInfoRenderer(),
@@ -333,17 +340,9 @@ def configure_logging(logger_name: str = "backend") -> structlog.stdlib.BoundLog
             processors=shared_processors + [final_processor],
             wrapper_class=structlog.stdlib.BoundLogger,
             context_class=dict,
-            # Use WriteLoggerFactory with sys.stderr for uvicorn compatibility
-            logger_factory=structlog.WriteLoggerFactory(file=sys.stderr),
+            logger_factory=structlog.stdlib.LoggerFactory(),  # Use stdlib for level filtering
             cache_logger_on_first_use=True,
         )
 
-    # Set stdlib logging level for compatibility
-    logging.basicConfig(
-        format="%(message)s",
-        level=getattr(logging, log_level, logging.INFO),
-        force=True,  # Force reconfiguration if already configured
-    )
-
     # Return logger bound with module name
-    return structlog.get_logger().bind(logger=logger_name)
+    return structlog.get_logger(logger_name).bind(logger=logger_name)

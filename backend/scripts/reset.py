@@ -14,31 +14,44 @@ Options:
 import sys
 import argparse
 from sqlalchemy import text, create_engine
-from backend.config.loader import get_database_url
+from ..config.loader import get_database_url
 
 
 # Tables to truncate in order (respecting foreign key constraints)
 # Order: dependent tables first, then parent tables
 TABLES_TO_TRUNCATE = [
-    # P&L tables
+    # P&L and calculation tables (most dependent)
+    "cost_lot_events",
+    "pnl_warnings",
+    "lot_settlements",
     "consumed_lot_slices",
+    "fee_entries",
+    "calculation_unit_legs",
     "realized_pnl",
-    "unrealized_pnl",
     "cost_lots",
+    "calculation_units",
     "calculation_versions",
+    "bundles",
     # Transaction tables
     "normalized_transactions",
     "raw_transactions",
-    # Reference tables
-    "price_snapshots",
-    "raw_assets",
-    "raw_accounts",
-    "groups",
-    # Account/connector tables
+    # Sync and connector tables
+    "sync_job_connector_runs",
+    "sync_jobs",
     "account_connectors",
+    # Asset and price tables
+    "price_snapshots",
+    "asset_price_getters",
+    "asset_categories",
+    "categories",
+    "dimensions",
+    "raw_assets",
+    # Account tables
+    "raw_accounts",
     "accounts",
-    # Asset table (last)
+    # Reference tables
     "assets",
+    "app_settings",
 ]
 
 

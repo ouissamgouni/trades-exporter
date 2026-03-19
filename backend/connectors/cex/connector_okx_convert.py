@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from backend.connectors.base.base_connector import BaseConnector
+from backend.connectors.base.connector_exceptions import (
+    ConnectorAPIError,
+    ErrorReason,
+)
 from backend.config.loader import configure_logging, load_credentials
 from backend.db.models import NormalizedTransaction
 
@@ -41,8 +45,8 @@ class OKXConvertConnector(BaseConnector):
         """Initialize OKX convert connector with API credentials from settings.yaml if not provided."""
         super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
-        # In test mode, skip all API configuration
-        if self.test_mode:
+        # In test/renormalize mode, skip all API configuration
+        if self.test_mode or self.renormalize_mode:
             return
 
         # Load credentials from settings.yaml if not provided
@@ -124,8 +128,85 @@ class OKXConvertConnector(BaseConnector):
             return sorted_trades
 
         except Exception as e:
-            log.warning(f"⚠️ Error fetching convert trades: {e}")
-            return []
+            error_str = str(e).lower()
+            
+            # Legitimate empty result
+            if "no data" in error_str or "empty" in error_str or "no" in error_str and "convert" in error_str:
+                log.debug("ℹ️ No convert trades found (legitimate empty result)")
+                return []
+            
+            # Authentication errors
+            if "401" in error_str or "unauthorized" in error_str:
+                log.error(f"❌ Authentication failed for OKX convert trades: {e}")
+                raise ConnectorAPIError(
+                    message="Authentication failed - check API credentials",
+                    connector_name=self.connector_name,
+                    operation="fetch_convert_trades",
+                    reason=ErrorReason.AUTHENTICATION_FAILED,
+                    http_status_code=401,
+                    retryable=False,
+                    original_error=e,
+                )
+            
+            if "403" in error_str or "forbidden" in error_str:
+                log.error(f"❌ Permission denied for OKX convert trades: {e}")
+                raise ConnectorAPIError(
+                    message="Permission denied - insufficient API key permissions",
+                    connector_name=self.connector_name,
+                    operation="fetch_convert_trades",
+                    reason=ErrorReason.PERMISSION_DENIED,
+                    http_status_code=403,
+                    retryable=False,
+                    original_error=e,
+                )
+            
+            # Rate limiting
+            if "429" in error_str or "rate limit" in error_str:
+                log.error(f"❌ Rate limited on OKX convert trades: {e}")
+                raise ConnectorAPIError(
+                    message="Rate limited by OKX API",
+                    connector_name=self.connector_name,
+                    operation="fetch_convert_trades",
+                    reason=ErrorReason.RATE_LIMITED,
+                    http_status_code=429,
+                    retryable=True,
+                    original_error=e,
+                )
+            
+            # Network/timeout errors
+            if "timeout" in error_str or "timed out" in error_str:
+                log.error(f"❌ Timeout fetching OKX convert trades: {e}")
+                raise ConnectorAPIError(
+                    message="Request timeout",
+                    connector_name=self.connector_name,
+                    operation="fetch_convert_trades",
+                    reason=ErrorReason.TIMEOUT,
+                    retryable=True,
+                    original_error=e,
+                )
+            
+            if "connection" in error_str or "network" in error_str:
+                log.error(f"❌ Network error fetching OKX convert trades: {e}")
+                raise ConnectorAPIError(
+                    message="Network connection error",
+                    connector_name=self.connector_name,
+                    operation="fetch_convert_trades",
+                    reason=ErrorReason.NETWORK_ERROR,
+                    retryable=True,
+                    original_error=e,
+                )
+            
+            # Generic API error
+            log.error(f"❌ API error fetching OKX convert trades: {e}")
+            raise ConnectorAPIError(
+                message="API request failed",
+                connector_name=self.connector_name,
+                operation="fetch_convert_trades",
+                reason=ErrorReason.API_ERROR,
+                retryable=False,
+                original_error=e,
+                details=str(e),
+            )
 
     def raw_to_normalized(self, convert_trade: dict) -> NormalizedTransaction:
         """
@@ -177,26 +258,31 @@ class OKXConvertConnector(BaseConnector):
                 total=to_amount,
                 fee=fee,
                 source_fee_quote_asset_symbol=quote,
-                tags={"type": "convert"},
+                include_fee=True,
+                tags=[{"type": "convert"}],
             )
         except Exception as e:
             error_msg = f"Failed to map OKX convert trade: {e}"
             log.error(error_msg)
             raise ValueError(error_msg) from e
 
-    def get_raws(self) -> List[Dict[str, Any]]:
+    def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
         """
-        Fetch all convert trades from OKX using CCXT.
-        Returns:
-            list: List of convert trade objects
+        Fetch convert trades from OKX using CCXT and yield them.
+        
+        Yields:
+            Dict[str, Any]: Convert trade objects as they are fetched
         """
+        from typing import Generator
+        
         log.info("🔄 Fetching convert trades from OKX API using CCXT...")
         
         self.update_progress(
             operation="Fetching convert trades",
             current=0,
             total=1,
-            log_message="Fetching convert trades from OKX API..."
+            log_message="Fetching convert trades from OKX API...",
+            fetched_count=0,
         )
         
         all_trades = self.get_convert_trades()
@@ -206,18 +292,21 @@ class OKXConvertConnector(BaseConnector):
                 operation="Completed",
                 current=1,
                 total=1,
-                log_message="ℹ️ No convert trades found on OKX"
+                log_message="ℹ️ No convert trades found on OKX",
+                fetched_count=0,
             )
-            return []
+            return
+        
+        for trade in all_trades:
+            yield trade
         
         self.update_progress(
             operation="Completed",
             current=1,
             total=1,
-            log_message=f"✅ Fetched {len(all_trades)} convert trades from OKX"
+            log_message=f"✅ Fetched {len(all_trades)} convert trades from OKX",
+            fetched_count=len(all_trades),
         )
-        
-        return all_trades
 
     # Inherits yield_normalized from BaseConnector
 

@@ -29,7 +29,7 @@ from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning
+from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern, ensure_utc, utc_now
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     PnLResult,
@@ -116,8 +116,8 @@ class PnLEngine:
                 bundle = None
             
             # Get earliest timestamp from members for the unit
-            timestamps = [m.date_time for m in members if hasattr(m, 'date_time') and m.date_time]
-            timestamp = min(timestamps) if timestamps else datetime.utcnow()
+            timestamps = [ensure_utc(m.date_time) for m in members if hasattr(m, 'date_time') and m.date_time]
+            timestamp = min(timestamps) if timestamps else utc_now()
             
             # Create CalculationUnit with runtime attributes from bundle
             unit_data = {
@@ -133,13 +133,17 @@ class PnLEngine:
             unit = CalculationUnit(**unit_data)
             if version:
                 unit.version = version
+                # Explicitly add unit to version's collection for proper cascade
+                if version.calculation_units is None:
+                    version.calculation_units = []
+                version.calculation_units.append(unit)
             
             # Create CalculationUnitLeg records from members (for persistence)
             unit.legs = members
             
             # Recompute pattern and label now that legs are assigned
             # (pattern computation in __init__ ran with empty legs)
-            if unit.pattern is None or unit.pattern == 'unknown':
+            if unit.pattern is None or unit.pattern == UnitPattern.UNKNOWN.value:
                 computed_pattern, reason = unit._compute_pattern_from_legs()
                 unit.pattern = computed_pattern
                 log.debug(f"Unit {unit.id}: Pattern recomputed after legs: {computed_pattern} ({reason})")
@@ -181,6 +185,8 @@ class PnLEngine:
                 selectinload(NormalizedTransaction.price_quote_asset),
                 selectinload(NormalizedTransaction.fee_quote_asset),
                 selectinload(NormalizedTransaction.user_calculation_unit),
+                selectinload(NormalizedTransaction.from_account),
+                selectinload(NormalizedTransaction.to_account),
             )
         )
         
@@ -234,6 +240,15 @@ class PnLEngine:
         # Set version on lot_manager so new lots have version relationship
         self.lot_manager.set_version(version)
 
+        # Ensure all units are linked to this version
+        # (Already done by aggregate_legs_to_units in the normal calculate() flow,
+        #  but needed when process_calculation_units is called directly.)
+        for unit in units:
+            if version.calculation_units is None:
+                version.calculation_units = []
+            if unit not in version.calculation_units:
+                version.calculation_units.append(unit)
+
         # Sort units by earliest transaction timestamp
         # Note: Asset symbols should already be enriched in build_runtime_units()
         sorted_units = sorted(units, key=self._get_earliest_timestamp)
@@ -271,6 +286,42 @@ class PnLEngine:
                     unit.warnings = []
                 unit.warnings.append(warning)
 
+        # Post-calculation sweep: emit warnings for negative lots that remain unsettled
+        # These are lots created from out-of-order disposals where the acquisition never arrived
+        base_ccy_id = self.config.base_currency_id
+        for key, neg_lots in self.lot_manager.negative_lots_map.items():
+            for neg_lot in neg_lots:
+                if not neg_lot.is_settled:
+                    # Skip base currency — unsettled EUR lots have zero P&L impact (1 EUR = 1 EUR)
+                    if base_ccy_id and neg_lot.asset_id == base_ccy_id:
+                        continue
+                    # Find the unit this negative lot belongs to
+                    target_unit = neg_lot.unit
+                    if target_unit is None:
+                        continue
+                    if target_unit.warnings is None:
+                        target_unit.warnings = []
+                    target_unit.warnings.append(
+                        PnlWarning(
+                            warning_type=WarningType.UNSETTLED_NEGATIVE_LOT.value,
+                            message=(
+                                f"Negative lot for {neg_lot.asset.symbol if neg_lot.asset else 'unknown'} "
+                                f"(qty={float(neg_lot.qty):.6g}) was never settled by an incoming acquisition. "
+                                f"Cost basis is {'provisional (FMV)' if neg_lot.cost_source in ('fmv', 'provisional') else 'zero'}."
+                            ),
+                            transaction_id=neg_lot.origin_transaction_id,
+                            asset_id=neg_lot.asset_id,
+                            unit=target_unit,
+                            details={
+                                "lot_id": neg_lot.cost_lot_id,
+                                "negative_lot_qty": float(neg_lot.qty),
+                                "unit_cost": float(neg_lot.unit_cost_in_base),
+                                "cost_source": neg_lot.cost_source,
+                                "acquired_at": neg_lot.acquired_at.isoformat() if neg_lot.acquired_at else None,
+                            },
+                        )
+                    )
+
         log.info(
             "calculation_completed",
             units_processed=len(result.calculation_units),
@@ -304,15 +355,24 @@ class PnLEngine:
                 # Create CalculationVersion upfront so all entities have version reference
         version = CalculationVersion(
             id=uuid.uuid4(),
-            description=f"P&L calculation {datetime.utcnow().isoformat()}",
+            description=f"P&L calculation {utc_now().isoformat()}",
             method=self.config.lot_method.value,
             lot_mode=self.config.lot_mode.value,
             base_currency_id=self.config.base_currency_id,
             allow_negative_balances=self.config.allow_negative_balances,
             residual_tolerance_pct=self.config.residual_tolerance_pct,
+            compute_residuals=self.config.compute_residuals,
+            crypto_swap_taxable=self.config.crypto_swap_taxable_by_default,
+            fee_taxable=self.config.fee_taxable_by_default,
+            use_price_fallback=self.config.use_price_fallback,
+            price_staleness_window_days=self.config.price_staleness_window_days,
             account_ids=account_ids,  # Store which accounts were included
             status="draft",  # Will be updated on persist
         )
+        
+        # Add version to session immediately so cascade relationships work during processing
+        self.session.add(version)
+        self.session.flush()  # Flush to get version_id without committing
         
         # Build calculation units from valid transactions (with optional account filter)
         units = self.build_runtime_units(version=version, account_ids=account_ids)
@@ -320,6 +380,9 @@ class PnLEngine:
         if not units:
             log.info("no_calculation_units", account_ids=account_ids)
             return PnLResult(config=self.config, version=version)
+        
+        # Flush units to session before processing so cascade relationships work
+        self.session.flush()
         
         log.info("calculation_units_built", unit_count=len(units), account_ids=account_ids)
         
@@ -331,7 +394,7 @@ class PnLEngine:
         if not unit.legs:
             raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs")
 
-        timestamps = [leg.date_time for leg in unit.legs if leg.date_time]
+        timestamps = [ensure_utc(leg.date_time) for leg in unit.legs if leg.date_time]
         if not timestamps:
             raise ValueError(f"CalculationUnit {unit.id or unit.unit_origin} has no legs with date_time")
         return min(timestamps)
@@ -366,7 +429,7 @@ class PnLEngine:
         # Calculate expiry for drafts
         expires_at = None
         if status == "draft":
-            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+            expires_at = utc_now() + timedelta(hours=expires_in_hours)
 
         # Update version metadata
         version.status = status

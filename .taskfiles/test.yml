@@ -2,47 +2,202 @@ version: "3"
 
 tasks:
   default:
-    desc: Run unit tests (quick)
+    desc: Run unit tests (quick, parallel)
     cmds:
       - task: unit
 
+  # =========================================================================
+  # Unit Tests (fast, no external dependencies)
+  # =========================================================================
+
   unit:
-    desc: Run all unit tests
+    desc: Run all unit tests (no database required)
     cmds:
       - task: unit:backend
       - task: unit:frontend
-      - echo "✅ All unit tests passed"
+      - cmd: echo "All unit tests passed"
 
   unit:backend:
-    desc: Run backend unit tests
+    desc: Run backend unit + API tests in parallel
     dir: "{{.BACKEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
-      - DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" .venv/bin/python -m pytest -v
+      - .venv/bin/python -m pytest tests/unit/ tests/api/ -v -n auto -m "not integration" --timeout=30
 
   unit:frontend:
     desc: Run frontend build and type check
     dir: "{{.FRONTEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
       - npm run build
       - npx tsc --noEmit || true
 
+  # =========================================================================
+  # Integration Tests — chunked by category
+  # =========================================================================
+
+  int:cex:
+    desc: "Integration: CEX connector tests (Binance, OKX, MEXC, Coinbase)"
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running CEX integration tests..."
+        .venv/bin/python -m pytest tests/integration/cex/ -v -m integration --timeout=60 \
+          --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py
+
+  int:onchain:
+    desc: "Integration: Onchain connector tests (Blockscout, Etherscan, Moralis, SUI, Hyperliquid)"
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running onchain integration tests..."
+        .venv/bin/python -m pytest tests/integration/onchain/ -v -m integration --timeout=120
+
+  int:exchanges:
+    desc: "Integration: Exchange-specific tests (MEXC deposits/withdrawals)"
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running exchange integration tests..."
+        .venv/bin/python -m pytest tests/integration/exchanges/ -v -m integration --timeout=60
+
+  int:prices:
+    desc: "Integration: Price getter tests (Yahoo, CoinGecko)"
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running price getter integration tests..."
+        .venv/bin/python -m pytest tests/integration/price_getters/ -v -m "integration and network" --timeout=60
+
+  int:db:
+    desc: "Integration: DB-only tests (data health, seeding, bulk update)"
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running DB integration tests..."
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          .venv/bin/python -m pytest \
+            tests/integration/test_int_data_health_detectors.py \
+            tests/integration/test_int_transfer_dismiss.py \
+            tests/integration/test_int_issue_service_counts.py \
+            tests/integration/test_int_seeding_and_connectors.py \
+            tests/integration/test_bulk_update.py \
+            -v -m integration --timeout=120
+
+  # =========================================================================
+  # Composite Integration Tasks
+  # =========================================================================
+
+  int:local:
+    desc: Run all integration tests against local integration database (trades_db_integ)
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running ALL integration tests against trades_db_integ..."
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          .venv/bin/python -m pytest tests/integration/ -v -m integration \
+            --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py \
+            --timeout=120
+
+  int:all:
+    desc: Run all integration test chunks sequentially
+    cmds:
+      - task: int:db
+      - task: int:cex
+      - task: int:onchain
+      - task: int:exchanges
+      - task: int:prices
+      - cmd: echo "All integration test chunks passed"
+
   int:dev:
     desc: Run integration tests against dev environment
     dir: "{{.BACKEND_DIR}}"
-    dotenv: [.env, ../.env.dev]
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
-      - DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" .venv/bin/python -m pytest -v -m integration || true
+      - DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" .venv/bin/python -m pytest -v -m integration --timeout=120 || true
 
-  int:test:
-    desc: Run integration tests against test stack
-    dotenv: [.env, .env.test]
+  int:full:
+    desc: Run full integration test cycle (setup → test → cleanup)
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml exec backend_test python -m pytest -v -m integration || true
+      - cmd: echo "Setting up integration test database..."
+      - task: :db:setup:integ
+      - cmd: echo "Running integration tests..."
+      - task: int:local
+      - cmd: echo "Cleaning up integration test database..."
+      - task: :db:reset:integ
+      - cmd: echo "Integration test cycle complete"
+
+  # =========================================================================
+  # E2E Tests
+  # =========================================================================
+
+  e2e:
+    desc: Run end-to-end tests (requires running database)
+    dir: "{{.BACKEND_DIR}}"
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    cmds:
+      - |
+        echo "🧪 Running E2E tests..."
+        .venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
+
+  # =========================================================================
+  # Run a specific chunk by name
+  # =========================================================================
+
+  chunk:
+    desc: "Run a specific test chunk (usage: task test:chunk -- cex)"
+    cmds:
+      - |
+        CHUNK="{{.CLI_ARGS}}"
+        case "$CHUNK" in
+          unit)      task test:unit ;;
+          cex)       task test:int:cex ;;
+          onchain)   task test:int:onchain ;;
+          exchanges) task test:int:exchanges ;;
+          prices)    task test:int:prices ;;
+          db)        task test:int:db ;;
+          e2e)       task test:e2e ;;
+          *)
+            echo "❌ Unknown chunk: $CHUNK"
+            echo "Available chunks: unit, cex, onchain, exchanges, prices, db, e2e"
+            exit 1
+            ;;
+        esac
+
+  # =========================================================================
+  # Run everything
+  # =========================================================================
+
+  all:
+    desc: Run all tests (unit parallel, integration chunks, e2e)
+    cmds:
+      - cmd: echo "--- Phase 1 - Unit Tests (parallel) ---"
+      - task: unit
+      - cmd: echo "--- Phase 2 - Integration Tests (chunked) ---"
+      - task: int:all
+      - cmd: echo "--- Phase 3 - E2E Tests ---"
+      - task: e2e
+      - cmd: echo "All tests passed!"
+
+  # =========================================================================
+  # CI & Misc
+  # =========================================================================
 
   ci:
     desc: Simulate full CI locally via Act
     dotenv: [.env, .env.dev]
     cmds:
       - act push -j backend-tests --container-architecture linux/amd64
+
+  int:test:
+    desc: Run integration tests against test stack
+    dotenv: [.env, .env.test]
+    cmds:
+      - docker compose -f infra/docker/docker-compose.test.yml exec backend_test python -m pytest -v -m integration || true

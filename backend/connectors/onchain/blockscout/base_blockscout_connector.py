@@ -10,11 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.onchain.chain_config import (
-    get_blockscout_api_url,
-    get_native_token,
-    get_native_token_decimals,
-)
+from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging("blockscout_base")
@@ -52,9 +48,13 @@ class BlockscoutConnectorBase(BaseConnector):
         self.chain_name = chain_name.lower()
         self.wallet_address = wallet_address
 
-        # Set native_token and decimals early (needed for both test and live mode)
-        self.native_token = get_native_token(self.chain_name)
-        self.native_token_decimals = get_native_token_decimals(self.chain_name)
+        # Get chain configuration from registry
+        registry = get_connector_registry()
+        self.native_token = registry.get_native_token("blockscout", self.chain_name)
+        self.native_token_decimals = registry.get_native_token_decimals("blockscout", self.chain_name)
+        self.chain_id = registry.get_chain_id("blockscout", self.chain_name)
+        if not self.native_token or self.native_token_decimals is None:
+            raise ValueError(f"Chain configuration not found for {chain_name}")
 
         # Initialize base (sets self.test_mode and logs)
         super().__init__(
@@ -68,16 +68,16 @@ class BlockscoutConnectorBase(BaseConnector):
         if not self.wallet_address:
             raise ValueError("Missing wallet address")
 
-        # In test mode, skip API-related configuration only
-        if self.test_mode:
+        # In test/renormalize mode, skip API-related configuration only
+        if self.test_mode or self.renormalize_mode:
             return
 
         # Live mode: API configuration and validation
-        blockscout_url = get_blockscout_api_url(self.chain_name)
-        if not blockscout_url:
+        chain_config = registry.get_chain_config("blockscout", self.chain_name)
+        if not chain_config or not chain_config.base_url:
             raise ValueError(f"Blockscout API not available for chain '{chain_name}'")
 
-        self.base_url = blockscout_url
+        self.base_url = chain_config.base_url
 
         # Load configuration
         settings = load_settings()
@@ -180,5 +180,5 @@ class BlockscoutConnectorBase(BaseConnector):
             )
 
     @abstractmethod
-    def get_raws(self) -> List[Dict[str, Any]]:
-        """Get raw transactions. Must be implemented by subclasses."""
+    def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
+        """Yield raw transactions. Must be implemented by subclasses."""

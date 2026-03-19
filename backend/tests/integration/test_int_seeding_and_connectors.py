@@ -11,9 +11,8 @@ Tests that:
 import pytest
 import logging
 
-from sqlmodel import Session, select
+from sqlmodel import select
 
-from backend.db.database import get_engine
 from backend.db.models import Account, AccountConnector
 from backend.services.connector_loader_service import ConnectorLoaderService
 from backend.connectors.connector_registry import get_connector_registry
@@ -22,36 +21,33 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
-@pytest.fixture
-def db_session():
-    """Get database session for tests."""
-    engine = get_engine()
-    with Session(engine) as session:
-        yield session
+# Integration tests use pg_session fixture from conftest.py
+# which connects to trades_db_integ via TEST_DATABASE_URL
 
 
 @pytest.fixture
-def loader_service(db_session):
+def loader_service(pg_session):
     """Get connector loader service."""
-    return ConnectorLoaderService(session=db_session)
+    return ConnectorLoaderService(session=pg_session)
 
 
 class TestDatabaseSeeding:
     """Test database seeding from accounts.yaml."""
 
-    def test_accounts_exist(self, db_session):
+    def test_accounts_exist(self, pg_session):
         """Test that expected accounts were seeded."""
-        accounts = db_session.exec(select(Account)).all()
+        accounts = pg_session.exec(select(Account)).all()
         account_names = [a.name for a in accounts]
 
         # Check expected accounts exist
         expected_accounts = [
-            "Binance Main",
-            "MEXC Main",
-            "OKX Main",
-            "Coinbase Main",
-            "Base Main Wallet",
-            "ETH Main Wallet",
+            "Binance",
+            "MEXC",
+            "OKX",
+            "Coinbase",
+            "Degiro",
+            "Base Wallet",
+            "ETH Wallet",
         ]
 
         for name in expected_accounts:
@@ -59,9 +55,9 @@ class TestDatabaseSeeding:
 
         log.info(f"✅ Found {len(accounts)} accounts: {account_names}")
 
-    def test_connectors_exist(self, db_session):
+    def test_connectors_exist(self, pg_session):
         """Test that expected connectors were seeded."""
-        connectors = db_session.exec(select(AccountConnector)).all()
+        connectors = pg_session.exec(select(AccountConnector)).all()
         connector_types = [c.connector_type for c in connectors]
 
         # Check expected connector types exist
@@ -82,15 +78,15 @@ class TestDatabaseSeeding:
 
         log.info(f"✅ Found {len(connectors)} connectors: {connector_types}")
 
-    def test_connector_account_relationships(self, db_session):
+    def test_connector_account_relationships(self, pg_session):
         """Test that connectors are linked to correct accounts."""
         # Check Binance account has all 3 connectors
-        binance = db_session.exec(
-            select(Account).where(Account.name == "Binance Main")
+        binance = pg_session.exec(
+            select(Account).where(Account.name == "Binance")
         ).first()
         assert binance is not None
 
-        binance_connectors = db_session.exec(
+        binance_connectors = pg_session.exec(
             select(AccountConnector).where(AccountConnector.account_id == binance.id)
         ).all()
         assert len(binance_connectors) == 3
@@ -119,7 +115,7 @@ class TestConnectorLoader:
                 f"  - {connector.connector_type} for {account.name} (priority={connector.sync_priority})"
             )
 
-    def test_build_connector_config(self, loader_service, db_session):
+    def test_build_connector_config(self, loader_service, pg_session):
         """Test that connector config is properly built."""
         # Get a connector
         connector, account = loader_service.get_enabled_connectors()[0]
@@ -141,14 +137,14 @@ class TestConnectorInstantiation:
     """Test that each connector type can be instantiated."""
 
     @pytest.mark.integration
-    def test_instantiate_binance_connector(self, loader_service, db_session):
+    def test_instantiate_binance_connector(self, loader_service, pg_session):
         """Test Binance connector instantiation."""
-        binance = db_session.exec(
-            select(Account).where(Account.name == "Binance Main")
+        binance = pg_session.exec(
+            select(Account).where(Account.name == "Binance")
         ).first()
         assert binance is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == binance.id,
                 AccountConnector.connector_type == "binance-transactions",
@@ -163,14 +159,14 @@ class TestConnectorInstantiation:
         log.info(f"✅ Binance connector instantiated: {type(connector).__name__}")
 
     @pytest.mark.integration
-    def test_instantiate_mexc_connector(self, loader_service, db_session):
+    def test_instantiate_mexc_connector(self, loader_service, pg_session):
         """Test MEXC connector instantiation."""
-        mexc = db_session.exec(
-            select(Account).where(Account.name == "MEXC Main")
+        mexc = pg_session.exec(
+            select(Account).where(Account.name == "MEXC")
         ).first()
         assert mexc is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == mexc.id,
                 AccountConnector.connector_type == "mexc-transactions",
@@ -185,12 +181,12 @@ class TestConnectorInstantiation:
         log.info(f"✅ MEXC connector instantiated: {type(connector).__name__}")
 
     @pytest.mark.integration
-    def test_instantiate_okx_connector(self, loader_service, db_session):
+    def test_instantiate_okx_connector(self, loader_service, pg_session):
         """Test OKX connector instantiation."""
-        okx = db_session.exec(select(Account).where(Account.name == "OKX Main")).first()
+        okx = pg_session.exec(select(Account).where(Account.name == "OKX")).first()
         assert okx is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == okx.id,
                 AccountConnector.connector_type == "okx-transactions",
@@ -205,14 +201,14 @@ class TestConnectorInstantiation:
         log.info(f"✅ OKX connector instantiated: {type(connector).__name__}")
 
     @pytest.mark.integration
-    def test_instantiate_coinbase_connector(self, loader_service, db_session):
+    def test_instantiate_coinbase_connector(self, loader_service, pg_session):
         """Test Coinbase connector instantiation."""
-        coinbase = db_session.exec(
-            select(Account).where(Account.name == "Coinbase Main")
+        coinbase = pg_session.exec(
+            select(Account).where(Account.name == "Coinbase")
         ).first()
         assert coinbase is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == coinbase.id,
                 AccountConnector.connector_type == "coinbase-transactions",
@@ -227,14 +223,14 @@ class TestConnectorInstantiation:
         log.info(f"✅ Coinbase connector instantiated: {type(connector).__name__}")
 
     @pytest.mark.integration
-    def test_instantiate_blockscout_connector(self, loader_service, db_session):
+    def test_instantiate_blockscout_connector(self, loader_service, pg_session):
         """Test Blockscout (Base) connector instantiation."""
-        base_wallet = db_session.exec(
-            select(Account).where(Account.name == "Base Main Wallet")
+        base_wallet = pg_session.exec(
+            select(Account).where(Account.name == "Base Wallet")
         ).first()
         assert base_wallet is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == base_wallet.id,
                 AccountConnector.connector_type == "blockscout",
@@ -249,14 +245,14 @@ class TestConnectorInstantiation:
         log.info(f"✅ Blockscout connector instantiated: {type(connector).__name__}")
 
     @pytest.mark.integration
-    def test_instantiate_etherscan_connector(self, loader_service, db_session):
+    def test_instantiate_etherscan_connector(self, loader_service, pg_session):
         """Test Etherscan connector instantiation."""
-        eth_wallet = db_session.exec(
-            select(Account).where(Account.name == "ETH Main Wallet")
+        eth_wallet = pg_session.exec(
+            select(Account).where(Account.name == "ETH Wallet")
         ).first()
         assert eth_wallet is not None
 
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == eth_wallet.id,
                 AccountConnector.connector_type == "etherscan",
@@ -277,15 +273,17 @@ class TestConnectorApiConnection:
     # Test symbols to limit API calls for faster tests
     BINANCE_TEST_SYMBOLS = ["BTC/USDT", "ETH/USDT"]
     MEXC_TEST_SYMBOLS = ["BTC_USDT", "ETH_USDT"]
+    OKX_TEST_SYMBOLS = ["BTC-USDT", "ETH-USDT"]
+    COINBASE_TEST_SYMBOLS = ["BTC/USD", "ETH/USD"]
 
     @pytest.mark.integration
     @pytest.mark.slow
-    def test_binance_api_connection(self, loader_service, db_session):
+    def test_binance_api_connection(self, loader_service, pg_session):
         """Test Binance connector can fetch data (limited)."""
-        binance = db_session.exec(
-            select(Account).where(Account.name == "Binance Main")
+        binance = pg_session.exec(
+            select(Account).where(Account.name == "Binance")
         ).first()
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == binance.id,
                 AccountConnector.connector_type == "binance-transactions",
@@ -314,12 +312,12 @@ class TestConnectorApiConnection:
 
     @pytest.mark.integration
     @pytest.mark.slow
-    def test_mexc_api_connection(self, loader_service, db_session):
+    def test_mexc_api_connection(self, loader_service, pg_session):
         """Test MEXC connector can fetch data (limited)."""
-        mexc = db_session.exec(
-            select(Account).where(Account.name == "MEXC Main")
+        mexc = pg_session.exec(
+            select(Account).where(Account.name == "MEXC")
         ).first()
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == mexc.id,
                 AccountConnector.connector_type == "mexc-transactions",
@@ -348,12 +346,80 @@ class TestConnectorApiConnection:
 
     @pytest.mark.integration
     @pytest.mark.slow
-    def test_blockscout_api_connection(self, loader_service, db_session):
-        """Test Blockscout connector can fetch data (limited)."""
-        base_wallet = db_session.exec(
-            select(Account).where(Account.name == "Base Main Wallet")
+    def test_okx_api_connection(self, loader_service, pg_session):
+        """Test OKX connector can fetch data (limited)."""
+        okx = pg_session.exec(
+            select(Account).where(Account.name == "OKX")
         ).first()
-        connector_record = db_session.exec(
+        connector_record = pg_session.exec(
+            select(AccountConnector).where(
+                AccountConnector.account_id == okx.id,
+                AccountConnector.connector_type == "okx-transactions",
+            )
+        ).first()
+
+        # Add test symbols to config for faster test execution
+        connector_record.config = connector_record.config or {}
+        connector_record.config["symbols"] = self.OKX_TEST_SYMBOLS
+
+        connector = loader_service.instantiate_connector(connector_record, okx)
+        assert connector is not None
+
+        # Try to fetch a small number of records
+        count = 0
+        for raw, mapped, error in connector.yield_normalized():
+            if count >= 3:
+                break
+            if error:
+                log.warning(f"Mapping error: {error}")
+            else:
+                count += 1
+                log.info(f"  OKX trade: {mapped.source_asset_symbol}")
+
+        log.info(f"✅ OKX API connected, fetched {count} records")
+
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_coinbase_api_connection(self, loader_service, pg_session):
+        """Test Coinbase connector can fetch data (limited)."""
+        coinbase = pg_session.exec(
+            select(Account).where(Account.name == "Coinbase")
+        ).first()
+        connector_record = pg_session.exec(
+            select(AccountConnector).where(
+                AccountConnector.account_id == coinbase.id,
+                AccountConnector.connector_type == "coinbase-transactions",
+            )
+        ).first()
+
+        # Add test symbols to config for faster test execution
+        connector_record.config = connector_record.config or {}
+        connector_record.config["symbols"] = self.COINBASE_TEST_SYMBOLS
+
+        connector = loader_service.instantiate_connector(connector_record, coinbase)
+        assert connector is not None
+
+        # Try to fetch a small number of records
+        count = 0
+        for raw, mapped, error in connector.yield_normalized():
+            if count >= 3:
+                break
+            if error:
+                log.warning(f"Mapping error: {error}")
+            else:
+                count += 1
+                log.info(f"  Coinbase trade: {mapped.source_asset_symbol}")
+
+        log.info(f"✅ Coinbase API connected, fetched {count} records")
+
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_blockscout_api_connection(self, loader_service, pg_session):
+        """Test Blockscout connector can fetch data (limited)."""
+        base_wallet = pg_session.exec(
+            select(Account).where(Account.name == "Base Wallet")
+        ).first()
+        connector_record = pg_session.exec(
             select(AccountConnector).where(
                 AccountConnector.account_id == base_wallet.id,
                 AccountConnector.connector_type == "blockscout",
@@ -380,10 +446,10 @@ class TestConnectorApiConnection:
 class TestConnectorRegistryIntegration:
     """Test that all seeded connector types are in the registry."""
 
-    def test_all_seeded_types_in_registry(self, db_session):
+    def test_all_seeded_types_in_registry(self, pg_session):
         """Test that all connector types in DB are registered."""
         registry = get_connector_registry()
-        connectors = db_session.exec(select(AccountConnector)).all()
+        connectors = pg_session.exec(select(AccountConnector)).all()
 
         for connector in connectors:
             info = registry.get(connector.connector_type)

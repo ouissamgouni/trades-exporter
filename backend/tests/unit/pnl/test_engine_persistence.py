@@ -8,7 +8,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock, MagicMock, patch
 
@@ -258,7 +258,7 @@ class TestCommitDraft:
         """Test successful commit_draft."""
         mock_version = MagicMock()
         mock_version.status = "draft"
-        mock_version.expires_at = datetime.utcnow() + timedelta(hours=1)
+        mock_version.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         mock_session.get.return_value = mock_version
         
         engine = PnLEngine(mock_session, mock_price_service, fifo_config)

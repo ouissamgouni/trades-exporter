@@ -30,9 +30,9 @@ export interface MarketValuePieChartProps {
     /** Base currency symbol for formatting */
     baseCurrency: string;
     /** Currently selected category IDs (for highlighting active filter) */
-    selectedCategoryIds: number[];
+    selectedCategoryIds?: number[];
     /** Callback when a pie slice is clicked */
-    onCategoryClick: (categoryId: number | null) => void;
+    onCategoryClick?: (categoryId: number | null) => void;
 }
 
 /**
@@ -64,7 +64,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     assets,
     dimensions,
     baseCurrency,
-    selectedCategoryIds,
+    selectedCategoryIds = [],
     onCategoryClick,
 }) => {
     // Default to first dimension
@@ -110,7 +110,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
 
     // Handle pie slice click
     const handlePieClick = useCallback((data: NivoPieData) => {
-        onCategoryClick(data.categoryId);
+        onCategoryClick?.(data.categoryId);
     }, [onCategoryClick]);
 
     // Handle dimension change via native select

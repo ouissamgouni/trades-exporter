@@ -17,8 +17,8 @@ export interface WarningTypeConfig {
  * Get warning styling based on warning type
  */
 export function getWarningTypeConfig(warningType: string): WarningTypeConfig {
-    // Pending transfers are warnings that need user attention
-    if (warningType === 'pending_transfer') {
+    // Unmatched internal transfers are warnings that need user attention
+    if (warningType === 'unmatched_internal_transfer') {
         return {
             colorPalette: 'orange',
             icon: '⚠️',
@@ -40,6 +40,24 @@ export function getWarningTypeConfig(warningType: string): WarningTypeConfig {
         return {
             colorPalette: 'red',
             icon: '🔴',
+            level: 'error',
+        };
+    }
+
+    // Provisional cost lot — acquisition TX missing, cost estimated at zero
+    if (warningType === 'provisional_cost_lot') {
+        return {
+            colorPalette: 'orange',
+            icon: '⏳',
+            level: 'warning',
+        };
+    }
+
+    // Unsettled negative lot — disposal before acquisition, negative balance
+    if (warningType === 'unsettled_negative_lot') {
+        return {
+            colorPalette: 'red',
+            icon: '📉',
             level: 'error',
         };
     }

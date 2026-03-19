@@ -7,7 +7,6 @@ import os
 import pytest
 import time
 
-from backend.config.loader import set_test_mode
 from backend.db.database import init_db, get_engine
 from backend.db.repositories import (
     NormalizedTransactionRepository,
@@ -17,27 +16,25 @@ from backend.services.sync_job_service import SyncJobService, get_sync_job_servi
 from sqlmodel import Session
 
 
-@pytest.fixture(autouse=True)
-def setup_test_mode():
-    """Ensure test mode is set for all tests."""
-    # Set test mode via environment
-    os.environ["TEST_MODE"] = "true"
-    set_test_mode(True)
+pytestmark = [pytest.mark.e2e, pytest.mark.timeout(30)]
 
-    # Initialize test database
-    init_db()
+# Polling config — test_mode uses local fixtures, so jobs finish fast
+POLL_INTERVAL = 0.1  # seconds between polls
+MAX_WAIT_NORMAL = 15  # seconds for normal job completion
+MAX_WAIT_ABORT = 5    # seconds for abort to finish
 
-    yield
 
-    # Reset after test
-    os.environ["TEST_MODE"] = "false"
-    set_test_mode(False)
+def _wait_for_completion(service, max_wait=MAX_WAIT_NORMAL):
+    """Poll service until job finishes or timeout."""
+    waited = 0
+    while service.is_running() and waited < max_wait:
+        time.sleep(POLL_INTERVAL)
+        waited += POLL_INTERVAL
 
 
 @pytest.fixture
 def sync_service():
     """Get a fresh SyncJobService instance."""
-    # Reset singleton for clean tests
     SyncJobService._instance = None
     return get_sync_job_service()
 
@@ -45,7 +42,7 @@ def sync_service():
 @pytest.fixture
 def test_session():
     """Get a database session for verification."""
-    engine = get_engine(test_mode=True)
+    engine = get_engine()
     with Session(engine) as session:
         yield session
 
@@ -55,117 +52,71 @@ class TestSyncJobServiceE2E:
 
     def test_sync_job_starts_and_completes(self, sync_service):
         """Test that a sync job can be started and completes successfully."""
-        # Verify not running initially
         assert not sync_service.is_running()
 
-        # Start job
         result = sync_service.start_job()
         assert result["status"] == "started"
         assert result["test_mode"] is True
 
-        # Wait for job to complete (max 30 seconds)
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
-        # Verify job completed
         status = sync_service.get_status()
         assert status["status"] in ["completed", "failed"]
         assert status["test_mode"] is True
 
     def test_sync_job_processes_transactions(self, sync_service, test_session):
         """Test that transactions are persisted during sync."""
-        # Start and wait for job
         sync_service.start_job()
-
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
         status = sync_service.get_status()
 
-        # If job completed successfully, verify transactions were added
         if status["status"] == "completed":
-            # Check that some transactions were processed
             assert status["total_processed"] >= 0
 
-            # Verify in database
             norm_repo = NormalizedTransactionRepository(test_session)
             transactions = norm_repo.list_all(limit=100)
-
-            # The count should match what the job reported
-            # (new_entries_added + duplicates_skipped = total_processed - errors)
             assert len(transactions) >= 0
 
     def test_sync_job_abort(self, sync_service):
         """Test that a running job can be aborted."""
-        # Start job
         sync_service.start_job()
 
-        # Request abort immediately
         result = sync_service.abort_job()
         assert result["status"] == "aborting"
 
-        # Wait for abort to complete
-        max_wait = 10
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service, MAX_WAIT_ABORT)
 
         status = sync_service.get_status()
         assert status["abort_requested"] is True
-        # Job should either be aborted or completed before abort took effect
         assert status["status"] in ["aborted", "completed"]
 
     def test_cannot_start_job_while_running(self, sync_service):
         """Test that starting a job while one is running raises an error."""
-        # Start first job
         sync_service.start_job()
 
-        # Try to start another - should raise
         with pytest.raises(RuntimeError) as exc_info:
             sync_service.start_job()
 
         assert "already running" in str(exc_info.value).lower()
 
-        # Abort to clean up
         sync_service.abort_job()
-
-        # Wait for cleanup
-        max_wait = 10
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service, MAX_WAIT_ABORT)
 
     def test_sync_job_status_reporting(self, sync_service):
         """Test that job status is accurately reported."""
-        # Initial status
         status = sync_service.get_status()
         assert status["status"] == "idle"
         assert status["started_at"] is None
 
-        # Start job
         sync_service.start_job()
 
-        # Status should be running
         status = sync_service.get_status()
         assert status["status"] == "running"
         assert status["started_at"] is not None
 
-        # Wait for completion
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
-        # Final status
         status = sync_service.get_status()
         assert status["finished_at"] is not None
         assert status["status"] in ["completed", "failed", "aborted"]
@@ -176,14 +127,8 @@ class TestDataIntegrityE2E:
 
     def test_raw_and_normalized_consistency(self, sync_service, test_session):
         """Verify that raw and normalized data are consistent."""
-        # Run sync
         sync_service.start_job()
-
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
         status = sync_service.get_status()
 
@@ -191,10 +136,8 @@ class TestDataIntegrityE2E:
             raw_repo = RawTransactionRepository(test_session)
             norm_repo = NormalizedTransactionRepository(test_session)
 
-            # Get transactions
             normalized = norm_repo.list_all(limit=100)
 
-            # Each normalized transaction should have a raw_transaction_id
             for tx in normalized:
                 assert tx.raw_transaction_id is not None
                 raw = raw_repo.get(tx.raw_transaction_id)
@@ -204,14 +147,8 @@ class TestDataIntegrityE2E:
 
     def test_normalized_transaction_structure(self, sync_service, test_session):
         """Verify that normalized transactions have required fields."""
-        # Run sync
         sync_service.start_job()
-
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
         status = sync_service.get_status()
 
@@ -220,7 +157,6 @@ class TestDataIntegrityE2E:
             transactions = norm_repo.list_all(limit=100)
 
             for tx in transactions:
-                # Required fields
                 assert tx.source is not None
                 assert tx.source_transaction_id is not None
                 assert tx.date_time is not None
@@ -235,48 +171,27 @@ class TestErrorHandlingE2E:
 
     def test_job_handles_connector_errors_gracefully(self, sync_service):
         """Test that the job continues despite individual connector errors."""
-        # Run sync - some connectors may fail
         sync_service.start_job()
-
-        max_wait = 30
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
+        _wait_for_completion(sync_service)
 
         status = sync_service.get_status()
 
-        # Job should complete even if some connectors failed
         assert status["status"] in ["completed", "failed"]
-
-        # Errors should be recorded
-        # (It's OK if there are no errors in test mode with fixtures)
         assert "errors" in status
         assert isinstance(status["errors"], list)
 
     def test_abort_does_not_corrupt_data(self, sync_service, test_session):
         """Test that aborting a job doesn't corrupt persisted data."""
-        # Start job
         sync_service.start_job()
 
-        # Let it run briefly
-        time.sleep(0.5)
+        time.sleep(0.1)  # Brief run before abort
 
-        # Abort
         sync_service.abort_job()
+        _wait_for_completion(sync_service, MAX_WAIT_ABORT)
 
-        # Wait for abort
-        max_wait = 10
-        waited = 0
-        while sync_service.is_running() and waited < max_wait:
-            time.sleep(0.5)
-            waited += 0.5
-
-        # Verify any persisted data is valid
         norm_repo = NormalizedTransactionRepository(test_session)
         transactions = norm_repo.list_all(limit=100)
 
         for tx in transactions:
-            # Each transaction should have required fields
             assert tx.source is not None
             assert tx.source_transaction_id is not None

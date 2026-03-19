@@ -1,0 +1,115 @@
+{
+    "account": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+    "ledger_index_min": 32570,
+    "ledger_index_max": 81505670,
+    "transactions": [
+        {
+            "meta": {
+                "TransactionIndex": 38,
+                "TransactionResult": "tesSUCCESS",
+                "delivered_amount": {
+                    "value": 109100000000,
+                    "currency": "XRP"
+                }
+            },
+            "validated": true,
+            "Account": "rDsbeomae4FXwgQTJp9Rs64Qg9vDiTCdBv",
+            "Amount": "109100000000",
+            "Destination": "rwWr7KUZ3ZFwzgaDGjKBysADByzxvohQ3C",
+            "DestinationTag": 2223795,
+            "Fee": "10000",
+            "Flags": 2147483648,
+            "LastLedgerSequence": 81505917,
+            "Sequence": 2902111,
+            "SigningPubKey": "03511308215C16636E6605938C61D28B03345CFFEAA0D9EACCFA9386BAA1A55752",
+            "TransactionType": "Payment",
+            "TxnSignature": "3044022054E688529685546D8DEEECE1612A782D1DAE92E516A4F94CEA0A77A1AFDD43B302201F1B8B114A4A090E036B6409A1693A43FEE791FDEA0F262875ED57B611119288",
+            "hash": "D54105B3D7CADE03910E90646514B0CDB98A052D97A60BF82C80EA6A2692BA12",
+            "ledger_index": 81505668,
+            "date": "2023-07-30T19:51:20.000Z",
+            "AccountName": {
+                "name": "Bitstamp",
+                "desc": "1",
+                "account": "rDsbeomae4FXwgQTJp9Rs64Qg9vDiTCdBv",
+                "domain": "bitstamp.net",
+                "twitter": "Bitstamp",
+                "verified": true
+            },
+            "DestinationName": {
+                "name": "Indodax",
+                "desc": "1",
+                "account": "rwWr7KUZ3ZFwzgaDGjKBysADByzxvohQ3C",
+                "domain": "indodax.com",
+                "twitter": "indodaxOfficial"
+            }
+        },
+        {
+            "meta": {
+                "TransactionIndex": 56,
+                "TransactionResult": "tesSUCCESS",
+                "delivered_amount": {
+                    "value": 568741841,
+                    "currency": "XRP"
+                }
+            },
+            "validated": true,
+            "Account": "rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
+            "Amount": "568741841",
+            "Destination": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+            "DestinationTag": 94827736,
+            "Fee": "12",
+            "Flags": 2147483648,
+            "LastLedgerSequence": 81505662,
+            "Sequence": 1453476,
+            "SigningPubKey": "02F6A2E0A7650748B45F2329D92D598604D89146C16D5700F492126F1F07914A2E",
+            "TransactionType": "Payment",
+            "TxnSignature": "30450221008D98D359BE6004DCDBB654D5F000F69CBC3754D79930290B467B835A586F14C2022025B04AC82A1D6A751F53A1EE9EF7C352A6BB0A02687C98D276A94AC56B7017D9",
+            "hash": "2A4D075E891011A444470BCB51629104732048926E760C0D292546B1F8A51DA7",
+            "ledger_index": 81505653,
+            "date": "2023-07-30T19:50:21.000Z",
+            "AccountName": {
+                "name": "Kraken",
+                "desc": "1",
+                "account": "rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
+                "domain": "kraken.com",
+                "twitter": "krakenfx",
+                "verified": true
+            },
+            "DestinationName": {
+                "name": "Test Wallet",
+                "desc": "1",
+                "account": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+                "domain": "example.com",
+                "twitter": "example"
+            }
+        },
+        {
+            "meta": {
+                "TransactionIndex": 12,
+                "TransactionResult": "tesSUCCESS",
+                "delivered_amount": {
+                    "value": 25000000,
+                    "currency": "XRP"
+                }
+            },
+            "validated": true,
+            "Account": "rG3umtUXot3Tojru2XKkuXoreXDoFrPTU6",
+            "Amount": "25000000",
+            "Destination": "rN7n7otQDd6FczFgLdlqtyMVrn3HMbhDyt",
+            "DestinationTag": 12345,
+            "Fee": "15",
+            "Flags": 2147483648,
+            "LastLedgerSequence": 81505400,
+            "Sequence": 1234567,
+            "SigningPubKey": "0251D5D3AF3D3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F3F",
+            "TransactionType": "Payment",
+            "TxnSignature": "304402201111111111111111111111111111111111111111111111111111111111111111022022222222222222222222222222222222222222222222222222222222222222",
+            "hash": "AAAA1111BBBB2222CCCC3333DDDD4444EEEE5555FFFF6666AAAA7777BBBB8888",
+            "ledger_index": 81505300,
+            "date": "2023-07-30T19:45:00.000Z"
+        }
+    ],
+    "validated": true,
+    "marker": "7b226c6564676572223a38313530353431332c22736571223a33347d",
+    "limit": 25
+}

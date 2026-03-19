@@ -31,10 +31,12 @@ class WarningType(str, Enum):
     STALE_PRICE = "stale_price"  # Price used is outside staleness window (fallback)
     RESIDUAL_MISMATCH = "residual_mismatch"
     ZERO_COST_LOT = "zero_cost_lot"
+    PROVISIONAL_COST_LOT = "provisional_cost_lot"  # Negative lot with FMV-based provisional cost
+    UNSETTLED_NEGATIVE_LOT = "unsettled_negative_lot"  # Negative lot never settled by end of calculation
     FEE_CONSUMPTION_FAILED = "fee_consumption_failed"
     UNMATCHED_GROUP = "unmatched_group"
     FMV_FETCH_FAILED = "fmv_fetch_failed"
-    PENDING_TRANSFER = "pending_transfer"  # Transfer with missing counterpart leg
+    UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Internal transfer with missing counterpart leg
 
 
 @dataclass

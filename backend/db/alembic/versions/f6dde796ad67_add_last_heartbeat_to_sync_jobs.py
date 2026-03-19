@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = 'f6dde796ad67'
@@ -17,9 +18,18 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def column_exists(table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    columns = [c['name'] for c in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
 def upgrade() -> None:
     """Add last_heartbeat column to sync_jobs for detecting stale/crashed jobs."""
-    op.add_column('sync_jobs', sa.Column('last_heartbeat', sa.DateTime(), nullable=True))
+    if not column_exists('sync_jobs', 'last_heartbeat'):
+        op.add_column('sync_jobs', sa.Column('last_heartbeat', sa.DateTime(), nullable=True))
 
 
 def downgrade() -> None:

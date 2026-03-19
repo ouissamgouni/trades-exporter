@@ -2,7 +2,7 @@ transactions:
   - source: manual-test
     source_transaction_id: manual_fa8cc018b4b9
     source_transaction_type: trade
-    account_name: Binance Main
+    account_name: Binance
     asset_symbol: BTC
     quantity: "0.015000000000000000"
     direction: inflow
@@ -14,14 +14,13 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     total: "1725.000000000000000000"
     tags:
-      goal: test
+      - goal: test
   - source: manual-test
     source_transaction_id: manual_bcd389849ce4
     source_transaction_type: trade
-    account_name: MEXC Main
+    account_name: MEXC
     asset_symbol: ETH
     quantity: "0.150000000000000000"
     direction: inflow
@@ -33,10 +32,9 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
     total: "450.000000000000000000"
     tags:
-      goal: test
+      - goal: test
   - source: manual-test
     source_transaction_id: manual_8848157c8ab2
     source_transaction_type: trade
@@ -52,12 +50,11 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "600.000000000000000000"
     tags:
-      goal: test
-      expanded: true
-      leg_type: acquired
+      - goal: test
+      - expanded: true
+      - leg_type: acquired
   - source: manual-test
     source_transaction_id: manual_3ea22bbb8d9a
     source_transaction_type: trade
@@ -73,12 +70,11 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "900.000000000000000000"
     tags:
-      goal: test
-      expanded: true
-      leg_type: acquired
+      - goal: test
+      - expanded: true
+      - leg_type: acquired
   - source: manual-test
     source_transaction_id: manual_40e70a6739b6
     source_transaction_type: trade
@@ -94,16 +90,15 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "875.000000000000000000"
     tags:
-      goal: test
-      expanded: true
-      leg_type: acquired
+      - goal: test
+      - expanded: true
+      - leg_type: acquired
   - source: manual-test
     source_transaction_id: manual_3bb5e6392673
     source_transaction_type: transfer
-    account_name: Binance Main
+    account_name: Binance
     asset_symbol: BTC
     quantity: "0.001000000000000000"
     direction: outflow
@@ -113,16 +108,15 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
-    from_account_name: Binance Main
-    to_account_name: MEXC Main
+    source_from_account: Binance
+    source_to_account: MEXC
     bundle_id: 1
     tags:
-      goal: test
+      - goal: test
   - source: manual-test
     source_transaction_id: manual_38937c79f698
     source_transaction_type: transfer
-    account_name: MEXC Main
+    account_name: MEXC
     asset_symbol: BTC
     quantity: "0.001000000000000000"
     direction: inflow
@@ -132,12 +126,11 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: unknown
-    disposal_taxable: false
-    from_account_name: Binance Main
-    to_account_name: MEXC Main
+    source_from_account: Binance
+    source_to_account: MEXC
     bundle_id: 1
     tags:
-      goal: test
+      - goal: test
   - source: manual-test
     source_transaction_id: manual_63f6a93c340a
     source_transaction_type: trade
@@ -152,12 +145,11 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: false
     total: "625.000000000000000000"
     tags:
-      goal: test
-      expanded: true
-      leg_type: acquired
+      - goal: test
+      - expanded: true
+      - leg_type: acquired
   - source: manual-test
     source_transaction_id: manual_a917a01369fe
     source_transaction_type: trade
@@ -173,9 +165,8 @@ transactions:
     fee_quote_asset_symbol: EUR
     review_status: valid
     taxability_status: taxable
-    disposal_taxable: true
     total: "750.000000000000000000"
     tags:
-      goal: test
-      expanded: true
-      leg_type: disposed
+      - goal: test
+      - expanded: true
+      - leg_type: disposed

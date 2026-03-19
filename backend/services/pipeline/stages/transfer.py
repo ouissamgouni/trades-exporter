@@ -1,29 +1,29 @@
 """
-TransferDetectionStage - Detect internal transfers between owned accounts.
+AccountResolutionStage - Resolve source addresses to account IDs.
 """
 
 from typing import List, Tuple
 
 from backend.config.loader import configure_logging
 from backend.db.models import NormalizedTransaction
-from backend.services.transfer_detector import TransferDetector
+from backend.services.account_resolver import AccountResolver
 from backend.services.pipeline.base import PipelineStage
 from backend.services.pipeline.context import PipelineContext
 
-log = configure_logging("transfer_stage")
+log = configure_logging("account_resolution_stage")
 
 
-class TransferDetectionStage(PipelineStage):
+class AccountResolutionStage(PipelineStage):
     """
-    Detect internal transfers between owned accounts.
+    Resolve source addresses to account IDs.
 
-    Resolves source_from_account and source_to_account to account IDs,
-    then marks as internal transfer if both are owned.
+    Resolves source_from_account and source_to_account to account IDs.
+    Does NOT modify transaction_type - internal transfer detection happens at P&L time.
     """
 
     @property
     def name(self) -> str:
-        return "transfer_detection"
+        return "account_resolution"
 
     def should_skip(self, context: PipelineContext) -> bool:
         return context.skip_transfer_detection
@@ -34,15 +34,13 @@ class TransferDetectionStage(PipelineStage):
         context: PipelineContext,
     ) -> Tuple[List[NormalizedTransaction], bool]:
         """
-        Process transactions, detecting internal transfers.
+        Process transactions, resolving account IDs.
 
         Modifies transactions in place:
         - Sets from_account_id and to_account_id
-        - Sets transaction_type to "transfer" if internal
-        - Sets taxable to False for internal transfers
         """
-        detector = TransferDetector(context.session)
-        transfer_count = 0
+        resolver = AccountResolver(context.session)
+        resolved_count = 0
 
         for tx in transactions:
             try:
@@ -52,27 +50,32 @@ class TransferDetectionStage(PipelineStage):
                 if not source:
                     continue
 
-                # Remember original type to detect if it changed
-                original_type = tx.transaction_type
+                # Check if transaction has addresses to resolve
+                has_addresses = bool(
+                    tx.source_from_account or tx.source_to_account
+                )
+                
+                if not has_addresses:
+                    continue
 
-                # Enrich transaction with account IDs and detect transfers
-                detector.enrich_transaction(tx, source)
+                # Enrich transaction with account IDs
+                resolver.enrich_transaction(tx, source)
 
-                # Track if this became a transfer
-                if tx.transaction_type == "transfer" and original_type != "transfer":
-                    transfer_count += 1
+                # Count if we resolved any account
+                if tx.from_account_id or tx.to_account_id:
+                    resolved_count += 1
 
             except Exception as e:
                 warning_msg = (
-                    f"Transfer detection failed for {tx.source_transaction_id}: {e}"
+                    f"Account resolution failed for {tx.source_transaction_id}: {e}"
                 )
                 context.warnings.append(warning_msg)
                 log.warning(warning_msg)
 
         # Update context statistics
-        context.transfer_count = transfer_count
+        context.transfer_count = resolved_count
 
-        if transfer_count > 0:
-            log.debug(f"Detected {transfer_count} internal transfer(s)")
+        if resolved_count > 0:
+            log.debug(f"Resolved accounts for {resolved_count} transaction(s)")
 
         return transactions, True

@@ -27,8 +27,8 @@ class TestConnector(BaseConnector):
     def connector_name(self) -> str:
         return "test_connector"
     
-    def get_raws(self) -> List[Dict[str, Any]]:
-        return [{"id": "1", "data": "test"}]
+    def yield_raws(self):
+        yield {"id": "1", "data": "test"}
     
     def raw_to_normalized(self, raw_item: dict) -> NormalizedTransaction:
         return NormalizedTransaction(

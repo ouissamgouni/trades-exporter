@@ -5,6 +5,7 @@ Tests that the connector can fetch and map withdrawal data successfully.
 
 import pytest
 import logging
+from datetime import datetime, timezone
 
 from backend.connectors.cex.connector_binance_withdrawals import (
     BinanceWithdrawalsConnector,
@@ -13,11 +14,14 @@ from backend.connectors.cex.connector_binance_withdrawals import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
+# Only fetch recent data to speed up integration tests
+TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
+
 
 @pytest.mark.integration
 def test_binance_withdrawals_connector_yield_normalized():
     """Test Binance withdrawals connector yield_normalized method."""
-    connector = BinanceWithdrawalsConnector()
+    connector = BinanceWithdrawalsConnector(config={"since_datetime": TEST_SINCE})
 
     results = []
     errors = []

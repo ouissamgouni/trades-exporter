@@ -1,9 +1,11 @@
 import {
+    Badge,
     Box,
     Button, Dialog, Flex, Input, NativeSelect, Portal, Text
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { API_URL, Account } from '../types';
+import { linkRawAccount } from '../utils/rawAccountApi';
 import { toaster } from './ui/toaster';
 
 interface AccountSelectorProps {
@@ -13,10 +15,14 @@ interface AccountSelectorProps {
     onAccountCreated?: () => void;
     placeholder?: string;
     defaultName?: string; // Pre-fill new account name
-    size?: 'sm' | 'md';
+    size?: 'xs' | 'sm' | 'md';
+    disabled?: boolean;
+    showOwnershipBadge?: boolean; // Display 'Owned' badge for owned accounts
     // For linking raw_account when creating new account from mapping context
     rawAccountSource?: string;
     rawAccountLabel?: string;
+    /** Network/chain for disambiguation (e.g. 'bsc', 'ethereum') */
+    rawAccountNetwork?: string;
 }
 
 export const AccountSelector: React.FC<AccountSelectorProps> = ({
@@ -27,8 +33,11 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
     placeholder = 'Search or select account...',
     defaultName = '',
     size = 'sm',
+    disabled,
+    showOwnershipBadge = false,
     rawAccountSource,
     rawAccountLabel,
+    rawAccountNetwork,
 }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -63,29 +72,16 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const linkRawAccount = async (accountId: number) => {
+    const doLinkRawAccount = async (accountId: number) => {
         // If raw account context is provided, link the raw_account to the account
         if (rawAccountSource && rawAccountLabel && accountId) {
             try {
-                // First try to PATCH (update existing raw account)
-                const patchResponse = await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(rawAccountSource)}/${encodeURIComponent(rawAccountLabel)}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ account_id: accountId })
+                await linkRawAccount({
+                    source: rawAccountSource,
+                    label: rawAccountLabel,
+                    network: rawAccountNetwork,
+                    accountId,
                 });
-
-                // If raw account doesn't exist (404), create it
-                if (patchResponse.status === 404) {
-                    await fetch(`${API_URL}/raw-accounts`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            label: rawAccountLabel,
-                            source: rawAccountSource,
-                            account_id: accountId
-                        })
-                    });
-                }
             } catch (linkErr) {
                 console.warn('Failed to link raw account:', linkErr);
                 // Don't fail the whole operation if linking fails
@@ -100,7 +96,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
 
         // Link raw_account when selecting an existing account
         if (accountId) {
-            await linkRawAccount(accountId);
+            await doLinkRawAccount(accountId);
         }
     };
 
@@ -130,7 +126,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
 
             // Link the raw_account to the new account
             if (created.id) {
-                await linkRawAccount(created.id);
+                await doLinkRawAccount(created.id);
             }
 
             setShowCreateDialog(false);
@@ -222,7 +218,14 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                             onClick={() => handleSelect(account.id)}
                             fontSize="sm"
                         >
-                            <Text fontWeight="medium">{account.name}</Text>
+                            <Flex align="center" gap={2}>
+                                <Text fontWeight="medium" flex="1">{account.name}</Text>
+                                {showOwnershipBadge && account.owned && (
+                                    <Badge size="xs" colorPalette="green" variant="subtle">
+                                        Owned
+                                    </Badge>
+                                )}
+                            </Flex>
                             <Text fontSize="xs" color="gray.500">
                                 {account.account_type}
                                 {account.address_or_identifier && ` • ${account.address_or_identifier.slice(0, 12)}...`}
@@ -297,8 +300,12 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                                         <Text fontWeight="medium" mb={1}>Tags</Text>
                                         <Input
                                             placeholder="e.g., trading, personal (comma-separated)"
-                                            value={(newAccount.tags || []).join(', ')}
-                                            onChange={e => setNewAccount({ ...newAccount, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                                            value={(newAccount.tags || []).map(t => Object.keys(t)[0]).filter(Boolean).join(', ')}
+                                            onChange={e => {
+                                                const tagStrings = e.target.value.split(',').map(t => t.trim()).filter(t => t);
+                                                const tags = tagStrings.map(tag => ({ [tag]: true }));
+                                                setNewAccount({ ...newAccount, tags });
+                                            }}
                                         />
                                     </Box>
                                     <Box>

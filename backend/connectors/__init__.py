@@ -22,7 +22,6 @@ from backend.connectors.cex.connector_okx_convert import (
 )
 
 # Web3 connectors
-from backend.connectors.onchain.connector_onchain_hub import ConnectorOnchainHub
 from backend.connectors.onchain.etherscan.connector_etherscan_hub import (
     ConnectorEtherscanHub,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "OKXConnectorTrx",
     "OKXConvertConnector",
     # Web3
-    "ConnectorOnchainHub",
     "ConnectorEtherscanHub",
     "ConnectorBlockscoutHub",
 ]

@@ -5,12 +5,16 @@ Tests that the connector can fetch and map trade data successfully.
 
 import pytest
 import logging
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from backend.connectors.cex.connector_coinbase_trx import ConnectorCoinbaseTrx
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+# Only fetch recent data to speed up integration tests
+TEST_SINCE = datetime(2025, 5, 1, tzinfo=timezone.utc)
 
 
 @pytest.mark.integration
@@ -22,7 +26,7 @@ def test_coinbase_trx_connector_yield_normalized():
         "get_symbols",
         return_value=["TAO-USDC"],
     ):
-        connector = ConnectorCoinbaseTrx()
+        connector = ConnectorCoinbaseTrx(config={"since_datetime": TEST_SINCE})
 
         results = []
         errors = []

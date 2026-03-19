@@ -21,13 +21,19 @@ import {
     Button,
     Flex,
     Input,
+    NativeSelect,
+    Spinner,
     Text,
     Textarea,
 } from '@chakra-ui/react';
-import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle } from 'react-icons/fi';
-import { Transaction, Account, API_URL } from '../types';
+import { FiCopy, FiCheck, FiLoader, FiTag, FiX, FiChevronDown, FiChevronRight, FiAlertTriangle, FiArrowDown, FiArrowUp } from 'react-icons/fi';
+import { Transaction, Account, Bundle, API_URL } from '../types';
+import { UnitPattern, TaxabilityStatus } from '../enums';
 import { AssetBadge } from './AssetBadge';
 import { formatDateTimeLocale } from '../utils/dateUtils';
+import { ValueDisplay } from './ValueDisplay';
+import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { toaster } from './ui/toaster';
 
 // ============================================================================
 // Types
@@ -51,20 +57,6 @@ interface TransactionDetailPanelProps {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-const formatCurrency = (value: number | null | undefined, decimals = 2): string => {
-    if (value == null) return '-';
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-    }).format(value);
-};
-
-const formatQty = (value: number | null | undefined): string => {
-    if (value == null) return '-';
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 // Using formatDateTimeLocale from utils/dateUtils for consistent date formatting
 
@@ -158,37 +150,59 @@ interface TagChipProps {
 }
 
 const TagChip: React.FC<TagChipProps> = ({ tag, onRemove, editable }) => {
-    const displayText = Object.entries(tag)
-        .map(([k, v]) => k === 'value' ? String(v) : `${k}: ${v}`)
-        .join(', ');
+    // Display each key:value pair as a separate badge
+    const entries = Object.entries(tag);
 
     return (
-        <Badge
-            size="xs"
-            colorPalette="blue"
-            variant="subtle"
-            display="flex"
-            alignItems="center"
-            gap={0.5}
-            px={1}
-            py={0.5}
-            fontSize="9px"
-        >
-            <FiTag size={8} />
-            <Text fontSize="9px">{displayText}</Text>
-            {editable && onRemove && (
-                <Box
-                    as="button"
-                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRemove(); }}
-                    ml={0.5}
-                    cursor="pointer"
-                    _hover={{ color: 'red.500' }}
+        <>
+            {entries.map(([key, value], index) => (
+                <Badge
+                    key={index}
+                    size="xs"
+                    colorPalette="blue"
+                    variant="subtle"
+                    display="flex"
+                    alignItems="center"
+                    gap={0.5}
+                    px={1}
+                    py={0.5}
+                    fontSize="9px"
                 >
-                    <FiX size={8} />
-                </Box>
-            )}
-        </Badge>
+                    <FiTag size={8} />
+                    <Text fontSize="9px">{key === 'value' ? String(value) : `${key}: ${value}`}</Text>
+                    {editable && onRemove && index === entries.length - 1 && (
+                        <Box
+                            as="button"
+                            onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRemove(); }}
+                            ml={0.5}
+                            cursor="pointer"
+                            _hover={{ color: 'red.500' }}
+                        >
+                            <FiX size={8} />
+                        </Box>
+                    )}
+                </Badge>
+            ))}
+        </>
     );
+};
+
+// Helper function to normalize tags (convert dict with numeric keys to array)
+const normalizeTags = (tags: any): Record<string, unknown>[] => {
+    if (!tags) return [];
+    if (Array.isArray(tags)) return tags;
+
+    // Check if it's a dict with numeric keys like {"0": {...}, "1": {...}}
+    const keys = Object.keys(tags);
+    const allNumeric = keys.every(k => !isNaN(Number(k)));
+
+    if (allNumeric) {
+        // Convert to array by extracting values
+        return keys.sort((a, b) => Number(a) - Number(b)).map(k => tags[k]);
+    }
+
+    // Otherwise, treat as a single tag object
+    return [tags];
 };
 
 // ============================================================================
@@ -201,6 +215,16 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     onNotesChange,
     onTagsChange,
 }) => {
+    // Normalize tags on component mount/update
+    const normalizedTags = normalizeTags(tx.tags);
+
+    // Bundle/Calculation Unit state
+    const [bundleData, setBundleData] = useState<Bundle | null>(null);
+    const [bundleLoading, setBundleLoading] = useState(false);
+    const [bundleError, setBundleError] = useState<string | null>(null);
+    const [bundleTaxability, setBundleTaxability] = useState<string>(TaxabilityStatus.UNKNOWN);
+    const [taxabilityLoading, setTaxabilityLoading] = useState(false);
+
     // Raw data state
     const [rawData, setRawData] = useState<RawTransactionData | null>(null);
     const [rawDataLoading, setRawDataLoading] = useState(false);
@@ -215,6 +239,62 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
     // Tags state
     const [newTagKey, setNewTagKey] = useState('');
     const [newTagValue, setNewTagValue] = useState('');
+
+    // Fetch bundle data if transaction is part of a calculation unit
+    useEffect(() => {
+        const fetchBundle = async () => {
+            if (!tx.user_calculation_unit_id) {
+                setBundleData(null);
+                return;
+            }
+
+            setBundleLoading(true);
+            setBundleError(null);
+            try {
+                const response = await fetch(`${API_URL}/bundles/${tx.user_calculation_unit_id}`);
+                if (!response.ok) throw new Error('Failed to fetch bundle');
+                const data = await response.json();
+                setBundleData(data);
+                setBundleTaxability(data.taxability_override || TaxabilityStatus.UNKNOWN);
+            } catch (err) {
+                console.error('Failed to fetch bundle:', err);
+                setBundleError(err instanceof Error ? err.message : 'Unknown error');
+            } finally {
+                setBundleLoading(false);
+            }
+        };
+
+        fetchBundle();
+    }, [tx.user_calculation_unit_id]);
+
+    // Update bundle taxability override via PATCH
+    const handleBundleTaxabilityChange = async (newValue: string) => {
+        if (!bundleData) return;
+        setBundleTaxability(newValue);
+        setTaxabilityLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/bundles/${bundleData.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue,
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to update taxability');
+            toaster.success({
+                title: 'Taxability updated',
+                description: `Bundle #${bundleData.id} set to ${newValue}`,
+            });
+        } catch (err) {
+            setBundleTaxability(bundleData.taxability_override || TaxabilityStatus.UNKNOWN);
+            toaster.error({
+                title: 'Error',
+                description: err instanceof Error ? err.message : 'Failed to update taxability',
+            });
+        } finally {
+            setTaxabilityLoading(false);
+        }
+    };
 
     // Fetch raw transaction data on-demand
     const fetchRawData = useCallback(async () => {
@@ -257,9 +337,8 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
             ? { [newTagKey.trim()]: newTagValue.trim() }
             : { value: newTagValue.trim() };
 
-        const currentTags = (tx.tags || []) as Record<string, unknown>[];
         if (onTagsChange) {
-            onTagsChange(tx.id, [...currentTags, newTag]);
+            onTagsChange(tx.id, [...normalizedTags, newTag]);
         }
         setNewTagKey('');
         setNewTagValue('');
@@ -267,9 +346,8 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
 
     // Remove tag
     const removeTag = (index: number) => {
-        const currentTags = (tx.tags || []) as Record<string, unknown>[];
         if (onTagsChange) {
-            onTagsChange(tx.id, currentTags.filter((_: Record<string, unknown>, i: number) => i !== index));
+            onTagsChange(tx.id, normalizedTags.filter((_: Record<string, unknown>, i: number) => i !== index));
         }
     };
 
@@ -290,14 +368,45 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                 {/* Key Infos */}
                 <Section title="Key Infos" icon="📊" defaultOpen={true} colorScheme="purple">
                     <InfoRow label="Date/Time" value={formatDateTimeLocale(tx.date_time)} />
-                    <InfoRow label="Account" value={getAccountName(tx.account_id ?? null)} />
+                    <InfoRow label="Account" value={
+                        <Box>
+                            <Text fontSize="10px" fontFamily="mono" fontWeight="medium">{getAccountName(tx.account_id ?? null)}</Text>
+                            {tx.source_account && (
+                                <Text fontSize="8px" color="gray.500" fontFamily="mono" mt={0.5}>
+                                    {tx.source_account}
+                                </Text>
+                            )}
+                        </Box>
+                    } />
                     <InfoRow label="Source" value={tx.source || '-'} muted />
                     <InfoRow
                         label="Type"
                         value={
-                            <Badge size="xs" colorPalette="gray" fontSize="9px">
-                                {tx.transaction_type || '-'}
-                            </Badge>
+                            <Flex align="center" gap={1} wrap="wrap">
+                                {tx.source_transaction_type && (
+                                    <Badge size="xs" colorPalette="blue" variant="subtle" fontSize="9px">
+                                        {tx.source_transaction_type}
+                                    </Badge>
+                                )}
+                                {tx.source_transaction_type && tx.transaction_type && (
+                                    <Text fontSize="9px" color="gray.400">→</Text>
+                                )}
+                                <Badge size="xs" colorPalette="gray" fontSize="9px">
+                                    {tx.transaction_type || '-'}
+                                </Badge>
+                                {tx.direction && (
+                                    <Flex align="center" gap={0.5} ml={1}>
+                                        {tx.direction === 'inflow' ? (
+                                            <FiArrowDown size={10} color="var(--chakra-colors-green-500)" />
+                                        ) : tx.direction === 'outflow' ? (
+                                            <FiArrowUp size={10} color="var(--chakra-colors-red-500)" />
+                                        ) : null}
+                                        <Text fontSize="8px" color="gray.500">
+                                            {tx.direction}
+                                        </Text>
+                                    </Flex>
+                                )}
+                            </Flex>
                         }
                     />
                     <InfoRow
@@ -312,12 +421,12 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             />
                         }
                     />
-                    <InfoRow label="Quantity" value={formatQty(tx.quantity)} />
+                    <InfoRow label="Quantity" value={<ValueDisplay value={tx.quantity} />} />
                     <InfoRow
                         label="Price"
                         value={
                             <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono">{formatCurrency(tx.price)}</Text>
+                                <Text fontSize="10px" fontFamily="mono"><ValueDisplay value={tx.price} /></Text>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -332,7 +441,9 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Total"
                         value={
                             <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono">{formatCurrency(tx.total)}</Text>
+                                <Text fontSize="10px" fontFamily="mono">
+                                    <ValueDisplay value={tx.total} />
+                                </Text>
                                 <AssetBadge
                                     asset={tx.price_quote_asset}
                                     sourceSymbol={tx.source_price_quote_asset_symbol}
@@ -347,7 +458,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         label="Fee"
                         value={tx.fee ? (
                             <Flex align="center" gap={1}>
-                                <Text fontSize="10px" fontFamily="mono">{formatQty(tx.fee)}</Text>
+                                <Text fontSize="10px" fontFamily="mono"><ValueDisplay value={tx.fee} /></Text>
                                 <AssetBadge
                                     asset={tx.fee_quote_asset}
                                     sourceSymbol={tx.source_fee_quote_asset_symbol}
@@ -358,6 +469,16 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             </Flex>
                         ) : '-'}
                     />
+                    {tx.source_transaction_id && (
+                        <InfoRow
+                            label="Source Transaction ID"
+                            value={
+                                <Text fontSize="9px" fontFamily="mono" maxW="200px" truncate title={tx.source_transaction_id}>
+                                    {tx.source_transaction_id}
+                                </Text>
+                            }
+                        />
+                    )}
                     <InfoRow
                         label="Review"
                         value={
@@ -370,6 +491,87 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                             </Badge>
                         }
                     />
+                    {(tx.from_account_id || tx.source_from_account) && (
+                        <InfoRow
+                            label="From Account"
+                            value={
+                                <Badge size="xs" colorPalette={tx.from_account_id ? "cyan" : "orange"} variant="subtle" fontSize="9px">
+                                    {tx.source_from_account && (
+                                        <>
+                                            Source: {tx.source_from_account}
+                                            {tx.from_account_id && <Text as="span" mx={1}>→</Text>}
+                                        </>
+                                    )}
+                                    {tx.from_account_id && (
+                                        <>#{tx.from_account_id} {getAccountName(tx.from_account_id)}</>
+                                    )}
+                                </Badge>
+                            }
+                        />
+                    )}
+                    {(tx.to_account_id || tx.source_to_account) && (
+                        <InfoRow
+                            label="To Account"
+                            value={
+                                <Badge size="xs" colorPalette={tx.to_account_id ? "cyan" : "orange"} variant="subtle" fontSize="9px">
+                                    {tx.source_to_account && (
+                                        <>
+                                            Source: {tx.source_to_account}
+                                            {tx.to_account_id && <Text as="span" mx={1}>→</Text>}
+                                        </>
+                                    )}
+                                    {tx.to_account_id && (
+                                        <>#{tx.to_account_id} {getAccountName(tx.to_account_id)}</>
+                                    )}
+                                </Badge>
+                            }
+                        />
+                    )}
+                    <InfoRow label="Network" value={tx.network || '-'} />
+                    <InfoRow label="Network TX ID" value={
+                        tx.network_transaction_id ? (
+                            <Text fontSize="9px" maxW="150px" truncate title={tx.network_transaction_id}>
+                                {tx.network_transaction_id}
+                            </Text>
+                        ) : '-'
+                    } />
+                    {/* Bundle/Calculation Unit - link to full section */}
+                    {tx.user_calculation_unit_id && bundleData && (
+                        <InfoRow
+                            label="Bundle"
+                            value={
+                                <Badge
+                                    size="xs"
+                                    colorPalette="purple"
+                                    fontSize="9px"
+                                    variant="subtle"
+                                >
+                                    📦 #{bundleData.id} {bundleData.pattern ? `• ${bundleData.pattern}` : ''}
+                                </Badge>
+                            }
+                        />
+                    )}
+                    {/* Spam/Phishing Detection Alert */}
+                    {tx.review_status === 'invalid' && tx.review_notes && tx.review_notes.includes('Auto-flagged') && (
+                        <Box
+                            mt={2}
+                            p={2}
+                            bg="red.950"
+                            borderWidth="1px"
+                            borderColor="red.700"
+                            borderRadius="md"
+                        >
+                            <Flex align="center" gap={1.5} mb={1}>
+                                <Box color="red.400"><FiAlertTriangle size={14} /></Box>
+                                <Text fontSize="10px" fontWeight="bold" color="red.300">
+                                    Spam / Phishing Detection
+                                </Text>
+                            </Flex>
+                            <Text fontSize="9px" color="red.200" whiteSpace="pre-wrap" fontFamily="mono">
+                                {tx.review_notes}
+                            </Text>
+                        </Box>
+                    )}
                 </Section>
 
                 {/* P&L */}
@@ -393,25 +595,11 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     />
                 </Section>
 
-                {/* Network */}
-                <Section title="Network" icon="🌐" defaultOpen={false} colorScheme="cyan">
-                    <InfoRow label="From Account" value={getAccountName(tx.from_account_id)} />
-                    <InfoRow label="To Account" value={getAccountName(tx.to_account_id)} />
-                    <InfoRow label="Network" value={tx.network || '-'} />
-                    <InfoRow label="Network TX ID" value={
-                        tx.network_transaction_id ? (
-                            <Text fontSize="9px" maxW="150px" truncate title={tx.network_transaction_id}>
-                                {tx.network_transaction_id}
-                            </Text>
-                        ) : '-'
-                    } />
-                </Section>
-
                 {/* Tags */}
                 <Section title="Tags" icon="🏷️" defaultOpen={false} colorScheme="blue">
                     <Flex gap={1} wrap="wrap" mb={1}>
-                        {tx.tags && (tx.tags as Record<string, unknown>[]).length > 0 ? (
-                            (tx.tags as Record<string, unknown>[]).map((tag: Record<string, unknown>, i: number) => (
+                        {normalizedTags && normalizedTags.length > 0 ? (
+                            normalizedTags.map((tag: Record<string, unknown>, i: number) => (
                                 <TagChip
                                     key={i}
                                     tag={tag}
@@ -494,37 +682,200 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
             </Section>
 
             {/* ============================================================ */}
+            {/* BUNDLE SECTION (only if transaction belongs to a bundle) */}
+            {/* ============================================================ */}
+            {tx.user_calculation_unit_id && (
+                <Section title="Bundle" level="main" defaultOpen={true} colorScheme="purple">
+                    {bundleLoading ? (
+                        <Flex align="center" gap={2} py={2}>
+                            <Spinner size="xs" />
+                            <Text fontSize="xs" color="gray.500">Loading bundle...</Text>
+                        </Flex>
+                    ) : bundleError ? (
+                        <Text fontSize="xs" color="red.500">{bundleError}</Text>
+                    ) : bundleData ? (
+                        <Box>
+                            {/* Header: pattern badge + ID */}
+                            <Flex justify="space-between" align="center" mb={2}>
+                                <Flex align="center" gap={1.5}>
+                                    <Badge
+                                        size="sm"
+                                        colorPalette={
+                                            bundleData.pattern === UnitPattern.INTERNAL_TRANSFER ? 'blue' :
+                                                bundleData.pattern === UnitPattern.SWAP ? 'orange' :
+                                                    bundleData.pattern === UnitPattern.SPLIT ? 'purple' :
+                                                        bundleData.pattern === UnitPattern.FLOW ? 'cyan' :
+                                                            bundleData.pattern === UnitPattern.CUSTOM ? 'purple' : 'gray'
+                                        }
+                                    >
+                                        {bundleData.pattern || 'unknown'}
+                                    </Badge>
+                                    {bundleData.label && (
+                                        <Text fontSize="10px" fontWeight="bold" color="purple.800">
+                                            {bundleData.label}
+                                        </Text>
+                                    )}
+                                </Flex>
+                                <Badge size="sm" colorPalette="purple" variant="subtle">
+                                    📦 #{bundleData.id}
+                                </Badge>
+                            </Flex>
+
+                            {/* Notes */}
+                            {bundleData.notes && (
+                                <Text fontSize="9px" color="gray.600" mb={2}>
+                                    {bundleData.notes}
+                                </Text>
+                            )}
+
+                            {/* Taxability Override */}
+                            <Flex align="center" gap={2} mb={2}>
+                                <Text fontSize="10px" color="gray.500" flexShrink={0}>
+                                    Taxability:
+                                </Text>
+                                <NativeSelect.Root size="sm" width="130px">
+                                    <NativeSelect.Field
+                                        value={bundleTaxability}
+                                        onChange={(e) => handleBundleTaxabilityChange(e.target.value)}
+                                        _disabled={{ opacity: 0.5, cursor: 'not-allowed' }}
+                                        aria-disabled={taxabilityLoading || undefined}
+                                        style={{
+                                            fontSize: '11px',
+                                            padding: '2px 6px',
+                                            backgroundColor:
+                                                bundleTaxability === TaxabilityStatus.TAXABLE
+                                                    ? '#FED7AA'
+                                                    : bundleTaxability === TaxabilityStatus.NON_TAXABLE
+                                                        ? '#C6F6D5'
+                                                        : '#FEFCBF',
+                                            borderRadius: '4px',
+                                        }}
+                                    >
+                                        <option value={TaxabilityStatus.UNKNOWN}>Unknown</option>
+                                        <option value={TaxabilityStatus.TAXABLE}>Taxable</option>
+                                        <option value={TaxabilityStatus.NON_TAXABLE}>Non-Taxable</option>
+                                    </NativeSelect.Field>
+                                </NativeSelect.Root>
+                                {taxabilityLoading && <Spinner size="xs" />}
+                            </Flex>
+
+                            {/* Transaction count */}
+                            <Text fontSize="xs" color="gray.500" mb={1} fontWeight="medium">
+                                {bundleData.transaction_count} transaction
+                                {bundleData.transaction_count !== 1 ? 's' : ''}
+                            </Text>
+
+                            {/* Embedded transactions table */}
+                            <BundleMemberTransactionsTable
+                                transactionIds={bundleData.transactions.map(t => t.id)}
+                            />
+                        </Box>
+                    ) : (
+                        <Text fontSize="xs" color="gray.500">
+                            Bundle #{tx.user_calculation_unit_id}
+                        </Text>
+                    )}
+                </Section>
+            )}
+
+            {/* ============================================================ */}
             {/* DETAILS SECTION */}
             {/* ============================================================ */}
             <Section title="Details" level="main" defaultOpen={false} colorScheme="gray">
 
-                {/* Source Data */}
+                {/* Source Data - Raw Data Button */}
                 <Section title="Source" icon="📤" defaultOpen={true} colorScheme="orange">
-                    <InfoRow label="Source" value={tx.source || '-'} />
-                    <InfoRow label="Source TX ID" value={
-                        <Text fontSize="9px" maxW="150px" truncate title={tx.source_transaction_id || ''}>
-                            {tx.source_transaction_id || '-'}
-                        </Text>
-                    } />
-                    <InfoRow label="Account" value={
-                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_account || ''}>
-                            {tx.source_account || '-'}
-                        </Text>
-                    } />
-                    <InfoRow label="Asset" value={tx.source_asset_symbol || '-'} />
-                    <InfoRow label="Type" value={tx.source_transaction_type || '-'} />
-                    <InfoRow label="Price Quote" value={tx.source_price_quote_asset_symbol || '-'} />
-                    <InfoRow label="Fee Quote" value={tx.source_fee_quote_asset_symbol || '-'} />
-                    <InfoRow label="From Address" value={
-                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_from_account || ''}>
-                            {tx.source_from_account || '-'}
-                        </Text>
-                    } />
-                    <InfoRow label="To Address" value={
-                        <Text fontSize="9px" maxW="120px" truncate title={tx.source_to_account || ''}>
-                            {tx.source_to_account || '-'}
-                        </Text>
-                    } />
+                    {!tx.raw_transaction_id ? (
+                        <Box p={2} bg="gray.50" borderRadius="md" textAlign="center">
+                            <Text fontSize="9px" color="gray.500">
+                                No raw transaction linked (manual entry)
+                            </Text>
+                        </Box>
+                    ) : !hasFetchedRaw ? (
+                        <Button
+                            size="xs"
+                            onClick={fetchRawData}
+                            fontSize="9px"
+                            w="100%"
+                        >
+                            Raw Data (Raw TX ID: {tx.raw_transaction_id})
+                        </Button>
+                    ) : rawDataLoading ? (
+                        <Flex align="center" justify="center" py={2} gap={2}>
+                            <FiLoader className="animate-spin" size={12} />
+                            <Text fontSize="9px" color="gray.500">Loading...</Text>
+                        </Flex>
+                    ) : rawDataError ? (
+                        <Box p={2} bg="red.50" borderRadius="md">
+                            <Text fontSize="9px" color="red.500">Error: {rawDataError}</Text>
+                            <Button
+                                size="xs"
+                                mt={1}
+                                fontSize="9px"
+                                onClick={() => {
+                                    setHasFetchedRaw(false);
+                                    setRawDataError(null);
+                                }}
+                            >
+                                Retry
+                            </Button>
+                        </Box>
+                    ) : rawData ? (
+                        <Box>
+                            <Flex justify="space-between" align="center" mb={1}>
+                                <Flex align="center" gap={1}>
+                                    <Badge size="xs" colorPalette="gray" fontSize="8px">{rawData.source}</Badge>
+                                    <Text fontSize="8px" color="gray.500">ID: {rawData.source_transaction_id}</Text>
+                                </Flex>
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    onClick={copyJson}
+                                    px={1}
+                                    fontSize="9px"
+                                >
+                                    {copied ? <FiCheck size={10} /> : <FiCopy size={10} />}
+                                </Button>
+                            </Flex>
+                            <Box
+                                bg="gray.900"
+                                color="green.300"
+                                p={2}
+                                borderRadius="md"
+                                fontSize="8px"
+                                fontFamily="mono"
+                                maxH="200px"
+                                overflowY="auto"
+                                whiteSpace="pre-wrap"
+                                wordBreak="break-all"
+                            >
+                                {JSON.stringify(rawData.raw_data, null, 2)}
+                            </Box>
+                            {/* Connector Metadata */}
+                            {tx.connector_name && (
+                                <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.200">
+                                    <InfoRow
+                                        label="Connector"
+                                        value={
+                                            <Badge size="xs" colorPalette="blue" fontSize="8px">
+                                                {tx.connector_name}
+                                            </Badge>
+                                        }
+                                    />
+                                    {tx.sync_connector_run_id && (
+                                        <InfoRow label="Run ID" value={tx.sync_connector_run_id} muted />
+                                    )}
+                                    {tx.run_datetime && (
+                                        <InfoRow label="Run Datetime" value={formatDateTimeLocale(tx.run_datetime)} muted />
+                                    )}
+                                </Box>
+                            )}
+                            {/* Raw Transaction Ingestion Time */}
+                            {rawData?.ingestion_time && (
+                                <InfoRow label="Ingestion Time" value={formatDateTimeLocale(rawData.ingestion_time)} muted />
+                            )}
+                        </Box>
+                    ) : null}
                 </Section>
 
                 {/* Source Mappings */}
@@ -633,15 +984,15 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         value={
                             tx.from_account_id ? (
                                 <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_from_account || '-'}</Text>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_from_account || undefined}>{tx.source_from_account || '-'}</Text>
                                     <Text fontSize="9px">→</Text>
-                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                    <Badge size="xs" colorPalette="cyan" fontSize="8px" title={`Source: ${tx.source_from_account || '-'}`}>
                                         #{tx.from_account_id} {getAccountName(tx.from_account_id)}
                                     </Badge>
                                 </Flex>
                             ) : tx.source_from_account ? (
                                 <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_from_account}</Text>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_from_account}>{tx.source_from_account}</Text>
                                     <Text fontSize="9px">→</Text>
                                     <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
                                 </Flex>
@@ -654,15 +1005,15 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                         value={
                             tx.to_account_id ? (
                                 <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_to_account || '-'}</Text>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_to_account || undefined}>{tx.source_to_account || '-'}</Text>
                                     <Text fontSize="9px">→</Text>
-                                    <Badge size="xs" colorPalette="cyan" fontSize="8px">
+                                    <Badge size="xs" colorPalette="cyan" fontSize="8px" title={`Source: ${tx.source_to_account || '-'}`}>
                                         #{tx.to_account_id} {getAccountName(tx.to_account_id)}
                                     </Badge>
                                 </Flex>
                             ) : tx.source_to_account ? (
                                 <Flex align="center" gap={1}>
-                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate>{tx.source_to_account}</Text>
+                                    <Text fontSize="9px" color="gray.500" maxW="60px" truncate title={tx.source_to_account}>{tx.source_to_account}</Text>
                                     <Text fontSize="9px">→</Text>
                                     <Text fontSize="9px" color="orange.500">NOT LINKED</Text>
                                 </Flex>
@@ -671,81 +1022,7 @@ export const TransactionDetailPanel: React.FC<TransactionDetailPanelProps> = ({
                     />
                 </Section>
 
-                {/* Raw Data */}
-                <Section title="Raw Data" icon="🗄️" defaultOpen={false} colorScheme="gray">
-                    <InfoRow label="Transaction ID" value={tx.id} />
-                    <InfoRow label="Raw TX ID" value={tx.raw_transaction_id ?? 'None'} muted={!tx.raw_transaction_id} />
 
-                    {!tx.raw_transaction_id ? (
-                        <Box p={2} bg="gray.50" borderRadius="md" textAlign="center" mt={2}>
-                            <Text fontSize="9px" color="gray.500">
-                                No raw transaction linked (manual entry)
-                            </Text>
-                        </Box>
-                    ) : !hasFetchedRaw ? (
-                        <Button
-                            size="xs"
-                            mt={2}
-                            onClick={fetchRawData}
-                            fontSize="9px"
-                            w="100%"
-                        >
-                            Load Raw Data
-                        </Button>
-                    ) : rawDataLoading ? (
-                        <Flex align="center" justify="center" py={2} gap={2}>
-                            <FiLoader className="animate-spin" size={12} />
-                            <Text fontSize="9px" color="gray.500">Loading...</Text>
-                        </Flex>
-                    ) : rawDataError ? (
-                        <Box p={2} bg="red.50" borderRadius="md" mt={2}>
-                            <Text fontSize="9px" color="red.500">Error: {rawDataError}</Text>
-                            <Button
-                                size="xs"
-                                mt={1}
-                                fontSize="9px"
-                                onClick={() => {
-                                    setHasFetchedRaw(false);
-                                    setRawDataError(null);
-                                }}
-                            >
-                                Retry
-                            </Button>
-                        </Box>
-                    ) : rawData ? (
-                        <Box mt={2}>
-                            <Flex justify="space-between" align="center" mb={1}>
-                                <Flex align="center" gap={1}>
-                                    <Badge size="xs" colorPalette="gray" fontSize="8px">{rawData.source}</Badge>
-                                    <Text fontSize="8px" color="gray.500">ID: {rawData.source_transaction_id}</Text>
-                                </Flex>
-                                <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    onClick={copyJson}
-                                    px={1}
-                                    fontSize="9px"
-                                >
-                                    {copied ? <FiCheck size={10} /> : <FiCopy size={10} />}
-                                </Button>
-                            </Flex>
-                            <Box
-                                bg="gray.900"
-                                color="green.300"
-                                p={2}
-                                borderRadius="md"
-                                fontSize="8px"
-                                fontFamily="mono"
-                                maxH="200px"
-                                overflowY="auto"
-                                whiteSpace="pre-wrap"
-                                wordBreak="break-all"
-                            >
-                                {JSON.stringify(rawData.raw_data, null, 2)}
-                            </Box>
-                        </Box>
-                    ) : null}
-                </Section>
             </Section>
         </Box>
     );

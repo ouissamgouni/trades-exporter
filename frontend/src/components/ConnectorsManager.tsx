@@ -172,6 +172,8 @@ const ConnectorsManager: React.FC = () => {
         switch (status) {
             case 'success':
                 return <Badge colorPalette="green">Success</Badge>;
+            case 'warning':
+                return <Badge colorPalette="orange">Warning</Badge>;
             case 'failed':
                 return <Badge colorPalette="red">Failed</Badge>;
             case 'running':
@@ -206,8 +208,11 @@ const ConnectorsManager: React.FC = () => {
     const getAccountTypeBadge = (accountType: string) => {
         const colors: Record<string, string> = {
             cex: 'blue',
+            dex: 'cyan',
             wallet: 'purple',
             broker: 'green',
+            bank: 'teal',
+            investment: 'orange',
         };
         return (
             <Badge colorPalette={colors[accountType] || 'gray'} size="sm">

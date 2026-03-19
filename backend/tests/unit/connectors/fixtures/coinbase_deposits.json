@@ -1,0 +1,56 @@
+[
+    {
+        "id": "dep_test_1",
+        "txid": "0xabc123def456789",
+        "timestamp": 1640995200000,
+        "datetime": "2022-01-01T00:00:00.000Z",
+        "currency": "ETH",
+        "amount": 1.5,
+        "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+        "addressTo": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+        "addressFrom": "0x123abc456def789",
+        "tag": null,
+        "status": "ok",
+        "fee": {
+            "currency": "ETH",
+            "cost": 0.001
+        },
+        "network": "ethereum",
+        "info": {}
+    },
+    {
+        "id": "dep_test_2",
+        "txid": "bc1qtest123456789",
+        "timestamp": 1641081600000,
+        "datetime": "2022-01-02T00:00:00.000Z",
+        "currency": "BTC",
+        "amount": 0.05,
+        "address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+        "addressTo": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+        "addressFrom": "bc1qsenderaddress",
+        "tag": null,
+        "status": "ok",
+        "fee": {
+            "currency": "BTC",
+            "cost": 0.0001
+        },
+        "network": "bitcoin",
+        "info": {}
+    },
+    {
+        "id": "dep_test_3",
+        "txid": "0xusdc123456",
+        "timestamp": 1641168000000,
+        "datetime": "2022-01-03T00:00:00.000Z",
+        "currency": "USDC",
+        "amount": 1000.0,
+        "address": "0xmyusdcaddress",
+        "addressTo": "0xmyusdcaddress",
+        "addressFrom": "0xusdcsource",
+        "tag": null,
+        "status": "ok",
+        "fee": 0.5,
+        "network": "ethereum",
+        "info": {}
+    }
+]

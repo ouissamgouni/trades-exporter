@@ -232,7 +232,7 @@ export const TransactionRow: React.FC<{
 
                     {/* Account:Source Badge - Purple */}
                     {sourceLabel && (
-                        <Badge size="xs" colorPalette="purple" variant="subtle">
+                        <Badge size="xs" colorPalette="purple" variant="subtle" maxW="120px" truncate title={sourceLabel}>
                             {sourceLabel}
                         </Badge>
                     )}
@@ -242,6 +242,9 @@ export const TransactionRow: React.FC<{
                         size="xs"
                         colorPalette={getTypeColor(typeLabel)}
                         variant="subtle"
+                        maxW="100px"
+                        truncate
+                        title={typeLabel}
                     >
                         {typeLabel}
                     </Badge>

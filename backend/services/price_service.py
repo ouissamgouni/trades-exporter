@@ -20,9 +20,9 @@ from typing import Optional, List, Tuple, Dict
 from sqlmodel import Session, select
 from sqlalchemy import func
 
-from backend.config.loader import configure_logging, get_price_getter_override
+from backend.config.loader import configure_logging
 from backend.db.database import get_engine
-from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter
+from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter, AppSettings
 from backend.services.price_getters import (
     get_price_getter,
     BasePriceGetter,
@@ -44,13 +44,13 @@ log = configure_logging("price_service")
 # Default price getters by price_type (simplified to 3 types)
 # Each price type has a list of getters to try in order
 ASSET_TYPE_PRICE_GETTERS: Dict[str, List[str]] = {
-    "crypto": ["coingecko", "yahoo"],  # All crypto: tokens, stablecoins, NFTs, etc.
-    "stock": ["datareader", "yahoo"],  # All traditional: stocks, ETFs, indices, commodities
+    "crypto": ["coingecko", "yahoo_direct", "yahoo"],  # All crypto: tokens, stablecoins, NFTs, etc.
+    "stock": ["yahoo_direct", "datareader", "yahoo"],  # All traditional: stocks, ETFs, indices, commodities
     "fiat": ["forex"],  # Fiat currencies
 }
 
 # Fallback getter when price type is unknown
-DEFAULT_GETTERS = ["yahoo", "coingecko"]
+DEFAULT_GETTERS = ["yahoo_direct", "yahoo", "coingecko"]
 
 
 class PriceGetterResolver:
@@ -58,7 +58,6 @@ class PriceGetterResolver:
     Resolves which price getter(s) to use for an asset.
     
     Priority order:
-    0. Global override (PRICE_GETTER_OVERRIDE env var) - highest priority
     1. Explicitly configured getters (AssetPriceGetter table)
     2. Default getters based on price_type
     3. Global fallback getters
@@ -77,15 +76,6 @@ class PriceGetterResolver:
         Returns:
             List of (getter_name, config) tuples in priority order
         """
-        # Priority 0: Global override (highest priority, for testing)
-        global_override = get_price_getter_override()
-        if global_override:
-            log.debug(
-                f"[PriceService] Using global override getter '{global_override}' "
-                f"for {asset.symbol} (PRICE_GETTER_OVERRIDE is set)"
-            )
-            return [(global_override, PriceGetterConfig())]
-        
         # Priority 1: Explicitly configured getters
         configured = self._get_configured_getters(session, asset.asset_id)
         if configured:
@@ -239,6 +229,7 @@ class PriceCache:
         quote_asset_id: Optional[int],
         dt: datetime,
         time_window_minutes: int = 15,
+        exclude_sources: Optional[List[str]] = None,
     ) -> Optional[Decimal]:
         """
         Get cached price from price_snapshots within a time window.
@@ -249,6 +240,7 @@ class PriceCache:
             quote_asset_id: Quote asset ID
             dt: Target datetime
             time_window_minutes: Search window in minutes (±)
+            exclude_sources: Source names to exclude (e.g. ["mock"])
             
         Returns:
             Cached price or None if not found
@@ -265,6 +257,11 @@ class PriceCache:
         if quote_asset_id is not None:
             statement = statement.where(
                 PriceSnapshot.quote_asset_id == quote_asset_id
+            )
+
+        if exclude_sources:
+            statement = statement.where(
+                PriceSnapshot.source.notin_(exclude_sources)
             )
         
         # Order by closest time
@@ -284,6 +281,7 @@ class PriceCache:
         quote_asset_id: Optional[int],
         dt: datetime,
         time_window_minutes: int = 15,
+        exclude_sources: Optional[List[str]] = None,
     ) -> Optional[PriceSnapshot]:
         """
         Get cached price snapshot with source metadata.
@@ -303,6 +301,11 @@ class PriceCache:
             statement = statement.where(
                 PriceSnapshot.quote_asset_id == quote_asset_id
             )
+
+        if exclude_sources:
+            statement = statement.where(
+                PriceSnapshot.source.notin_(exclude_sources)
+            )
         
         # Order by closest time
         statement = statement.order_by(
@@ -318,6 +321,7 @@ class PriceCache:
         quote_asset_id: Optional[int],
         dt: datetime,
         max_days_back: int = 7,
+        exclude_sources: Optional[List[str]] = None,
     ) -> Optional[PriceSnapshot]:
         """
         Get the latest cached price before a given datetime within a max lookback window.
@@ -330,6 +334,7 @@ class PriceCache:
             quote_asset_id: Quote asset ID
             dt: Target datetime (search for prices before this)
             max_days_back: Maximum days to look back
+            exclude_sources: Optional list of source names to exclude
             
         Returns:
             Latest PriceSnapshot before dt within window, or None
@@ -345,6 +350,11 @@ class PriceCache:
         if quote_asset_id is not None:
             statement = statement.where(
                 PriceSnapshot.quote_asset_id == quote_asset_id
+            )
+        
+        if exclude_sources:
+            statement = statement.where(
+                PriceSnapshot.source.notin_(exclude_sources)
             )
         
         # Order by most recent first
@@ -436,6 +446,13 @@ class PriceService:
         statement = select(Asset).where(Asset.symbol == quote_symbol.upper())
         quote_asset = session.exec(statement).first()
         return quote_asset.asset_id if quote_asset else None
+
+    def _get_cache_exclude_sources(self, session: Session) -> Optional[List[str]]:
+        """Return sources to exclude from cache when mock mode is off."""
+        settings = session.get(AppSettings, 1)
+        if settings and settings.mock_mode_enabled:
+            return None  # mock mode on — don't exclude anything
+        return ["mock"]  # mock mode off — exclude stale mock snapshots
 
     def _fetch_price(
         self,
@@ -687,7 +704,8 @@ class PriceService:
             quote_asset_id = self._get_quote_asset_id(session, requested_quote)
             
             # Check cache first
-            cached = self.cache.get(session, asset_id, quote_asset_id, dt)
+            exclude = self._get_cache_exclude_sources(session)
+            cached = self.cache.get(session, asset_id, quote_asset_id, dt, exclude_sources=exclude)
             if cached is not None:
                 log.debug(
                     f"Cache hit for {asset.symbol} at {dt.date()}: {cached}"
@@ -761,7 +779,8 @@ class PriceService:
             quote_asset_id = self._get_quote_asset_id(session, requested_quote)
             
             # Check cache first (including source)
-            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt)
+            exclude = self._get_cache_exclude_sources(session)
+            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt, exclude_sources=exclude)
             if cached_snapshot is not None:
                 return PriceResult(
                     price=float(cached_snapshot.price),
@@ -850,7 +869,8 @@ class PriceService:
             quote_asset_id = self._get_quote_asset_id(session, requested_quote)
             
             # Check cache first (including source)
-            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt)
+            exclude = self._get_cache_exclude_sources(session)
+            cached_snapshot = self.cache.get_with_source(session, asset_id, quote_asset_id, dt, exclude_sources=exclude)
             if cached_snapshot is not None:
                 return PriceResult(
                     price=float(cached_snapshot.price),
@@ -901,14 +921,17 @@ class PriceService:
                     raise
             
             # Fallback: look for latest cached price before requested date
+            # Search window = max of staleness_window * 10 or 90 days (always search wider than staleness threshold)
+            fallback_search_days = max(staleness_window_days * 10, 90)
             log.info(
                 f"Attempting fallback lookup for {asset.symbol}, "
-                f"looking back up to {staleness_window_days} days"
+                f"looking back up to {fallback_search_days} days (staleness threshold: {staleness_window_days}d)"
             )
             
-            # Look back for any cached price (use large window for fallback search)
+            # Look back for any cached price within search window
             fallback_snapshot = self.cache.get_latest_before(
-                session, asset_id, quote_asset_id, dt, max_days_back=365  # Search up to 1 year
+                session, asset_id, quote_asset_id, dt, max_days_back=fallback_search_days,
+                exclude_sources=exclude,
             )
             
             if fallback_snapshot is None:

@@ -5,12 +5,23 @@ Uses CCXT library for API access.
 
 import ccxt
 import time
+import requests
 from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Callable, Optional
+from requests.adapters import HTTPAdapter
+from typing import Dict, Any, Generator, List, Callable, Optional
+from urllib3.util.retry import Retry
 
 from backend.connectors.base.base_connector import BaseConnector
+from backend.connectors.base.connector_exceptions import (
+    ConnectorAPIError,
+    ErrorReason,
+)
 from backend.config.loader import configure_logging, load_credentials
+
+# Maximum concurrent workers for API requests (balances rate limits vs speed)
+MAX_WORKERS = 10
 
 
 class MEXCBaseConnector(BaseConnector):
@@ -48,12 +59,12 @@ class MEXCBaseConnector(BaseConnector):
         """Initialize MEXC connector with API credentials from settings.yaml if not provided."""
         super().__init__(account_id=account_id, connector_id=connector_id, config=config, progress_callback=progress_callback)
 
-        # Store filters (currencies for deposits/withdrawals, symbols for transactions)
-        self._currencies_filter = currencies
-        self._symbols_filter = symbols
+        # Store filters - from parameter or config (for override support)
+        self._currencies_filter = currencies or (config.get("currencies") if config else None)
+        self._symbols_filter = symbols or (config.get("symbols") if config else None)
 
-        # In test mode, skip all API configuration
-        if self.test_mode:
+        # In test/renormalize mode, skip all API configuration
+        if self.test_mode or self.renormalize_mode:
             return
 
         # Load credentials from settings.yaml if not provided
@@ -69,13 +80,28 @@ class MEXCBaseConnector(BaseConnector):
         if not self.api_key or not self.api_secret:
             raise ValueError("Missing API credentials for MEXC")
 
-        # Initialize CCXT exchange
+        # Initialize CCXT exchange with connection pooling
         try:
+            # Create a requests session with connection pooling and retry
+            session = requests.Session()
+            adapter = HTTPAdapter(
+                pool_connections=MAX_WORKERS,
+                pool_maxsize=MAX_WORKERS + 2,  # Small buffer for concurrent requests
+                max_retries=Retry(
+                    total=0,  # We handle retries ourselves with exponential backoff
+                    backoff_factor=0,
+                ),
+            )
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            
             self.exchange = ccxt.mexc(
                 {
                     "apiKey": self.api_key,
                     "secret": self.api_secret,
                     "enableRateLimit": True,
+                    "rateLimit": 200,  # Milliseconds between requests (5 req/sec)
+                    "session": session,
                 }
             )
             self.exchange.load_markets()
@@ -141,7 +167,10 @@ class MEXCBaseConnector(BaseConnector):
             entity_type: Type of entity (e.g., 'withdrawal', 'deposit', 'trade'). If None, uses _get_transaction_type()
             
         Returns:
-            list: Results from fetch_func or empty list if all retries exhausted
+            list: Results from fetch_func
+            
+        Raises:
+            ConnectorAPIError: On persistent API failures after retries
         """
         import random
         log = self._get_logger()
@@ -168,20 +197,79 @@ class MEXCBaseConnector(BaseConnector):
                         time.sleep(wait_time)
                         continue
                     else:
-                        log.warning(f"⚠️ Rate limit exceeded for {entity_name} after {max_retries} retries")
-                        return []
+                        # Max retries exhausted for rate limiting
+                        log.error(f"❌ Rate limit exceeded for {entity_name} after {max_retries} retries")
+                        raise ConnectorAPIError(
+                            message=f"Rate limit exceeded after {max_retries} retries",
+                            connector_name=self.connector_name,
+                            operation=f"fetch_{entity_type}s",
+                            reason=ErrorReason.RATE_LIMITED,
+                            http_status_code=429,
+                            retryable=False,
+                            original_error=e,
+                            details=entity_name,
+                        )
                 
                 # MEXC error 703 can mean either: no data OR no permission
-                # Treat it as "no data" since most entities won't have any
-                if "703" in error_str or "permission" in error_str or "权限" in error_str:
-                    log.debug(f"ℹ️ No {entity_type}s available for {entity_name} (code 703)")
-                elif f"no {entity_type}s" in error_str or "empty" in error_str:
+                # Treat it as "no data" (legitimate empty result) since most entities won't have any
+                if "703" in error_str or ("权限" in error_str and "permission" in error_str):
+                    log.debug(f"ℹ️ No {entity_type}s available for {entity_name} (code 703 - legitimate empty)")
+                    return []
+                
+                # Legitimate empty result
+                if f"no {entity_type}s" in error_str or "empty" in error_str:
                     log.debug(f"ℹ️ No {entity_type}s found for {entity_name}")
-                else:
-                    log.debug(f"ℹ️ Error fetching {entity_type}s for {entity_name}: {e}")
-                return []
+                    return []
+                
+                # Authentication errors - non-retryable
+                if "401" in error_str or "unauthorized" in error_str or "invalid api key" in error_str:
+                    log.error(f"❌ Authentication failed for {entity_name}: {e}")
+                    raise ConnectorAPIError(
+                        message="Authentication failed - check API credentials",
+                        connector_name=self.connector_name,
+                        operation=f"fetch_{entity_type}s",
+                        reason=ErrorReason.AUTHENTICATION_FAILED,
+                        http_status_code=401,
+                        retryable=False,
+                        original_error=e,
+                        details=entity_name,
+                    )
+                
+                if "403" in error_str or "forbidden" in error_str:
+                    log.error(f"❌ Permission denied for {entity_name}: {e}")
+                    raise ConnectorAPIError(
+                        message="Permission denied - insufficient API key permissions",
+                        connector_name=self.connector_name,
+                        operation=f"fetch_{entity_type}s",
+                        reason=ErrorReason.PERMISSION_DENIED,
+                        http_status_code=403,
+                        retryable=False,
+                        original_error=e,
+                        details=entity_name,
+                    )
+                
+                # Other errors - fatal
+                log.error(f"❌ API error fetching {entity_type}s for {entity_name}: {e}")
+                raise ConnectorAPIError(
+                    message="API request failed",
+                    connector_name=self.connector_name,
+                    operation=f"fetch_{entity_type}s",
+                    reason=ErrorReason.API_ERROR,
+                    retryable=False,
+                    original_error=e,
+                    details=entity_name,
+                )
         
-        return []  # Fallback if max_retries exhausted
+        # Should not reach here, but handle edge case
+        log.error(f"❌ Max retries ({max_retries}) exhausted for {entity_name}")
+        raise ConnectorAPIError(
+            message=f"Max retries ({max_retries}) exhausted",
+            connector_name=self.connector_name,
+            operation=f"fetch_{entity_type}s",
+            reason=ErrorReason.UNKNOWN,
+            retryable=False,
+            details=entity_name,
+        )
 
     def get_currencies(self) -> List[str]:
         """
@@ -211,7 +299,7 @@ class MEXCBaseConnector(BaseConnector):
         # Second: Get all available currencies from exchange
         try:
             log.debug("Fetching all available currencies from exchange...")
-            all_currencies = list(self.exchange.currencies.keys())
+            all_currencies = [code for code, info in self.exchange.currencies.items() if info.get('active', False)]
             
             # Remove balance currencies from all_currencies to avoid duplicates
             balance_set = set(balance_currencies)
@@ -272,15 +360,18 @@ class MEXCBaseConnector(BaseConnector):
         
         all_transactions = []
         current_end = now_ms
+        window_count = 0
+        total_windows = max(1, int((current_end - since) / seven_days_ms))
         
         # Iterate backwards over 7-day windows (most recent first)
         while current_end > since:
+            window_count += 1
             current_start = max(current_end - seven_days_ms, since)
             
             # Log the timeframe being fetched
             start_date = datetime.fromtimestamp(current_start / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
             end_date = datetime.fromtimestamp(current_end / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
-            log.debug(f"Fetching {transaction_type}s for {currency} from {start_date} to {end_date}")
+            log.debug(f"Fetching {transaction_type}s for {currency} [{window_count}/{total_windows}] from {start_date} to {end_date}")
             
             # Use retry logic with exponential backoff
             def fetch_func():
@@ -298,89 +389,131 @@ class MEXCBaseConnector(BaseConnector):
             # Move to previous 7-day window
             current_end = current_start
         
+        if all_transactions:
+            log.debug(f"Completed {currency}: fetched {len(all_transactions)} {transaction_type}s across {window_count} windows")
+        
         return all_transactions
 
-    def get_raws(self) -> List[Dict[str, Any]]:
+    def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
         """
-        Fetch all transactions from MEXC using CCXT, fetching per currency in parallel.
-        Returns:
-            list: List of transaction objects from all currencies
+        Fetch transactions from MEXC using CCXT with queue-based streaming.
+        Yields transactions as they are fetched from each currency in parallel.
+        
+        Uses a ThreadPoolExecutor with limited workers to prevent overwhelming
+        the API rate limits and connection pool.
+        
+        Yields:
+            Dict[str, Any]: Transaction objects as they are fetched
         """
+        from typing import Generator
+        from queue import Queue
+        import threading
+        
         log = self._get_logger()
         transaction_type = self._get_transaction_type()
         
-        log.info(f"🔄 Fetching {transaction_type}s from MEXC API using CCXT...")
+        log.info(f"🔄 Fetching {transaction_type}s from MEXC API using CCXT (streaming with {MAX_WORKERS} workers)...")
         currencies = self.get_currencies()
         if not currencies:
             log.warning("⚠️ No currencies fetched from MEXC")
-            return []
+            return
 
+        log.info(f"📊 Processing {len(currencies)} currencies")
         self.update_progress(
             operation="Fetching currencies",
             current=0,
             total=len(currencies),
-            log_message=f"Starting to fetch {transaction_type}s for {len(currencies)} currencies"
+            log_message=f"Starting to fetch {transaction_type}s for {len(currencies)} currencies",
+            fetched_count=0,
         )
 
-        import threading
+        # Queue for streaming transactions from worker threads
+        queue: Queue = Queue()
+        
+        # Shared state for progress tracking
         completed_count = 0
+        fetched_total = 0
         completed_lock = threading.Lock()
 
         def fetch_currency_transactions(indexed_currency):
-            """Helper function to fetch transactions for a single currency."""
-            nonlocal completed_count
+            """Worker function to fetch transactions for a single currency and put them in queue."""
+            nonlocal completed_count, fetched_total
             idx, currency = indexed_currency
             prefix = f"[{idx + 1}/{len(currencies)}]"
             try:
                 transactions = self.fetch_with_7day_windows(currency)
                 
+                # Put each transaction in the queue immediately
+                if transactions:
+                    for tx in transactions:
+                        queue.put(tx)
+                
                 with completed_lock:
                     completed_count += 1
+                    if transactions:
+                        fetched_total += len(transactions)
                     self.update_progress(
-                        operation=f"Fetching {currency}",
+                        operation=f"{prefix} Fetching {currency}",
                         current=completed_count,
                         total=len(currencies),
-                        log_message=f"{prefix} Fetched {len(transactions)} {transaction_type}s for {currency}" if transactions else None
+                        log_message=f"{prefix} Fetched {len(transactions)} {transaction_type}s for {currency}" if transactions else None,
+                        fetched_count=fetched_total,
                     )
                 
+                # Log at debug level for individual currencies, info only for significant finds
                 if transactions:
-                    log.info(f"{prefix} ✅ Found {len(transactions)} {transaction_type}s for {currency}")
-                    return transactions
-                else:
-                    log.debug(f"{prefix} ℹ️ No {transaction_type}s for {currency}")
-                    return []
+                    if len(transactions) >= 10:
+                        log.info(f"{prefix} ✅ Found {len(transactions)} {transaction_type}s for {currency}")
+                    else:
+                        log.debug(f"{prefix} ✅ Found {len(transactions)} {transaction_type}s for {currency}")
             except Exception as e:
                 log.error(f"{prefix} ❌ Error fetching {transaction_type}s for {currency}: {e}")
-                return []
+            finally:
+                # Signal this worker is done
+                queue.put(None)
 
-        # Use ThreadPoolExecutor for parallel currency fetching
-        # max_workers=5 to stay within rate limits when multiple MEXC connectors run simultaneously
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        all_transactions = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(fetch_currency_transactions, item): item
-                for item in enumerate(currencies)
-            }
-            for future in as_completed(futures):
-                # Check for abort before processing next future
+        # Use ThreadPoolExecutor with limited workers to prevent rate limit issues
+        total_workers = len(currencies)
+        completed_workers = 0
+        total_yielded = 0
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all tasks to the executor
+            futures = []
+            for item in enumerate(currencies):
+                future = executor.submit(fetch_currency_transactions, item)
+                futures.append(future)
+            
+            # Yield items as they arrive from any worker thread
+            while completed_workers < total_workers:
+                # Check for abort
                 if self.is_abort_requested():
                     log.info(f"⚠️ Abort requested, stopping MEXC {transaction_type}s fetching")
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
-                    
+                
                 try:
-                    transactions = future.result()
-                    all_transactions.extend(transactions)
+                    item = queue.get(timeout=900)
+                    if item is None:
+                        # Worker finished
+                        completed_workers += 1
+                        # Log progress every 10% or so
+                        if completed_workers % max(1, total_workers // 10) == 0:
+                            log.info(f"📊 Progress: {completed_workers}/{total_workers} currencies processed")
+                    else:
+                        total_yielded += 1
+                        yield item
                 except Exception as e:
-                    log.debug(f"Error processing future result: {e}")
+                    # Timeout - log warning
+                    log.warning(
+                        f"⚠️ Queue timeout. Completed: {completed_workers}/{total_workers}"
+                    )
 
         self.update_progress(
             operation="Completed",
             current=len(currencies),
             total=len(currencies),
-            log_message=f"✅ Total {transaction_type}s fetched: {len(all_transactions)}"
+            log_message=f"✅ Total {transaction_type}s fetched: {total_yielded}",
+            fetched_count=total_yielded,
         )
-
-        return all_transactions
+        log.info(f"✅ Completed fetching {total_yielded} {transaction_type}s from {len(currencies)} currencies")

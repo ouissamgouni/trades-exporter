@@ -232,7 +232,7 @@ class TestConnectorLoaderServiceIntegration:
         # Blockscout should have multiple chains
         blockscout_chains = registry.get_chain_configs("blockscout")
         assert "base" in blockscout_chains
-        assert "bnb" in blockscout_chains
+        assert "polygon" in blockscout_chains
         assert "ethereum" in blockscout_chains
 
         # Etherscan should have ethereum

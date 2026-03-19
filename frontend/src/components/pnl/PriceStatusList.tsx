@@ -13,6 +13,7 @@ import {
 import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiClock, FiDatabase, FiPlus } from 'react-icons/fi';
 import { AssetRef, PriceResponse } from '../../types';
 import { formatTimeLocale } from '../../utils/dateUtils';
+import { Tooltip } from '../ui/tooltip';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 
 interface PriceStatusListProps {
@@ -158,7 +159,9 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                             </Icon>
                                         </Table.Cell>
                                         <Table.Cell fontWeight="medium">
-                                            {item.asset.symbol}
+                                            <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
+                                                <Text>{item.asset.symbol}</Text>
+                                            </Tooltip>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Text fontWeight={isError ? 'normal' : 'bold'}>

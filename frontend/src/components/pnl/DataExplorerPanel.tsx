@@ -22,7 +22,7 @@ import {
     Tabs,
     Text,
 } from '@chakra-ui/react';
-import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus } from 'react-icons/fi';
+import { FiSearch, FiChevronDown, FiChevronRight, FiAlertTriangle, FiLayers, FiDatabase, FiDollarSign, FiLoader, FiLink, FiActivity, FiPlus, FiFileText } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { CalculationUnit, CostLot, RealizedPnLRow, PnLWarningItem, OriginTransactionDetail, Settlement, ConsumedSliceDetail, CostLotEventEntry, FeeEntry } from './types';
 import { API_URL, AssetRef } from '../../types';
@@ -30,8 +30,14 @@ import { Tooltip } from '../ui/tooltip';
 import { AssetBadge } from '../AssetBadge';
 import { CompactTransactionBadgeRow } from '../CompactTransactionBadgeRow';
 import { TransactionRow } from '../TransactionRow';
+import { TransactionsTable } from '../TransactionsTable';
+import { defaultFilterState, TransactionFilterState, TransactionFilters } from '../TransactionFilters';
+import { buildPnLFilterParams } from '../../utils/pnlFilterParams';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
+import { formatQuantity } from '../../utils/numberUtils';
+const formatQty = formatQuantity;
+import { ValueDisplay } from '../ValueDisplay';
 import { TablePagination } from '../TablePagination';
 import { usePagination } from '../../hooks/usePagination';
 import { getWarningTypeConfig } from './warningStyles';
@@ -42,23 +48,11 @@ import {
     RealizedTabWrapper,
     FeesTabWrapper,
     WarningsTabWrapper,
+    TransactionsTabWrapper,
 } from './AuditTabWrappers';
+import { ActivityFeed } from './ActivityFeed';
 // Re-export for backwards compatibility
 export { getPersistedPageSize } from '../../hooks/usePagination';
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 // Using formatDateLocale from utils/dateUtils for consistent date formatting
 
@@ -173,15 +167,17 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Quantity</Text>
-                        <Text color="white" fontFamily="mono">{formatQty(txData.quantity || 0)}</Text>
+                        <Text color="white" fontFamily="mono"><ValueDisplay value={txData.quantity} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Unit Price</Text>
-                        <Text color="white">{txData.price ? formatCurrency(txData.price, baseCurrency) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.price} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Total</Text>
-                        <Text color="white">{txData.total ? formatCurrency(txData.total, baseCurrency) : '-'}</Text>
+                        <Text color="white">
+                            {txData.total ? <ValueDisplay value={txData.total} currency={baseCurrency} /> : '-'}
+                        </Text>
                     </Flex>
                     <Flex justify="space-between" mb={1} align="center">
                         <Text color="gray.400">Quote Asset</Text>
@@ -195,7 +191,7 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Fee</Text>
-                        <Text color="white">{txData.fee ? formatQty(txData.fee) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.fee} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1} align="center">
                         <Text color="gray.400">Fee Quote</Text>
@@ -211,8 +207,12 @@ const TransactionTooltip: React.FC<TransactionTooltipProps> = ({ txId, children,
                         <Text color="gray.400">From/To Account</Text>
                         <Text color="white">
                             {txData.direction === 'inflow'
-                                ? (txData.from_account_name || txData.source_from_account || '-')
-                                : (txData.to_account_name || txData.source_to_account || '-')}
+                                ? (txData.from_account_name
+                                    ? `${txData.from_account_name}${txData.source_from_account && txData.source_from_account !== txData.from_account_name ? ` (${txData.source_from_account})` : ''}`
+                                    : (txData.source_from_account || '-'))
+                                : (txData.to_account_name
+                                    ? `${txData.to_account_name}${txData.source_to_account && txData.source_to_account !== txData.to_account_name ? ` (${txData.source_to_account})` : ''}`
+                                    : (txData.source_to_account || '-'))}
                         </Text>
                     </Flex>
                 </Box>
@@ -403,7 +403,7 @@ const CompactTxInfo: React.FC<CompactTxInfoProps> = ({
                     <Text>• {txData.account_name}</Text>
                 )}
                 {txData.total != null && txData.total > 0 && (
-                    <Text>• {formatCurrency(txData.total, baseCurrency)}</Text>
+                    <Text>• <ValueDisplay value={txData.total} currency={baseCurrency} /></Text>
                 )}
             </Flex>
         </Flex>
@@ -422,83 +422,17 @@ interface UnitDetailRowProps {
     onTransactionClick?: (txId: number) => void;
 }
 
-const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
-    // Fetch ALL origin transaction details on-demand (units can have multiple transactions)
-    const [originTxs, setOriginTxs] = useState<OriginTransactionDetail[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    // Fetch lot events on-demand for this unit
-    const [unitEvents, setUnitEvents] = useState<CostLotEventEntry[]>([]);
-    const [loadingEvents, setLoadingEvents] = useState(false);
-
+export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costLots, versionId, onTransactionClick }) => {
     // Get all transaction IDs for this unit
     const allTxIds = useMemo(() => {
         return unit.transactions.map(tx => tx.id);
     }, [unit.transactions]);
 
-    useEffect(() => {
-        const fetchOriginTransactions = async () => {
-            if (allTxIds.length === 0) return;
-
-            setLoading(true);
-            setError(null);
-            try {
-                // Fetch all transactions in parallel
-                const responses = await Promise.all(
-                    allTxIds.map(txId => fetch(`${API_URL}/transactions/${txId}`))
-                );
-
-                const txDetails: OriginTransactionDetail[] = [];
-                for (const response of responses) {
-                    if (!response.ok) continue;
-                    const data = await response.json();
-                    txDetails.push({
-                        transaction_id: data.id,
-                        date_time: data.date_time,
-                        account_id: data.account_id,
-                        account_name: data.account_name || '-',  // Use server-side resolved account_name
-                        source: data.source,
-                        source_transaction_type: data.source_transaction_type,
-                        transaction_type: data.transaction_type,
-                        direction: data.direction,
-                        // Transfer fields
-                        from_account_id: data.from_account_id,
-                        from_account_name: data.from_account_name,
-                        to_account_id: data.to_account_id,
-                        to_account_name: data.to_account_name,
-                        source_from_account: data.source_from_account,
-                        source_to_account: data.source_to_account,
-                        // Nested asset refs
-                        linked_asset: data.linked_asset,
-                        price_quote_asset: data.price_quote_asset,
-                        fee_quote_asset: data.fee_quote_asset,
-                        // Legacy flat fields
-                        asset_id: data.asset_id,
-                        asset_symbol: data.linked_asset_symbol || data.source_asset_symbol,
-                        source_asset_symbol: data.source_asset_symbol,
-                        quantity: data.quantity,
-                        price: data.price,
-                        price_quote_asset_id: data.price_quote_asset_id,
-                        price_quote_asset_symbol: data.linked_price_quote_asset_symbol || data.source_price_quote_asset_symbol,
-                        source_price_quote_asset_symbol: data.source_price_quote_asset_symbol,
-                        total: data.total,
-                        fee: data.fee,
-                        fee_quote_asset_id: data.fee_quote_asset_id,
-                        fee_quote_asset_symbol: data.linked_fee_quote_asset_symbol || data.source_fee_quote_asset_symbol,
-                        source_fee_quote_asset_symbol: data.source_fee_quote_asset_symbol,
-                    });
-                }
-                setOriginTxs(txDetails);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Unknown error');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchOriginTransactions();
-    }, [allTxIds]);
+    // Build filters to show only this unit's transactions
+    const txFilters = useMemo<TransactionFilterState>(() => ({
+        ...defaultFilterState,
+        transactionIds: allTxIds,
+    }), [allTxIds]);
 
     // Build a map of cost_lot_id -> CostLot for quick lookup
     const lotMap = useMemo(() => {
@@ -509,179 +443,26 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
         return map;
     }, [costLots]);
 
-    // Fetch lot events on-demand when row expands
-    useEffect(() => {
-        const fetchUnitEvents = async () => {
-            if (!versionId || !unit.unit_id) return;
-            setLoadingEvents(true);
-            try {
-                const response = await fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?unit_id=${unit.unit_id}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    // Handle both paginated response (with items array) and legacy array response
-                    const eventsData = Array.isArray(data) ? data : data.items || [];
-                    setUnitEvents(eventsData);
-                }
-            } catch (err) {
-                console.error('Failed to fetch unit events:', err);
-            } finally {
-                setLoadingEvents(false);
-            }
-        };
-        fetchUnitEvents();
-    }, [versionId, unit.unit_id]);
-
     return (
         <Box bg="gray.50" p={4} borderRadius="md">
             <Flex direction="column" gap={4}>
-                {/* Origin Transactions - Full Width - Now shows ALL transactions in the unit */}
+                {/* Origin Transactions - Full Width - Uses TransactionsTable in embedded mode */}
                 <Card.Root size="sm" variant="outline">
                     <Card.Body p={3}>
                         <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
                             📄 Origin Transactions ({allTxIds.length})
                         </Text>
-                        {loading ? (
-                            <Flex align="center" gap={2} py={2}>
-                                <FiLoader className="animate-spin" />
-                                <Text fontSize="xs" color="gray.500">Loading transaction details...</Text>
-                            </Flex>
-                        ) : error ? (
-                            <Text fontSize="xs" color="red.500">Error: {error}</Text>
-                        ) : originTxs.length > 0 ? (
-                            <Table.Root size="sm">
-                                <Table.Header>
-                                    <Table.Row>
-                                        <Table.ColumnHeader fontSize="xs">TX ID</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Date</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Direction</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Qty</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Price</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Total</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs" textAlign="right">Fee</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Account</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">Type</Table.ColumnHeader>
-                                        <Table.ColumnHeader fontSize="xs">From/To</Table.ColumnHeader>
-                                    </Table.Row>
-                                </Table.Header>
-                                <Table.Body>
-                                    {originTxs.map((tx) => {
-                                        const txType = tx.transaction_type || tx.source_transaction_type || '-';
-                                        const fromAccount = tx.from_account_name || tx.source_from_account;
-                                        const toAccount = tx.to_account_name || tx.source_to_account;
-                                        // From/To Account: show from_account if inflow, to_account if outflow
-                                        const fromToAccount = tx.direction === 'inflow' ? fromAccount : toAccount;
-
-                                        return (
-                                            <Table.Row key={tx.transaction_id}>
-                                                <Table.Cell>
-                                                    <TransactionCell
-                                                        txId={tx.transaction_id}
-                                                        baseCurrency={baseCurrency}
-                                                        onTransactionClick={onTransactionClick}
-                                                        prefix=""
-                                                        size="xs"
-                                                    />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs">
-                                                    {tx.date_time ? formatDateLocale(tx.date_time) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <Badge
-                                                        size="xs"
-                                                        colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}
-                                                    >
-                                                        {tx.direction || '-'}
-                                                    </Badge>
-                                                </Table.Cell>
-                                                <Table.Cell>
-                                                    <AssetBadge
-                                                        asset={tx.linked_asset}
-                                                        sourceSymbol={tx.source_asset_symbol || tx.asset_symbol}
-                                                        size="xs"
-                                                        maxLength={15}
-                                                    />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right" fontFamily="mono">
-                                                    {formatQty(tx.quantity || 0)}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.price ? formatCurrency(tx.price, baseCurrency) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.total ? formatCurrency(tx.total, baseCurrency) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
-                                                    {tx.fee ? (
-                                                        <Flex align="center" gap={1} justify="flex-end">
-                                                            <Text color="orange.600">{formatQty(tx.fee)}</Text>
-                                                            <AssetBadge
-                                                                asset={tx.fee_quote_asset}
-                                                                sourceSymbol={tx.source_fee_quote_asset_symbol || tx.fee_quote_asset_symbol}
-                                                                size="xs"
-                                                                colorPalette="orange"
-                                                                maxLength={10}
-                                                            />
-                                                        </Flex>
-                                                    ) : '-'}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs">{tx.account_name || '-'}</Table.Cell>
-                                                <Table.Cell fontSize="xs">
-                                                    <Badge size="xs" colorPalette={txType === 'transfer' ? 'blue' : 'gray'}>
-                                                        {txType}
-                                                    </Badge>
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" color="gray.600">
-                                                    {fromToAccount || '-'}
-                                                </Table.Cell>
-                                            </Table.Row>
-                                        );
-                                    })}
-                                </Table.Body>
-                            </Table.Root>
+                        {allTxIds.length > 0 ? (
+                            <TransactionsTable
+                                filters={txFilters}
+                                showFilters={false}
+                                showBundles={false}
+                                embeddedMode={true}
+                                compact={true}
+                                tableId={`unit-detail-${unit.unit_id}`}
+                            />
                         ) : (
-                            /* Fallback: show transaction IDs as clickable buttons */
-                            <Flex gap={4} wrap="wrap" fontSize="xs" align="center">
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Date</Text>
-                                    <Text>{formatDateLocale(unit.date)}</Text>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Outflows</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {unit.legs.filter(leg => leg.leg_type === 'outflow').map((leg, i) => (
-                                            <Badge key={i} size="xs" colorPalette="red">{leg.asset?.symbol}</Badge>
-                                        ))}
-                                    </Flex>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Inflows</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {unit.legs.filter(leg => leg.leg_type === 'inflow').map((leg, i) => (
-                                            <Badge key={i} size="xs" colorPalette="green">{leg.asset?.symbol}</Badge>
-                                        ))}
-                                    </Flex>
-                                </Box>
-                                <Box>
-                                    <Text color="gray.500" fontWeight="bold">Transactions</Text>
-                                    <Flex gap={1} wrap="wrap">
-                                        {allTxIds.length > 0 ? (
-                                            allTxIds.map(txId => (
-                                                <Button
-                                                    key={txId}
-                                                    size="xs"
-                                                    variant="outline"
-                                                    onClick={() => onTransactionClick?.(txId)}
-                                                >
-                                                    #{txId}
-                                                </Button>
-                                            ))
-                                        ) : (
-                                            <Text color="gray.400">-</Text>
-                                        )}
-                                    </Flex>
-                                </Box>
-                            </Flex>
+                            <Text fontSize="xs" color="gray.400">No transactions</Text>
                         )}
                     </Card.Body>
                 </Card.Root>
@@ -719,7 +500,8 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                     <Table.Header>
                                         <Table.Row>
                                             <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="right">FMV</Table.ColumnHeader>
+                                            <Table.ColumnHeader fontSize="xs" textAlign="right">Proceeds</Table.ColumnHeader>
+                                            <Table.ColumnHeader fontSize="xs">FMV</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="right">Cost</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="right">P&L</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="center">Type</Table.ColumnHeader>
@@ -732,10 +514,26 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     <Badge size="xs">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {formatCurrency(entry.proceeds_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs">
+                                                    {entry.proceeds_price != null ? (
+                                                        <Flex gap={1} align="center" wrap="wrap">
+                                                            <Text fontSize="2xs" fontFamily="mono" color="gray.600">
+                                                                {formatQuantity(entry.proceeds_price)}
+                                                            </Text>
+                                                            {entry.proceeds_price_source && (
+                                                                <Badge size="xs" colorPalette={entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'cyan' : entry.proceeds_source === 'provisional' ? 'orange' : 'gray'} variant="subtle">
+                                                                    {entry.proceeds_price_source}
+                                                                </Badge>
+                                                            )}
+                                                        </Flex>
+                                                    ) : (
+                                                        <Text fontSize="2xs" color="gray.400">-</Text>
+                                                    )}
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
-                                                    {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell
                                                     fontSize="xs"
@@ -743,7 +541,7 @@ const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency, costL
                                                     color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
                                                     fontWeight="bold"
                                                 >
-                                                    {formatCurrency(entry.pnl_in_base, baseCurrency)}
+                                                    <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="center">
                                                     {entry.is_fee ? (
@@ -913,51 +711,51 @@ export const UnitsTab: React.FC<{
 
                                 if (hasLegs) {
                                     const inflow = inflowLegs.map((leg, idx) => (
-                                        <Flex key={`inflow-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="green.500" fontWeight="bold">↓</Text>
-                                            <Text fontSize="sm" color="green.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`inflow-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="green.500" fontWeight="bold">↓</Text>
+                                            <Text fontSize="xs" color="green.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="green.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="green.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     const outflow = outflowLegs.map((leg, idx) => (
-                                        <Flex key={`outflow-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="red.500" fontWeight="bold">↑</Text>
-                                            <Text fontSize="sm" color="red.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`outflow-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="red.500" fontWeight="bold">↑</Text>
+                                            <Text fontSize="xs" color="red.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="red.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="red.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     const fee = feeLegs.map((leg, idx) => (
-                                        <Flex key={`fee-${idx}`} align="center" gap={1} as="span">
-                                            <Text fontSize="sm" color="orange.500" fontWeight="bold">💸</Text>
-                                            <Text fontSize="sm" color="orange.600">{formatQty(leg.qty)}</Text>
+                                        <Flex key={`fee-${idx}`} align="center" gap={0.5} as="span">
+                                            <Text fontSize="xs" color="orange.500" fontWeight="bold">💸</Text>
+                                            <Text fontSize="xs" color="orange.600">{formatQty(leg.qty)}</Text>
                                             {leg.asset?.id ? (
                                                 <AssetBadge asset={{ id: leg.asset.id, symbol: leg.asset.symbol }} size="xs" />
                                             ) : (
-                                                <Text fontSize="sm" color="orange.600">{leg.asset?.symbol || '?'}</Text>
+                                                <Text fontSize="xs" color="orange.600">{leg.asset?.symbol || '?'}</Text>
                                             )}
                                         </Flex>
                                     ));
                                     return (
-                                        <Flex align="center" gap={1} flexWrap="wrap" ml={2}>
+                                        <Flex align="center" gap={0.5} flexWrap="wrap" ml={2}>
                                             {/* Inflow legs */}
                                             {inflow.length > 0 && inflow}
                                             {/* Separator if both inflow and outflow */}
                                             {inflow.length > 0 && outflow.length > 0 && (
-                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
                                             )}
                                             {/* Outflow legs */}
                                             {outflow.length > 0 && outflow}
                                             {/* Separator if any fee legs */}
                                             {(inflow.length > 0 || outflow.length > 0) && fee.length > 0 && (
-                                                <Text fontSize="sm" color="gray.400" px={1}>|</Text>
+                                                <Text fontSize="xs" color="gray.400" px={0.5}>|</Text>
                                             )}
                                             {/* Fee legs */}
                                             {fee.length > 0 && fee}
@@ -1032,23 +830,20 @@ export const UnitsTab: React.FC<{
                                                 {unit.pattern || 'unknown'}
                                             </Badge>
                                         </Table.Cell>
-                                        <Table.Cell fontSize="xs">{formatDateLocale(unit.date)}</Table.Cell>
+                                        <Table.Cell fontSize="2xs">{formatDateLocale(unit.date)}</Table.Cell>
                                         {/* Operation Column: Icon + Label + Sub-label + Transactions */}
                                         <Table.Cell>
-                                            <Flex direction="column" gap={1}>
+                                            <Flex direction="column" gap={0.5}>
                                                 <Flex align="center" gap={1}>
-
-                                                    <Text fontSize="sm" fontWeight="medium">
+                                                    <Text fontSize="xs" fontWeight="medium">
                                                         {mainLabel}
                                                     </Text>
                                                 </Flex>
-                                                {/* Display transactions with expandable leg details */}
+                                                {/* Display transactions with truncated account/source badges */}
                                                 {(() => {
-
-                                                    // Show transaction IDs as fallback
                                                     if (unit.transactions.length > 0) {
                                                         return (
-                                                            <Flex direction="column" gap={0.5} mt={1} bg="gray.100">
+                                                            <Flex direction="column" gap={0.5} mt={0.5} bg="gray.100">
                                                                 {unit.transactions.slice(0, 3).map((tx: any) => (
                                                                     <TransactionRow
                                                                         key={tx.id}
@@ -1062,7 +857,6 @@ export const UnitsTab: React.FC<{
                                                             </Flex>
                                                         );
                                                     }
-
                                                     return null;
                                                 })()}
                                             </Flex>
@@ -1082,27 +876,27 @@ export const UnitsTab: React.FC<{
                                             })()}
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            <Text fontSize="sm" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
-                                                {formatCurrency(unit.realized_pnl_in_base || 0, baseCurrency)}
+                                            <Text fontSize="xs" color={(unit.realized_pnl_in_base || 0) >= 0 ? 'green.600' : 'red.600'} fontWeight="medium">
+                                                <ValueDisplay value={unit.realized_pnl_in_base || 0} currency={baseCurrency} />
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
                                             {unit.has_fees && unit.total_fees_in_base ? (
-                                                <Text fontSize="sm" color="orange.600">
-                                                    {formatCurrency(unit.total_fees_in_base, baseCurrency)}
+                                                <Text fontSize="xs" color="orange.600">
+                                                    <ValueDisplay value={unit.total_fees_in_base} currency={baseCurrency} />
                                                 </Text>
                                             ) : (
-                                                <Text fontSize="xs" color="gray.400">-</Text>
+                                                <Text fontSize="2xs" color="gray.400">-</Text>
                                             )}
                                         </Table.Cell>
                                         <Table.Cell textAlign="center">
                                             {warningCount > 0 ? (
-                                                <Badge size="sm" colorPalette="orange">
+                                                <Badge size="xs" colorPalette="orange">
                                                     <FiAlertTriangle style={{ marginRight: 2 }} />
                                                     {warningCount}
                                                 </Badge>
                                             ) : (
-                                                <Text fontSize="xs" color="gray.400">-</Text>
+                                                <Text fontSize="2xs" color="gray.400">-</Text>
                                             )}
                                         </Table.Cell>
                                     </Table.Row>
@@ -1286,7 +1080,7 @@ const CostLotsTab: React.FC<{
             <Flex gap={4} mb={3} fontSize="sm" color="gray.600">
                 <Text>
                     <Badge size="sm" colorPalette="green" mr={1}>Open</Badge>
-                    {formatCurrency(stats.totalCostBasis, baseCurrency)} total cost basis
+                    <ValueDisplay value={stats.totalCostBasis} currency={baseCurrency} /> total cost basis
                 </Text>
             </Flex>
 
@@ -1302,6 +1096,7 @@ const CostLotsTab: React.FC<{
                             <Table.ColumnHeader textAlign="right">Qty Remaining</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Unit Cost</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Total Cost</Table.ColumnHeader>
+                            <Table.ColumnHeader>Source</Table.ColumnHeader>
                             <Table.ColumnHeader>Account</Table.ColumnHeader>
                             <Table.ColumnHeader>Origin TX</Table.ColumnHeader>
                         </Table.Row>
@@ -1335,30 +1130,113 @@ const CostLotsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell fontSize="xs">{formatDateLocale(lot.acquired_at)}</Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
-                                        {formatQty(lot.qty_original)}
+                                        <ValueDisplay value={lot.qty_original} />
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
                                         <Text color={isExhausted ? 'gray.400' : undefined}>
-                                            {formatQty(lot.qty_remaining)}
+                                            <ValueDisplay value={lot.qty_remaining} />
                                         </Text>
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="purple">Zero</Badge>
+                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
+                                        ) : lot.cost_source === 'provisional' ? (
+                                            <Tooltip
+                                                content={
+                                                    <Box fontSize="xs">
+                                                        <Text fontWeight="semibold">Provisional Cost</Text>
+                                                        <Text>FMV-based estimate for negative lot.</Text>
+                                                        {lot.cost_fmv_price != null && <Text>FMV: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
+                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
+                                                        <Text mt={1} color="orange.300">Will be settled when acquisition arrives.</Text>
+                                                    </Box>
+                                                }
+                                                openDelay={200}
+                                            >
+                                                <Badge size="xs" colorPalette="orange" cursor="help">
+                                                    <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
+                                                </Badge>
+                                            </Tooltip>
+                                        ) : lot.cost_source === 'fmv' && lot.cost_fmv_stale ? (
+                                            <Tooltip
+                                                content={
+                                                    <Box fontSize="xs">
+                                                        <Text fontWeight="semibold">Stale FMV Price</Text>
+                                                        {lot.cost_fmv_price != null && <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
+                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
+                                                        {lot.cost_fmv_timestamp && <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>}
+                                                        <Text mt={1} color="orange.300">⚠ Price exceeds staleness window</Text>
+                                                    </Box>
+                                                }
+                                                openDelay={200}
+                                            >
+                                                <Badge size="xs" colorPalette="yellow" cursor="help">
+                                                    <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
+                                                </Badge>
+                                            </Tooltip>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
-                                                {formatCurrency(lot.unit_cost_in_base, baseCurrency)}
+                                                <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
                                             </Text>
                                         )}
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="purple">Zero</Badge>
+                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
-                                                {formatCurrency(lot.total_cost_in_base, baseCurrency)}
+                                                <ValueDisplay value={lot.total_cost_in_base} currency={baseCurrency} />
                                             </Text>
                                         )}
+                                    </Table.Cell>
+                                    <Table.Cell fontSize="xs">
+                                        {lot.cost_source ? (
+                                            (lot.cost_fmv_price || lot.cost_fmv_source || lot.cost_fmv_timestamp) ? (
+                                                <Tooltip
+                                                    content={
+                                                        <Box fontSize="xs" lineHeight="tall">
+                                                            <Text fontWeight="semibold" mb={1}>FMV Details</Text>
+                                                            {lot.cost_fmv_price != null && (
+                                                                <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_source && (
+                                                                <Text>Source: {lot.cost_fmv_source}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_timestamp && (
+                                                                <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_stale && (
+                                                                <Text color="orange.300">⚠ Stale price</Text>
+                                                            )}
+                                                        </Box>
+                                                    }
+                                                    openDelay={200}
+                                                    closeDelay={100}
+                                                >
+                                                    <Badge size="xs" cursor="help" colorPalette={
+                                                        lot.cost_source === 'base_currency' ? 'gray' :
+                                                            lot.cost_source === 'proceeds' ? 'green' :
+                                                                lot.cost_source === 'inherited' ? 'blue' :
+                                                                    lot.cost_source === 'fmv' ? 'cyan' :
+                                                                        lot.cost_source === 'provisional' ? 'orange' :
+                                                                            'gray'
+                                                    }>
+                                                        {lot.cost_source}
+                                                    </Badge>
+                                                </Tooltip>
+                                            ) : (
+                                                <Badge size="xs" colorPalette={
+                                                    lot.cost_source === 'base_currency' ? 'gray' :
+                                                        lot.cost_source === 'proceeds' ? 'green' :
+                                                            lot.cost_source === 'inherited' ? 'blue' :
+                                                                lot.cost_source === 'fmv' ? 'cyan' :
+                                                                    lot.cost_source === 'provisional' ? 'orange' :
+                                                                        'gray'
+                                                }>
+                                                    {lot.cost_source}
+                                                </Badge>
+                                            )
+                                        ) : '-'}
                                     </Table.Cell>
                                     <Table.Cell fontSize="xs">{lot.account_name || '-'}</Table.Cell>
                                     <Table.Cell>
@@ -1502,10 +1380,14 @@ const RealizedPnLTab: React.FC<{
                 </Flex>
                 <Flex gap={4} ml="auto">
                     <Text fontSize="sm" color="gray.500">
-                        Total P&L: <strong style={{ color: stats.totalPnL >= 0 ? 'green' : 'red' }}>{formatCurrency(stats.totalPnL, baseCurrency)}</strong>
+                        Total P&L: <strong style={{ color: stats.totalPnL >= 0 ? 'green' : 'red' }}>
+                            <ValueDisplay value={stats.totalPnL} currency={baseCurrency} />
+                        </strong>
                     </Text>
                     <Text fontSize="sm" color="gray.500">
-                        Taxable: <strong style={{ color: stats.taxablePnL >= 0 ? 'green' : 'red' }}>{formatCurrency(stats.taxablePnL, baseCurrency)}</strong>
+                        Taxable: <strong style={{ color: stats.taxablePnL >= 0 ? 'green' : 'red' }}>
+                            <ValueDisplay value={stats.taxablePnL} currency={baseCurrency} />
+                        </strong>
                     </Text>
                 </Flex>
             </Flex>
@@ -1566,7 +1448,9 @@ const RealizedPnLTab: React.FC<{
                                     {/* Combined FMV Price & Source column */}
                                     <Table.Cell textAlign="right" fontSize="sm">
                                         <Flex direction="column" align="flex-end" gap={0}>
-                                            <Text>{fmvPrice != null ? formatCurrency(fmvPrice, baseCurrency) : '-'}</Text>
+                                            <Text>
+                                                {fmvPrice != null ? <ValueDisplay value={fmvPrice} currency={baseCurrency} /> : '-'}
+                                            </Text>
                                             {sourceLabel && (
                                                 <Badge size="xs" colorPalette={sourceColor} variant="subtle">
                                                     {sourceLabel}
@@ -1575,17 +1459,17 @@ const RealizedPnLTab: React.FC<{
                                         </Flex>
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="sm">
-                                        {formatCurrency(entry.proceeds_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="sm">
-                                        {formatCurrency(entry.cost_basis_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell
                                         textAlign="right"
                                         fontWeight="bold"
                                         color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
                                     >
-                                        {formatCurrency(entry.pnl_in_base, baseCurrency)}
+                                        <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
                                     </Table.Cell>
                                     <Table.Cell>
                                         <Badge colorPalette={entry.disposal_taxable ? 'red' : 'green'} size="sm">
@@ -1702,7 +1586,7 @@ const FeesTab: React.FC<{
                     <Card.Body py={2}>
                         <Text fontSize="xs" color="gray.500">Total Fees</Text>
                         <Text fontSize="lg" fontWeight="bold">
-                            {formatCurrency(totalFees, baseCurrency)}
+                            <ValueDisplay value={totalFees} currency={baseCurrency} />
                         </Text>
                     </Card.Body>
                 </Card.Root>
@@ -1786,13 +1670,13 @@ const FeesTab: React.FC<{
                                 </Table.Cell>
                                 <Table.Cell textAlign="right">
                                     <Text fontSize="xs">
-                                        {formatCurrency(fee.fee_in_base, baseCurrency)}
+                                        <ValueDisplay value={fee.fee_in_base} currency={baseCurrency} />
                                     </Text>
                                 </Table.Cell>
                                 <Table.Cell textAlign="right">
                                     <Text fontSize="xs" color="gray.600">
                                         {fee.cost_basis_consumed != null
-                                            ? formatCurrency(fee.cost_basis_consumed, baseCurrency)
+                                            ? <ValueDisplay value={fee.cost_basis_consumed} currency={baseCurrency} />
                                             : '-'}
                                     </Text>
                                 </Table.Cell>
@@ -1802,7 +1686,7 @@ const FeesTab: React.FC<{
                                             fontSize="xs"
                                             color={fee.realized_pnl >= 0 ? 'green.600' : 'red.600'}
                                         >
-                                            {formatCurrency(fee.realized_pnl, baseCurrency)}
+                                            <ValueDisplay value={fee.realized_pnl} currency={baseCurrency} />
                                         </Text>
                                     ) : (
                                         <Text fontSize="xs" color="gray.400">-</Text>
@@ -2138,7 +2022,7 @@ const SettlementsTab: React.FC<{
                 {stats.totalCostApplied > 0 && (
                     <Text>
                         <Badge size="sm" colorPalette="purple" mr={1}>
-                            {formatCurrency(stats.totalCostApplied, baseCurrency)}
+                            <ValueDisplay value={stats.totalCostApplied} currency={baseCurrency} />
                         </Badge>
                         Cost basis applied
                     </Text>
@@ -2245,7 +2129,7 @@ const SettlementsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {settlement.cost_basis_applied != null ? (
-                                            formatCurrency(settlement.cost_basis_applied, baseCurrency)
+                                            <ValueDisplay value={settlement.cost_basis_applied} currency={baseCurrency} />
                                         ) : (
                                             <Text fontSize="xs" color="gray.400">-</Text>
                                         )}
@@ -2297,6 +2181,143 @@ const LotEventsTab: React.FC<{
     );
 };
 
+// ============================================================================
+// Transactions Tab - Shows included/excluded transactions with toggle
+// ============================================================================
+
+const TransactionsTab: React.FC<{
+    versionId: number;
+    baseCurrency: string;
+    onTransactionClick?: (txId: number) => void;
+}> = ({ versionId, baseCurrency, onTransactionClick }) => {
+    const [view, setView] = useState<'included' | 'excluded'>('included');
+    const [includedCount, setIncludedCount] = useState<number | null>(null);
+    const [excludedCount, setExcludedCount] = useState<number | null>(null);
+
+    // Controlled filter state
+    const [filters, setFilters] = useState<TransactionFilterState>({
+        reviewStatus: [],
+        taxability: [],
+        sources: [],
+        accountIds: [],
+        fromAccountIds: [],
+        toAccountIds: [],
+        relatedAccountIds: [],
+        assetIds: [],
+        relatedAssetIds: [],
+        categoryIds: [],
+        transactionTypes: [],
+        directions: [],
+        connectorRunIds: [],
+        tagKeys: [],
+        networks: [],
+        dateFrom: '',
+        dateTo: '',
+        nonOwned: false,
+        versionId: String(versionId),
+        inclusionStatus: 'included',
+    });
+
+    // Update filters when view changes
+    useEffect(() => {
+        setFilters(prev => ({
+            ...prev,
+            inclusionStatus: view,
+        }));
+    }, [view]);
+
+    // Fetch counts on mount
+    useEffect(() => {
+        const fetchCounts = async () => {
+            try {
+                // Fetch included count
+                const includedRes = await fetch(
+                    `${API_URL}/transactions?pnl_cal_version=${versionId}&pnl_cal_inclusions_status=included&limit=1`
+                );
+                if (includedRes.ok) {
+                    const includedData = await includedRes.json();
+                    setIncludedCount(includedData.metadata?.filtered_count ?? 0);
+                }
+
+                // Fetch excluded count
+                const excludedRes = await fetch(
+                    `${API_URL}/transactions?pnl_cal_version=${versionId}&pnl_cal_inclusions_status=excluded&limit=1`
+                );
+                if (excludedRes.ok) {
+                    const excludedData = await excludedRes.json();
+                    setExcludedCount(excludedData.metadata?.filtered_count ?? 0);
+                }
+            } catch (error) {
+                console.error('Failed to fetch transaction counts:', error);
+            }
+        };
+
+        fetchCounts();
+    }, [versionId]);
+
+    // Base filters for reset
+    const baseFilters = useMemo(() => ({
+        reviewStatus: [],
+        taxability: [],
+        sources: [],
+        accountIds: [],
+        fromAccountIds: [],
+        toAccountIds: [],
+        relatedAccountIds: [],
+        assetIds: [],
+        relatedAssetIds: [],
+        categoryIds: [],
+        transactionTypes: [],
+        directions: [],
+        connectorRunIds: [],
+        tagKeys: [],
+        networks: [],
+        dateFrom: '',
+        dateTo: '',
+        versionId: String(versionId),
+        inclusionStatus: view,
+        nonOwned: false,
+    }), [versionId, view]);
+
+    return (
+        <Box>
+            {/* Toggle between included/excluded */}
+            <Flex mb={4} justify="center" gap={2}>
+                <Button
+                    size="sm"
+                    variant={view === 'included' ? 'solid' : 'outline'}
+                    colorPalette={view === 'included' ? 'blue' : 'gray'}
+                    onClick={() => setView('included')}
+                >
+                    Included {includedCount !== null && `(${includedCount})`}
+                </Button>
+                <Button
+                    size="sm"
+                    variant={view === 'excluded' ? 'solid' : 'outline'}
+                    colorPalette={view === 'excluded' ? 'blue' : 'gray'}
+                    onClick={() => setView('excluded')}
+                >
+                    Excluded {excludedCount !== null && `(${excludedCount})`}
+                </Button>
+            </Flex>
+
+            {/* Controlled transactions table */}
+            <TransactionsTable
+                tableId="pnl-explorer"
+                title=""
+                subtitle=""
+                filters={filters}
+                onFiltersChange={setFilters}
+                resetFilters={baseFilters}
+                showFilters={true}
+                showBundles={false}
+                showSuggestions={false}
+                compact={true}
+            />
+        </Box>
+    );
+};
+
 // Legacy-compatible export for PnLPanel integration
 // Accepts optional costLots, realizedPnL, warnings, settlements, consumedSlices, fees
 interface PnLAuditViewProps {
@@ -2335,6 +2356,8 @@ interface PnLAuditViewProps {
     quoteAssetId?: number;
     onPriceAdded?: (assetId: number, warningId: string) => void;
     assets?: Array<AssetRef>;
+    /** Current P&L balance per asset: symbol (uppercase) → qty */
+    assetBalanceMap?: Map<string, number>;
     // Pagination props per tab
     unitsPagination?: { page: number; pageSize: number; total: number };
     lotsPagination?: { page: number; pageSize: number; total: number };
@@ -2377,6 +2400,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
     quoteAssetId,
     onPriceAdded,
     assets,
+    assetBalanceMap,
     // Pagination props
     unitsPagination,
     lotsPagination,
@@ -2405,6 +2429,26 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
         onTabChange?.(tab);
     };
 
+    // ── Transaction-level filters for P&L audit ──
+    const defaultPnlFilterState: TransactionFilterState = useMemo(() => ({
+        ...defaultFilterState,
+        reviewStatus: [],  // not relevant for P&L
+        taxability: [],    // not relevant for P&L
+    }), []);
+
+    const [txFilters, setTxFilters] = useState<TransactionFilterState>(defaultPnlFilterState);
+    const [txFilterExpanded, setTxFilterExpanded] = useState(false);
+
+    const txFilterParams = useMemo(
+        () => buildPnLFilterParams(txFilters),
+        [txFilters],
+    );
+
+    const pnlHiddenFilters: (keyof TransactionFilterState)[] = useMemo(
+        () => ['reviewStatus', 'taxability', 'connectorRunIds'],
+        [],
+    );
+
     // Use provided data directly - no fallback derivation
     const costLots = propCostLots || [];
     const consumedSlices = propConsumedSlices || [];
@@ -2426,11 +2470,28 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
 
     return (
         <Box mt={4}>
+            {/* Transaction-level filters for P&L audit data */}
+            {versionId && (
+                <Box mb={4}>
+                    <TransactionFilters
+                        filters={txFilters}
+                        onChange={setTxFilters}
+                        onClear={() => { setTxFilters(defaultPnlFilterState); }}
+                        expanded={txFilterExpanded}
+                        onExpandedChange={setTxFilterExpanded}
+                        resetFilters={defaultPnlFilterState}
+                        filterOptionsUrl={`${API_URL}/pnl/versions/${versionId}/filter-options`}
+                        filterOptionsQueryKey={['pnlFilterOptions', String(versionId)]}
+                        hiddenFilters={pnlHiddenFilters}
+                    />
+                </Box>
+            )}
+
             <Tabs.Root value={activeTab} onValueChange={(e) => handleTabChange(e.value)}>
                 <Tabs.List mb={4}>
                     <Tabs.Trigger value="units">
                         <FiLayers style={{ marginRight: 4 }} />
-                        Calculation Units ({unitsCount})
+                        Activity Feed ({unitsCount})
                     </Tabs.Trigger>
                     <Tabs.Trigger value="lots">
                         <FiDatabase style={{ marginRight: 4 }} />
@@ -2447,6 +2508,10 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                         <FiActivity style={{ marginRight: 4 }} />
                         Cost Lot Events ({eventsCount})
                     </Tabs.Trigger>
+                    <Tabs.Trigger value="transactions">
+                        <FiFileText style={{ marginRight: 4 }} />
+                        Transactions
+                    </Tabs.Trigger>
                     <Tabs.Trigger value="warnings">
                         <FiAlertTriangle style={{ marginRight: 4 }} />
                         Warnings ({warningsCount})
@@ -2455,22 +2520,12 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
 
                 <Tabs.Content value="units">
                     {versionId ? (
-                        <UnitsTabWrapper
+                        <ActivityFeed
                             versionId={versionId}
                             baseCurrency={baseCurrency}
                             onTransactionClick={onTransactionClick}
-                            lazy={true}
-                            enabled={activeTab === 'units'}
-                            renderTab={({ units, baseCurrency, versionId, onTransactionClick }) => (
-                                <UnitsTab
-                                    units={units}
-                                    baseCurrency={baseCurrency}
-                                    costLots={[]}
-                                    versionId={versionId}
-                                    onTransactionClick={onTransactionClick}
-                                    hidePagination={true}
-                                />
-                            )}
+                            txFilterParams={txFilterParams}
+                            assetBalanceMap={assetBalanceMap}
                         />
                     ) : (
                         <Box p={4} textAlign="center" color="gray.500">
@@ -2487,6 +2542,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'lots'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ lots, baseCurrency, onTransactionClick }) => (
                                 <CostLotsTab
                                     lots={lots}
@@ -2510,6 +2566,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onTransactionClick={onTransactionClick}
                             lazy={true}
                             enabled={activeTab === 'realized'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ entries, baseCurrency, onTransactionClick }) => (
                                 <RealizedPnLTab
                                     entries={entries}
@@ -2534,6 +2591,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             onUnitClick={onUnitClick}
                             lazy={true}
                             enabled={activeTab === 'fees'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ fees, baseCurrency, onTransactionClick, onUnitClick }) => (
                                 <FeesTab
                                     fees={fees}
@@ -2564,6 +2622,30 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                     )}
                 </Tabs.Content>
 
+                <Tabs.Content value="transactions">
+                    {versionId ? (
+                        <TransactionsTabWrapper
+                            versionId={versionId}
+                            baseCurrency={baseCurrency}
+                            onTransactionClick={onTransactionClick}
+                            lazy={true}
+                            enabled={activeTab === 'transactions'}
+                            txFilterParams={txFilterParams}
+                            renderTab={({ versionId, baseCurrency, onTransactionClick }) => (
+                                <TransactionsTab
+                                    versionId={versionId}
+                                    baseCurrency={baseCurrency}
+                                    onTransactionClick={onTransactionClick}
+                                />
+                            )}
+                        />
+                    ) : (
+                        <Box p={4} textAlign="center" color="gray.500">
+                            No version ID available
+                        </Box>
+                    )}
+                </Tabs.Content>
+
                 <Tabs.Content value="warnings">
                     {versionId ? (
                         <WarningsTabWrapper
@@ -2575,6 +2657,7 @@ export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
                             assets={assets}
                             lazy={true}
                             enabled={activeTab === 'warnings'}
+                            txFilterParams={txFilterParams}
                             renderTab={({ warnings, baseCurrency, onTransactionClick, quoteAssetId, onPriceAdded, assets }) => (
                                 <WarningsTab
                                     warnings={warnings}

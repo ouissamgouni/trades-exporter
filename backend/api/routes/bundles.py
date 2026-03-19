@@ -15,6 +15,7 @@ from backend.db.database import get_db
 from backend.db.models import (
     NormalizedTransaction,
     UserCalculationBundle,
+    DismissedSuggestion,
     Asset,
     Account,
     UnitPattern,
@@ -22,8 +23,9 @@ from backend.db.models import (
     Direction,
     ReviewStatus,
 )
-from backend.api.routes.pnl import TransactionSummary  # Import shared model
+from backend.api.routes.pnl import TransactionSummary, AssetRef  # Import shared models
 from backend.services.suggestion_service import SuggestionService, GroupingSuggestion
+from backend.services.suggestion_fingerprint import compute_suggestion_fingerprint
 from backend.services.pnl.taxability import suggest_bundle_taxability
 from backend.services.pnl.config import PnLConfig
 
@@ -82,6 +84,7 @@ class UnitResponse(BaseModel):
 class SuggestionResponse(BaseModel):
     """Response model for a unit suggestion."""
 
+    fingerprint: str
     pattern: UnitPattern
     transaction_ids: List[int]
     confidence: float
@@ -99,6 +102,12 @@ class SuggestionResponse(BaseModel):
     transactions: List[TransactionSummary] = []
 
 
+class TransactionIdsRequest(BaseModel):
+    """Request model for adding/removing transactions from a bundle."""
+
+    transaction_ids: List[int] = Field(..., description="Transaction IDs to add/remove")
+
+
 class AcceptSuggestionRequest(BaseModel):
     """Request to accept a suggestion."""
 
@@ -109,6 +118,27 @@ class AcceptSuggestionRequest(BaseModel):
     taxability_override: Optional[TaxabilityStatus] = Field(
         None, description="Override taxability for the bundle"
     )
+
+
+class DismissSuggestionRequest(BaseModel):
+    """Request to dismiss a suggestion."""
+
+    pattern: str
+    transaction_ids: List[int]
+    label: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class DismissedSuggestionResponse(BaseModel):
+    """Response model for a dismissed suggestion."""
+
+    id: int
+    fingerprint: str
+    pattern: Optional[str]
+    transaction_ids: List[int]
+    label: Optional[str]
+    reason: Optional[str]
+    dismissed_at: str
 
 
 # ============================================================================
@@ -150,7 +180,8 @@ def list_bundles(
 
 @router.get("/suggestions", response_model=List[SuggestionResponse])
 def get_suggestions(
-    max_suggestions: int = Query(20, ge=1, le=100),
+    max_suggestions: int = Query(200, ge=1, le=500),
+    include_bundled: bool = Query(False, description="Include transactions that already belong to a bundle"),
     session: Session = Depends(get_db),
 ):
     """
@@ -160,7 +191,10 @@ def get_suggestions(
     Use POST /units or POST /units/accept-suggestion to create units.
     """
     service = SuggestionService(session)
-    suggestions = service.get_suggestions(max_suggestions=max_suggestions)
+    suggestions = service.get_suggestions(
+        max_suggestions=max_suggestions,
+        include_bundled=include_bundled,
+    )
     
     # Load config for taxability suggestion (uses same logic as P&L engine)
     config = PnLConfig()
@@ -191,6 +225,15 @@ def get_suggestions(
                 to_account = session.get(Account, t.get("to_account_id"))
                 to_account_name = to_account.name if to_account else None
             
+            # Build AssetRef with source_symbol for display
+            source_asset_symbol = t.get("asset_symbol") or t.get("symbol", "")
+            asset_ref = AssetRef(
+                id=None,
+                symbol=None,
+                label=None,
+                source_symbol=source_asset_symbol if source_asset_symbol else None
+            )
+            
             tx_summaries.append(
                 TransactionSummary(
                     id=t.get("id", 0),
@@ -199,22 +242,18 @@ def get_suggestions(
                     source_transaction_id=t.get("source_transaction_id", ""),
                     direction=t.get("direction", ""),
                     quantity=t.get("quantity", 0),
-                    symbol=t.get("symbol", ""),
-                    asset_symbol=t.get("asset_symbol") or t.get("symbol", ""),
+                    asset=asset_ref,
                     # Extended fields
                     account_id=t.get("account_id"),
                     account_name=account_name,
                     price=t.get("price"),
-                    price_quote_asset_symbol=t.get("price_quote_asset_symbol"),
                     total=t.get("total"),
                     fee=t.get("fee"),
-                    fee_quote_asset_symbol=t.get("fee_quote_asset_symbol"),
                     from_account_name=from_account_name,
                     to_account_name=to_account_name,
                     source_from_account=t.get("source_from_account"),
                     source_to_account=t.get("source_to_account"),
                     source_transaction_type=t.get("source_transaction_type"),
-                    source_asset_symbol=t.get("source_asset_symbol"),
                     network=t.get("network"),
                     network_transaction_id=t.get("network_transaction_id"),
                 )
@@ -222,6 +261,7 @@ def get_suggestions(
         
         responses.append(
             SuggestionResponse(
+                fingerprint=compute_suggestion_fingerprint(s.pattern, s.transaction_ids),
                 pattern=s.pattern,
                 transaction_ids=s.transaction_ids,
                 confidence=s.confidence,
@@ -236,6 +276,77 @@ def get_suggestions(
     return responses
 
 
+@router.post("/suggestions/dismiss", response_model=DismissedSuggestionResponse)
+def dismiss_suggestion(
+    request: DismissSuggestionRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Dismiss a suggestion so it won't appear in future results.
+
+    The suggestion is identified by (pattern, transaction_ids). Only the exact
+    combination is blocked — individual transactions can still appear in other suggestions.
+    """
+    service = SuggestionService(session)
+    try:
+        dismissed = service.dismiss_suggestion(
+            pattern=request.pattern,
+            transaction_ids=request.transaction_ids,
+            label=request.label,
+            reason=request.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return DismissedSuggestionResponse(
+        id=dismissed.id,
+        fingerprint=dismissed.fingerprint,
+        pattern=dismissed.pattern,
+        transaction_ids=dismissed.transaction_ids,
+        label=dismissed.label,
+        reason=dismissed.reason,
+        dismissed_at=dismissed.dismissed_at.isoformat(),
+    )
+
+
+@router.delete("/suggestions/dismiss/{fingerprint}")
+def undismiss_suggestion(
+    fingerprint: str,
+    session: Session = Depends(get_db),
+):
+    """
+    Restore a dismissed suggestion so it appears again.
+    """
+    service = SuggestionService(session)
+    restored = service.undismiss_suggestion(fingerprint)
+    if not restored:
+        raise HTTPException(status_code=404, detail="Dismissed suggestion not found")
+    return {"success": True, "message": f"Suggestion {fingerprint} restored"}
+
+
+@router.get("/suggestions/dismissed", response_model=List[DismissedSuggestionResponse])
+def list_dismissed_suggestions(
+    session: Session = Depends(get_db),
+):
+    """
+    List all dismissed suggestions.
+    """
+    service = SuggestionService(session)
+    dismissed_list = service.list_dismissed()
+    return [
+        DismissedSuggestionResponse(
+            id=d.id,
+            fingerprint=d.fingerprint,
+            pattern=d.pattern,
+            transaction_ids=d.transaction_ids or [],
+            label=d.label,
+            reason=d.reason,
+            dismissed_at=d.dismissed_at.isoformat() if d.dismissed_at else "",
+        )
+        for d in dismissed_list
+    ]
+
+
 @router.post("/accept-suggestion", response_model=UnitResponse)
 def accept_suggestion(
     request: AcceptSuggestionRequest,
@@ -246,6 +357,24 @@ def accept_suggestion(
 
     This persists the suggestion as a real unit.
     """
+    # Validate transactions are not already in a bundle
+    conflicts = []
+    for tx_id in request.transaction_ids:
+        tx = session.get(NormalizedTransaction, tx_id)
+        if not tx:
+            raise HTTPException(
+                status_code=404, detail=f"Transaction {tx_id} not found"
+            )
+        if tx.user_calculation_unit_id:
+            conflicts.append(
+                f"Transaction {tx_id} is already in bundle {tx.user_calculation_unit_id}"
+            )
+    if conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail="Some transactions are already in a bundle: " + "; ".join(conflicts),
+        )
+
     # Reconstruct the suggestion
     suggestion = GroupingSuggestion(
         pattern=request.pattern,
@@ -300,7 +429,6 @@ def create_bundle(
     # Link transactions via user_calculation_unit_id FK
     for tx in transactions:
         tx.user_calculation_unit_id = bundle.id
-        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
 
     session.commit()
@@ -339,9 +467,10 @@ def update_bundle(
         bundle.pattern = request.pattern
     if request.notes is not None:
         bundle.notes = request.notes
-    if request.taxability_override is not None:
+    # Use model_fields_set to detect if taxability_override was explicitly sent (even as null)
+    if 'taxability_override' in request.model_fields_set:
         bundle.taxability_override = (
-            request.taxability_override if request.taxability_override else None
+            request.taxability_override.value if request.taxability_override else None
         )
 
     bundle.updated_at = datetime.now(timezone.utc)
@@ -379,7 +508,6 @@ def delete_bundle(
 
         for tx in transactions:
             tx.user_calculation_unit_id = None
-            tx.review_status = ReviewStatus.PENDING.value
             session.add(tx)
 
     session.delete(bundle)
@@ -391,7 +519,7 @@ def delete_bundle(
 @router.post("/{bundle_id}/add-transactions")
 def add_transactions_to_bundle(
     bundle_id: int,
-    transaction_ids: List[int],
+    request: TransactionIdsRequest,
     session: Session = Depends(get_db),
 ):
     """Add transactions to an existing bundle."""
@@ -399,28 +527,29 @@ def add_transactions_to_bundle(
     if not bundle:
         raise HTTPException(status_code=404, detail="Bundle not found")
 
-    added = 0
-    for tx_id in transaction_ids:
+    added = []
+    skipped = []
+    for tx_id in request.transaction_ids:
         tx = session.get(NormalizedTransaction, tx_id)
         if not tx:
             continue
         if tx.user_calculation_unit_id:
+            skipped.append({"id": tx_id, "existing_bundle_id": tx.user_calculation_unit_id})
             continue  # Already in a bundle
 
         tx.user_calculation_unit_id = bundle_id
-        tx.review_status = ReviewStatus.VALID.value
         session.add(tx)
-        added += 1
+        added.append(tx_id)
 
     session.commit()
 
-    return {"success": True, "added_count": added}
+    return {"success": True, "added_count": len(added), "added": added, "skipped": skipped}
 
 
 @router.post("/{bundle_id}/remove-transactions")
 def remove_transactions_from_bundle(
     bundle_id: int,
-    transaction_ids: List[int],
+    request: TransactionIdsRequest,
     session: Session = Depends(get_db),
 ):
     """Remove transactions from a bundle."""
@@ -429,7 +558,7 @@ def remove_transactions_from_bundle(
         raise HTTPException(status_code=404, detail="Bundle not found")
 
     removed = 0
-    for tx_id in transaction_ids:
+    for tx_id in request.transaction_ids:
         tx = session.get(NormalizedTransaction, tx_id)
         if not tx:
             continue
@@ -437,7 +566,6 @@ def remove_transactions_from_bundle(
             continue
 
         tx.user_calculation_unit_id = None
-        tx.review_status = ReviewStatus.PENDING.value
         session.add(tx)
         removed += 1
 
@@ -500,14 +628,32 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
         from_account_name = get_account_name(tx.from_account_id)
         to_account_name = get_account_name(tx.to_account_id)
 
+        # Build AssetRef with linked asset or source_symbol fallback
+        asset_ref = None
+        if tx.asset_id:
+            asset = session.get(Asset, tx.asset_id)
+            if asset:
+                asset_ref = AssetRef(
+                    id=asset.asset_id,
+                    symbol=asset.symbol,
+                    label=asset.label,
+                    source_symbol=tx.source_asset_symbol
+                )
+        elif asset_symbol:
+            asset_ref = AssetRef(
+                id=None,
+                symbol=None,
+                label=None,
+                source_symbol=asset_symbol
+            )
+
         tx_summaries.append(
             TransactionSummary(
                 id=tx.id,
-                date_time=tx.date_time.isoformat() if tx.date_time else None,
+                date_time=tx.date_time.replace(tzinfo=timezone.utc).isoformat() if tx.date_time else None,
                 direction=tx.direction,
                 transaction_type=tx.transaction_type,
-                asset_symbol=asset_symbol,
-                symbol=asset_symbol,  # Alias for frontend
+                asset=asset_ref,
                 quantity=float(tx.quantity) if tx.quantity else 0,
                 source=tx.source,
                 source_transaction_id=tx.source_transaction_id,
@@ -516,16 +662,13 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
                 account_id=tx.account_id,
                 account_name=account_name,
                 price=float(tx.price) if tx.price else None,
-                price_quote_asset_symbol=price_quote_asset_symbol,
                 total=float(tx.total) if tx.total else None,
                 fee=float(tx.fee) if tx.fee else None,
-                fee_quote_asset_symbol=fee_quote_asset_symbol,
                 from_account_name=from_account_name,
                 to_account_name=to_account_name,
                 source_from_account=tx.source_from_account,
                 source_to_account=tx.source_to_account,
                 source_transaction_type=tx.source_transaction_type,
-                source_asset_symbol=tx.source_asset_symbol,
                 network_transaction_id=tx.network_transaction_id,
             )
         )
@@ -547,7 +690,7 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
         pattern=bundle.pattern,
         notes=bundle.notes,
         taxability_override=bundle.taxability_override,
-        created_at=bundle.created_at.isoformat() if bundle.created_at else "",
+        created_at=bundle.created_at.replace(tzinfo=timezone.utc).isoformat() if bundle.created_at else "",
         transaction_count=len(tx_summaries),
         transactions=tx_summaries,
         total_inflow=inflows if inflows else None,

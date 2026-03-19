@@ -25,10 +25,18 @@ import {
     Text,
 } from '@chakra-ui/react';
 import { FiArrowLeft, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
-import { AssetPnLRow, CostLot, CalculationUnit, CostLotEventEntry, mapProcessedUnitToCalculationUnit } from './types';
+import { AssetPnLRow, CostLot, CalculationUnit, CostLotEventEntry, AccountBalanceBreakdown, mapProcessedUnitToCalculationUnit } from './types';
 import { UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 import { BalanceTimelineChart } from './BalanceTimelineChart';
+import { TransactionsTable } from '../TransactionsTable';
+import { defaultFilterState, TransactionFilterState } from '../TransactionFilters';
 import { API_URL } from '../../types';
+import { formatQuantity, formatQuantityWithCurrency } from '../../utils/numberUtils';
+import { ValueDisplay } from '../ValueDisplay';
+import { Tooltip } from '../ui/tooltip';
+import { getAccountColor } from '../../utils/accountColors';
+import { DeltaBar } from './DeltaBar';
+import { computeDelta } from './deltaUtils';
 
 interface AssetDetailViewProps {
     asset: AssetPnLRow;
@@ -36,21 +44,21 @@ interface AssetDetailViewProps {
     baseCurrency: string;
     onBack: () => void;
     onTransactionClick?: (txId: number) => void;
+    /** Per-account P&L balance breakdown for this asset */
+    accountBreakdown?: AccountBalanceBreakdown[];
+    /** Aggregated live qty for this asset's symbol */
+    liveBalance?: number;
+    /** Per-account live qty: accountId → qty */
+    liveAccountBalances?: Map<number, number>;
+    /** True while live balances are being fetched */
+    liveBalanceLoading?: boolean;
+    /** Account IDs whose live-balance fetch completed */
+    liveFetchedAccountIds?: Set<number>;
+    /** Account IDs that had connector-level errors: accountId → error messages */
+    liveAccountErrors?: Map<number, string[]>;
+    /** Initial account ID to filter transactions by (from clicking account in expanded PnL row) */
+    initialAccountFilter?: number;
 }
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
-
-const formatQty = (value: number): string => {
-    if (Math.abs(value) < 0.00001) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
 
 /** Metric Card for sidebar */
 const MetricCard: React.FC<{
@@ -101,16 +109,78 @@ const LoadingPlaceholder: React.FC<{ label: string }> = ({ label }) => (
     </Flex>
 );
 
+/** Embedded transactions table filtered to a specific asset (any role: base, price quote, fee quote) */
+const AssetTransactionsTab: React.FC<{
+    versionId: number;
+    assetId: number;
+    accountId?: number;
+    onTransactionClick?: (txId: number) => void;
+}> = ({ versionId, assetId, accountId, onTransactionClick }) => {
+    const [filters, setFilters] = React.useState<TransactionFilterState>(() => ({
+        ...defaultFilterState,
+        reviewStatus: [],
+        taxability: [],
+        relatedAssetIds: [String(assetId)],
+        versionId: String(versionId),
+        inclusionStatus: 'included',
+        relatedAccountIds: accountId ? [String(accountId)] : [],
+    }));
+
+    const resetFilters = React.useMemo<TransactionFilterState>(() => ({
+        ...defaultFilterState,
+        reviewStatus: [],
+        taxability: [],
+        relatedAssetIds: [String(assetId)],
+        versionId: String(versionId),
+        inclusionStatus: 'included',
+    }), [versionId, assetId]);
+
+    // Update account filter when accountId prop changes
+    React.useEffect(() => {
+        setFilters(prev => ({
+            ...prev,
+            relatedAccountIds: accountId ? [String(accountId)] : [],
+        }));
+    }, [accountId]);
+
+    return (
+        <TransactionsTable
+            tableId={`asset-detail-txs-${assetId}`}
+            title=""
+            subtitle=""
+            filters={filters}
+            onFiltersChange={setFilters}
+            resetFilters={resetFilters}
+            showFilters={true}
+            showBundles={false}
+            showSuggestions={false}
+            compact={true}
+            defaultFiltersCollapsed={true}
+        />
+    );
+};
+
 function AssetDetailView({
     asset: assetPnlRow,
     versionId,
     baseCurrency,
     onBack,
     onTransactionClick,
+    accountBreakdown,
+    liveBalance,
+    liveAccountBalances,
+    liveBalanceLoading = false,
+    liveFetchedAccountIds,
+    liveAccountErrors,
+    initialAccountFilter,
 }: AssetDetailViewProps) {
-    // Tab state
-    const [activeTab, setActiveTab] = useState<'units' | 'events' | 'timeline'>('units');
+    // Tab state - if initialAccountFilter is set, start on transactions tab
+    const [activeTab, setActiveTab] = useState<'units' | 'events' | 'timeline' | 'transactions'>(
+        initialAccountFilter ? 'transactions' : 'units'
+    );
     const [timelineViewMode, setTimelineViewMode] = useState<'total' | 'by-account'>('total');
+    // Account filter for transactions tab
+    const [txAccountFilter, setTxAccountFilter] = useState<number | undefined>(initialAccountFilter);
 
     // Units data state
     const [calculationUnits, setCalculationUnits] = useState<CalculationUnit[]>([]);
@@ -136,7 +206,7 @@ function AssetDetailView({
         setEventsLoaded(false);
         setLotEvents([]);
 
-        fetch(`${API_URL}/pnl/versions/${versionId}/units?asset_id=${assetPnlRow.asset.id}&limit=1000`)
+        fetch(`${API_URL}/pnl/versions/${versionId}/units?related_asset_id=${assetPnlRow.asset.id}&limit=1000`)
             .then(response => {
                 if (fetchIdRef.current !== currentFetchId) {
                     console.log(`[AssetDetailView] Fetch ${currentFetchId}: Stale response, ignoring`);
@@ -206,7 +276,7 @@ function AssetDetailView({
         console.log('[AssetDetailView] Starting events fetch');
         setEventsLoading(true);
 
-        fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?asset_id=${assetPnlRow.asset.id}&limit=1000`)
+        fetch(`${API_URL}/pnl/versions/${versionId}/lot-events?related_asset_id=${assetPnlRow.asset.id}&limit=1000`)
             .then(response => {
                 if (!response.ok) throw new Error('Failed to load lot events');
                 return response.json();
@@ -250,28 +320,147 @@ function AssetDetailView({
             </Flex>
 
             {/* Split-View Layout */}
-            <Grid templateColumns={{ base: '1fr', lg: '280px 1fr' }} gap={4}>
+            <Grid templateColumns={{ base: '1fr', lg: '220px 1fr' }} gap={4}>
                 {/* Left Sidebar - Asset Summary */}
                 <Box>
                     <Card.Root position="sticky" top="80px">
                         <Card.Body p={3}>
-                            <Text fontSize="sm" fontWeight="bold" color="gray.600" mb={3}>
-                                Position Summary
-                            </Text>
+                            {/* ── Balances ── */}
+                            <Flex align="center" gap={2} mb={3}>
+                                <Text fontSize="sm" fontWeight="bold" color="gray.600">
+                                    Balances
+                                </Text>
+                                {liveBalanceLoading && <Spinner size="xs" color="gray.400" />}
+                            </Flex>
+
+                            {/* Total row: P&L qty vs Live qty + delta */}
+                            {(() => {
+                                // Resolve effective live balance: explicit value, confirmed 0 (fetched but no entries), or undefined
+                                const fetchDone = !liveBalanceLoading && liveFetchedAccountIds && liveFetchedAccountIds.size > 0;
+                                const effectiveLive = liveBalance ?? (fetchDone ? 0 : undefined);
+
+                                if (effectiveLive != null) {
+                                    const deltaInfo = computeDelta(assetPnlRow.quantity, effectiveLive);
+
+                                    // Check if any account had errors (partial data)
+                                    const hasErrors = liveAccountErrors && liveAccountErrors.size > 0;
+                                    return (
+                                        <Box p={2} bg="blue.50" borderRadius="md" mb={2}>
+                                            <Flex justify="space-between" align="center" mb={1}>
+                                                <Flex align="center" gap={1}>
+                                                    <Text fontSize="xs" color="gray.500" fontWeight="medium">Total</Text>
+                                                    {hasErrors && (
+                                                        <Tooltip content={`${liveAccountErrors!.size} account(s) had fetch errors — live total may be incomplete`} openDelay={200}>
+                                                            <Text fontSize="xs" color="orange.500" cursor="help">⚠</Text>
+                                                        </Tooltip>
+                                                    )}
+                                                </Flex>
+                                                <DeltaBar delta={deltaInfo} liveQty={effectiveLive} pnlQty={assetPnlRow.quantity} size="sm" />
+                                            </Flex>
+                                            <Flex justify="space-between" align="center">
+                                                <Text fontSize="sm" fontFamily="mono" fontWeight="bold">
+                                                    <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
+                                                </Text>
+                                            </Flex>
+                                        </Box>
+                                    );
+                                }
+
+                                // Fallback: still loading or no live data infrastructure
+                                return (
+                                    <Box p={3} bg="gray.50" borderRadius="md" mb={2}>
+                                        <Text fontSize="xs" color="gray.500" mb={1}>Quantity</Text>
+                                        <Text fontSize="sm" fontFamily="mono" fontWeight="bold" color="blue.600">
+                                            <ValueDisplay value={assetPnlRow.quantity} options={{ maxDecimals: 4 }} />
+                                        </Text>
+                                    </Box>
+                                );
+                            })()}
+
+                            {/* Per-account rows */}
+                            {accountBreakdown && accountBreakdown.length > 0 ? (
+                                <Flex direction="column" gap={1} mb={2}>
+                                    {[...accountBreakdown]
+                                        .sort((a, b) => Math.abs(b.qty) - Math.abs(a.qty))
+                                        .map((acct) => {
+                                            const acctLiveQtyRaw = liveAccountBalances?.get(acct.account_id);
+                                            const acctFetched = liveFetchedAccountIds?.has(acct.account_id) ?? false;
+                                            const acctErrors = liveAccountErrors?.get(acct.account_id);
+                                            // If account was fetched but has no entry for this symbol → confirmed 0
+                                            const acctLiveQty = acctLiveQtyRaw ?? (acctFetched ? 0 : undefined);
+                                            const acctColor = getAccountColor(acct.account_id);
+                                            const acctDelta = computeDelta(acct.qty, acctLiveQty);
+                                            let deltaNode: React.ReactNode = <DeltaBar delta={null} size="xs" />;
+
+                                            if (acctErrors && acctErrors.length > 0 && acctLiveQtyRaw == null) {
+                                                // Connector error — no live data for this account
+                                                deltaNode = (
+                                                    <Tooltip
+                                                        content={
+                                                            <Box fontSize="xs">
+                                                                <Text fontWeight="medium" mb={1}>Fetch error:</Text>
+                                                                {acctErrors.map((err, i) => <Text key={i}>{err}</Text>)}
+                                                            </Box>
+                                                        }
+                                                        openDelay={200}
+                                                    >
+                                                        <Text fontSize="xs" color="red.500" cursor="help">⚠ err</Text>
+                                                    </Tooltip>
+                                                );
+                                            } else if (acctLiveQty != null) {
+                                                deltaNode = (
+                                                    <DeltaBar delta={acctDelta} liveQty={acctLiveQty} pnlQty={acct.qty} size="xs" />
+                                                );
+                                            }
+
+                                            return (
+                                                <Box key={acct.account_id} px={1.5} py={1} bg="gray.50" borderRadius="md">
+                                                    <Flex align="center" gap={1} mb={0.5}>
+                                                        <Box w="6px" h="6px" borderRadius="full" bg={acctColor} flexShrink={0} />
+                                                        <Text
+                                                            fontSize="2xs"
+                                                            fontWeight="medium"
+                                                            truncate
+                                                            maxW="120px"
+                                                            title={acct.account_name}
+                                                            cursor="pointer"
+                                                            _hover={{ textDecoration: 'underline', color: 'blue.600' }}
+                                                            onClick={() => {
+                                                                setTxAccountFilter(acct.account_id);
+                                                                setActiveTab('transactions');
+                                                            }}
+                                                        >
+                                                            {acct.account_name}
+                                                        </Text>
+                                                    </Flex>
+                                                    <Flex justify="space-between" align="center">
+                                                        <Text fontSize="xs" fontFamily="mono"><ValueDisplay value={acct.qty} options={{ maxDecimals: 4 }} /></Text>
+                                                        {deltaNode}
+                                                    </Flex>
+                                                </Box>
+                                            );
+                                        })}
+                                </Flex>
+                            ) : (
+                                <Text fontSize="xs" color="gray.400" textAlign="center" py={2}>
+                                    {liveBalanceLoading ? 'Loading...' : 'No account breakdown available'}
+                                </Text>
+                            )}
+
+                            {/* Divider between balance rows and monetary metrics */}
+                            <Box borderTop="1px solid" borderColor="gray.200" my={2} />
+
                             <Flex direction="column" gap={2}>
                                 <MetricCard
-                                    label="Quantity"
-                                    value={formatQty(assetPnlRow.quantity)}
-                                    color="blue.600"
-                                />
-                                <MetricCard
                                     label="Market Value"
-                                    value={formatCurrency(assetPnlRow.market_value, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.market_value, baseCurrency)}
+                                    subValue={assetPnlRow.unit_value != null ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_value, baseCurrency)}/unit` : undefined}
                                     color="blue.600"
                                 />
                                 <MetricCard
                                     label="Cost Basis"
-                                    value={formatCurrency(assetPnlRow.cost_basis, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.cost_basis, baseCurrency)}
+                                    subValue={assetPnlRow.unit_cost != null && assetPnlRow.unit_cost > 0 ? `@ ${formatQuantityWithCurrency(assetPnlRow.unit_cost, baseCurrency)}/unit` : undefined}
                                 />
                             </Flex>
 
@@ -281,7 +470,7 @@ function AssetDetailView({
                             <Flex direction="column" gap={2}>
                                 <MetricCard
                                     label="Unrealized P&L"
-                                    value={formatCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.unrealized_pnl, baseCurrency)}
                                     subValue={unrealizedPct}
                                     color={unrealizedColor}
                                     icon={assetPnlRow.unrealized_pnl >= 0 ?
@@ -291,7 +480,7 @@ function AssetDetailView({
                                 />
                                 <MetricCard
                                     label="Realized P&L"
-                                    value={formatCurrency(assetPnlRow.realized_pnl, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.realized_pnl, baseCurrency)}
                                     color={realizedColor}
                                     icon={assetPnlRow.realized_pnl >= 0 ?
                                         <FiTrendingUp color="green" size={14} /> :
@@ -300,7 +489,7 @@ function AssetDetailView({
                                 />
                                 <MetricCard
                                     label="Total Fees"
-                                    value={formatCurrency(assetPnlRow.total_fees, baseCurrency)}
+                                    value={formatQuantityWithCurrency(assetPnlRow.total_fees, baseCurrency)}
                                     color="orange.600"
                                 />
                             </Flex>
@@ -335,12 +524,12 @@ function AssetDetailView({
                 </Box>
 
                 {/* Right Main Area - Tabs */}
-                <Box>
+                <Box minW={0} overflow="hidden">
                     <Card.Root>
                         <Card.Body p={0}>
                             <Tabs.Root
                                 value={activeTab}
-                                onValueChange={(e) => setActiveTab(e.value as 'units' | 'events' | 'timeline')}
+                                onValueChange={(e) => setActiveTab(e.value as 'units' | 'events' | 'timeline' | 'transactions')}
                             >
                                 <Tabs.List px={4} pt={2}>
                                     <Tabs.Trigger value="units">
@@ -361,6 +550,9 @@ function AssetDetailView({
                                     </Tabs.Trigger>
                                     <Tabs.Trigger value="timeline">
                                         Balance Timeline
+                                    </Tabs.Trigger>
+                                    <Tabs.Trigger value="transactions">
+                                        Transactions
                                     </Tabs.Trigger>
                                 </Tabs.List>
 
@@ -409,6 +601,15 @@ function AssetDetailView({
                                             />
                                         </Box>
                                     )}
+                                </Tabs.Content>
+
+                                <Tabs.Content value="transactions" p={0}>
+                                    <AssetTransactionsTab
+                                        versionId={versionId}
+                                        assetId={assetPnlRow.asset.id!}
+                                        accountId={txAccountFilter}
+                                        onTransactionClick={onTransactionClick}
+                                    />
                                 </Tabs.Content>
                             </Tabs.Root>
                         </Card.Body>

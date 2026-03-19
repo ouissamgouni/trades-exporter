@@ -43,6 +43,12 @@ class PipelineContext:
     skip_asset_enrichment: bool = (
         False  # Skip asset enrichment (if already has asset_ids)
     )
+    skip_onchain_enrichment: bool = (
+        False  # Skip on-chain address enrichment (from explorer APIs)
+    )
+    renormalize_mode: bool = (
+        False  # Renormalize mode: delete existing normalized before re-inserting
+    )
 
     # Metadata collected during processing
     created_units: List[CalculationUnit] = field(

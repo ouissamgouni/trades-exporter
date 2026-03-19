@@ -18,24 +18,29 @@ Returns CalculationUnit objects directly (the unified grouping concept).
 from decimal import Decimal
 from typing import List, Optional
 from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern
+from backend.db.models import NormalizedTransaction, UserCalculationBundle, UnitPattern, DismissedSuggestion
+from backend.db.repositories.dismissed_suggestion_repository import DismissedSuggestionRepository
 from backend.services.grouping_engine import (
     GroupingEngine,
     GroupingConfig,
     GroupingSuggestion,
     PATTERN_UNKNOWN,
 )
+from backend.services.suggestion_fingerprint import compute_suggestion_fingerprint
 
 log = configure_logging("suggestion_service")
 
 
 # Taxability defaults for patterns
 _PATTERN_TAXABILITY = {
-    UnitPattern.TRANSFER.value: "non_taxable",
+    UnitPattern.INTERNAL_TRANSFER.value: "non_taxable",
     UnitPattern.SWAP.value: "taxable",  # Default, but depends on config
+    UnitPattern.FLOW.value: "taxable",  # External single-leg, same as SWAP
     UnitPattern.SPLIT.value: "non_taxable",
+    UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value: "non_taxable",
     UnitPattern.UNKNOWN.value: "unknown",
 }
 
@@ -51,12 +56,14 @@ class SuggestionService:
     def __init__(self, session: Session, config: Optional[GroupingConfig] = None):
         self.session = session
         self.engine = GroupingEngine(config)
+        self.dismissed_repo = DismissedSuggestionRepository(session)
 
     def get_suggestions(
         self,
         transactions: Optional[List[NormalizedTransaction]] = None,
-        max_suggestions: int = 20,
+        max_suggestions: int = 200,
         include_unknown: bool = False,
+        include_bundled: bool = False,
     ) -> List[GroupingSuggestion]:
         """
         Generate grouping suggestions for transactions.
@@ -65,12 +72,16 @@ class SuggestionService:
             transactions: Transactions to analyze. If None, fetches pending ones.
             max_suggestions: Maximum number of suggestions to return.
             include_unknown: Whether to include "unknown" pattern suggestions.
+            include_bundled: Whether to include transactions that already belong to a bundle.
 
         Returns:
             List of GroupingSuggestion objects (can be converted to CalculationUnit).
         """
         if transactions is None:
-            transactions = self._get_standalone_transactions()
+            if include_bundled:
+                transactions = self._get_all_transactions()
+            else:
+                transactions = self._get_standalone_transactions()
 
         if not transactions:
             return []
@@ -84,6 +95,15 @@ class SuggestionService:
             if len(s.transaction_ids) >= 2  # Only 2+ transactions
             and (include_unknown or s.pattern != PATTERN_UNKNOWN)
         ]
+
+        # Filter out dismissed suggestions
+        dismissed_fps = self.dismissed_repo.get_dismissed_fingerprints()
+        if dismissed_fps:
+            filtered = [
+                s for s in filtered
+                if compute_suggestion_fingerprint(s.pattern, s.transaction_ids)
+                not in dismissed_fps
+            ]
 
         # Sort by confidence and limit
         filtered.sort(key=lambda s: s.confidence, reverse=True)
@@ -120,12 +140,23 @@ class SuggestionService:
         self.session.add(bundle)
         self.session.flush()  # Get the ID
 
-        # Link transactions to the bundle
+        # Link transactions to the bundle (validate none are already bundled)
+        conflicts = []
         for tx_id in suggestion.transaction_ids:
             tx = self.session.get(NormalizedTransaction, tx_id)
             if tx:
-                tx.user_calculation_unit_id = bundle.id
-                self.session.add(tx)
+                if tx.user_calculation_unit_id is not None:
+                    conflicts.append(
+                        f"Transaction {tx_id} is already in bundle {tx.user_calculation_unit_id}"
+                    )
+                else:
+                    tx.user_calculation_unit_id = bundle.id
+                    self.session.add(tx)
+        if conflicts:
+            self.session.rollback()
+            raise ValueError(
+                "Cannot accept suggestion: " + "; ".join(conflicts)
+            )
 
         self.session.commit()
         log.info(
@@ -134,12 +165,63 @@ class SuggestionService:
 
         return bundle
 
+    def dismiss_suggestion(
+        self,
+        pattern: str,
+        transaction_ids: List[int],
+        label: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> DismissedSuggestion:
+        """
+        Dismiss a suggestion so it won't appear in future results.
+
+        Args:
+            pattern: Suggestion pattern (e.g., 'internal_transfer', 'swap')
+            transaction_ids: Transaction IDs in the suggestion
+            label: Suggestion label (for display context)
+            reason: User-provided reason for dismissal
+
+        Returns:
+            The created DismissedSuggestion record
+        """
+        dismissed = self.dismissed_repo.dismiss(
+            pattern=pattern,
+            transaction_ids=transaction_ids,
+            label=label,
+            reason=reason,
+        )
+        self.session.commit()
+        fingerprint = compute_suggestion_fingerprint(pattern, transaction_ids)
+        log.info(f"Dismissed suggestion {fingerprint} ({pattern}, {len(transaction_ids)} txs)")
+        return dismissed
+
+    def undismiss_suggestion(self, fingerprint: str) -> bool:
+        """
+        Restore a dismissed suggestion so it appears again.
+
+        Args:
+            fingerprint: The fingerprint of the dismissed suggestion
+
+        Returns:
+            True if restored, False if not found
+        """
+        result = self.dismissed_repo.undismiss(fingerprint)
+        if result:
+            self.session.commit()
+            log.info(f"Restored dismissed suggestion {fingerprint}")
+        return result
+
+    def list_dismissed(self) -> List[DismissedSuggestion]:
+        """List all dismissed suggestions."""
+        return self.dismissed_repo.list_dismissed()
+
     def _get_pending_transactions(self) -> List[NormalizedTransaction]:
         """Get all pending transactions (not yet reviewed/grouped)."""
         statement = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.review_status == "pending")
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())
@@ -149,6 +231,16 @@ class SuggestionService:
         statement = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.user_calculation_unit_id.is_(None))
+            .options(selectinload(NormalizedTransaction.account_rel))
+            .order_by(NormalizedTransaction.date_time)
+        )
+        return list(self.session.exec(statement).all())
+
+    def _get_all_transactions(self) -> List[NormalizedTransaction]:
+        """Get all transactions (including those already in a bundle)."""
+        statement = (
+            select(NormalizedTransaction)
+            .options(selectinload(NormalizedTransaction.account_rel))
             .order_by(NormalizedTransaction.date_time)
         )
         return list(self.session.exec(statement).all())

@@ -207,7 +207,8 @@ def make_transaction(
     quantity: Decimal,
     account_id: int = 1,
     date_time: datetime = None,
-    disposal_taxable: bool = False,  # User input override flag
+    taxability_status: str = "unknown",  # 3-state: taxable/non_taxable/unknown
+    source_transaction_type: str = None,  # e.g. "funding", "perp_open", "perp_close"
 ) -> NormalizedTransaction:
     """Create a NormalizedTransaction for testing (minimal fields)."""
     if date_time is None:
@@ -219,9 +220,11 @@ def make_transaction(
         quantity=quantity,
         account_id=account_id,
         date_time=date_time,
-        disposal_taxable=disposal_taxable,
+        taxability_status=taxability_status,
         source_transaction_id=f"test-{id}",
     )
+    if source_transaction_type:
+        tx.source_transaction_type = source_transaction_type
     # Set relationship objects for property access
     tx.asset = make_asset(asset_id)
     tx.account_rel = make_account(account_id)
@@ -233,7 +236,6 @@ def make_leg(
     leg_type: LegType,
     quantity: Decimal,
     transaction: NormalizedTransaction = None,
-    tx_disposal_taxable: bool = False,
 ) -> CalculationUnitLeg:
     """
     Create a CalculationUnitLeg for testing.
@@ -243,7 +245,6 @@ def make_leg(
         leg_type: "inflow", "outflow", or "fee"
         quantity: Amount
         transaction: Optional NormalizedTransaction (creates one if not provided)
-        tx_disposal_taxable: User override flag from transaction
     """
     if transaction is None:
         # Create a minimal transaction for relationship
@@ -251,7 +252,6 @@ def make_leg(
             id=1,
             asset_id=asset_id,
             quantity=quantity,
-            disposal_taxable=tx_disposal_taxable,
         )
     
     leg = CalculationUnitLeg(
@@ -339,8 +339,8 @@ def create_buy_group(
     base_currency_id: int = 1,
 ) -> CalculationUnit:
     """Create a BUY group: EUR → Asset."""
-    outflow_tx = make_transaction(id=1, asset_id=base_currency_id, quantity=cost_in_base)
-    inflow_tx = make_transaction(id=2, asset_id=asset_id, quantity=qty)
+    outflow_tx = make_transaction(id=1, asset_id=base_currency_id, quantity=cost_in_base, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=2, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=base_currency_id, leg_type=LegType.OUTFLOW, quantity=cost_in_base, transaction=outflow_tx),
@@ -359,8 +359,8 @@ def create_sell_group(
     base_currency_id: int = 1,
 ) -> CalculationUnit:
     """Create a SELL group: Asset → EUR."""
-    outflow_tx = make_transaction(id=3, asset_id=asset_id, quantity=qty)
-    inflow_tx = make_transaction(id=4, asset_id=base_currency_id, quantity=proceeds_in_base)
+    outflow_tx = make_transaction(id=3, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=4, asset_id=base_currency_id, quantity=proceeds_in_base, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
@@ -381,8 +381,8 @@ def create_swap_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a SWAP group: Asset1 → Asset2."""
-    outflow_tx = make_transaction(id=5, asset_id=from_asset_id, quantity=from_qty)
-    inflow_tx = make_transaction(id=6, asset_id=to_asset_id, quantity=to_qty)
+    outflow_tx = make_transaction(id=5, asset_id=from_asset_id, quantity=from_qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=6, asset_id=to_asset_id, quantity=to_qty, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=from_asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
@@ -403,20 +403,20 @@ def create_transfer_group(
     """Create a TRANSFER group: same asset, different accounts."""
     inflow_qty = qty - fee_qty if fee_qty else qty
 
-    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty, account_id=from_account_id)
-    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty, account_id=to_account_id)
+    outflow_tx = make_transaction(id=7, asset_id=asset_id, quantity=qty, account_id=from_account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=8, asset_id=asset_id, quantity=inflow_qty, account_id=to_account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),
-        make_leg(asset_id=asset_id, leg_type="inflow", quantity=inflow_qty, transaction=inflow_tx),
+        make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=inflow_qty, transaction=inflow_tx),
     ]
 
     # Add fee leg if specified
     if fee_qty:
-        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, account_id=from_account_id)
+        fee_tx = make_transaction(id=9, asset_id=asset_id, quantity=fee_qty, account_id=from_account_id, date_time=base_dt)
         legs.append(make_leg(asset_id=asset_id, leg_type=LegType.FEE, quantity=fee_qty, transaction=fee_tx))
 
-    return make_unit(legs=legs, pattern="transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
+    return make_unit(legs=legs, pattern="internal_transfer", unit_label=f"Transfer {qty} of asset {asset_id}")
 
 
 def create_split_group(
@@ -427,8 +427,8 @@ def create_split_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a SPLIT group: same asset, qty multiplies (e.g., 2:1 split)."""
-    outflow_tx = make_transaction(id=10, asset_id=asset_id, quantity=from_qty)
-    inflow_tx = make_transaction(id=11, asset_id=asset_id, quantity=to_qty)
+    outflow_tx = make_transaction(id=10, asset_id=asset_id, quantity=from_qty, account_id=account_id, date_time=base_dt)
+    inflow_tx = make_transaction(id=11, asset_id=asset_id, quantity=to_qty, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=from_qty, transaction=outflow_tx),
@@ -446,7 +446,7 @@ def create_airdrop_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create an AIRDROP group: inflow only."""
-    inflow_tx = make_transaction(id=12, asset_id=asset_id, quantity=qty)
+    inflow_tx = make_transaction(id=12, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.INFLOW, quantity=qty, transaction=inflow_tx),
@@ -463,7 +463,7 @@ def create_payment_group(
     account_id: int = 1,
 ) -> CalculationUnit:
     """Create a PAYMENT group: outflow only."""
-    outflow_tx = make_transaction(id=13, asset_id=asset_id, quantity=qty)
+    outflow_tx = make_transaction(id=13, asset_id=asset_id, quantity=qty, account_id=account_id, date_time=base_dt)
     
     legs = [
         make_leg(asset_id=asset_id, leg_type=LegType.OUTFLOW, quantity=qty, transaction=outflow_tx),

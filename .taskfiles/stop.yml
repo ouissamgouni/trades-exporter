@@ -12,16 +12,38 @@ tasks:
     desc: Stop dev database
     dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev stop
-      - echo "✅ Dev database stopped"
+      - |
+        ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
+        # Confirm no containers remain for this compose project
+        CONTAINERS=$(docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev ps -q || true)
+        if [ -n "$CONTAINERS" ]; then
+          echo "❌ Dev database still present: $CONTAINERS"
+          exit 1
+        else
+          echo "✅ Dev database stopped"
+        fi
 
   dev:backend:
     desc: Stop dev backend
     dotenv: [.env, .env.dev]
     cmds:
       - |
-        if pkill -f "uvicorn backend.api.main:app" 2>/dev/null; then
+        if pkill -f "backend.api.main" 2>/dev/null; then
           echo "✅ Backend stopped"
+          # Wait a moment and check if any processes still running
+          sleep 1
+          if pgrep -f "backend.api.main" > /dev/null 2>&1; then
+            echo "Retrying with force..."
+            pkill -9 -f "backend.api.main" 2>/dev/null
+            sleep 1
+            if pgrep -f "backend.api.main" > /dev/null 2>&1; then
+              echo "❌ Failed to stop backend completely"
+            else
+              echo "✅ Backend fully stopped"
+            fi
+          else
+            echo "✅ Backend fully stopped"
+          fi
         else
           echo "ℹ️  Backend not running"
         fi
@@ -41,12 +63,12 @@ tasks:
     desc: Stop test stack
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+      - ENV_NAME=test docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
       - echo "✅ Test stack stopped"
 
   prod:
     desc: Stop prod stack
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod stack stopped"

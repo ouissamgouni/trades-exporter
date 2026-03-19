@@ -1,14 +1,17 @@
 import {
     Badge, Box,
-    Button, Card, Collapsible, Heading, HStack, IconButton, Input,
-    Switch, Table, Text, useDisclosure, VStack
+    Button, Card, Collapsible, Flex, Heading, HStack, IconButton, Input,
+    SimpleGrid, Switch, Text, useDisclosure, VStack
 } from '@chakra-ui/react';
-import React, { useEffect, useState } from 'react';
-import { FiChevronDown, FiChevronRight, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FiChevronDown, FiChevronRight, FiPieChart, FiEdit2, FiPlus, FiTrash2 } from 'react-icons/fi';
+import { LuEraser } from 'react-icons/lu';
+import { BalanceDrawer } from './BalanceDrawer';
 import { Account, API_URL } from '../types';
 import AccountConnectors from './AccountConnectors';
 import AccountFormDialog from './AccountFormDialog';
-import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
+import { DeleteAccountDialog } from './DeleteAccountDialog';
+import { CleanupDialog } from './CleanupDialog';
 import { toaster } from './ui/toaster';
 
 const AccountsManagement: React.FC = () => {
@@ -16,18 +19,58 @@ const AccountsManagement: React.FC = () => {
     const [filteredAccounts, setFilteredAccounts] = useState<Account[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchText, setSearchText] = useState('');
-    const [accountTypeFilter, setAccountTypeFilter] = useState<string>('');
     const [editingAccount, setEditingAccount] = useState<Account | null>(null);
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const { open: isDialogOpen, onOpen: openDialog, onClose: closeDialog } = useDisclosure();
 
-    const deleteConfirm = useConfirmDialog<number>();
+    // Delete dialog state
+    const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+    const isDeleteOpen = deleteTarget !== null;
+
+    // Balance drawer state
+    const [balanceDrawerOpen, setBalanceDrawerOpen] = useState(false);
+    const [balanceMode, setBalanceMode] = useState<'global' | 'account'>('global');
+    const [balanceAccountId, setBalanceAccountId] = useState<number | undefined>();
+    const [balanceTitle, setBalanceTitle] = useState<string>('');
+
+    // Cleanup dialog state
+    const [cleanupTarget, setCleanupTarget] = useState<{ accountId: number; title: string } | null>(null);
+    const isCleanupOpen = cleanupTarget !== null;
+
+    const handleBalanceClick = (account: Account) => {
+        setBalanceMode('account');
+        setBalanceAccountId(account.id);
+        setBalanceTitle(`${account.name} Balance`);
+        setBalanceDrawerOpen(true);
+    };
+
+    const handleGlobalBalanceClick = () => {
+        setBalanceMode('global');
+        setBalanceAccountId(undefined);
+        setBalanceTitle('Global Balance');
+        setBalanceDrawerOpen(true);
+    };
+
+    const handlePurgeAccount = (account: Account) => {
+        setCleanupTarget({
+            accountId: account.id,
+            title: `Purge All Data: ${account.name}`,
+        });
+    };
+
+    const handleCleanupClose = () => {
+        setCleanupTarget(null);
+    };
+
+    const handleCleanupCompleted = () => {
+        setCleanupTarget(null);
+        fetchAccounts();
+    };
 
     const fetchAccounts = async () => {
         setLoading(true);
         try {
             const params = new URLSearchParams();
-            if (accountTypeFilter) params.append('account_type', accountTypeFilter);
             if (searchText) params.append('search', searchText);
 
             const response = await fetch(`${API_URL}/accounts/?${params.toString()}`);
@@ -45,26 +88,19 @@ const AccountsManagement: React.FC = () => {
 
     useEffect(() => {
         fetchAccounts();
-    }, [accountTypeFilter, searchText]);
+    }, [searchText]);
 
-    const handleDelete = (accountId: number) => {
-        deleteConfirm.open(accountId);
+    const handleDelete = (account: Account) => {
+        setDeleteTarget({ id: account.id, name: account.name });
     };
 
-    const executeDelete = async () => {
-        if (!deleteConfirm.data) return;
-        const accountId = deleteConfirm.data;
-        try {
-            const response = await fetch(`${API_URL}/accounts/${accountId}`, {
-                method: 'DELETE',
-            });
-            if (!response.ok) throw new Error('Failed to delete account');
+    const handleDeleteClose = () => {
+        setDeleteTarget(null);
+    };
 
-            fetchAccounts();
-        } catch (error) {
-            console.error('Error deleting account:', error);
-            toaster.error({ title: 'Error', description: 'Failed to delete account' });
-        }
+    const handleDeleted = () => {
+        setDeleteTarget(null);
+        fetchAccounts();
     };
 
     const handleEdit = (account: Account) => {
@@ -83,14 +119,27 @@ const AccountsManagement: React.FC = () => {
         fetchAccounts();
     };
 
-    const getAccountTypeBadgeColor = (type: string) => {
-        switch (type) {
-            case 'cex': return 'blue';
-            case 'broker': return 'green';
-            case 'wallet': return 'purple';
-            default: return 'gray';
+    // Group accounts by type, then by group within each type
+    const accountsByTypeAndGroup = useMemo(() => {
+        const result = new Map<string, Map<string, Account[]>>();
+        for (const type of ['cex', 'dex', 'wallet', 'broker', 'bank', 'investment']) {
+            const typeAccounts = filteredAccounts.filter(a => a.account_type === type);
+            const groups = new Map<string, Account[]>();
+            for (const account of typeAccounts) {
+                const groupName = account.group || 'Ungrouped';
+                const list = groups.get(groupName) || [];
+                list.push(account);
+                groups.set(groupName, list);
+            }
+            if (typeAccounts.length > 0) {
+                result.set(type, groups);
+            }
         }
-    };
+        return result;
+    }, [filteredAccounts]);
+
+    const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
     const toggleExpand = (accountId: number) => {
         setExpandedAccountIds(prev => {
@@ -110,15 +159,6 @@ const AccountsManagement: React.FC = () => {
 
     const collapseAll = () => {
         setExpandedAccountIds(new Set());
-    };
-
-    const getAccountTypeIcon = (type: string) => {
-        switch (type) {
-            case 'cex': return '🏦';
-            case 'broker': return '📈';
-            case 'wallet': return '👛';
-            default: return '📁';
-        }
     };
 
     const toggleAccountEnabled = async (accountId: number, currentEnabled: boolean) => {
@@ -160,6 +200,9 @@ const AccountsManagement: React.FC = () => {
                         </Text>
                     </Box>
                     <HStack gap={2}>
+                        <Button size="sm" variant="ghost" onClick={handleGlobalBalanceClick}>
+                            <FiPieChart /> Balance
+                        </Button>
                         <Button size="sm" variant="ghost" onClick={expandAll}>
                             Expand All
                         </Button>
@@ -175,173 +218,233 @@ const AccountsManagement: React.FC = () => {
                     </HStack>
                 </HStack>
 
-                {/* Filters */}
+                {/* Search */}
                 <HStack gap={4}>
                     <Input
                         placeholder="Search by name or identifier..."
                         value={searchText}
                         onChange={(e) => setSearchText(e.target.value)}
                         maxW="400px"
+                        size="sm"
                     />
-                    <HStack>
-                        <Button
-                            size="sm"
-                            variant={accountTypeFilter === '' ? 'solid' : 'outline'}
-                            onClick={() => setAccountTypeFilter('')}
-                        >
-                            All
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant={accountTypeFilter === 'cex' ? 'solid' : 'outline'}
-                            colorScheme="blue"
-                            onClick={() => setAccountTypeFilter('cex')}
-                        >
-                            CEX
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant={accountTypeFilter === 'broker' ? 'solid' : 'outline'}
-                            colorScheme="green"
-                            onClick={() => setAccountTypeFilter('broker')}
-                        >
-                            Broker
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant={accountTypeFilter === 'wallet' ? 'solid' : 'outline'}
-                            colorScheme="purple"
-                            onClick={() => setAccountTypeFilter('wallet')}
-                        >
-                            Wallet
-                        </Button>
-                    </HStack>
                 </HStack>
 
-                {/* Accounts as Expandable Cards */}
-                <VStack align="stretch" gap={3}>
-                    {loading ? (
-                        <Box textAlign="center" py={8}>
-                            <Text>Loading accounts...</Text>
-                        </Box>
-                    ) : filteredAccounts.length === 0 ? (
-                        <Box textAlign="center" py={8} bg="gray.50" borderRadius="lg">
-                            <Text color="gray.600" mb={4}>No accounts found</Text>
-                            <Button colorScheme="blue" onClick={handleCreate}>
-                                <FiPlus /> Create Your First Account
-                            </Button>
-                        </Box>
-                    ) : (
-                        filteredAccounts.map((account) => {
-                            const isExpanded = expandedAccountIds.has(account.id);
-                            const isEnabled = account.enabled !== false;
-                            const bgColor = isEnabled ? ({
-                                cex: 'blue.50',
-                                broker: 'green.50',
-                                wallet: 'purple.50'
-                            }[account.account_type] || 'gray.50') : 'gray.100';
+                {/* Account Type Sections */}
+                {loading ? (
+                    <Box textAlign="center" py={8}>
+                        <Text>Loading accounts...</Text>
+                    </Box>
+                ) : filteredAccounts.length === 0 ? (
+                    <Box textAlign="center" py={8} bg="gray.50" borderRadius="lg">
+                        <Text color="gray.600" mb={4}>No accounts found</Text>
+                        <Button colorScheme="blue" onClick={handleCreate}>
+                            <FiPlus /> Create Your First Account
+                        </Button>
+                    </Box>
+                ) : (
+                    <VStack align="stretch" gap={2}>
+                        {[{ type: 'cex', label: '🏦 CEX', colorScheme: 'blue' },
+                        { type: 'dex', label: '🔗 DEX', colorScheme: 'cyan' },
+                        { type: 'wallet', label: '💼 Wallets', colorScheme: 'purple' },
+                        { type: 'broker', label: '📊 Brokers', colorScheme: 'green' },
+                        { type: 'bank', label: '🏛️ Banks', colorScheme: 'teal' },
+                        { type: 'investment', label: '📈 Investments', colorScheme: 'orange' }]
+                            .filter(section => accountsByTypeAndGroup.has(section.type))
+                            .map(section => {
+                                const groupsMap = accountsByTypeAndGroup.get(section.type)!;
+                                const allTypeAccounts = Array.from(groupsMap.values()).flat();
+                                const isCollapsed = collapsedSections[section.type] ?? false;
+                                const groupEntries = Array.from(groupsMap.entries());
+                                const hasMultipleGroups = groupEntries.length > 1 || (groupEntries.length === 1 && groupEntries[0][0] !== 'Ungrouped');
 
-                            return (
-                                <Card.Root key={account.id} variant="outline" opacity={isEnabled ? 1 : 0.7}>
-                                    {/* Account Header - Clickable */}
-                                    <Card.Body p={0}>
-                                        <Box
-                                            p={4}
+                                return (
+                                    <Box key={section.type} mb={2}>
+                                        {/* Type Section Header */}
+                                        <Flex
+                                            align="center"
+                                            justify="space-between"
+                                            py={1.5}
+                                            px={2}
+                                            bg={`${section.colorScheme}.50`}
+                                            borderRadius="md"
+                                            mb={1}
                                             cursor="pointer"
-                                            bg={bgColor}
-                                            borderBottomWidth={isExpanded ? 1 : 0}
-                                            borderColor="gray.200"
-                                            onClick={() => toggleExpand(account.id)}
-                                            _hover={{ opacity: 0.9 }}
-                                            transition="all 0.15s"
+                                            onClick={() => setCollapsedSections(prev => ({ ...prev, [section.type]: !isCollapsed }))}
+                                            _hover={{ bg: `${section.colorScheme}.100` }}
                                         >
-                                            <HStack justify="space-between">
-                                                <HStack gap={3}>
-                                                    {isExpanded ? <FiChevronDown /> : <FiChevronRight />}
-                                                    <Text fontSize="lg">{getAccountTypeIcon(account.account_type)}</Text>
-                                                    <Box>
-                                                        <HStack gap={2}>
-                                                            <Text fontWeight="semibold">{account.name}</Text>
-                                                            <Badge colorScheme={getAccountTypeBadgeColor(account.account_type)}>
-                                                                {account.account_type.toUpperCase()}
-                                                            </Badge>
-                                                        </HStack>
-                                                        {account.address_or_identifier && (
-                                                            <Text fontSize="xs" color="gray.600" fontFamily="mono">
-                                                                {account.address_or_identifier.length > 40
-                                                                    ? `${account.address_or_identifier.slice(0, 20)}...${account.address_or_identifier.slice(-10)}`
-                                                                    : account.address_or_identifier}
-                                                            </Text>
-                                                        )}
-                                                    </Box>
-                                                </HStack>
-                                                <HStack gap={2} onClick={(e) => e.stopPropagation()}>
-                                                    {/* Enabled Toggle */}
-                                                    <HStack gap={1} title={account.enabled !== false ? 'Click to disable syncing' : 'Click to enable syncing'}>
-                                                        <Text fontSize="xs" color={account.enabled !== false ? 'green.600' : 'gray.400'}>
-                                                            {account.enabled !== false ? 'Sync On' : 'Sync Off'}
-                                                        </Text>
-                                                        <Switch.Root
-                                                            size="sm"
-                                                            checked={account.enabled !== false}
-                                                            onCheckedChange={() => toggleAccountEnabled(account.id, account.enabled !== false)}
-                                                        >
-                                                            <Switch.HiddenInput />
-                                                            <Switch.Control>
-                                                                <Switch.Thumb />
-                                                            </Switch.Control>
-                                                        </Switch.Root>
-                                                    </HStack>
-                                                    {account.tags?.slice(0, 2).map((tag, idx) => (
-                                                        <Badge key={idx} size="sm" variant="subtle">
-                                                            {tag}
-                                                        </Badge>
-                                                    ))}
-                                                    <IconButton
-                                                        aria-label="Edit account"
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        onClick={() => handleEdit(account)}
-                                                    >
-                                                        <FiEdit2 />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="Delete account"
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        colorScheme="red"
-                                                        onClick={() => handleDelete(account.id)}
-                                                    >
-                                                        <FiTrash2 />
-                                                    </IconButton>
-                                                </HStack>
-                                            </HStack>
-                                            {!isExpanded && (
-                                                <Text fontSize="xs" color="gray.500" ml={10} mt={1}>
-                                                    Click to configure connectors →
+                                            <Flex align="center" gap={2}>
+                                                <Text color="gray.400" fontSize="xs">{isCollapsed ? '▶' : '▼'}</Text>
+                                                <Text fontWeight="medium" fontSize="sm" color="gray.700">
+                                                    {section.label}
                                                 </Text>
-                                            )}
-                                        </Box>
+                                                <Badge colorPalette="gray" size="xs" variant="subtle">
+                                                    {allTypeAccounts.length}
+                                                </Badge>
+                                            </Flex>
+                                        </Flex>
 
-                                        {/* Inline Connectors Panel */}
-                                        <Collapsible.Root open={isExpanded}>
+                                        <Collapsible.Root open={!isCollapsed}>
                                             <Collapsible.Content>
-                                                <Box p={4} bg="white">
-                                                    <AccountConnectors account={account} />
-                                                </Box>
+                                                {groupEntries.map(([groupName, groupAccounts]) => {
+                                                    const groupKey = `${section.type}:${groupName}`;
+                                                    const isGroupCollapsed = collapsedGroups[groupKey] ?? false;
+
+                                                    return (
+                                                        <Card.Root key={groupKey} variant="outline" mb={2}>
+                                                            <Card.Body p={0}>
+                                                                {hasMultipleGroups && (
+                                                                    <Flex
+                                                                        align="center"
+                                                                        py={2}
+                                                                        px={3}
+                                                                        bg="gray.50"
+                                                                        borderBottomWidth="1px"
+                                                                        borderColor="gray.200"
+                                                                        cursor="pointer"
+                                                                        onClick={() => setCollapsedGroups(prev => ({ ...prev, [groupKey]: !isGroupCollapsed }))}
+                                                                        _hover={{ bg: 'gray.100' }}
+                                                                    >
+                                                                        <Flex align="center" gap={2}>
+                                                                            <Text color="gray.500" fontSize="xs">{isGroupCollapsed ? '▶' : '▼'}</Text>
+                                                                            <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+                                                                                {groupName}
+                                                                            </Text>
+                                                                            <Badge colorPalette="gray" size="xs" variant="subtle">
+                                                                                {groupAccounts.length}
+                                                                            </Badge>
+                                                                        </Flex>
+                                                                    </Flex>
+                                                                )}
+
+                                                                <Collapsible.Root open={!isGroupCollapsed || !hasMultipleGroups}>
+                                                                    <Collapsible.Content>
+                                                                        <SimpleGrid columns={2} gap={2} p={2}>
+                                                                            {groupAccounts.map((account) => {
+                                                                                const isExpanded = expandedAccountIds.has(account.id);
+                                                                                const isEnabled = account.enabled !== false;
+
+                                                                                return (
+                                                                                    <Card.Root key={account.id} variant="outline" opacity={isEnabled ? 1 : 0.6} size="sm">
+                                                                                        <Card.Body p={0}>
+                                                                                            <Box
+                                                                                                py={1}
+                                                                                                px={2}
+                                                                                                cursor="pointer"
+                                                                                                bg={isEnabled ? 'white' : 'gray.50'}
+                                                                                                borderBottomWidth={isExpanded ? 1 : 0}
+                                                                                                borderColor="gray.200"
+                                                                                                onClick={() => toggleExpand(account.id)}
+                                                                                                _hover={{ bg: 'gray.50' }}
+                                                                                                transition="all 0.1s"
+                                                                                            >
+                                                                                                <Flex justify="space-between" align="center">
+                                                                                                    <Flex align="center" gap={1.5} minW={0} flex={1}>
+                                                                                                        <Box color="gray.400" flexShrink={0}>
+                                                                                                            {isExpanded ? <FiChevronDown size={10} /> : <FiChevronRight size={10} />}
+                                                                                                        </Box>
+                                                                                                        {account.color && (
+                                                                                                            <Box w="8px" h="8px" borderRadius="full" bg={account.color} flexShrink={0} />
+                                                                                                        )}
+                                                                                                        <Text fontWeight="semibold" fontSize="xs" truncate>
+                                                                                                            {account.name}
+                                                                                                        </Text>
+                                                                                                        {account.address_or_identifier && (
+                                                                                                            <Text fontSize="2xs" color="gray.400" fontFamily="mono" truncate maxW="120px">
+                                                                                                                {account.address_or_identifier.length > 20
+                                                                                                                    ? `${account.address_or_identifier.slice(0, 6)}...${account.address_or_identifier.slice(-4)}`
+                                                                                                                    : account.address_or_identifier}
+                                                                                                            </Text>
+                                                                                                        )}
+                                                                                                        {/* Tags inline */}
+                                                                                                        {account.tags && account.tags.length > 0 && (
+                                                                                                            <Flex gap={0.5} flexWrap="wrap">
+                                                                                                                {account.tags.map((tagObj, idx) => {
+                                                                                                                    const tagKey = typeof tagObj === 'string' ? tagObj : Object.keys(tagObj)[0];
+                                                                                                                    return tagKey ? (
+                                                                                                                        <Badge key={idx} size="xs" variant="subtle" fontSize="2xs" colorPalette="gray">
+                                                                                                                            {tagKey}
+                                                                                                                        </Badge>
+                                                                                                                    ) : null;
+                                                                                                                })}
+                                                                                                            </Flex>
+                                                                                                        )}
+                                                                                                    </Flex>
+                                                                                                    <Flex align="center" gap={1} flexShrink={0} onClick={(e) => e.stopPropagation()}>
+                                                                                                        <Switch.Root
+                                                                                                            size="sm"
+                                                                                                            checked={isEnabled}
+                                                                                                            onCheckedChange={() => toggleAccountEnabled(account.id, isEnabled)}
+                                                                                                            title={isEnabled ? 'Disable syncing' : 'Enable syncing'}
+                                                                                                        >
+                                                                                                            <Switch.HiddenInput />
+                                                                                                            <Switch.Control>
+                                                                                                                <Switch.Thumb />
+                                                                                                            </Switch.Control>
+                                                                                                        </Switch.Root>
+                                                                                                        <IconButton
+                                                                                                            aria-label="View balance"
+                                                                                                            size="xs"
+                                                                                                            variant="ghost"
+                                                                                                            onClick={() => handleBalanceClick(account)}
+                                                                                                            title="View live balance"
+                                                                                                        >
+                                                                                                            <FiPieChart />
+                                                                                                        </IconButton>
+                                                                                                        <IconButton
+                                                                                                            aria-label="Purge data"
+                                                                                                            size="xs"
+                                                                                                            variant="ghost"
+                                                                                                            onClick={() => handlePurgeAccount(account)}
+                                                                                                            title="Purge all account data"
+                                                                                                        >
+                                                                                                            <LuEraser />
+                                                                                                        </IconButton>
+                                                                                                        <IconButton
+                                                                                                            aria-label="Edit"
+                                                                                                            size="xs"
+                                                                                                            variant="ghost"
+                                                                                                            onClick={() => handleEdit(account)}
+                                                                                                        >
+                                                                                                            <FiEdit2 />
+                                                                                                        </IconButton>
+                                                                                                        <IconButton
+                                                                                                            aria-label="Delete"
+                                                                                                            size="xs"
+                                                                                                            variant="ghost"
+                                                                                                            colorScheme="red"
+                                                                                                            onClick={() => handleDelete(account)}
+                                                                                                        >
+                                                                                                            <FiTrash2 />
+                                                                                                        </IconButton>
+                                                                                                    </Flex>
+                                                                                                </Flex>
+                                                                                            </Box>
+
+                                                                                            <Collapsible.Root open={isExpanded}>
+                                                                                                <Collapsible.Content>
+                                                                                                    <Box p={3} bg="white" overflowX="auto">
+                                                                                                        <AccountConnectors account={account} />
+                                                                                                    </Box>
+                                                                                                </Collapsible.Content>
+                                                                                            </Collapsible.Root>
+                                                                                        </Card.Body>
+                                                                                    </Card.Root>
+                                                                                );
+                                                                            })}
+                                                                        </SimpleGrid>
+                                                                    </Collapsible.Content>
+                                                                </Collapsible.Root>
+                                                            </Card.Body>
+                                                        </Card.Root>
+                                                    );
+                                                })}
                                             </Collapsible.Content>
                                         </Collapsible.Root>
-                                    </Card.Body>
-                                </Card.Root>
-                            );
-                        })
-                    )}
-                </VStack>
-
-                {/* Summary */}
-                <Text fontSize="sm" color="gray.600">
-                    Showing {filteredAccounts.length} account{filteredAccounts.length !== 1 ? 's' : ''}
-                </Text>
+                                    </Box>
+                                );
+                            })}
+                    </VStack>
+                )}
             </VStack>
 
             {/* Dialog */}
@@ -352,14 +455,30 @@ const AccountsManagement: React.FC = () => {
             />
 
             {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={deleteConfirm.isOpen}
-                onClose={deleteConfirm.close}
-                onConfirm={executeDelete}
-                title="Delete Account"
-                message="Are you sure you want to delete this account?"
-                confirmLabel="Delete"
-                isDestructive
+            <DeleteAccountDialog
+                isOpen={isDeleteOpen}
+                onClose={handleDeleteClose}
+                accountId={deleteTarget?.id ?? null}
+                accountName={deleteTarget?.name ?? ''}
+                onDeleted={handleDeleted}
+            />
+
+            <BalanceDrawer
+                isOpen={balanceDrawerOpen}
+                onClose={() => setBalanceDrawerOpen(false)}
+                mode={balanceMode}
+                accountId={balanceAccountId}
+                title={balanceTitle}
+            />
+
+            <CleanupDialog
+                isOpen={isCleanupOpen}
+                onClose={handleCleanupClose}
+                connectorIds={[]}
+                accountId={cleanupTarget?.accountId}
+                defaultMode="purge"
+                title={cleanupTarget?.title ?? ''}
+                onCompleted={handleCleanupCompleted}
             />
         </Box>
     );

@@ -3,7 +3,6 @@ version: "3"
 tasks:
   migrate:dev:
     desc: Run database migrations on dev
-    dir: "{{.ROOT_DIR}}"
     dotenv: [.env, .env.dev]
     cmds:
       - |
@@ -26,30 +25,28 @@ tasks:
 
   seed:dev:
     desc: Seed dev database
-    dir: "{{.ROOT_DIR}}"
     dotenv: [.env, .env.dev]
     cmds:
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python {{.BACKEND_DIR}}/scripts/seed.py
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database seeded"
 
   seed:test:
     desc: Seed test database
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend python scripts/seed.py
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend python -m backend.scripts.seed
       - echo "✅ Test database seeded"
 
   reset:dev:
     desc: "⚠️ Reset dev database (drops all tables)"
     prompt: This will DELETE all data in dev database. Continue?
-    dir: "{{.ROOT_DIR}}"
     dotenv: [.env, .env.dev]
     cmds:
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" echo "y" | {{.BACKEND_DIR}}/.venv/bin/python {{.BACKEND_DIR}}/scripts/reset.py
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
       - |
-        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python {{.BACKEND_DIR}}/scripts/seed.py
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
       - echo "✅ Dev database reset and seeded"
 
   reset:test:
@@ -57,13 +54,310 @@ tasks:
     prompt: This will DELETE all data in test database. Continue?
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
       - echo "✅ Test database reset and seeded"
+
+  # === Integration Test Database ===
+
+  setup:integ:
+    desc: Setup integration test database (one-time setup)
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        echo "🔧 Setting up integration test database (trades_db_integ)..."
+        PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -c "DROP DATABASE IF EXISTS trades_db_integ;" postgres || true
+        PGPASSWORD=$POSTGRES_PASSWORD psql -h $POSTGRES_HOST -U $POSTGRES_USER -c "CREATE DATABASE trades_db_integ;" postgres
+      - |
+        echo "Creating tables from SQLModel..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          {{.BACKEND_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+      - |
+        echo "Stamping database to current migration..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
+      - |
+        echo "Seeding test data..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+      - echo "✅ Integration test database ready (trades_db_integ)"
+
+  reset:integ:
+    desc: Reset integration test database
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        echo "🔄 Resetting integration test database..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
+      - |
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+      - echo "✅ Integration test database reset and seeded"
 
   reset:prod:
     desc: "🚨 Reset prod database (DANGEROUS!)"
     prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python scripts/reset.py && python scripts/seed.py'
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
       - echo "⚠️ Prod database reset"
+
+  # === Migration Status & Validation ===
+
+  status:dev:
+    desc: Show migration status (current version, heads, pending)
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        echo "📊 Migration Status (dev)"
+        echo "========================"
+        echo ""
+        echo "Current version:"
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>&1 | grep -v "^\[Alembic\]" | grep -v "^INFO"
+        echo ""
+        echo "Head(s):"
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>&1 | grep -v "^\[Alembic\]"
+        echo ""
+        HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+        if [ "$HEAD_COUNT" -gt 1 ]; then
+          echo "⚠️  WARNING: Multiple heads detected ($HEAD_COUNT)! Run 'task db:merge:dev' to fix."
+        else
+          echo "✅ Single head - migration chain is clean"
+        fi
+
+  status:test:
+    desc: Show migration status on test
+    dotenv: [.env, .env.test]
+    cmds:
+      - |
+        echo "📊 Migration Status (test)"
+        echo "========================"
+        docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend sh -c '
+          echo "Current version:"
+          python -m alembic current
+          echo ""
+          echo "Head(s):"
+          python -m alembic heads
+        '
+
+  check:dev:
+    desc: Validate migration health (for CI/PR checks)
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        echo "🔍 Checking migration health (dev)..."
+        HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+        if [ "$HEAD_COUNT" -gt 1 ]; then
+          echo "❌ FAIL: Multiple migration heads detected ($HEAD_COUNT heads)"
+          echo ""
+          echo "Heads found:"
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null
+          echo ""
+          echo "Fix: Run 'task db:merge:dev -- \"merge_description\"'"
+          exit 1
+        fi
+        CURRENT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini current 2>/dev/null | grep -v "^\[Alembic\]" | grep -v "^INFO" | awk '{print $1}' | head -1)
+        HEAD=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep "(head)" | awk '{print $1}')
+        if [ "$CURRENT" != "$HEAD" ] && [ -n "$CURRENT" ]; then
+          echo "⚠️  WARNING: Pending migrations exist"
+          echo "   Current: $CURRENT"
+          echo "   Head:    $HEAD"
+          echo "   Run 'task db:migrate:dev' to apply"
+        else
+          echo "✅ Migration chain is healthy (single head, up to date)"
+        fi
+
+  history:dev:
+    desc: Show migration history
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        echo "📜 Migration History (dev)"
+        echo "=========================="
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini history --verbose 2>&1 | grep -v "^\[Alembic\]" | head -50
+
+  merge:dev:
+    desc: Merge multiple migration heads
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini heads 2>/dev/null | grep -c "(head)" || echo "0")
+        if [ "$HEAD_COUNT" -le 1 ]; then
+          echo "✅ No merge needed - only one head exists"
+          exit 0
+        fi
+        echo "🔀 Merging $HEAD_COUNT migration heads..."
+        MSG="${1:-merge_heads}"
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini merge heads -m "$MSG"
+        echo "✅ Heads merged. Run 'task db:migrate:dev' to apply."
+
+  stamp:dev:
+    desc: "⚠️ Stamp database to a revision (recovery tool)"
+    prompt: "This will update alembic_version without running migrations. Continue?"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        if [ -z "{{.CLI_ARGS}}" ]; then
+          echo "Usage: task db:stamp:dev -- <revision>"
+          echo "       task db:stamp:dev -- head"
+          exit 1
+        fi
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp {{.CLI_ARGS}}
+        echo "✅ Database stamped to {{.CLI_ARGS}}"
+
+  downgrade:dev:
+    desc: "⚠️ Rollback migrations (use with caution)"
+    prompt: "This will rollback migrations. Continue?"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        if [ -z "{{.CLI_ARGS}}" ]; then
+          echo "Usage: task db:downgrade:dev -- <revision>"
+          echo "       task db:downgrade:dev -- -1  (rollback 1 step)"
+          exit 1
+        fi
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini downgrade {{.CLI_ARGS}}
+        echo "✅ Rolled back to {{.CLI_ARGS}}"
+
+  # === Tag Cleanup ===
+
+  # === Database Copy / Promotion ===
+  #
+  # Named shortcuts (recommended):
+  #   task db:copy:dev-to-test        Copy dev → test
+  #   task db:copy:test-to-prod       Copy test → prod (with extra warning)
+  #
+  # Generic (any direction):
+  #   task db:copy -- dev test         Same as copy:dev-to-test
+  #   task db:copy -- dev prod         Any custom combination
+  #
+  # Dry-run (preview only):
+  #   task db:copy:dry-run -- dev test
+  #
+
+  copy:dev-to-test:
+    desc: "🔄 Copy dev database → test"
+    prompt: "This will REPLACE the test database with dev data. Continue?"
+    cmds:
+      - "{{.BACKEND_DIR}}/scripts/db_copy.sh {{.ROOT_DIR}}/.env.dev {{.ROOT_DIR}}/.env.test"
+
+  copy:test-to-prod:
+    desc: "⚠️ Copy test database → prod (promotes to production)"
+    prompt: "⚠️ This will REPLACE the PRODUCTION database with test data. Continue?"
+    cmds:
+      - "{{.BACKEND_DIR}}/scripts/db_copy.sh {{.ROOT_DIR}}/.env.test {{.ROOT_DIR}}/.env.prod"
+
+  copy:
+    desc: "🔄 Copy a database between any two envs (usage: task db:copy -- <src> <dst>)"
+    prompt: "This will REPLACE the target database with source data. Continue?"
+    cmds:
+      - |
+        set -- {{.CLI_ARGS}}
+        SRC="$1"
+        DST="$2"
+
+        if [ -z "$SRC" ] || [ -z "$DST" ]; then
+          echo "Usage: task db:copy -- <source> <target>"
+          echo "       task db:copy -- dev test"
+          echo "       task db:copy -- test prod"
+          echo ""
+          echo "Or use the named shortcuts:"
+          echo "       task db:copy:dev-to-test"
+          echo "       task db:copy:test-to-prod"
+          echo ""
+          echo "Available environments: dev, test, prod"
+          exit 1
+        fi
+
+        if [ "$SRC" = "$DST" ]; then
+          echo "❌ Source and target must be different environments"
+          exit 1
+        fi
+
+        SRC_ENV="{{.ROOT_DIR}}/.env.$SRC"
+        DST_ENV="{{.ROOT_DIR}}/.env.$DST"
+
+        exec "{{.BACKEND_DIR}}/scripts/db_copy.sh" "$SRC_ENV" "$DST_ENV"
+
+  copy:dry-run:
+    desc: "🔍 Preview a database copy without making changes"
+    cmds:
+      - |
+        set -- {{.CLI_ARGS}}
+        SRC="$1"
+        DST="$2"
+
+        if [ -z "$SRC" ] || [ -z "$DST" ]; then
+          echo "Usage: task db:copy:dry-run -- <source> <target>"
+          echo "       task db:copy:dry-run -- dev test"
+          exit 1
+        fi
+
+        SRC_ENV="{{.ROOT_DIR}}/.env.$SRC"
+        DST_ENV="{{.ROOT_DIR}}/.env.$DST"
+
+        exec "{{.BACKEND_DIR}}/scripts/db_copy.sh" "$SRC_ENV" "$DST_ENV" --dry-run
+
+  # === Tag Cleanup ===
+
+  cleanup-tags:dev:
+    desc: "🧹 Clean up user tags from transactions (preserves system tags)"
+    prompt: "This will remove user tags from transactions (system tags preserved). Continue?"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags --backup
+      - echo "✅ User tags cleaned up"
+
+  cleanup-tags:dev:dry-run:
+    desc: "🔍 Preview tag cleanup (dry run)"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags --dry-run
+
+  cleanup-tags:dev:all:
+    desc: "🚨 Clean up ALL tags including system tags (DANGEROUS!)"
+    prompt: "🚨 This will remove ALL tags including duplicate resolution data. Are you sure?"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags --no-preserve-system --backup
+      - echo "⚠️  All tags cleaned up (including system tags)"
+
+  cleanup-tags:dev:key:
+    desc: "🧹 Clean up specific tag key (usage: task db:cleanup-tags:dev:key -- category)"
+    dotenv: [.env, .env.dev]
+    cmds:
+      - |
+        if [ -z "{{.CLI_ARGS}}" ]; then
+          echo "Usage: task db:cleanup-tags:dev:key -- <tag_key>"
+          echo "Example: task db:cleanup-tags:dev:key -- category"
+          exit 1
+        fi
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.cleanup_tags --tag-key {{.CLI_ARGS}} --backup
+      - echo "✅ Tags with key '{{.CLI_ARGS}}' cleaned up"
+
+  cleanup-tags:test:
+    desc: "🧹 Clean up user tags from test database"
+    prompt: "This will remove user tags from test transactions. Continue?"
+    dotenv: [.env, .env.test]
+    cmds:
+      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test exec backend python -m backend.scripts.cleanup_tags --backup
+      - echo "✅ Test database user tags cleaned up"

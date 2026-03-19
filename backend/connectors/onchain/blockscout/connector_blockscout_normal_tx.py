@@ -4,12 +4,14 @@ Uses Blockscout API v2. Supports multiple networks.
 """
 
 from decimal import Decimal
-from typing import Dict, Any, List
+from typing import Dict, Any, Generator
 
 from backend.connectors.onchain.blockscout.base_blockscout_connector import (
     BlockscoutConnectorBase,
 )
 from backend.config.loader import configure_logging
+from backend.core.network_normalizer import normalize_network
+from backend.core.spam_detection import detect_blockscout_phishing, apply_spam_markers
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("blockscout_normal_tx")
@@ -50,8 +52,8 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             config=config,
         )
 
-    def get_raws(self) -> List[Dict[str, Any]]:
-        """Get raw normal transactions without mapping (for JSON logging)."""
+    def yield_raws(self) -> Generator[Dict[str, Any], None, None]:
+        """Fetch and yield raw normal transactions with pagination support."""
         try:
             self.update_progress(
                 operation="Fetching normal transactions",
@@ -60,27 +62,46 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
                 log_message=f"Fetching normal transactions for {self.wallet_address[:10]}..."
             )
             
-            # Blockscout API v2 transactions endpoint
-            result = self.safe_request(f"/addresses/{self.wallet_address}/transactions")
+            # Blockscout API v2 transactions endpoint with pagination
+            next_page_params = None
+            total_items = 0
+            page = 0
+            
+            while True:
+                page += 1
+                endpoint = f"/addresses/{self.wallet_address}/transactions"
+                params = next_page_params if next_page_params else {}
+                
+                result = self.safe_request(endpoint, params)
 
-            # Blockscout returns {"items": [...], "next_page_params": ...}
-            items = result.get("items", [])
-            if not isinstance(items, list):
-                log.warning(f"Unexpected transactions format: {type(items)}")
-                return []
+                # Blockscout returns {"items": [...], "next_page_params": ...}
+                items = result.get("items", [])
+                if not isinstance(items, list):
+                    log.warning(f"Unexpected transactions format: {type(items)}")
+                    break
+                
+                # Yield items from this page immediately
+                for item in items:
+                    total_items += 1
+                    yield item
+                
+                log.info(f"   Page {page}: yielded {len(items)} normal transactions")
+                
+                # Check for more pages
+                next_page_params = result.get("next_page_params")
+                if not next_page_params:
+                    break
 
             log.info(
-                f"   ✅ Found {len(items)} normal transactions on {self.chain_name}"
+                f"   ✅ Found {total_items} normal transactions on {self.chain_name}"
             )
             
             self.update_progress(
                 operation="Completed",
                 current=1,
                 total=1,
-                log_message=f"✅ Found {len(items)} normal transactions on {self.chain_name}"
+                log_message=f"✅ Found {total_items} normal transactions on {self.chain_name}"
             )
-            
-            return items
         except Exception as e:
             log.error(f"   ⚠️ Error fetching normal transactions: {e}")
             self.update_progress(
@@ -125,9 +146,9 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             if not tx_to:
                 raise ValueError(f"Cannot determine 'to' in '{tx}")
 
-            value_raw = int(tx.get("value", 0))
-            gas_used = int(tx.get("gas_used", 0))
-            gas_price = int(tx.get("gas_price", 0))
+            value_raw = int(tx.get("value") or 0)
+            gas_used = int(tx.get("gas_used") or 0)
+            gas_price = int(tx.get("gas_price") or 0)
 
             # Calculate amounts
             value = Decimal(value_raw) / Decimal(10**token_decimal)
@@ -143,14 +164,15 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
             # Build tags
             tags = {}
 
-            return NormalizedTransaction(
+            normalized = NormalizedTransaction(
                 source=f"blockscout_{self.chain_name.lower()}_normal_tx",
                 account_id=self.account_id,
-                source_account=self.wallet_address,  # Raw account identifier for mapping
+                source_account=self.wallet_address,
                 source_transaction_id=tx_hash,
+                network_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
-                transaction_type="technical" if value == 0 else "transfer",
+                transaction_type="cost" if value == 0 else "transfer",
                 source_transaction_type="normal-tx",
                 source_asset_symbol=self.native_token,
                 quantity=float(value),
@@ -159,9 +181,21 @@ class ConnectorBlockscoutNormalTx(BlockscoutConnectorBase):
                 include_fee=True if direction == "outflow" else False,
                 source_from_account=tx_from,
                 source_to_account=to_addr,
-                network=self.chain_name.lower(),
+                network=normalize_network(self.chain_name),
                 tags=tags,
             )
+
+            # Phishing / spam detection
+            spam_reasons = detect_blockscout_phishing(tx)
+            if spam_reasons:
+                apply_spam_markers(
+                    normalized,
+                    reasons=spam_reasons,
+                    tags=tags,
+                    tx_id=tx_hash,
+                )
+
+            return normalized
         except Exception as e:
             log.error(f"   ⚠️ Error mapping normal transaction: {e}")
             raise

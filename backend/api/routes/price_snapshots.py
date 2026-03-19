@@ -2,15 +2,16 @@
 Price Snapshots endpoints for the Trade Exporter API.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
+from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, select, func, col
 
 from backend.db.database import get_db
-from backend.db.models import PriceSnapshot, Asset, ensure_utc
+from backend.db.models import PriceSnapshot, Asset, AppSettings, ensure_utc
 
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
 
@@ -188,6 +189,265 @@ def list_price_snapshots(
             offset=offset,
         )
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ============================================================================
+# Price Health & Timeseries Endpoints
+# ============================================================================
+
+
+class PriceHealthRow(BaseModel):
+    """Health summary for a single asset's price data."""
+    asset_id: int
+    symbol: str
+    label: Optional[str] = None
+    last_price: float
+    last_source: Optional[str] = None
+    last_updated: str  # ISO datetime
+    first_snapshot: str  # ISO datetime
+    total_snapshots: int
+    days_stale: int
+    is_flatline: bool
+    status: str  # "healthy", "warning", "stale"
+
+
+class PriceHealthResponse(BaseModel):
+    """Response model for price health endpoint."""
+    items: List[PriceHealthRow]
+    staleness_threshold_days: int
+    summary: Dict[str, int]  # {"healthy": N, "warning": N, "stale": N}
+
+
+class PriceTimeseriesPoint(BaseModel):
+    date: str
+    price: float
+
+
+class PriceTimeseriesAsset(BaseModel):
+    asset_id: int
+    symbol: str
+    label: Optional[str] = None
+    points: List[PriceTimeseriesPoint]
+
+
+class PriceTimeseriesResponse(BaseModel):
+    assets: List[PriceTimeseriesAsset]
+
+
+def _get_app_settings(session: Session) -> AppSettings:
+    """Get or create app settings (reuse config pattern)."""
+    settings = session.exec(select(AppSettings)).first()
+    if not settings:
+        settings = AppSettings()
+        session.add(settings)
+        session.commit()
+        session.refresh(settings)
+    return settings
+
+
+@router.get("/health", response_model=PriceHealthResponse)
+def get_price_health(
+    session: Session = Depends(get_db),
+):
+    """
+    Get price health summary for all assets with price data.
+    
+    Returns per-asset freshness status, flat-line detection, and staleness info.
+    Uses the configured pnl_price_staleness_days threshold from app settings.
+    """
+    try:
+        settings = _get_app_settings(session)
+        staleness_days = settings.pnl_price_staleness_days
+        warning_days = max(1, staleness_days // 2)  # Warning at half the stale threshold
+        now = datetime.now(timezone.utc)
+
+        # 1) Aggregate stats per asset
+        agg_stmt = (
+            select(
+                PriceSnapshot.asset_id,
+                func.max(PriceSnapshot.snapshot_time).label("last_updated"),
+                func.min(PriceSnapshot.snapshot_time).label("first_snapshot"),
+                func.count(PriceSnapshot.snapshot_id).label("total_snapshots"),
+            )
+            .group_by(PriceSnapshot.asset_id)
+        )
+        agg_rows = session.exec(agg_stmt).all()
+
+        if not agg_rows:
+            return PriceHealthResponse(
+                items=[],
+                staleness_threshold_days=staleness_days,
+                summary={"healthy": 0, "warning": 0, "stale": 0},
+            )
+
+        # 2) Get latest price + source per asset using a subquery
+        asset_ids = [r[0] for r in agg_rows]
+
+        # Build a lookup: asset_id -> (last_price, last_source)
+        latest_lookup: Dict[int, tuple] = {}
+        for aid in asset_ids:
+            latest_stmt = (
+                select(PriceSnapshot.price, PriceSnapshot.source)
+                .where(PriceSnapshot.asset_id == aid)
+                .order_by(PriceSnapshot.snapshot_time.desc())
+                .limit(1)
+            )
+            row = session.exec(latest_stmt).first()
+            if row:
+                latest_lookup[aid] = (float(row[0]), row[1])
+
+        # 3) Flat-line detection: check if last 5 prices are identical per asset
+        flatline_set: set = set()
+        for aid in asset_ids:
+            recent_stmt = (
+                select(PriceSnapshot.price)
+                .where(PriceSnapshot.asset_id == aid)
+                .order_by(PriceSnapshot.snapshot_time.desc())
+                .limit(5)
+            )
+            recent_prices = session.exec(recent_stmt).all()
+            if len(recent_prices) >= 5:
+                prices_float = [float(p[0]) if isinstance(p, tuple) else float(p) for p in recent_prices]
+                if prices_float[0] > 0:
+                    all_same = all(
+                        abs(p - prices_float[0]) / prices_float[0] < 0.0001
+                        for p in prices_float[1:]
+                    )
+                    if all_same:
+                        flatline_set.add(aid)
+
+        # 4) Build asset info lookup
+        asset_lookup: Dict[int, Asset] = {}
+        for aid in asset_ids:
+            asset = session.get(Asset, aid)
+            if asset:
+                asset_lookup[aid] = asset
+
+        # 5) Build response rows
+        summary = {"healthy": 0, "warning": 0, "stale": 0}
+        items: List[PriceHealthRow] = []
+
+        for row in agg_rows:
+            aid, last_updated, first_snapshot, total_snapshots = row
+            asset = asset_lookup.get(aid)
+            latest = latest_lookup.get(aid, (0.0, None))
+
+            last_updated_dt = ensure_utc(last_updated) if last_updated else now
+            days = (now - last_updated_dt).days
+
+            if days >= staleness_days:
+                status = "stale"
+            elif days >= warning_days:
+                status = "warning"
+            else:
+                status = "healthy"
+
+            summary[status] += 1
+
+            items.append(PriceHealthRow(
+                asset_id=aid,
+                symbol=asset.symbol if asset else f"ID:{aid}",
+                label=asset.label if asset else None,
+                last_price=latest[0],
+                last_source=latest[1],
+                last_updated=last_updated_dt.isoformat() if last_updated else "",
+                first_snapshot=ensure_utc(first_snapshot).isoformat() if first_snapshot else "",
+                total_snapshots=total_snapshots,
+                days_stale=days,
+                is_flatline=aid in flatline_set,
+                status=status,
+            ))
+
+        # Sort by days_stale descending (worst offenders first)
+        items.sort(key=lambda x: x.days_stale, reverse=True)
+
+        return PriceHealthResponse(
+            items=items,
+            staleness_threshold_days=staleness_days,
+            summary=summary,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.get("/timeseries", response_model=PriceTimeseriesResponse)
+def get_price_timeseries(
+    asset_ids: str = Query(..., description="Comma-separated asset IDs"),
+    quote_asset_id: Optional[int] = Query(None, description="Filter by quote asset ID"),
+    source: Optional[str] = Query(None, description="Filter by source"),
+    date_from: Optional[str] = Query(None, description="Start date (ISO format)"),
+    date_to: Optional[str] = Query(None, description="End date (ISO format)"),
+    session: Session = Depends(get_db),
+):
+    """
+    Get price timeseries for selected assets, grouped by asset.
+    
+    Designed for charting — returns all data points (no pagination).
+    Limited to 10 assets at a time.
+    """
+    try:
+        # Parse asset IDs
+        try:
+            ids = [int(x.strip()) for x in asset_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid asset_ids format. Use comma-separated integers.")
+
+        if not ids:
+            raise HTTPException(status_code=400, detail="At least one asset_id is required.")
+        if len(ids) > 50:
+            raise HTTPException(status_code=400, detail="Maximum 50 assets per request.")
+
+        # Build query
+        statement = (
+            select(
+                PriceSnapshot.asset_id,
+                PriceSnapshot.snapshot_time,
+                PriceSnapshot.price,
+            )
+            .where(col(PriceSnapshot.asset_id).in_(ids))
+            .order_by(PriceSnapshot.asset_id, PriceSnapshot.snapshot_time)
+        )
+
+        if quote_asset_id is not None:
+            statement = statement.where(PriceSnapshot.quote_asset_id == quote_asset_id)
+        if source:
+            statement = statement.where(PriceSnapshot.source == source)
+        if date_from:
+            statement = statement.where(PriceSnapshot.snapshot_time >= parse_datetime(date_from))
+        if date_to:
+            statement = statement.where(PriceSnapshot.snapshot_time <= parse_datetime(date_to))
+
+        rows = session.exec(statement).all()
+
+        # Group by asset_id
+        grouped: Dict[int, List[PriceTimeseriesPoint]] = defaultdict(list)
+        for asset_id, snapshot_time, price in rows:
+            dt = ensure_utc(snapshot_time)
+            grouped[asset_id].append(PriceTimeseriesPoint(
+                date=dt.strftime("%Y-%m-%d"),
+                price=float(price),
+            ))
+
+        # Build response with asset info
+        result_assets: List[PriceTimeseriesAsset] = []
+        for aid in ids:
+            if aid not in grouped:
+                continue
+            asset = session.get(Asset, aid)
+            result_assets.append(PriceTimeseriesAsset(
+                asset_id=aid,
+                symbol=asset.symbol if asset else f"ID:{aid}",
+                label=asset.label if asset else None,
+                points=grouped[aid],
+            ))
+
+        return PriceTimeseriesResponse(assets=result_assets)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 

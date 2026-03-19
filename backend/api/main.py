@@ -25,9 +25,15 @@ from backend.api.routes import (
     connectors,
     categories,
     fixtures,
+    data_health,
+    timeline,
+    balance,
+    positions,
 )
 from backend.config.loader import get_database_url
 from backend.db import init_db
+from backend.db.database import register_pnl_invalidation_listener
+from backend.services.pnl_calculation_service import PnLCalculationService
 
 
 @asynccontextmanager
@@ -43,8 +49,17 @@ async def lifespan(app: FastAPI):
     # Initialize database (creates tables + seeds default data)
     init_db()
 
+    # Register P&L invalidation listener (detects data changes → marks stale)
+    register_pnl_invalidation_listener()
+
+    # Initialize P&L calculation service (starts as stale on boot)
+    pnl_service = PnLCalculationService.get_instance()
+    print(f"   P&L Calculation Service: initialized (status={pnl_service.get_status()['status']})")
+
     yield
-    # Shutdown: nothing to do - connections are closed per-request
+
+    # Shutdown: clean up background services
+    pnl_service.shutdown()
 
 
 app = FastAPI(
@@ -87,6 +102,10 @@ app.include_router(account_connectors.router)
 app.include_router(connectors.router)
 app.include_router(categories.router)
 app.include_router(fixtures.router)
+app.include_router(data_health.router)
+app.include_router(timeline.router)
+app.include_router(balance.router)
+app.include_router(positions.router)
 
 
 @app.get("/")

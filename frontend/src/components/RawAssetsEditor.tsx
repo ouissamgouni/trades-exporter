@@ -6,6 +6,7 @@ import {
 } from '@chakra-ui/react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { API_URL, Asset, RawAsset } from '../types';
+import { useAssets } from '../hooks/useAssets';
 import { AssetSelector } from './AssetSelector';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
@@ -60,7 +61,7 @@ interface SuggestedMatch {
 
 export const RawAssetsEditor: React.FC = () => {
     const [rawAssets, setRawAssets] = useState<RawAsset[]>([]);
-    const [assets, setAssets] = useState<Asset[]>([]);
+    const { assets, refetchAssets } = useAssets();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -76,7 +77,6 @@ export const RawAssetsEditor: React.FC = () => {
 
     useEffect(() => {
         fetchRawAssets();
-        fetchAssets();
     }, [sourceFilter, linkedFilter]);
 
     const fetchRawAssets = async () => {
@@ -95,18 +95,6 @@ export const RawAssetsEditor: React.FC = () => {
             setError(err instanceof Error ? err.message : 'Unknown error');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const fetchAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
         }
     };
 
@@ -401,7 +389,7 @@ export const RawAssetsEditor: React.FC = () => {
                                                         value={editAssetId}
                                                         onChange={setEditAssetId}
                                                         assets={assets}
-                                                        onAssetCreated={fetchAssets}
+                                                        onAssetCreated={refetchAssets}
                                                         defaultSymbol={rawAsset.symbol}
                                                         placeholder="Search assets..."
                                                     />
@@ -515,7 +503,7 @@ export const RawAssetsEditor: React.FC = () => {
                                             value={newRawAsset.asset_id ?? null}
                                             onChange={(assetId) => setNewRawAsset({ ...newRawAsset, asset_id: assetId ?? undefined })}
                                             assets={assets}
-                                            onAssetCreated={fetchAssets}
+                                            onAssetCreated={refetchAssets}
                                             defaultSymbol={newRawAsset.symbol || ''}
                                             placeholder="Search or create asset..."
                                         />

@@ -111,6 +111,30 @@ def yahoo_getter() -> BasePriceGetter:
 
 
 @pytest.fixture
+def yahoo_direct_getter() -> BasePriceGetter:
+    """Get Yahoo Direct (Chart API v8) price getter instance."""
+    return get_price_getter("yahoo_direct")
+
+
+@pytest.fixture
 def coingecko_getter() -> BasePriceGetter:
     """Get CoinGecko price getter instance."""
     return get_price_getter("coingecko")
+
+
+@pytest.fixture
+def marketstack_getter() -> BasePriceGetter:
+    """Get Marketstack price getter instance."""
+    return get_price_getter("marketstack")
+
+
+@pytest.fixture
+def alphavantage_getter() -> BasePriceGetter:
+    """Get Alpha Vantage price getter instance."""
+    return get_price_getter("alphavantage")
+
+
+@pytest.fixture
+def forex_getter() -> BasePriceGetter:
+    """Get Forex price getter instance."""
+    return get_price_getter("forex")

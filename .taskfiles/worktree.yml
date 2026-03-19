@@ -1,0 +1,147 @@
+version: "3"
+
+tasks:
+  # ════════════════════════════════════════════════════════════════
+  # Worktree Management
+  # ════════════════════════════════════════════════════════════════
+
+  setup:
+    desc: Create persistent worktrees for main and develop branches
+    cmds:
+      - mkdir -p {{.WORKTREE_DIR}}
+      - |
+        # Setup main worktree
+        if [ ! -d "{{.WORKTREE_MAIN}}" ]; then
+          echo "Creating worktree for main branch..."
+          git worktree add {{.WORKTREE_MAIN}} main
+          echo "✅ Created {{.WORKTREE_MAIN}}"
+        else
+          echo "✅ Worktree {{.WORKTREE_MAIN}} already exists"
+        fi
+      - |
+        # Setup develop worktree
+        if [ ! -d "{{.WORKTREE_DEVELOP}}" ]; then
+          echo "Creating worktree for develop branch..."
+          
+          # Check if develop branch exists
+          if ! git rev-parse --verify develop >/dev/null 2>&1; then
+            echo "⚠️  develop branch doesn't exist, creating from main..."
+            git branch develop main
+          fi
+          
+          git worktree add {{.WORKTREE_DEVELOP}} develop
+          echo "✅ Created {{.WORKTREE_DEVELOP}}"
+        else
+          echo "✅ Worktree {{.WORKTREE_DEVELOP}} already exists"
+        fi
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Worktrees ready"
+        echo ""
+        echo "   {{.WORKTREE_MAIN}}     → main branch"
+        echo "   {{.WORKTREE_DEVELOP}} → develop branch"
+        echo ""
+        echo "These directories are used for safe builds/deploys without"
+        echo "disrupting your current working directory."
+        echo "═══════════════════════════════════════════════════════════════"
+
+  setup:ref:
+    desc: Create temporary worktree for specific git ref
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    deps:
+      - task: git:resolve:ref
+        vars: { REF: "{{.REF}}" }
+    cmds:
+      - mkdir -p {{.WORKTREE_DIR}}
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        WORKTREE_PATH="{{.WORKTREE_DIR}}/ref-$SHA"
+
+        if [ -d "$WORKTREE_PATH" ]; then
+          echo "✅ Worktree for $REF ($SHA) already exists at $WORKTREE_PATH"
+        else
+          echo "Creating temporary worktree for $REF ($SHA)..."
+          git worktree add "$WORKTREE_PATH" "$REF"
+          echo "✅ Created $WORKTREE_PATH"
+        fi
+
+        echo "$WORKTREE_PATH"
+
+  status:
+    desc: Show all active worktrees
+    cmds:
+      - |
+        echo "Active worktrees:"
+        echo ""
+        git worktree list
+        echo ""
+
+        # Show disk usage
+        if [ -d "{{.WORKTREE_DIR}}" ]; then
+          echo "Disk usage:"
+          du -sh {{.WORKTREE_DIR}}/* 2>/dev/null || echo "  No worktrees"
+        fi
+
+  clean:
+    desc: Remove all worktrees (main, develop, and refs)
+    prompt: This will remove ALL worktrees. Any uncommitted changes in worktrees will be lost. Continue?
+    cmds:
+      - |
+        echo "Removing all worktrees..."
+
+        # Remove all worktrees except the main working directory
+        git worktree list --porcelain | grep "worktree " | grep -v "$(pwd)$" | sed 's/worktree //' | while read -r wt; do
+          echo "Removing $wt..."
+          git worktree remove "$wt" --force 2>/dev/null || true
+        done
+
+        # Clean up the directory
+        rm -rf {{.WORKTREE_DIR}}
+
+        echo "✅ All worktrees removed"
+
+  clean:refs:
+    desc: Remove only temporary ref worktrees (keep main and develop)
+    cmds:
+      - |
+        if [ ! -d "{{.WORKTREE_DIR}}" ]; then
+          echo "No worktree directory found"
+          exit 0
+        fi
+
+        echo "Removing temporary ref worktrees..."
+
+        # Remove ref-* worktrees
+        for wt in {{.WORKTREE_DIR}}/ref-*; do
+          if [ -d "$wt" ]; then
+            echo "Removing $wt..."
+            git worktree remove "$wt" --force 2>/dev/null || true
+          fi
+        done
+
+        echo "✅ Temporary ref worktrees removed"
+        echo ""
+        echo "Persistent worktrees retained:"
+        [ -d "{{.WORKTREE_MAIN}}" ] && echo "  ✅ {{.WORKTREE_MAIN}}"
+        [ -d "{{.WORKTREE_DEVELOP}}" ] && echo "  ✅ {{.WORKTREE_DEVELOP}}"
+
+  update:
+    desc: Update persistent worktrees (git pull)
+    cmds:
+      - |
+        echo "Updating worktrees..."
+
+        if [ -d "{{.WORKTREE_MAIN}}" ]; then
+          echo "Updating main..."
+          cd {{.WORKTREE_MAIN}} && git pull origin main
+        fi
+
+        if [ -d "{{.WORKTREE_DEVELOP}}" ]; then
+          echo "Updating develop..."
+          cd {{.WORKTREE_DEVELOP}} && git pull origin develop
+        fi
+
+        echo "✅ Worktrees updated"

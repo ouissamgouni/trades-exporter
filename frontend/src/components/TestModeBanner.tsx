@@ -39,7 +39,7 @@ export const TestModeBanner: React.FC = () => {
             fontWeight="bold"
             position="sticky"
             top={0}
-            zIndex={1000}
+            zIndex={10}
         >
             <Flex justify="center" align="center" gap={2}>
                 <Text fontSize="lg">⚠️</Text>

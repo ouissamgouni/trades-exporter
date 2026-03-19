@@ -3,11 +3,9 @@ version: "3"
 vars:
   DONT_RELOAD: false
   AUTO_START_DB: true
-  DOCKER_COMPOSE_DEV: infra/docker/docker-compose.dev.yml -p trades-exporter
-  DATABASE_URL_DEV: postgresql://trades_user:trades_password@localhost:{{.DEV_DB_PORT}}/trades_db_dev
-  BACKEND_CMD: .venv/bin/uvicorn backend.api.main:app{{if not .DONT_RELOAD}} --reload{{end}} --port {{.DEV_BACKEND_PORT}}
-  BACKEND_DEBUG_CMD: .venv/bin/python -m debugpy --listen {{.DEV_DEBUGPY_PORT}} -m uvicorn backend.api.main:app{{if not .DONT_RELOAD}} --reload{{end}} --port {{.DEV_BACKEND_PORT}}
-  FRONTEND_CMD: npm run dev -- --port {{.DEV_FRONTEND_PORT}}
+  DOCKER_COMPOSE_DEV: infra/docker/docker-compose.dev.yml
+  LOG_LEVEL: '{{.LOG_LEVEL | default "INFO"}}' # DEBUG, INFO, WARNING, ERROR
+  UVICORN_ACCESS_LOG_EXCLUDE_PATHS: '{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS | default ""}}' # JSON list or empty for settings.yaml default
 
 tasks:
   # ════════════════════════════════════════════════════════════════
@@ -16,19 +14,19 @@ tasks:
 
   dev:db:
     desc: Start dev database only
+    dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f {{.DOCKER_COMPOSE_DEV}} up -d postgres_dev
+      - ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter up -d postgres_dev
       - sleep 2
-      - |
-        echo ""
-        echo "✅ Dev database running on localhost:{{.DEV_DB_PORT}}"
-        echo ""
-        echo "Next steps:"
-        echo "  task start:dev:backend         → Start backend"
-        echo "  task start:dev:backend:debug   → Start backend with debugger"
-        echo "  task start:dev:frontend        → Start frontend"
-        echo "  task start:dev:all             → Start all services"
-        echo "  task start:dev:all:debug       → Start all with debugging"
+      - echo ""
+      - echo "✅ Dev database running on localhost:$POSTGRES_PORT"
+      - echo ""
+      - echo "Next steps:"
+      - echo "  task start:dev:backend         - Start backend"
+      - echo "  task start:dev:backend:debug   - Start backend with debugger"
+      - echo "  task start:dev:frontend        - Start frontend"
+      - echo "  task start:dev:all             - Start all services"
+      - echo "  task start:dev:all:debug       - Start all with debugging"
 
   dev:db:check:
     internal: true
@@ -47,58 +45,62 @@ tasks:
 
   dev:all:
     desc: Start full dev environment (DB + backend + frontend)
+    dotenv: [.env, .env.dev]
     deps: [dev:db]
+    vars:
+      RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
     cmds:
-      - |
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Starting all services with live logs"
-        echo ""
-        echo "Services:"
-        echo "   [DB]  Database on localhost:{{.DEV_DB_PORT}}"
-        echo "   [API] Backend on localhost:{{.DEV_BACKEND_PORT}}"
-        echo "   [WEB] Frontend on localhost:{{.DEV_FRONTEND_PORT}}"
-        echo ""
-        echo "Press Ctrl+C to stop all services"
-        echo "═══════════════════════════════════════════════════════════════"
-        echo ""
+      - echo ""
+      - echo "═══════════════════════════════════════════════════════════════"
+      - echo "✅ Starting all services with live logs"
+      - echo ""
+      - echo "Services:"
+      - echo "   [DB]  Database on localhost:$POSTGRES_PORT"
+      - echo "   [API] Backend on localhost:$BACKEND_PORT"
+      - echo "   [WEB] Frontend on localhost:$FRONTEND_PORT"
+      - echo ""
+      - echo "Press Ctrl+C to stop all services"
+      - echo "═══════════════════════════════════════════════════════════════"
+      - echo ""
       - |
         npx concurrently \
           --names "DB,API,WEB" \
           --prefix-colors "blue.bold,yellow.bold,green.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
-          "docker compose -f {{.DOCKER_COMPOSE_DEV}} logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL={{.DATABASE_URL_DEV}} {{.BACKEND_CMD}}" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:{{.DEV_BACKEND_PORT}} {{.FRONTEND_CMD}}"
+          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
 
   dev:all:debug:
     desc: Start full dev environment with debugging (DB + backend + frontend)
+    dotenv: [.env, .env.dev]
     deps: [dev:db]
+    vars:
+      RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
     cmds:
-      - |
-        echo ""
-        echo "═══════════════════════════════════════════════════════════════"
-        echo "✅ Starting all services with live logs (debugger enabled)"
-        echo ""
-        echo "Services:"
-        echo "   [DB]  Database on localhost:{{.DEV_DB_PORT}}"
-        echo "   [API] Backend on localhost:{{.DEV_BACKEND_PORT}} (debugger: {{.DEV_DEBUGPY_PORT}})"
-        echo "   [WEB] Frontend on localhost:{{.DEV_FRONTEND_PORT}}"
-        echo ""
-        echo "To attach debugger: VSCode → F5 → 'Backend: Attach'"
-        echo "Press Ctrl+C to stop all services"
-        echo "═══════════════════════════════════════════════════════════════"
-        echo ""
+      - echo ""
+      - echo "═══════════════════════════════════════════════════════════════"
+      - echo "✅ Starting all services with live logs (debugger enabled)"
+      - echo ""
+      - echo "Services:"
+      - 'echo "   [DB]  Database on localhost:$POSTGRES_PORT"'
+      - 'echo "   [API] Backend on localhost:$BACKEND_PORT (debugger: $DEBUGPY_PORT)"'
+      - 'echo "   [WEB] Frontend on localhost:$FRONTEND_PORT"'
+      - echo ""
+      - 'echo "To attach debugger: VSCode -> F5 -> Backend: Attach"'
+      - echo "Press Ctrl+C to stop all services"
+      - echo "═══════════════════════════════════════════════════════════════"
+      - echo ""
       - |
         npx concurrently \
           --names "DB,API,WEB" \
           --prefix-colors "blue.bold,yellow.bold,green.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
-          "docker compose -f {{.DOCKER_COMPOSE_DEV}} logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} DATABASE_URL={{.DATABASE_URL_DEV}} {{.BACKEND_DEBUG_CMD}}" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:{{.DEV_BACKEND_PORT}} {{.FRONTEND_CMD}}"
+          "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
 
   # ════════════════════════════════════════════════════════════════
   # Dev Environment: Individual Components
@@ -106,6 +108,7 @@ tasks:
 
   dev:backend:
     desc: Start backend locally (no debugger)
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -113,12 +116,14 @@ tasks:
     dir: "{{.BACKEND_DIR}}"
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
-      DATABASE_URL: "{{.DATABASE_URL_DEV}}"
+      LOG_LEVEL: "{{.LOG_LEVEL}}"
+      UVICORN_ACCESS_LOG_EXCLUDE_PATHS: "{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}"
     cmds:
-      - "{{.BACKEND_CMD}}"
+      - .venv/bin/python -m backend.api.run
 
   dev:backend:debug:
     desc: Start backend with debugger
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -126,20 +131,19 @@ tasks:
     dir: "{{.BACKEND_DIR}}"
     env:
       PYTHONPATH: "{{.ROOT_DIR}}"
-      DATABASE_URL: "{{.DATABASE_URL_DEV}}"
+      LOG_LEVEL: "{{.LOG_LEVEL}}"
+      UVICORN_ACCESS_LOG_EXCLUDE_PATHS: "{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}"
     cmds:
-      - |
-        echo "Starting backend with debugger on port {{.DEV_DEBUGPY_PORT}}..."
-        echo "→ In VSCode: F5 → 'Backend: Attach'"
-      - "{{.BACKEND_DEBUG_CMD}}"
+      - echo "Starting backend with debugger on port $DEBUGPY_PORT..."
+      - 'echo "In VSCode: F5 -> Backend: Attach"'
+      - .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m backend.api.run
 
   dev:frontend:
     desc: Start frontend locally (Vite)
+    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
     dir: "{{.FRONTEND_DIR}}"
-    env:
-      VITE_API_URL: http://localhost:{{.DEV_BACKEND_PORT}}
     cmds:
-      - "{{.FRONTEND_CMD}}"
+      - VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT
 
   # ════════════════════════════════════════════════════════════════
   # Test & Prod Environments: Full Stacks
@@ -147,24 +151,24 @@ tasks:
 
   test:
     desc: Start test stack (existing images)
+    dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - ENV_NAME=test docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
       - sleep 3
-      - |
-        echo ""
-        echo "✅ Test stack running"
-        echo "   Frontend: http://localhost:{{.TEST_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.TEST_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.TEST_DB_PORT}}"
+      - 'echo ""'
+      - 'echo "✅ Test stack running"'
+      - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
+      - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
+      - 'echo "   Database: localhost:$POSTGRES_PORT"'
 
   prod:
     desc: Start prod stack (existing images)
+    dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
       - sleep 3
-      - |
-        echo ""
-        echo "✅ Prod stack running"
-        echo "   Frontend: http://localhost:{{.PROD_FRONTEND_PORT}}"
-        echo "   Backend:  http://localhost:{{.PROD_BACKEND_PORT}}"
-        echo "   Database: localhost:{{.PROD_DB_PORT}}"
+      - 'echo ""'
+      - 'echo "✅ Prod stack running"'
+      - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
+      - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
+      - 'echo "   Database: localhost:$POSTGRES_PORT"'

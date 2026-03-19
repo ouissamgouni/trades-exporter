@@ -16,6 +16,7 @@ interface SlidePanelProps {
     title: string;
     titleIcon?: React.ReactNode;
     width?: string;
+    zIndex?: number;
     children: React.ReactNode;
 }
 
@@ -25,6 +26,7 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
     title,
     titleIcon,
     width = '600px',
+    zIndex = 100,
     children,
 }) => {
     if (!isOpen) return null;
@@ -36,8 +38,8 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
                 position="fixed"
                 inset={0}
                 bg="blackAlpha.400"
-                zIndex={99}
-                onClick={onClose}
+                zIndex={zIndex - 1}
+                onClick={(e) => { e.stopPropagation(); onClose(); }}
                 cursor="pointer"
             />
 
@@ -51,7 +53,7 @@ export const SlidePanel: React.FC<SlidePanelProps> = ({
                 maxW="90vw"
                 bg="white"
                 boxShadow="xl"
-                zIndex={100}
+                zIndex={zIndex}
                 overflowY="auto"
                 borderLeft="1px solid"
                 borderColor="gray.200"

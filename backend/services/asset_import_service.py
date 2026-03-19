@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 import random
 from sqlmodel import Session, select
 
-from backend.db.models import Asset, AssetPriceGetter, Category, AssetCategory, Dimension
+from backend.db.models import Asset, AssetPriceGetter, AppSettings, Category, AssetCategory, Dimension
 from backend.file_loaders.asset_csv_loader import LoadResult, ParsedAsset, CategoryDefinition, PriceGetterConfig
 from backend.config.loader import configure_logging
 
@@ -278,6 +278,39 @@ class AssetImportService:
                  skipped=stats.skipped)
         
         return stats
+
+    # ------------------------------------------------------------------
+    # Mock getter auto-creation
+    # ------------------------------------------------------------------
+    _MOCK_RANGES_BY_TYPE = {
+        "crypto": {"min_price": 100.0, "max_price": 50000.0},
+        "stock": {"min_price": 10.0, "max_price": 500.0},
+        "fiat": {"min_price": 0.5, "max_price": 2.0},
+    }
+    _MOCK_DEFAULT_RANGE = {"min_price": 1.0, "max_price": 1000.0}
+
+    def _create_mock_getter(self, asset_id: int, price_type: str | None) -> None:
+        """Create a disabled mock price getter row for an asset (idempotent)."""
+        existing = self.session.exec(
+            select(AssetPriceGetter).where(
+                AssetPriceGetter.asset_id == asset_id,
+                AssetPriceGetter.price_getter == "mock",
+            )
+        ).first()
+        if existing:
+            return
+        settings = self.session.get(AppSettings, 1)
+        mock_enabled = settings.mock_mode_enabled if settings else False
+        pt = (price_type or "crypto").lower()
+        params = dict(self._MOCK_RANGES_BY_TYPE.get(pt, self._MOCK_DEFAULT_RANGE))
+        getter = AssetPriceGetter(
+            asset_id=asset_id,
+            price_getter="mock",
+            priority=0,
+            enabled=mock_enabled,
+            params=params,
+        )
+        self.session.add(getter)
     
     def _import_assets(
         self, 
@@ -315,6 +348,8 @@ class AssetImportService:
                         self.session.add(asset)
                         self.session.flush()  # Get the ID
                         asset_id_map[parsed.symbol] = asset.asset_id
+                        # Auto-create mock price getter for new asset
+                        self._create_mock_getter(asset.asset_id, asset.price_type)
                     else:
                         # For dry run, use a placeholder ID
                         asset_id_map[parsed.symbol] = -1

@@ -32,14 +32,61 @@ export type WorkflowStatus = 'pending' | 'reviewed' | 'excluded';
 // V2 Architecture: Taxability status
 export type TaxabilityStatus = `${TaxabilityStatusEnum}`;
 
+// Filter Response Wrapper Types
+export interface ValidationWarning {
+    filter_name: string;
+    provided_value: string;
+    reason: string;
+    severity: 'warning' | 'error';
+}
+
+export interface AppliedFilters {
+    review_statuses: string[];
+    taxability?: string;
+    sources: string[];
+    account_ids: (number | string)[];
+    from_account_ids: (number | string)[];
+    to_account_ids: (number | string)[];
+    related_account_ids: (number | string)[];
+    asset_ids: number[];
+    related_asset_ids: number[];
+    category_ids: number[];
+    transaction_types: string[];
+    directions: string[];
+    connector_run_ids: number[];
+    tag_keys: string[];
+    networks: string[];
+    date_from?: string;
+    date_to?: string;
+    pnl_cal_version?: number;
+    pnl_cal_inclusions_status?: string;
+}
+
+export interface FilterMetadata {
+    applied_filters: AppliedFilters;
+    validation_warnings: ValidationWarning[];
+    total_count: number;
+    filtered_count: number;
+    limit: number;
+    offset: number;
+}
+
+export interface TransactionListResponse {
+    results: Transaction[];
+    metadata: FilterMetadata;
+}
+
 export interface Account {
     id: number;
     name: string;
     account_type: `${AccountType}`;
     address_or_identifier?: string;
-    tags: string[];
+    group?: string;
+    tags: Record<string, any>[];
     owned: boolean;
     enabled: boolean;
+    live_balance_eligible?: boolean;
+    color?: string;
     created_at: string;
 }
 
@@ -51,6 +98,7 @@ export interface AccountConnector {
     config: Record<string, any>;
     credentials_ref?: string;
     sync_priority: number;
+    color?: string;
     last_sync_at?: string;
     last_sync_status?: `${SyncStatus}`;
     last_error?: string;
@@ -70,6 +118,8 @@ export interface ConnectorTypeInfo {
     supported_chains?: string[];
     required_config: string[];
     optional_config: string[];
+    supports_balance?: boolean;
+    is_file_connector?: boolean;
 }
 
 /**
@@ -121,7 +171,6 @@ export interface Transaction {
     total?: number; // Computed: price * quantity
     fee?: number;
     include_fee?: boolean;
-    disposal_taxable?: boolean;  // Whether disposing this asset is a taxable event
     source_account?: string;  // Raw account identifier before mapping
     source_from_account?: string;
     source_to_account?: string;
@@ -134,12 +183,16 @@ export interface Transaction {
     review_notes?: string;
     tags?: Record<string, any>;
     synced_at?: string;
+    // Connector metadata
+    sync_connector_run_id?: number | null;
+    connector_name?: string | null;
+    run_datetime?: string | null;
 }
 
 // V2 Architecture: Calculation Unit patterns (unified concept for grouping transactions)
 export type UnitPattern = `${UnitPatternEnum}`;
 // Backward compatibility alias
-export type BundlePattern = 'transfer' | 'swap';
+export type BundlePattern = 'internal_transfer' | 'swap';
 
 // V2 Architecture: CalculationUnit (replaces Bundle concept)
 export interface CalculationUnit {
@@ -162,6 +215,7 @@ export type Bundle = CalculationUnit;
 
 // Grouping suggestion from the suggestion service
 export interface GroupingSuggestion {
+    fingerprint: string;
     pattern: UnitPattern;
     confidence: number;
     label: string;
@@ -183,7 +237,7 @@ export interface ClassificationSuggestion {
     pattern: GroupPattern;
     confidence: number;
     reason: string;
-    suggested_disposal_taxable: boolean;
+    suggested_taxability_status: string;
     suggested_group_type: string;
     inflow_asset_ids: number[];
     outflow_asset_ids: number[];
@@ -301,7 +355,7 @@ export interface Asset {
     symbol: string;
     label?: string;
     price_type?: string;  // 'crypto', 'stock', 'fiat' - for price getter
-    tags?: string[];
+    tags?: Record<string, any>[];
     created_at?: string;
     status?: number;
     price_getters?: AssetPriceGetter[];
@@ -329,6 +383,46 @@ export interface PaginatedPriceSnapshotsResponse {
     offset: number;
 }
 
+// ============================================================================
+// Price Health Types
+// ============================================================================
+
+export interface PriceHealthRow {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    last_price: number;
+    last_source?: string | null;
+    last_updated: string;
+    first_snapshot: string;
+    total_snapshots: number;
+    days_stale: number;
+    is_flatline: boolean;
+    status: 'healthy' | 'warning' | 'stale';
+}
+
+export interface PriceHealthResponse {
+    items: PriceHealthRow[];
+    staleness_threshold_days: number;
+    summary: { healthy: number; warning: number; stale: number };
+}
+
+export interface PriceTimeseriesPoint {
+    date: string;
+    price: number;
+}
+
+export interface PriceTimeseriesAsset {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    points: PriceTimeseriesPoint[];
+}
+
+export interface PriceTimeseriesResponse {
+    assets: PriceTimeseriesAsset[];
+}
+
 export interface RawAsset {
     symbol: string;
     source: string;
@@ -339,13 +433,18 @@ export interface RawAccount {
     id: number;
     source: string;
     label: string;
-    account_id?: number;
+    network?: string;
+    account_id?: number | null;
+    transaction_count?: number;
+    dismissed?: boolean;
+    dismissed_at?: string;
+    dismissed_reason?: string;
 }
 
 // Sync Job Types
-export type SyncJobStatus = 'idle' | 'running' | 'completed' | 'aborted' | 'failed';
+export type SyncJobStatus = 'idle' | 'pending' | 'running' | 'completed' | 'warning' | 'aborted' | 'failed';
 
-export type ConnectorSyncStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'queued';
+export type ConnectorSyncStatus = 'pending' | 'running' | 'completed' | 'warning' | 'failed' | 'skipped' | 'queued';
 
 export type PipelineStage = 'fetch' | 'transfer_detection' | 'asset_enrichment' | 'persistence';
 
@@ -363,11 +462,15 @@ export interface StageStats {
 
 export interface ConnectorProgress {
     connector_id: number;
+    connector_run_id?: number;
     connector_type: string;
     account_name: string;
+    account_type?: string;
+    account_group?: string;
     status: ConnectorSyncStatus;
     test_mode: boolean;
     processed: number;
+    fetched_count: number;  // Items fetched from API (updated during fetch phase)
     new_count: number;
     updated_count: number;
     skipped_count: number;
@@ -408,6 +511,7 @@ export interface SyncJobProgress {
     error_message?: string;
     connector_statuses?: Record<string, ConnectorProgress>;
     job_id?: number; // Persisted job ID
+    renormalize?: boolean;
 }
 
 // ============================================================================
@@ -426,6 +530,8 @@ export interface SyncJobSummary {
     total_skipped: number;
     total_errors: number;
     error_message?: string;
+    renormalize?: boolean;
+    connector_runs?: ConnectorRunSummary[];
 }
 
 export interface ConnectorRunSummary {
@@ -456,6 +562,7 @@ export interface SyncJobDetail {
     total_skipped: number;
     total_errors: number;
     error_message?: string;
+    renormalize?: boolean;
     config_snapshot?: Record<string, any>;
     connector_runs: ConnectorRunSummary[];
 }
@@ -510,6 +617,34 @@ export interface JobTransactionsResponse {
     job_id: number;
 }
 
+// Raw transaction types for viewing original API data
+export interface RawTransactionResponse {
+    id: number;
+    source: string;
+    source_transaction_id: string;
+    raw_data: Record<string, unknown>;
+    ingestion_time: string;
+    truncated: boolean;
+}
+
+export interface BatchRawTransactionRequest {
+    raw_ids: number[];
+}
+
+export interface BatchRawTransactionResponse {
+    transactions: RawTransactionResponse[];
+    total_requested: number;
+    total_found: number;
+}
+
+export interface LookupSourceIdsRequest {
+    source_transaction_ids: string[];
+}
+
+export interface LookupSourceIdsResponse {
+    mapping: Record<string, number>;  // source_transaction_id -> raw_transaction_id
+}
+
 export interface SyncJobStartResponse {
     status: string;
     message: string;
@@ -523,11 +658,9 @@ export interface ConnectorOverride {
     enabled?: boolean;
     test_mode?: boolean;
     test_file_path?: string;
-}
-
-// Connector override for incremental sync (since datetime)
-export interface ConnectorSinceOverride {
-    since_datetime: string | null;  // ISO datetime string or null for full sync
+    since_datetime?: string | null;  // ISO datetime string or null for full sync
+    symbols?: string[] | null;  // Override symbols list for trade connectors
+    currencies?: string[] | null;  // Override currencies list for deposit/withdrawal connectors
 }
 
 // Connector default info for sync configuration UI
@@ -542,10 +675,10 @@ export interface ConnectorDefaultInfo {
 
 // Request payload for starting sync job with overrides
 export interface SyncJobStartRequest {
-    // Enable/disable connectors and test mode overrides
+    // Per-connector overrides (enable/disable, test mode, since datetime, symbols/currencies)
     connector_overrides?: ConnectorOverride[];
-    // Since datetime overrides for incremental sync
-    since_overrides?: Record<number, ConnectorSinceOverride>;
+    // If true, re-normalize from stored raw data instead of fetching from APIs
+    renormalize?: boolean;
 }
 
 export interface EnabledConnector {
@@ -555,12 +688,48 @@ export interface EnabledConnector {
     account_name: string;
     account_type: string;
     account_enabled?: boolean;
+    account_group?: string;
     enabled: boolean;
     test_mode: boolean;
     test_file_path?: string;
     sync_priority: number;
     last_sync_at?: string;
     last_sync_status?: string;
+    supports_incremental_sync?: boolean;
+    default_since_datetime?: string | null;
+    optional_config?: string[];  // List of optional config params (symbols, currencies, etc.)
+    config?: Record<string, any>;  // Full connector config (includes sync_mode, import_history, etc.)
+    // File connector metadata (from registry)
+    is_file_connector?: boolean;
+    connector_family?: string;  // e.g., "mexc-transactions" groups API and file connectors
+    display_name?: string;  // e.g., "MEXC Transactions (API)" or "MEXC Transactions (File)"
+    // On-chain connector specific fields
+    chain_name?: string;  // e.g., "base", "ethereum"
+    wallet_address?: string;  // Wallet address for on-chain connectors
+    // Last job data
+    last_job_status?: string | null;
+    last_job_started_at?: string | null;
+    last_job_finished_at?: string | null;
+    last_job_new?: number;
+    last_job_updated?: number;
+    last_job_errors?: number;
+    last_job_error_message?: string | null;
+    last_job_last_transaction?: {
+        datetime: string;
+        type: string;
+        asset: string;
+        qty: number | null;
+        price: number | null;
+    } | null;
+    last_synced_transaction?: {
+        datetime: string;
+        type: string;
+        asset: string;
+        qty: number | null;
+        price: number | null;
+    } | null;
+    // Start datetime from connector config (default since for sync)
+    start_datetime?: string | null;
 }
 
 export interface EnabledConnectorsResponse {
@@ -573,6 +742,8 @@ export interface AccountSummary {
     name: string;
     account_type: string;
     enabled: boolean;
+    address_or_identifier?: string;  // Wallet address or exchange identifier
+    group?: string;  // Visual grouping label (e.g. "Tangem EVM")
 }
 
 export interface AllConnectorsResponse {
@@ -665,7 +836,18 @@ export interface RawAccountIssue {
 /**
  * Issue type enum for transaction-centric issues
  */
-export type IssueType = 'asset' | 'account' | 'price_quote' | 'fee_quote';
+export type IssueType =
+    | 'missing_source'
+    | 'missing_source_asset'
+    | 'missing_source_account'
+    | 'unlinked_asset'
+    | 'unlinked_account'
+    | 'unlinked_price_quote'
+    | 'unlinked_fee_quote'
+    | 'missing_transfer_from_account'
+    | 'missing_transfer_to_account'
+    | 'unlinked_transfer_from_account'
+    | 'unlinked_transfer_to_account';
 
 /**
  * A single data issue for a specific transaction.
@@ -679,6 +861,7 @@ export interface TransactionIssue {
     quantity: number;
     source_asset_symbol: string;
     source: string;
+    network?: string | null;
 
     // Issue details
     issue_type: IssueType;
@@ -686,48 +869,79 @@ export interface TransactionIssue {
 
     // Fix suggestion
     suggestion?: SuggestionInfo | null;
+
+    // Account info (for source info column)
+    account_id?: number | null;
+    account_name?: string | null;
+    source_account?: string | null;
+
+    // Connector info (for source info column)
+    connector_name?: string | null;
+    sync_connector_run_id?: number | null;
+    run_datetime?: string | null;
 }
 
 /**
- * Response from /transactions/data-health-check endpoint.
- * Powers "Data Health Check" badges and drawer UI with inline fixing.
+ * New split endpoints for data health check
  */
-export interface DataHealthCheckResponse {
-    // Transaction counts by review status
+
+/**
+ * Response from /transactions/data-health-check/status endpoint.
+ */
+export interface TransactionStatusResponse {
     total_count: number;
     valid_count: number;
     pending_count: number;
     invalid_count: number;
-
-    // Missing required data counts
-    missing_asset_count: number;
-    missing_account_count: number;
-    missing_price_quote_count: number;
-    missing_fee_quote_count: number;
-
-    // Bundle suggestions
     bundle_suggestions_count: number;
 
-    // Computed flags
-    has_issues: boolean;
+    // Data completeness issue counts
+    missing_data_issues_count: number;
+    linkage_issues_count: number;
+    transfer_issues_count: number;
+    duplicate_count: number;
+
+    // Aggregated totals
     total_issues: number;
-
-    // [DEPRECATED] Grouped detail lists - use issues_list instead
-    missing_assets_detail?: RawAssetIssue[] | null;
-    missing_accounts_detail?: RawAccountIssue[] | null;
-    missing_price_quotes_detail?: RawAssetIssue[] | null;
-    missing_fee_quotes_detail?: RawAssetIssue[] | null;
-
-    // Transaction-centric issue list (preferred)
-    issues_list?: TransactionIssue[] | null;
-    issues_total_count: number;
-    issues_page: number;
-    issues_per_page: number;
+    has_issues: boolean;
 }
 
 /**
- * @deprecated Use DataHealthCheckResponse instead
- * Kept for backward compatibility during migration
+ * Pagination metadata for list endpoints.
+ */
+export interface PaginationMetadata {
+    page: number;
+    per_page: number;
+    total_count: number;
+}
+
+/**
+ * Response from /transactions/data-health-check/linkage-issues endpoint.
+ */
+export interface LinkageIssuesResponse {
+    issues: TransactionIssue[];
+    pagination: PaginationMetadata;
+}
+
+/**
+ * Response from /transactions/data-health-check/transfer-issues endpoint.
+ */
+export interface TransferIssuesResponse {
+    issues: TransactionIssue[];
+    pagination: PaginationMetadata;
+}
+
+/**
+ * Response from /transactions/data-health-check/missing-data-issues endpoint.
+ */
+export interface MissingDataIssuesResponse {
+    issues: TransactionIssue[];
+    pagination: PaginationMetadata;
+}
+
+/**
+ * Response from /transactions/data-health-check/status endpoint.
+ * Used by DataHealthContext for the global health badge and summary.
  */
 export interface ValidationSummary {
     // Transaction counts by review status
@@ -736,14 +950,13 @@ export interface ValidationSummary {
     pending_count: number;
     invalid_count: number;
 
-    // Missing required data counts
-    missing_asset_count: number;
-    missing_account_count: number;
-    missing_price_quote_count: number;
-    missing_fee_quote_count: number;
-
     // Bundle suggestions
     bundle_suggestions_count: number;
+
+    // Data completeness issue counts
+    linkage_issues_count: number;
+    transfer_issues_count: number;
+    duplicate_count: number;
 
     // Computed flags
     has_issues: boolean;
@@ -793,3 +1006,103 @@ const getDefaultApiUrl = (): string => {
  */
 export const API_URL = import.meta.env.VITE_API_URL || getDefaultApiUrl();
 
+// ============================================================================
+// Derivative Position Types
+// ============================================================================
+
+export interface DerivativePosition {
+    id: number;
+    account_id: number;
+    exchange: string;
+    coin: string;
+    side: 'long' | 'short';
+    status: 'open' | 'closed';
+    entry_price: number;
+    exit_price: number | null;
+    size: number;
+    remaining_size: number;
+    margin_currency: string;
+    realized_pnl: number;
+    total_fees: number;
+    opened_at: string;
+    closed_at: string | null;
+    open_transaction_id: number | null;
+    close_transaction_ids: number[];
+    // Computed fields
+    net_pnl: number;
+    duration_hours: number | null;
+    return_pct: number | null;
+    // Optional nested transactions (from detail endpoint)
+    open_transaction?: Transaction;
+    close_transactions?: Transaction[];
+}
+
+// ============================================================================
+// File Upload Preview Types
+// ============================================================================
+
+export interface NormalizedTransactionSample {
+    source_transaction_id: string;
+    date_time: string;
+    transaction_type: string;
+    direction: string;
+    source_asset_symbol: string;
+    quantity: number;
+    fee: number;
+    source_fee_quote_asset_symbol?: string;
+    network?: string;
+    source_price?: number;
+    source_price_quote_asset_symbol?: string;
+    source_from_account?: string;
+    source_to_account?: string;
+}
+
+export interface FileUploadDetailedPreview {
+    row_count: number;
+    normalized_count: number;
+    date_range: {
+        min_date: string | null;
+        max_date: string | null;
+    } | null;
+    pairs?: string[];
+    currencies?: string[];
+    sample_rows: Record<string, unknown>[];
+    sample_normalized: NormalizedTransactionSample[];
+    normalization_errors: Array<{
+        row_index: number;
+        error: string;
+    }>;
+}
+
+
+// ============================================================================
+// Live Balance types (from connector APIs)
+// ============================================================================
+
+export interface LiveBalanceEntry {
+    asset_symbol: string;
+    total: string;       // Decimal as string
+    available: string;
+    locked: string;
+    chain: string | null;
+    raw: Record<string, unknown>;
+}
+
+export interface ConnectorBalance {
+    connector_id: number;
+    connector_type: string;
+    account_id: number;
+    account_name: string;
+    chain: string | null;
+    entries: LiveBalanceEntry[];
+    fetched_at: string;
+    error: string | null;
+}
+
+export interface AccountBalance {
+    account_id: number;
+    account_name: string;
+    account_type: string;
+    group: string | null;
+    connector_balances: ConnectorBalance[];
+}

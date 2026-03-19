@@ -9,10 +9,12 @@
  * Bundle/Unit pattern types for calculation units.
  */
 export enum UnitPattern {
-  TRANSFER = 'transfer',
+  INTERNAL_TRANSFER = 'internal_transfer',
   SWAP = 'swap',
   SPLIT = 'split',
-  PENDING_TRANSFER = 'pending_transfer',
+  FLOW = 'flow',
+  UNMATCHED_INTERNAL_TRANSFER = 'unmatched_internal_transfer',
+  CUSTOM = 'custom',
   UNKNOWN = 'unknown',
 }
 
@@ -22,7 +24,8 @@ export enum UnitPattern {
 export enum TransactionType {
   TRADE = 'trade',
   TRANSFER = 'transfer',
-  TECHNICAL = 'technical',
+  MARGIN = 'margin',
+  COST = 'cost',
 }
 
 /**
@@ -57,8 +60,11 @@ export enum ReviewStatus {
  */
 export enum AccountType {
   CEX = 'cex',
+  DEX = 'dex',
   BROKER = 'broker',
   WALLET = 'wallet',
+  BANK = 'bank',
+  INVESTMENT = 'investment',
 }
 
 /**
@@ -117,10 +123,12 @@ export enum LotMode {
  */
 export function getUnitPatternLabel(pattern: UnitPattern | string): string {
   const labels: Record<string, string> = {
-    [UnitPattern.TRANSFER]: 'Transfer',
+    [UnitPattern.INTERNAL_TRANSFER]: 'Internal Transfer',
     [UnitPattern.SWAP]: 'Swap',
     [UnitPattern.SPLIT]: 'Split',
-    [UnitPattern.PENDING_TRANSFER]: 'Pending Transfer',
+    [UnitPattern.FLOW]: 'Flow',
+    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
+    [UnitPattern.CUSTOM]: 'Custom',
     [UnitPattern.UNKNOWN]: 'Unknown',
   };
   return labels[pattern] || pattern;
@@ -133,7 +141,8 @@ export function getTransactionTypeLabel(type: TransactionType | string): string 
   const labels: Record<string, string> = {
     [TransactionType.TRADE]: 'Trade',
     [TransactionType.TRANSFER]: 'Transfer',
-    [TransactionType.TECHNICAL]: 'Technical',
+    [TransactionType.MARGIN]: 'Margin',
+    [TransactionType.COST]: 'Cost',
   };
   return labels[type] || type;
 }
@@ -180,8 +189,11 @@ export function getReviewStatusLabel(status: ReviewStatus | string): string {
 export function getAccountTypeLabel(type: AccountType | string): string {
   const labels: Record<string, string> = {
     [AccountType.CEX]: 'Centralized Exchange',
+    [AccountType.DEX]: 'Decentralized Exchange',
     [AccountType.BROKER]: 'Broker',
     [AccountType.WALLET]: 'Wallet',
+    [AccountType.BANK]: 'Bank',
+    [AccountType.INVESTMENT]: 'Investment',
   };
   return labels[type] || type;
 }

@@ -1,0 +1,232 @@
+{
+    "description": "Test fixture for SUI connector. Contains 5 representative transaction blocks matching sui_multiGetTransactionBlocks response format.",
+    "wallet_address": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+    "transactions": [
+        {
+            "digest": "3GYRx3KMhBsfDqm3CBEZpiMbSjKHD3GEpHTDhFxU7GQp",
+            "timestampMs": "1706140800000",
+            "transaction": {
+                "data": {
+                    "sender": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                    "transaction": {
+                        "kind": "ProgrammableTransaction"
+                    },
+                    "gasData": {
+                        "owner": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                        "price": "1000",
+                        "budget": "10000000"
+                    }
+                }
+            },
+            "effects": {
+                "status": {
+                    "status": "success"
+                },
+                "gasUsed": {
+                    "computationCost": "1000000",
+                    "storageCost": "2000000",
+                    "storageRebate": "500000",
+                    "nonRefundableStorageFee": "0"
+                }
+            },
+            "balanceChanges": [
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "5000000000"
+                },
+                {
+                    "owner": {
+                        "AddressOwner": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "-7500000"
+                }
+            ],
+            "_test_description": "Inflow: wallet receives 5 SUI from another address"
+        },
+        {
+            "digest": "8HNRx4KMhBsfDqm3CBEZpiMbSjKHD3GEpHTDhFxU7ABC",
+            "timestampMs": "1706227200000",
+            "transaction": {
+                "data": {
+                    "sender": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                    "transaction": {
+                        "kind": "ProgrammableTransaction"
+                    },
+                    "gasData": {
+                        "owner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                        "price": "1000",
+                        "budget": "10000000"
+                    }
+                }
+            },
+            "effects": {
+                "status": {
+                    "status": "success"
+                },
+                "gasUsed": {
+                    "computationCost": "1500000",
+                    "storageCost": "2500000",
+                    "storageRebate": "800000",
+                    "nonRefundableStorageFee": "0"
+                }
+            },
+            "balanceChanges": [
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "-2003200000"
+                },
+                {
+                    "owner": {
+                        "AddressOwner": "0xbbbb567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "2000000000"
+                }
+            ],
+            "_test_description": "Outflow: wallet sends 2 SUI (balance change includes gas: -2_003_200_000 MIST = -2 SUI transfer - 3_200_000 MIST gas)"
+        },
+        {
+            "digest": "5XPQw7LMhCsfEqm4DBFZqjNcTkLID4HFqIUEiFyV8DEF",
+            "timestampMs": "1706313600000",
+            "transaction": {
+                "data": {
+                    "sender": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                    "transaction": {
+                        "kind": "ProgrammableTransaction"
+                    },
+                    "gasData": {
+                        "owner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                        "price": "1000",
+                        "budget": "15000000"
+                    }
+                }
+            },
+            "effects": {
+                "status": {
+                    "status": "success"
+                },
+                "gasUsed": {
+                    "computationCost": "2000000",
+                    "storageCost": "3000000",
+                    "storageRebate": "1000000",
+                    "nonRefundableStorageFee": "0"
+                }
+            },
+            "balanceChanges": [
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "-4000000"
+                },
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0xdba34672e30cb4b08d3f6903b45be3bfb0e8b8c2c3d4e5f6a7b8c9d0e1f2a3b4::usdc::USDC",
+                    "amount": "50000000000"
+                },
+                {
+                    "owner": {
+                        "AddressOwner": "0xcccc567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "0"
+                },
+                {
+                    "owner": {
+                        "AddressOwner": "0xdddd567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                    },
+                    "coinType": "0xdba34672e30cb4b08d3f6903b45be3bfb0e8b8c2c3d4e5f6a7b8c9d0e1f2a3b4::usdc::USDC",
+                    "amount": "-50000000000"
+                }
+            ],
+            "_test_description": "Multi-coin: wallet swaps SUI for USDC. SUI balance change = -4_000_000 MIST (gas only since transfer is 0 after gas adj), receives 50 USDC (token with 9 decimals). DEX pool 0xdddd... provides the USDC."
+        },
+        {
+            "digest": "9ZTUy2NNiDtgGrn5ECGArkOdUlMJE5IGrJVFjGzW9GHI",
+            "timestampMs": "1706400000000",
+            "transaction": {
+                "data": {
+                    "sender": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                    "transaction": {
+                        "kind": "ProgrammableTransaction"
+                    },
+                    "gasData": {
+                        "owner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                        "price": "1000",
+                        "budget": "5000000"
+                    }
+                }
+            },
+            "effects": {
+                "status": {
+                    "status": "success"
+                },
+                "gasUsed": {
+                    "computationCost": "800000",
+                    "storageCost": "1200000",
+                    "storageRebate": "400000",
+                    "nonRefundableStorageFee": "0"
+                }
+            },
+            "balanceChanges": [
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "-1600000"
+                }
+            ],
+            "_test_description": "Self-transfer / gas-only: wallet balance change is just the gas fee (-1_600_000 MIST). After gas adjustment, net transfer is 0 so no transfer record yielded — only fee tx."
+        },
+        {
+            "digest": "2ABCx5OOjEuhHso6FDHBslPeVmNKF6JHsKWGkH0X0JKL",
+            "timestampMs": "1706486400000",
+            "transaction": {
+                "data": {
+                    "sender": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                    "transaction": {
+                        "kind": "ProgrammableTransaction"
+                    },
+                    "gasData": {
+                        "owner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb",
+                        "price": "1000",
+                        "budget": "10000000"
+                    }
+                }
+            },
+            "effects": {
+                "status": {
+                    "status": "failure",
+                    "error": "InsufficientGas"
+                },
+                "gasUsed": {
+                    "computationCost": "500000",
+                    "storageCost": "0",
+                    "storageRebate": "0",
+                    "nonRefundableStorageFee": "0"
+                }
+            },
+            "balanceChanges": [
+                {
+                    "owner": {
+                        "AddressOwner": "0xaa79c13bdb08ae78e4db1fc04227fe0b5bfcab4c39ef078b4ea77b048c55caeb"
+                    },
+                    "coinType": "0x2::sui::SUI",
+                    "amount": "-500000"
+                }
+            ],
+            "_test_description": "Failed transaction: status=failure, should be skipped entirely by raw_to_normalized"
+        }
+    ]
+}
