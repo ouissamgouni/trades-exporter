@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from sqlmodel import Session, select
 from sqlalchemy import func, union_all, literal
 
-from backend.db.models import NormalizedTransaction, ReviewStatus, Asset, Account, AccountConnector
+from backend.db.models import NormalizedTransaction, ReviewStatus, TransactionType, Asset, Account, AccountConnector
 from backend.api.schemas import TransactionIssue, IssueType, SuggestionInfo
 from backend.services.similarity_service import (
     get_best_asset_suggestion,
@@ -200,6 +200,7 @@ class LinkageIssueDetector(IssueDetector):
         # Default to all types if not specified
         types_set = set(issue_types) if issue_types else None
         # Subquery for unlinked asset
+        # Exclude fee-only (cost) transactions: they have no main asset by design.
         missing_asset_subq = (
             select(
                 NormalizedTransaction.id.label('tx_id'),
@@ -209,6 +210,9 @@ class LinkageIssueDetector(IssueDetector):
             .where(NormalizedTransaction.asset_id.is_(None))
             .where(NormalizedTransaction.source_asset_symbol.isnot(None))
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(
+                NormalizedTransaction.transaction_type != TransactionType.COST.value
+            )
         )
         if account_ids:
             missing_asset_subq = missing_asset_subq.where(

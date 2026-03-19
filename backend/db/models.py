@@ -289,6 +289,7 @@ class AppSettings(SQLModel, table=True):
     pnl_allow_negative_balances: bool = Field(default=True)
     pnl_crypto_swap_taxable: bool = Field(default=False)
     pnl_fee_taxable: bool = Field(default=False)
+    pnl_compute_residuals: bool = Field(default=False)  # Whether to compute residual warnings
     pnl_use_price_fallback: bool = Field(default=True)
     pnl_price_staleness_days: int = Field(default=7)
 
@@ -1137,6 +1138,12 @@ class CalculationVersion(SQLModel, table=True):
     status: str = Field(
         default="draft", index=True
     )  # draft, committed, active
+    # Advanced config fields for reproducibility
+    compute_residuals: bool = Field(default=True)  # Whether residual warnings were computed
+    crypto_swap_taxable: bool = Field(default=False)  # Whether crypto-to-crypto swaps were taxable
+    fee_taxable: bool = Field(default=False)  # Whether fees were treated as taxable events
+    use_price_fallback: bool = Field(default=True)  # Whether price fallback was used
+    price_staleness_window_days: int = Field(default=7)  # Max days to consider a cached price fresh
     # Trigger source: "auto" (background refresh), "manual" (ad-hoc custom), "refresh" (user-clicked refresh)
     trigger: Optional[str] = Field(default="manual")  # auto, manual, refresh
     # Account filter - stores which accounts were included in this calculation
@@ -1201,6 +1208,15 @@ class CostLot(SQLModel, table=True):
     )  # FK to CalculationUnit (processing record)
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     
+    # Cost basis provenance
+    cost_source: Optional[str] = Field(default=None)  # fmv, inherited, proceeds, provisional, base_currency
+    cost_fmv_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(36, 18))
+    )  # FMV unit price used (when cost_source="fmv")
+    cost_fmv_source: Optional[str] = Field(default=None)  # Price provider (e.g. coingecko, manual, fallback:cached)
+    cost_fmv_timestamp: Optional[datetime] = Field(default=None)  # When the price was valid
+    cost_fmv_stale: Optional[bool] = Field(default=None)  # Whether the price was a stale fallback
+
     # Negative lot tracking
     is_negative: bool = Field(default=False, index=True)
     is_zero_cost: bool = Field(default=False)
@@ -1209,13 +1225,24 @@ class CostLot(SQLModel, table=True):
     settled_cost_in_base: Optional[Decimal] = Field(
         default=None, sa_column=Column(Numeric(36, 18))
     )
-    origin_pnl_id: Optional[int] = Field(default=None, index=True)
+    origin_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+
+    # Cost basis chain — links to the lot that was consumed to create this one
+    # (set for transfers/splits where cost_source="inherited")
+    source_lot_id: Optional[int] = Field(
+        default=None, foreign_key="cost_lots.cost_lot_id", index=True
+    )
     
     created_at: datetime = Field(default_factory=utc_now)
     
     # Relationships
     asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[CostLot.asset_id]"},
+    )
+    origin_pnl: Optional["RealizedPnl"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[CostLot.origin_pnl_id]"}
     )
     origin_transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="cost_lots",

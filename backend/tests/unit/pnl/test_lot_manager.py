@@ -391,7 +391,7 @@ class TestNegativeLotSettlement:
         mock_account = Account(id=1, name="Test", account_type="cex")
         mock_asset = Asset(asset_id=2, symbol="TEST", price_type="crypto")
         
-        remaining_qty, settlement_records = manager.settle_negative_lots(
+        remaining_qty, settlement_info = manager.settle_negative_lots(
             account=mock_account,
             asset=mock_asset,
             available_qty=Decimal("3"),
@@ -400,9 +400,10 @@ class TestNegativeLotSettlement:
         )
 
         # Should have settled the 1 unit negative lot
-        assert len(settlement_records) == 1
-        assert settlement_records[0].qty_settled == Decimal("1")
-        assert settlement_records[0].cost_basis_applied == Decimal("150")  # 1 * 150
+        assert len(settlement_info) == 1
+        settlement, _prov_cost = settlement_info[0]
+        assert settlement.qty_settled == Decimal("1")
+        assert settlement.cost_basis_applied == Decimal("150")  # 1 * 150
         assert remaining_qty == Decimal("2")  # 3 - 1 settled
 
     def test_settle_negative_lots_partial_settlement(self, fifo_config, base_datetime):
@@ -429,7 +430,7 @@ class TestNegativeLotSettlement:
         mock_account = Account(id=1, name="Test", account_type="cex")
         mock_asset = Asset(asset_id=2, symbol="TEST", price_type="crypto")
         
-        remaining_qty, settlement_records = manager.settle_negative_lots(
+        remaining_qty, settlement_info = manager.settle_negative_lots(
             account=mock_account,
             asset=mock_asset,
             available_qty=Decimal("1"),
@@ -438,8 +439,9 @@ class TestNegativeLotSettlement:
         )
 
         # Should have partially settled
-        assert len(settlement_records) == 1
-        assert settlement_records[0].qty_settled == Decimal("1")
+        assert len(settlement_info) == 1
+        settlement, _prov_cost = settlement_info[0]
+        assert settlement.qty_settled == Decimal("1")
         assert remaining_qty == Decimal("0")  # All used for settlement
 
         # Check that 1 unit still unsettled

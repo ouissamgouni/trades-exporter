@@ -12,14 +12,16 @@
  *
  * Uses the last point of the portfolio timeline breakdown + AssetPnLRow for fees.
  */
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Badge, Box, Flex, Heading, IconButton, Slider, Text } from '@chakra-ui/react';
 import { ResponsiveTreeMap } from '@nivo/treemap';
 import { FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import type { TimelinePoint, TimelineBreakdownItem } from '../../hooks/useChartData';
-import { Account } from '../../types';
+import { Account, DimensionWithCategories } from '../../types';
 import { getContrastTextColor } from '../../constants/colors';
 import type { AssetPnLRow } from './types';
+import type { AccountBalanceBreakdown } from './types';
 import { currencySymbol } from './TotalReturnScorecard';
 
 /** Drilldown state exported by the treemap for cross-component filtering */
@@ -31,17 +33,27 @@ export interface TreemapDrilldownState {
 
 interface AllocationTreemapProps {
     points: TimelinePoint[];
-    assetCategoryMap: Record<number, string>;
+    /** Per-dimension asset category maps: dimensionId → (assetId → categoryLabel) */
+    assetCategoryMaps: Record<number, Record<number, string>>;
+    /** Available dimensions for category grouping selector */
+    dimensions: DimensionWithCategories[];
     accounts: Account[];
     assets: AssetPnLRow[];
     baseCurrency: string;
     isLoading?: boolean;
     /** Called when drilldown state changes (for cross-component filtering) */
     onDrilldownChange?: (state: TreemapDrilldownState) => void;
+    /** Per-account balance data keyed by asset ID (for accurate account grouping) */
+    accountBalances?: Map<number, AccountBalanceBreakdown[]>;
 }
 
 type GroupBy = 'flat' | 'category' | 'account';
 type SizeBy = 'market_value' | 'total_return' | 'cost_basis' | 'efficiency';
+
+/** Minimum cost basis to compute meaningful ROI / efficiency (avoids division-by-near-zero) */
+const MIN_COST_BASIS = 1.0;
+/** Cap efficiency value to prevent a single asset from dominating the treemap */
+const EFFICIENCY_CAP = 1000;
 
 const SIZE_BY_LABELS: Record<SizeBy, string> = {
     market_value: 'Weight',
@@ -95,21 +107,52 @@ interface TreeNode {
 
 export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
     points,
-    assetCategoryMap,
+    assetCategoryMaps,
+    dimensions,
     accounts,
     assets,
     baseCurrency,
     isLoading,
     onDrilldownChange,
+    accountBalances,
 }) => {
     const [groupBy, setGroupBy] = useState<GroupBy>('category');
     const [sizeBy, setSizeBy] = useState<SizeBy>('market_value');
+    // Selected dimension for category grouping (default: first dimension)
+    const [selectedDimensionId, setSelectedDimensionId] = useState<number | null>(null);
     // Drill-down: when set, show only children of this group
     const [drilldown, setDrilldown] = useState<string | null>(null);
     // Range slider: [min, max] as percentage of the data range (0-100)
     const [rangeFilter, setRangeFilter] = useState<[number, number]>([0, 100]);
     // Fullscreen toggle
     const [isFullscreen, setIsFullscreen] = useState(false);
+    // Mouse position for portal tooltip (viewport coords)
+    const mousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+    // Default to first dimension when dimensions load
+    useEffect(() => {
+        if (selectedDimensionId === null && dimensions.length > 0) {
+            setSelectedDimensionId(dimensions[0].id);
+        }
+    }, [dimensions, selectedDimensionId]);
+
+    // Resolved category map for the selected dimension
+    const assetCategoryMap = useMemo(() => {
+        if (selectedDimensionId != null && assetCategoryMaps[selectedDimensionId]) {
+            return assetCategoryMaps[selectedDimensionId];
+        }
+        // Fallback: merge all dimensions (first match wins)
+        const result: Record<number, string> = {};
+        for (const dimId of Object.keys(assetCategoryMaps)) {
+            const map = assetCategoryMaps[Number(dimId)];
+            for (const [assetId, label] of Object.entries(map)) {
+                if (!(Number(assetId) in result)) {
+                    result[Number(assetId)] = label;
+                }
+            }
+        }
+        return result;
+    }, [assetCategoryMaps, selectedDimensionId]);
 
     // Escape key closes fullscreen
     useEffect(() => {
@@ -157,11 +200,19 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
             case 'efficiency': {
                 // ROI% as size — how much return per unit of cost invested
                 const tr = (b.value_in_base - b.cost_basis_in_base) + b.realized_pnl_to_date;
-                return b.cost_basis_in_base > 0 ? Math.abs(tr / b.cost_basis_in_base) * 100 : 0;
+                if (b.cost_basis_in_base < MIN_COST_BASIS) return 0;
+                return Math.min(Math.abs(tr / b.cost_basis_in_base) * 100, EFFICIENCY_CAP);
             }
             default: return b.value_in_base;
         }
     };
+
+    /** Compute total return for a breakdown item (signed) */
+    const itemTotalReturn = (b: TimelineBreakdownItem): number =>
+        (b.value_in_base - b.cost_basis_in_base) + b.realized_pnl_to_date;
+
+    /** Whether the current sizeBy mode needs a Gains / Losses partition */
+    const hasSplit = sizeBy === 'total_return' || sizeBy === 'efficiency';
 
     // Compute the full tree (before drilldown / range filtering)
     const { fullTree, dataRange } = useMemo(() => {
@@ -178,7 +229,8 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
         const mkLeaf = (b: TimelineBreakdownItem): TreeNode => {
             const unrealizedPnl = b.value_in_base - b.cost_basis_in_base;
             const totalReturn = unrealizedPnl + b.realized_pnl_to_date;
-            const pnlPct = b.cost_basis_in_base > 0 ? (totalReturn / b.cost_basis_in_base) * 100 : 0;
+            const rawPct = b.cost_basis_in_base >= MIN_COST_BASIS ? (totalReturn / b.cost_basis_in_base) * 100 : 0;
+            const pnlPct = Math.max(-EFFICIENCY_CAP, Math.min(EFFICIENCY_CAP, rawPct));
             const sizeVal = getSizeValue(b);
             return {
                 id: b.symbol,
@@ -194,78 +246,137 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
             };
         };
 
-        let tree: TreeNode;
-
-        if (groupBy === 'flat') {
-            tree = {
-                id: 'Portfolio',
-                children: breakdown.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf),
-            };
-        } else if (groupBy === 'category') {
-            const groups: Record<string, TimelineBreakdownItem[]> = {};
-            for (const b of breakdown) {
-                const cat = assetCategoryMap[b.asset_id] || 'Uncategorized';
-                if (!groups[cat]) groups[cat] = [];
-                groups[cat].push(b);
-            }
-            tree = {
-                id: 'Portfolio',
-                children: Object.entries(groups)
+        /** Build grouped children for a subset of breakdown items */
+        const buildGroupedChildren = (items: TimelineBreakdownItem[]): TreeNode[] => {
+            if (groupBy === 'flat') {
+                return items.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf);
+            } else if (groupBy === 'category') {
+                const groups: Record<string, TimelineBreakdownItem[]> = {};
+                for (const b of items) {
+                    const cat = assetCategoryMap[b.asset_id] || 'Uncategorized';
+                    if (!groups[cat]) groups[cat] = [];
+                    groups[cat].push(b);
+                }
+                return Object.entries(groups)
                     .sort(([, a], [, b]) => {
                         const aSum = a.reduce((s, i) => s + getSizeValue(i), 0);
                         const bSum = b.reduce((s, i) => s + getSizeValue(i), 0);
                         return bSum - aSum;
                     })
-                    .map(([cat, items]) => ({
+                    .map(([cat, catItems]) => ({
                         id: cat,
-                        children: items.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf),
-                    })),
-            };
-        } else {
-            // account grouping
-            const accountGroups: Record<string, TreeNode[]> = {};
-            for (const b of breakdown) {
-                const acctIds = assetAccountMap[b.asset_id] || [];
-                const leaf = mkLeaf(b);
-                if (acctIds.length === 0) {
-                    const key = 'Unknown';
-                    if (!accountGroups[key]) accountGroups[key] = [];
-                    accountGroups[key].push(leaf);
-                } else {
-                    const share = 1 / acctIds.length;
-                    for (const acctId of acctIds) {
-                        const key = accountMap[acctId] || `Account #${acctId}`;
+                        children: catItems.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf),
+                    }));
+            } else {
+                // account grouping
+                const accountGroups: Record<string, TreeNode[]> = {};
+                for (const b of items) {
+                    const acctIds = assetAccountMap[b.asset_id] || [];
+                    const leaf = mkLeaf(b);
+                    const balances = accountBalances?.get(b.asset_id);
+
+                    if (acctIds.length === 0) {
+                        const key = 'Unknown';
                         if (!accountGroups[key]) accountGroups[key] = [];
-                        accountGroups[key].push({
-                            ...leaf,
-                            id: `${leaf.id}`,
-                            value: (leaf.value ?? 0) * share,
-                            costBasis: (leaf.costBasis ?? 0) * share,
-                            marketValue: (leaf.marketValue ?? 0) * share,
-                            totalReturn: (leaf.totalReturn ?? 0) * share,
-                            fees: (leaf.fees ?? 0) * share,
-                        });
+                        accountGroups[key].push(leaf);
+                    } else if (balances && balances.length > 0) {
+                        const totalCost = balances.reduce((s, ab) => s + ab.cost_basis_in_base, 0);
+                        for (const ab of balances) {
+                            const key = ab.account_name || accountMap[ab.account_id] || `Account #${ab.account_id}`;
+                            if (!accountGroups[key]) accountGroups[key] = [];
+                            const share = totalCost > 0 ? ab.cost_basis_in_base / totalCost : 1 / balances.length;
+                            const acctMarketValue = ab.market_value != null ? ab.market_value : (leaf.marketValue ?? 0) * share;
+                            const acctCostBasis = ab.cost_basis_in_base;
+                            const acctUnrealizedPnl = acctMarketValue - acctCostBasis;
+                            const acctRealizedPnl = (leaf.totalReturn ?? 0) - ((leaf.marketValue ?? 0) - (leaf.costBasis ?? 0));
+                            const acctTotalReturn = acctUnrealizedPnl + acctRealizedPnl * share;
+                            const rawPct = acctCostBasis >= MIN_COST_BASIS ? (acctTotalReturn / acctCostBasis) * 100 : 0;
+                            const pnlPct = Math.max(-EFFICIENCY_CAP, Math.min(EFFICIENCY_CAP, rawPct));
+                            const sizeVal = (() => {
+                                switch (sizeBy) {
+                                    case 'market_value': return acctMarketValue;
+                                    case 'cost_basis': return acctCostBasis;
+                                    case 'total_return': return Math.abs(acctTotalReturn);
+                                    case 'efficiency':
+                                        return acctCostBasis < MIN_COST_BASIS ? 0 : Math.min(Math.abs(acctTotalReturn / acctCostBasis) * 100, EFFICIENCY_CAP);
+                                    default: return acctMarketValue;
+                                }
+                            })();
+                            accountGroups[key].push({
+                                ...leaf,
+                                id: `${leaf.id}@${key}`,
+                                value: Math.max(sizeVal, 0.01),
+                                pnlPct,
+                                costBasis: acctCostBasis,
+                                marketValue: acctMarketValue,
+                                totalReturn: acctTotalReturn,
+                                totalReturnPct: pnlPct,
+                                fees: (leaf.fees ?? 0) * share,
+                                color: performanceColor(pnlPct),
+                            });
+                        }
+                    } else {
+                        const share = 1 / acctIds.length;
+                        for (const acctId of acctIds) {
+                            const key = accountMap[acctId] || `Account #${acctId}`;
+                            if (!accountGroups[key]) accountGroups[key] = [];
+                            accountGroups[key].push({
+                                ...leaf,
+                                id: `${leaf.id}@${key}`,
+                                value: (leaf.value ?? 0) * share,
+                                costBasis: (leaf.costBasis ?? 0) * share,
+                                marketValue: (leaf.marketValue ?? 0) * share,
+                                totalReturn: (leaf.totalReturn ?? 0) * share,
+                                fees: (leaf.fees ?? 0) * share,
+                            });
+                        }
                     }
                 }
-            }
-            tree = {
-                id: 'Portfolio',
-                children: Object.entries(accountGroups)
+                return Object.entries(accountGroups)
                     .sort(([, a], [, b]) => {
                         const aSum = a.reduce((s, n) => s + (n.value ?? 0), 0);
                         const bSum = b.reduce((s, n) => s + (n.value ?? 0), 0);
                         return bSum - aSum;
                     })
-                    .map(([acct, items]) => ({
+                    .map(([acct, acctItems]) => ({
                         id: acct,
-                        children: items.sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
-                    })),
+                        children: acctItems.sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+                    }));
+            }
+        };
+
+        let tree: TreeNode;
+
+        if (hasSplit) {
+            // Partition into gains (return >= 0) and losses (return < 0)
+            const gains = breakdown.filter(b => itemTotalReturn(b) >= 0);
+            const losses = breakdown.filter(b => itemTotalReturn(b) < 0);
+            const children: TreeNode[] = [];
+            if (gains.length > 0) {
+                children.push({
+                    id: 'Gains',
+                    children: buildGroupedChildren(gains),
+                    color: performanceColor(30),
+                });
+            }
+            if (losses.length > 0) {
+                children.push({
+                    id: 'Losses',
+                    children: buildGroupedChildren(losses),
+                    color: performanceColor(-30),
+                });
+            }
+            tree = { id: 'Portfolio', children };
+        } else {
+            tree = {
+                id: 'Portfolio',
+                children: buildGroupedChildren(breakdown),
             };
         }
 
         return { fullTree: tree, dataRange: { min, max } };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [points, groupBy, sizeBy, assetCategoryMap, assetFeeMap, assetAccountMap, accountMap]);
+    }, [points, groupBy, sizeBy, assetCategoryMap, assetFeeMap, assetAccountMap, accountMap, accountBalances]);
 
     // Apply drilldown + range filtering
     const treeData = useMemo((): TreeNode => {
@@ -316,24 +427,27 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
         return sumLeaves(treeData);
     }, [treeData]);
 
-    // Build leaf → parent group mapping for drill-down via leaf click
+    // Build leaf → top-level group mapping for drill-down via leaf click
     const leafToParent = useMemo(() => {
         const map = new Map<string, string>();
-        if (groupBy !== 'flat' && fullTree.children) {
-            for (const group of fullTree.children) {
-                if (group.children) {
-                    for (const leaf of group.children) {
-                        map.set(leaf.id, group.id);
-                    }
+        if ((hasSplit || groupBy !== 'flat') && fullTree.children) {
+            const mapLeaves = (node: TreeNode, topGroup: string) => {
+                if (node.children) {
+                    for (const child of node.children) mapLeaves(child, topGroup);
+                } else {
+                    map.set(node.id, topGroup);
                 }
+            };
+            for (const group of fullTree.children) {
+                mapLeaves(group, group.id);
             }
         }
         return map;
-    }, [fullTree, groupBy]);
+    }, [fullTree, groupBy, hasSplit]);
 
     // Handle node click for drill-down
     const handleNodeClick = (node: any) => {
-        if (groupBy === 'flat') return;
+        if (groupBy === 'flat' && !hasSplit) return;
         // Group node click (rare — Nivo renders them behind leaves)
         if (node.data?.children && !drilldown) {
             setDrilldown(node.id);
@@ -356,6 +470,11 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
         setDrilldown(null);
         onDrilldownChange?.({ groupBy: g, drilldown: null });
     };
+
+    // Track mouse position for portal-based tooltip (avoids overflow clipping)
+    const handleChartMouseMove = useCallback((e: React.MouseEvent) => {
+        mousePosRef.current = { x: e.clientX, y: e.clientY };
+    }, []);
 
     if (!points.length && !isLoading) return null;
 
@@ -394,6 +513,25 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                             </Badge>
                         ))}
                     </Flex>
+                    {/* Dimension selector — shown when groupBy is 'category' */}
+                    {groupBy === 'category' && dimensions.length > 1 && (
+                        <Flex gap={1} align="center">
+                            <Text fontSize="xs" color="gray.500">Dim:</Text>
+                            {dimensions.map(dim => (
+                                <Badge
+                                    key={dim.id}
+                                    cursor="pointer"
+                                    variant={selectedDimensionId === dim.id ? 'solid' : 'outline'}
+                                    colorPalette={selectedDimensionId === dim.id ? 'teal' : 'gray'}
+                                    onClick={() => { setSelectedDimensionId(dim.id); setDrilldown(null); }}
+                                    size="sm"
+                                    px={2}
+                                >
+                                    {dim.label}
+                                </Badge>
+                            ))}
+                        </Flex>
+                    )}
                     {/* Size by */}
                     <Flex gap={1} align="center">
                         <Text fontSize="xs" color="gray.500">Size:</Text>
@@ -403,7 +541,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                                 cursor="pointer"
                                 variant={sizeBy === s ? 'solid' : 'outline'}
                                 colorPalette={sizeBy === s ? 'purple' : 'gray'}
-                                onClick={() => setSizeBy(s)}
+                                onClick={() => { setSizeBy(s); setDrilldown(null); }}
                                 size="sm"
                                 px={2}
                             >
@@ -475,19 +613,20 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                     <Text fontSize="sm" color="gray.400">Loading...</Text>
                 </Box>
             ) : (
-                <Box h={isFullscreen ? 'calc(100vh - 140px)' : '500px'}>
+                <Box h={isFullscreen ? 'calc(100vh - 140px)' : '500px'} onMouseMove={handleChartMouseMove}>
                     <ResponsiveTreeMap
                         data={treeData}
                         identity="id"
                         value="value"
-                        leavesOnly={groupBy === 'flat' || !!drilldown}
+                        leavesOnly={hasSplit ? !!drilldown : (groupBy === 'flat' || !!drilldown)}
                         innerPadding={2}
                         outerPadding={4}
                         colors={(node: any) => node.data?.color || '#CBD5E0'}
                         borderWidth={1}
                         borderColor={{ from: 'color', modifiers: [['darker', 0.3]] }}
                         label={(node: any) => {
-                            const label = truncate(node.data?.fullLabel || node.id);
+                            const rawId = (node.id as string)?.replace(/@.+$/, '') ?? node.id;
+                            const label = truncate(node.data?.fullLabel || rawId);
                             return label;
                         }}
                         labelSkipSize={40}
@@ -505,76 +644,102 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                             const totalReturn = data?.totalReturn ?? 0;
                             const totalReturnPct = data?.totalReturnPct ?? 0;
                             const sym = currencySymbol(baseCurrency);
-                            // Group node (has children) — show aggregate name
+                            const { x: mx, y: my } = mousePosRef.current;
+
+                            // Build tooltip content
+                            let content: React.ReactNode;
                             if (data?.children) {
-                                return (
+                                // Group node (has children) — show aggregate name
+                                content = (
                                     <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="160px">
                                         <Text fontSize="xs" fontWeight="bold" color="gray.700">{node.node?.id}</Text>
                                         <Text fontSize="xs" color="gray.600">
-                                            {Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} {sym} ({pct}%)
+                                            {sizeBy === 'efficiency'
+                                                ? `ROI: ${Number(value).toFixed(1)}% (${pct}% of total)`
+                                                : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} ${sym} (${pct}%)`
+                                            }
                                         </Text>
                                         {groupBy !== 'flat' && !drilldown && (
                                             <Text fontSize="2xs" color="blue.500" mt={1}>Click to drill down</Text>
                                         )}
                                     </Box>
                                 );
+                            } else {
+                                // Leaf node: stacked horizontal bar for cost vs return
+                                const cost = Math.abs(data?.costBasis ?? 0);
+                                const ret = data?.totalReturn ?? 0;
+                                const barTotal = cost + Math.abs(ret);
+                                const costPct = barTotal > 0 ? (cost / barTotal) * 100 : 50;
+                                const retPct = barTotal > 0 ? (Math.abs(ret) / barTotal) * 100 : 50;
+                                const parentGroup = !drilldown && groupBy !== 'flat' ? leafToParent.get(node.node?.id) : null;
+                                // Strip @accountName suffix from display ID
+                                const displayId = (node.node?.id as string)?.replace(/@.+$/, '') ?? node.node?.id;
+                                content = (
+                                    <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="220px">
+                                        <Text fontSize="xs" fontWeight="bold" color="gray.700">
+                                            {data?.fullLabel || displayId}
+                                        </Text>
+                                        {data?.fullLabel && data.fullLabel !== displayId && (
+                                            <Text fontSize="xs" color="gray.500">{displayId}</Text>
+                                        )}
+                                        <Text fontSize="xs" color="gray.600" mt={1}>
+                                            {sizeBy === 'efficiency'
+                                                ? `ROI: ${Number(value).toFixed(1)}% (${pct}% of total)`
+                                                : `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} ${sym} (${pct}%)`
+                                            }
+                                        </Text>
+                                        {data?.marketValue != null && (
+                                            <Box borderTop="1px solid" borderColor="gray.100" mt={1} pt={1}>
+                                                {/* Cost & Return values */}
+                                                <Flex justify="space-between" mb={0.5}>
+                                                    <Text fontSize="2xs" color="gray.500">Cost: {formatCompact(cost, baseCurrency)}</Text>
+                                                    <Text fontSize="2xs" color={ret >= 0 ? 'green.600' : 'red.600'}>
+                                                        Return: {ret >= 0 ? '+' : ''}{formatCompact(ret, baseCurrency)}
+                                                    </Text>
+                                                </Flex>
+                                                {/* Stacked horizontal bar */}
+                                                <Flex h="10px" borderRadius="sm" overflow="hidden" mb={1}>
+                                                    <Box bg="#A0AEC0" w={`${costPct}%`} h="100%" />
+                                                    <Box bg={ret >= 0 ? '#48BB78' : '#F56565'} w={`${retPct}%`} h="100%" />
+                                                </Flex>
+                                                <Flex justify="space-between">
+                                                    <Text fontSize="xs" color="gray.500">
+                                                        MV: {formatCompact(data.marketValue, baseCurrency)}
+                                                    </Text>
+                                                    <Text fontSize="xs" fontWeight="bold" color={totalReturnPct >= 0 ? 'green.600' : 'red.600'}>
+                                                        ROI: {totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%
+                                                    </Text>
+                                                </Flex>
+                                                {(data.fees ?? 0) > 0 && (
+                                                    <Text fontSize="2xs" color="orange.500">
+                                                        Fees: {formatCompact(data.fees, baseCurrency)}
+                                                    </Text>
+                                                )}
+                                            </Box>
+                                        )}
+                                        {parentGroup && (
+                                            <Text fontSize="2xs" color="blue.500" mt={1}>Click to drill into {parentGroup}</Text>
+                                        )}
+                                    </Box>
+                                );
                             }
-                            // Leaf node: stacked horizontal bar for cost vs return
-                            const cost = Math.abs(data?.costBasis ?? 0);
-                            const ret = data?.totalReturn ?? 0;
-                            const barTotal = cost + Math.abs(ret);
-                            const costPct = barTotal > 0 ? (cost / barTotal) * 100 : 50;
-                            const retPct = barTotal > 0 ? (Math.abs(ret) / barTotal) * 100 : 50;
-                            const parentGroup = !drilldown && groupBy !== 'flat' ? leafToParent.get(node.node?.id) : null;
-                            return (
-                                <Box bg="white" p={2} borderRadius="md" boxShadow="md" border="1px solid" borderColor="gray.200" minW="220px">
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.700">
-                                        {data?.fullLabel || node.node?.id}
-                                    </Text>
-                                    {data?.fullLabel && data.fullLabel !== node.node?.id && (
-                                        <Text fontSize="xs" color="gray.500">{node.node?.id}</Text>
-                                    )}
-                                    <Text fontSize="xs" color="gray.600" mt={1}>
-                                        {Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })} {sym} ({pct}%)
-                                    </Text>
-                                    {data?.marketValue != null && (
-                                        <Box borderTop="1px solid" borderColor="gray.100" mt={1} pt={1}>
-                                            {/* Cost & Return values */}
-                                            <Flex justify="space-between" mb={0.5}>
-                                                <Text fontSize="2xs" color="gray.500">Cost: {formatCompact(cost, baseCurrency)}</Text>
-                                                <Text fontSize="2xs" color={ret >= 0 ? 'green.600' : 'red.600'}>
-                                                    Return: {ret >= 0 ? '+' : ''}{formatCompact(ret, baseCurrency)}
-                                                </Text>
-                                            </Flex>
-                                            {/* Stacked horizontal bar */}
-                                            <Flex h="10px" borderRadius="sm" overflow="hidden" mb={1}>
-                                                <Box bg="#A0AEC0" w={`${costPct}%`} h="100%" />
-                                                <Box bg={ret >= 0 ? '#48BB78' : '#F56565'} w={`${retPct}%`} h="100%" />
-                                            </Flex>
-                                            <Flex justify="space-between">
-                                                <Text fontSize="xs" color="gray.500">
-                                                    MV: {formatCompact(data.marketValue, baseCurrency)}
-                                                </Text>
-                                                <Text fontSize="xs" fontWeight="bold" color={totalReturnPct >= 0 ? 'green.600' : 'red.600'}>
-                                                    ROI: {totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(1)}%
-                                                </Text>
-                                            </Flex>
-                                            {(data.fees ?? 0) > 0 && (
-                                                <Text fontSize="2xs" color="orange.500">
-                                                    Fees: {formatCompact(data.fees, baseCurrency)}
-                                                </Text>
-                                            )}
-                                        </Box>
-                                    )}
-                                    {parentGroup && (
-                                        <Text fontSize="2xs" color="blue.500" mt={1}>Click to drill into {parentGroup}</Text>
-                                    )}
-                                </Box>
+
+                            // Render via portal so tooltip is never clipped by parent overflow
+                            return createPortal(
+                                <div style={{
+                                    position: 'fixed',
+                                    left: mx + 12,
+                                    top: my + 12,
+                                    zIndex: 10000,
+                                    pointerEvents: 'none',
+                                }}>
+                                    {content}
+                                </div>,
+                                document.body,
                             );
                         }}
                         theme={{
                             labels: { text: { fontSize: 11, fontWeight: 600 } },
-                            tooltip: { container: { fontFamily: 'inherit', fontSize: 12 } },
                         }}
                     />
                 </Box>

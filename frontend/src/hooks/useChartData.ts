@@ -4,7 +4,7 @@
  * Uses TanStack React Query for automatic caching, deduplication and
  * background refetching — data survives tab switches without re-fetching.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { API_URL } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -167,69 +167,95 @@ export function useFeeSummaryByPeriod(
 }
 
 // ---------------------------------------------------------------------------
-// Period summary types
+// Metrics types (replaces period-summary)
 // ---------------------------------------------------------------------------
 
-export interface AssetPerformer {
-    asset_id: number;
-    symbol: string;
+export interface PerformerItem {
+    id: number;
+    name: string;
     label?: string | null;
+    group_type: 'asset' | 'account' | 'category';
     total_return: number;
     roi_pct: number;
 }
 
-export interface PeriodRangeMetrics {
+export interface MetricsRangeData {
     total_return: number;
     roi_pct: number;
     current_value: number;
     cost_basis: number;
     unrealized_pnl: number;
     realized_pnl: number;
+    taxable_realized_pnl: number;
     realized_in_period: number;
-    top_performers: AssetPerformer[];
-    flop_performers: AssetPerformer[];
+    cost_basis_in_period: number;
+    unrealized_in_period: number;
+    fees_in_period: number;
+    top_performers: PerformerItem[];
+    flop_performers: PerformerItem[];
 }
 
-export type RangeKey = 'all' | '1y' | '6m' | '3m' | '1m';
+export interface MetricsSummary {
+    current_value: number;
+    cost_basis: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    taxable_realized_pnl: number;
+    total_fees: number;
+    fee_entry_count: number;
+}
 
-export interface PeriodSummaryResponse {
+export type RangeKey = 'all' | '3y' | '1y' | '6m' | '3m' | '1m' | '1w';
+
+export interface VersionMetricsResponse {
     version_id: number;
-    ranges: Partial<Record<RangeKey, PeriodRangeMetrics>>;
+    summary: MetricsSummary;
+    ranges: Partial<Record<RangeKey, MetricsRangeData>>;
 }
 
+
+
 // ---------------------------------------------------------------------------
-// usePeriodSummary  (React Query)
+// useVersionMetrics  (React Query)
 // ---------------------------------------------------------------------------
 
-export interface PeriodSummaryParams {
+export type GroupBy = 'asset' | 'account' | 'category';
+
+export interface VersionMetricsParams {
+    groupBy?: GroupBy;
     topN?: number;
+    dimensionId?: number | null;
     assetIds?: number[];
     accountIds?: number[];
     categoryIds?: number[];
 }
 
-export function usePeriodSummary(
+export function useVersionMetrics(
     versionId: number | null,
-    params: PeriodSummaryParams = {},
+    params: VersionMetricsParams = {},
     enabled = true,
 ) {
-    const result = useQuery<PeriodSummaryResponse>({
+    const result = useQuery<VersionMetricsResponse>({
         queryKey: [
-            'period-summary', versionId,
+            'version-metrics', versionId,
+            params.groupBy,
             params.topN,
+            params.dimensionId,
             params.assetIds?.join(','),
             params.accountIds?.join(','),
             params.categoryIds?.join(','),
         ],
         queryFn: async ({ signal }) => {
             const sp = new URLSearchParams();
+            if (params.groupBy) sp.set('group_by', params.groupBy);
             if (params.topN) sp.set('top_n', String(params.topN));
+            if (params.dimensionId != null) sp.set('dimension_id', String(params.dimensionId));
             if (params.assetIds?.length) sp.set('asset_ids', params.assetIds.join(','));
             if (params.accountIds?.length) sp.set('account_ids', params.accountIds.join(','));
             if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
             const qs = sp.toString() ? `?${sp.toString()}` : '';
             const res = await fetch(
-                `${API_URL}/pnl/versions/${versionId}/period-summary${qs}`,
+                `${API_URL}/pnl/versions/${versionId}/metrics${qs}`,
                 { signal },
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -246,6 +272,8 @@ export function usePeriodSummary(
         refetch: result.refetch,
     };
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Benchmark series types & hook
@@ -314,4 +342,42 @@ export function useBenchmarkSeries(
         isLoading: result.isLoading,
         error: result.error ? (result.error as Error).message : null,
     };
+}
+
+/**
+ * Fetch daily close prices for multiple benchmark indices in parallel.
+ * Uses React Query's useQueries to run independent queries per ticker.
+ */
+export function useMultiBenchmarkSeries(
+    tickers: string[],
+    startDate: string | null,
+    endDate: string | null,
+    enabled = true,
+) {
+    const results = useQueries({
+        queries: tickers.map(ticker => ({
+            queryKey: ['benchmark-series', ticker, startDate, endDate],
+            queryFn: async ({ signal }: { signal: AbortSignal }) => {
+                const sp = new URLSearchParams();
+                sp.set('ticker', ticker);
+                sp.set('start_date', startDate!);
+                sp.set('end_date', endDate!);
+                const res = await fetch(`${API_URL}/pnl/benchmark-series?${sp.toString()}`, { signal });
+                if (!res.ok) {
+                    const body = await res.text().catch(() => '');
+                    throw new Error(`HTTP ${res.status}: ${body}`);
+                }
+                return res.json() as Promise<BenchmarkSeriesResponse>;
+            },
+            enabled: enabled && !!ticker && !!startDate && !!endDate,
+            staleTime: 10 * 60_000,
+        })),
+    });
+
+    return results.map((r, i) => ({
+        ticker: tickers[i],
+        data: r.data ?? null,
+        isLoading: r.isLoading,
+        error: r.error ? (r.error as Error).message : null,
+    }));
 }

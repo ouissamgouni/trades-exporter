@@ -12,7 +12,7 @@
  *   - Tooltips on warnings and balance columns
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Badge,
     Box,
@@ -42,6 +42,7 @@ import { UnitDetailRow } from './DataExplorerPanel';
 import { formatDateLocale } from '../../utils/dateUtils';
 import { formatQuantityCompact } from '../../utils/numberUtils';
 import { UnitPattern, getUnitPatternLabel } from '../../enums';
+import { API_URL } from '../../types';
 
 const fmtQty = formatQuantityCompact;
 
@@ -58,6 +59,8 @@ export interface ActivityFeedProps {
     onAssetClick?: (assetId: number) => void;
     /** Current P&L balance per asset: symbol (uppercase) → total quantity */
     assetBalanceMap?: Map<string, number>;
+    /** Called when user clicks a unit row to navigate / inspect. */
+    onUnitClick?: (unitId: number) => void;
 }
 
 // ─── Pattern icon mapping (matches UnitPattern enum values) ─────────────────
@@ -214,17 +217,57 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     onTransactionClick,
     onAssetClick,
     assetBalanceMap,
+    onUnitClick,
 }) => {
     const pagination = usePagination({ storageKey: 'pnl_activity_feed' });
+
+    // ── Server-side filter state ────────────────────────────────────────────
+    const [typeFilter, setTypeFilter] = useState<string>('all');
+    const [warningTypes, setWarningTypes] = useState<string[]>([]);
+    const [hasRealizedPnl, setHasRealizedPnl] = useState(false);
+    const [hasFees, setHasFees] = useState(false);
+    const [searchInput, setSearchInput] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    // Debounce search input
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
+
+    // Build server params from filter state
+    const serverParams = useMemo(() => {
+        const params: Record<string, string | number | boolean | undefined> = {
+            ...txFilterParams,
+        };
+        if (typeFilter !== 'all') params.unit_pattern = typeFilter;
+        if (warningTypes.length > 0) {
+            params.warning_type = warningTypes.join(',');
+            params.has_warnings = true;
+        }
+        if (hasRealizedPnl) params.has_realized_pnl = true;
+        if (hasFees) params.has_fees = true;
+        if (debouncedSearch) params.search = debouncedSearch;
+        return params;
+    }, [txFilterParams, typeFilter, warningTypes, hasRealizedPnl, hasFees, debouncedSearch]);
+
+    // Reset to page 1 when filters change
+    const prevParamsRef = React.useRef(serverParams);
+    useEffect(() => {
+        if (prevParamsRef.current !== serverParams) {
+            pagination.setPage(1);
+            prevParamsRef.current = serverParams;
+        }
+    }, [serverParams]);
 
     const { data: rawUnits, total, isLoading, error, refetch } = useLazyPaginatedQuery<ProcessedUnitResponse>({
         endpoint: `/pnl/versions/${versionId}/units`,
         page: pagination.page,
         limit: pagination.pageSize,
-        params: { ...txFilterParams },
+        params: serverParams,
     });
 
-    // Map raw API response to frontend CalculationUnit (timestamp → date, etc.)
+    // Map raw API response to frontend CalculationUnit
     const units = useMemo(
         () => rawUnits.map(mapProcessedUnitToCalculationUnit),
         [rawUnits],
@@ -234,28 +277,42 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
         pagination.setTotal(total);
     }, [total]);
 
-    // ── Client-side filters ─────────────────────────────────────────────────
-    const [typeFilter, setTypeFilter] = useState<string>('all');
-    const [hasWarnings, setHasWarnings] = useState(false);
-    const [hasRealizedPnl, setHasRealizedPnl] = useState(false);
-    const [unitIdSearch, setUnitIdSearch] = useState('');
+    // ── Filter options from backend ─────────────────────────────────────────
+    interface FilterOption { value: string; label?: string; count: number }
+    interface UnitsFilterOptions {
+        patterns: FilterOption[];
+        total_units: number;
+        has_warnings_count: number;
+        has_realized_pnl_count: number;
+        has_fees_count: number;
+        warning_types: FilterOption[];
+    }
+    const [filterOptions, setFilterOptions] = useState<UnitsFilterOptions | null>(null);
 
-    // Distinct types in current page
+    useEffect(() => {
+        const qs = new URLSearchParams();
+        if (txFilterParams) {
+            Object.entries(txFilterParams).forEach(([k, v]) => {
+                if (v !== undefined && v !== '') qs.set(k, String(v));
+            });
+        }
+        fetch(`${API_URL}/pnl/versions/${versionId}/units/filter-options?${qs}`)
+            .then(r => r.json())
+            .then(setFilterOptions)
+            .catch(() => { });
+    }, [versionId, txFilterParams]);
+
+    // Available pattern types for filter buttons
     const availableTypes = useMemo(() => {
+        if (filterOptions?.patterns) {
+            return filterOptions.patterns
+                .filter(p => p.count > 0)
+                .map(p => ({ value: p.value, count: p.count }));
+        }
+        // Fallback: derive from current page
         const set = new Set(units.map(u => u.pattern || 'unknown'));
-        return Array.from(set).sort();
-    }, [units]);
-
-    // Apply client-side filters
-    const filteredUnits = useMemo(() => {
-        return units.filter(u => {
-            if (typeFilter !== 'all' && (u.pattern || 'unknown') !== typeFilter) return false;
-            if (hasWarnings && (!u.warnings || u.warnings.length === 0)) return false;
-            if (hasRealizedPnl && !(u.realized_pnl_in_base && u.realized_pnl_in_base !== 0)) return false;
-            if (unitIdSearch && !u.unit_id.toString().includes(unitIdSearch.trim())) return false;
-            return true;
-        });
-    }, [units, typeFilter, hasWarnings, hasRealizedPnl, unitIdSearch]);
+        return Array.from(set).sort().map(v => ({ value: v, count: 0 }));
+    }, [filterOptions, units]);
 
     // ── Expandable row state ────────────────────────────────────────────────
     const [expandedUnits, setExpandedUnits] = useState<Set<number>>(new Set());
@@ -284,9 +341,11 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     // Total columns (used for expanded row colSpan)
     const COL_COUNT = 8;
 
+    const hasAnyFilter = typeFilter !== 'all' || warningTypes.length > 0 || hasRealizedPnl || hasFees || !!debouncedSearch;
+
     if (isLoading) return <TabLoadingState message="Loading activity feed..." />;
     if (error) return <TabErrorState error={error} onRetry={refetch} />;
-    if (units.length === 0) {
+    if (units.length === 0 && !hasAnyFilter) {
         return (
             <TabEmptyState
                 title="No Activity"
@@ -295,21 +354,27 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
         );
     }
 
-    const hasAnyFilter = typeFilter !== 'all' || hasWarnings || hasRealizedPnl || !!unitIdSearch;
+    const clearFilters = () => {
+        setTypeFilter('all');
+        setWarningTypes([]);
+        setHasRealizedPnl(false);
+        setHasFees(false);
+        setSearchInput('');
+    };
 
     return (
         <Box>
             {/* ── Filter bar ────────────────────────────────────────────── */}
             <Flex gap={2} mb={3} wrap="wrap" align="center">
-                {/* Unit ID search */}
+                {/* Search */}
                 <Flex align="center" gap={1} bg="gray.50" borderRadius="md" px={2} py={0.5}>
                     <FiSearch size={12} color="gray" />
                     <input
                         type="text"
-                        placeholder="Unit ID"
-                        value={unitIdSearch}
-                        onChange={(e) => setUnitIdSearch(e.target.value)}
-                        style={{ width: 70, fontSize: 11, background: 'transparent', border: 'none', outline: 'none' }}
+                        placeholder="Search ID / label"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        style={{ width: 100, fontSize: 11, background: 'transparent', border: 'none', outline: 'none' }}
                     />
                 </Flex>
                 {/* Type filter buttons */}
@@ -321,14 +386,14 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                     >
                         All
                     </Button>
-                    {availableTypes.map(type => {
+                    {availableTypes.map(({ value: type, count }) => {
                         const pi = getPatternIcon(type);
                         return (
-                            <Tooltip key={type} content={getUnitPatternLabel(type)} showArrow>
+                            <Tooltip key={type} content={`${getUnitPatternLabel(type)} (${count})`} showArrow>
                                 <Button
                                     size="2xs"
                                     variant={typeFilter === type ? 'solid' : 'outline'}
-                                    onClick={() => setTypeFilter(type)}
+                                    onClick={() => setTypeFilter(typeFilter === type ? 'all' : type)}
                                 >
                                     <Box color={typeFilter === type ? undefined : pi.color}>{pi.icon}</Box>
                                 </Button>
@@ -338,15 +403,37 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                 </Flex>
                 {/* Toggle filters */}
                 <Flex gap={1} align="center" ml={2}>
-                    <Button
-                        size="2xs"
-                        variant={hasWarnings ? 'solid' : 'outline'}
-                        colorPalette={hasWarnings ? 'orange' : 'gray'}
-                        onClick={() => setHasWarnings(v => !v)}
-                    >
-                        <FiAlertTriangle size={12} />
-                        <Text ml={1}>Warnings</Text>
-                    </Button>
+                    {/* Warning type toggle buttons */}
+                    {(filterOptions?.warning_types ?? []).map(wt => {
+                        const active = warningTypes.includes(wt.value);
+                        return (
+                            <Button
+                                key={wt.value}
+                                size="2xs"
+                                variant={active ? 'solid' : 'outline'}
+                                colorPalette={active ? 'orange' : 'gray'}
+                                onClick={() => {
+                                    setWarningTypes(prev =>
+                                        prev.includes(wt.value)
+                                            ? prev.filter(t => t !== wt.value)
+                                            : [...prev, wt.value]
+                                    );
+                                }}
+                            >
+                                <FiAlertTriangle size={10} />
+                                <Text ml={1}>
+                                    {(wt.label || wt.value).replace(/_/g, ' ')} ({wt.count})
+                                </Text>
+                            </Button>
+                        );
+                    })}
+                    {/* Fallback: show generic warnings button while filter options load */}
+                    {!filterOptions && (
+                        <Button size="2xs" variant="outline" colorPalette="gray" disabled>
+                            <FiAlertTriangle size={10} />
+                            <Text ml={1}>Warnings</Text>
+                        </Button>
+                    )}
                     <Button
                         size="2xs"
                         variant={hasRealizedPnl ? 'solid' : 'outline'}
@@ -354,14 +441,28 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                         onClick={() => setHasRealizedPnl(v => !v)}
                     >
                         💰
-                        <Text ml={1}>Has P&L</Text>
+                        <Text ml={1}>Has P&L{filterOptions ? ` (${filterOptions.has_realized_pnl_count})` : ''}</Text>
+                    </Button>
+                    <Button
+                        size="2xs"
+                        variant={hasFees ? 'solid' : 'outline'}
+                        colorPalette={hasFees ? 'yellow' : 'gray'}
+                        onClick={() => setHasFees(v => !v)}
+                    >
+                        💸
+                        <Text ml={1}>Fees{filterOptions ? ` (${filterOptions.has_fees_count})` : ''}</Text>
                     </Button>
                 </Flex>
-                {/* Filter count */}
+                {/* Active filter indicator */}
                 {hasAnyFilter && (
-                    <Text fontSize="2xs" color="gray.500" ml={2}>
-                        {filteredUnits.length} of {units.length}
-                    </Text>
+                    <Flex align="center" gap={1} ml={2}>
+                        <Text fontSize="2xs" color="gray.500">
+                            {total} result{total !== 1 ? 's' : ''}
+                        </Text>
+                        <Button size="2xs" variant="ghost" onClick={clearFilters}>
+                            Clear
+                        </Button>
+                    </Flex>
                 )}
             </Flex>
 
@@ -381,7 +482,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                         </Table.Row>
                     </Table.Header>
                     <Table.Body>
-                        {filteredUnits.map((unit: CalculationUnit) => {
+                        {units.map((unit: CalculationUnit) => {
                             const txIds = txIdsByUnit.get(unit.unit_id) || [];
                             const isExpanded = expandedUnits.has(unit.unit_id);
                             const pi = getPatternIcon(unit.pattern);

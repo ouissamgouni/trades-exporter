@@ -12,19 +12,18 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func, not_, or_
+from sqlalchemy import func, not_, or_, case, cast, String as SAString
 from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_session_dependency
 from backend.db.models import (
     Asset, NormalizedTransaction, CalculationUnit,
     CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg,
-    AssetCategory, Category, Dimension, UnitPattern, Account, SyncJobConnectorRun,
+    AssetCategory, Category, Dimension, UnitPattern, Account, SyncJobConnectorRun, AppSettings,
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
@@ -81,6 +80,129 @@ def _apply_unit_filter(query, tx_filters: PnLTransactionFilters, version_id: int
 from typing import Generic, TypeVar
 
 T = TypeVar("T")
+
+
+# =============================================================================
+# Warning severity mapping (deterministic: warning_type -> level)
+# =============================================================================
+
+WARNING_SEVERITY_MAP: Dict[str, str] = {
+    "insufficient_lots": "error",
+    "negative_balance": "error",
+    "unexpected_error": "error",
+    "unmatched_internal_transfer": "warning",
+    "missing_price": "warning",
+    "stale_price": "warning",
+    "residual_mismatch": "warning",
+    "fmv_fetch_failed": "warning",
+    "unmatched_group": "warning",
+    "zero_cost_lot": "warning",  # Upgraded from "info" — zero-cost means phantom gains
+    "provisional_cost_lot": "warning",  # FMV-based cost on negative lot
+    "unsettled_negative_lot": "warning",  # Negative lot never settled by acquisition
+    "fee_consumption_failed": "info",
+}
+
+SEVERITY_TO_WARNING_TYPES: Dict[str, List[str]] = {}
+for _wt, _lvl in WARNING_SEVERITY_MAP.items():
+    SEVERITY_TO_WARNING_TYPES.setdefault(_lvl, []).append(_wt)
+
+
+def _get_warning_level(warning_type: str) -> str:
+    return WARNING_SEVERITY_MAP.get(warning_type, "info")
+
+
+# =============================================================================
+# Audit summary response models
+# =============================================================================
+
+class AuditLotsSummary(BaseModel):
+    total: int = 0
+    open: int = 0
+    exhausted: int = 0
+    negative: int = 0
+
+class AuditRealizedSummary(BaseModel):
+    total: int = 0
+    taxable: int = 0
+    non_taxable: int = 0
+    total_gain: float = 0.0
+    total_loss: float = 0.0
+    short_term: int = 0
+    long_term: int = 0
+
+class AuditFeeSourceCount(BaseModel):
+    source: str
+    count: int
+
+class AuditFeesSummary(BaseModel):
+    total: int = 0
+    total_value_in_base: float = 0.0
+    by_source: List[AuditFeeSourceCount] = []
+
+class AuditWarningTypeCount(BaseModel):
+    type: str
+    count: int
+
+class AuditWarningsByLevel(BaseModel):
+    error: int = 0
+    warning: int = 0
+    info: int = 0
+
+class AuditWarningsSummary(BaseModel):
+    total: int = 0
+    by_level: AuditWarningsByLevel = AuditWarningsByLevel()
+    by_type: List[AuditWarningTypeCount] = []
+
+class AuditTransactionsSummary(BaseModel):
+    included: int = 0
+    excluded: int = 0
+
+class AuditSummaryResponse(BaseModel):
+    units_count: int = 0
+    lots: AuditLotsSummary = AuditLotsSummary()
+    realized: AuditRealizedSummary = AuditRealizedSummary()
+    fees: AuditFeesSummary = AuditFeesSummary()
+    warnings: AuditWarningsSummary = AuditWarningsSummary()
+    events_count: int = 0
+    transactions: AuditTransactionsSummary = AuditTransactionsSummary()
+
+
+# =============================================================================
+# Per-tab filter options response models
+# =============================================================================
+
+class FilterOptionWithCount(BaseModel):
+    value: str
+    label: Optional[str] = None
+    count: int = 0
+
+class UnitsFilterOptionsResponse(BaseModel):
+    patterns: List[FilterOptionWithCount] = []
+    total_units: int = 0
+    has_warnings_count: int = 0
+    has_realized_pnl_count: int = 0
+    has_fees_count: int = 0
+    warning_types: List[FilterOptionWithCount] = []  # Per-type breakdown for multi-select
+
+class LotsFilterOptionsResponse(BaseModel):
+    assets: List[FilterOptionWithCount] = []
+    accounts: List[FilterOptionWithCount] = []
+    statuses: List[FilterOptionWithCount] = []
+
+class RealizedPnLFilterOptionsResponse(BaseModel):
+    assets: List[FilterOptionWithCount] = []
+    taxable_options: List[FilterOptionWithCount] = []
+    pnl_sign_options: List[FilterOptionWithCount] = []
+    holding_period_options: List[FilterOptionWithCount] = []
+
+class FeesFilterOptionsResponse(BaseModel):
+    assets: List[FilterOptionWithCount] = []
+    related_assets: List[FilterOptionWithCount] = []
+
+class WarningsFilterOptionsResponse(BaseModel):
+    warning_types: List[FilterOptionWithCount] = []
+    levels: List[FilterOptionWithCount] = []
+    assets: List[FilterOptionWithCount] = []
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
@@ -140,6 +262,7 @@ class PnLCalculateRequest(BaseModel):
 class RealizedPnLResponse(BaseModel):
     """Realized P&L entry response."""
 
+    pnl_id: int
     asset: AssetRef
     qty: float
     proceeds_in_base: float
@@ -212,6 +335,16 @@ class CostLotResponse(BaseModel):
     is_fully_settled: bool = False  # True if negative lot is fully settled
     notes: Optional[str] = None  # Additional info (e.g., settlement details)
     
+    # Cost provenance
+    cost_source: Optional[str] = None  # "fmv", "proceeds", "inherited", "provisional", "base_currency"
+    cost_fmv_price: Optional[float] = None  # FMV unit price used (if cost_source is fmv/provisional)
+    cost_fmv_source: Optional[str] = None  # Price source (e.g., "coingecko", "fallback:cached")
+    cost_fmv_timestamp: Optional[datetime] = None  # When the FMV price was snapped
+    cost_fmv_stale: Optional[bool] = None  # Whether the FMV price was flagged stale
+    
+    # Cost basis chain (for transfers/splits — links to source lot)
+    source_lot_id: Optional[int] = None  # The lot this was created from (if inherited/split)
+
     # Settlement tracking for negative lots
     total_settled: Optional[float] = None  # Amount already settled
     settlement_count: int = 0  # Number of settlements
@@ -278,6 +411,13 @@ class CostLotEventResponse(BaseModel):
     
     timestamp: datetime
 
+    # FMV details for 'created' events where cost basis used FMV
+    cost_source: Optional[str] = None
+    cost_fmv_price: Optional[float] = None
+    cost_fmv_source: Optional[str] = None
+    cost_fmv_timestamp: Optional[datetime] = None
+    cost_fmv_stale: Optional[bool] = None
+
 
 class ConsumedSliceResponse(BaseModel):
     """Details of a consumed lot slice for audit."""
@@ -304,6 +444,11 @@ class RealizedEntryDetailResponse(BaseModel):
     pnl_in_base: float
     disposal_taxable: bool
     is_fee: bool = False  # True if this entry is from a fee disposal
+    # Proceeds tracking - how FMV was determined
+    proceeds_source: Optional[str] = None
+    proceeds_price: Optional[float] = None
+    proceeds_price_source: Optional[str] = None
+    proceeds_price_timestamp: Optional[datetime] = None
 
 
 class OriginTransactionDetail(BaseModel):
@@ -397,6 +542,48 @@ class CostBasisTracking(BaseModel):
     lots: List[CostLotResponse] = []
     consumed: List[ConsumedSliceResponse] = []
     settlements: List[SettlementResponse] = []
+
+
+class CostLotLineageResponse(BaseModel):
+    """Full lineage/provenance for a single cost lot."""
+    lot: CostLotResponse
+    consumed_slices: List[ConsumedSliceResponse] = []       # Slices taken from this lot by disposals
+    settlements: List[SettlementResponse] = []              # Settlements (for negative lots)
+    events_count: int = 0                                   # Total event count
+    recent_events: List[CostLotEventResponse] = []          # Last 5 events
+    origin_transaction: Optional["TransactionSummary"] = None  # Transaction that created this lot
+
+
+class RealizedPnlLineageResponse(BaseModel):
+    """Full lineage/provenance for a single realized P&L entry."""
+    pnl: RealizedPnLResponse
+    source_lots: List[CostLotResponse] = []                 # Lots that contributed cost basis
+    consumed_slices: List[ConsumedSliceResponse] = []       # Bridge records (lot → PnL)
+    disposal_transaction: Optional["TransactionSummary"] = None  # Transaction that triggered disposal
+
+
+class CostBasisChainNode(BaseModel):
+    """Single node in the cost basis chain — one step in the provenance trail."""
+    lot_id: int
+    transaction_id: Optional[int] = None
+    transaction_type: Optional[str] = None          # e.g. "buy", "transfer", "swap", "split"
+    transaction_source_type: Optional[str] = None   # Source-level type (source_transaction_type)
+    timestamp: Optional[datetime] = None            # Transaction or lot acquired_at
+    asset_symbol: Optional[str] = None
+    asset_id: Optional[int] = None
+    account_name: Optional[str] = None
+    account_id: Optional[int] = None
+    qty: float = 0
+    unit_cost: float = 0
+    cost_source: Optional[str] = None               # "fmv", "inherited", "proceeds", "provisional", "base_currency"
+    unit_pattern: Optional[str] = None              # "transfer", "swap", "split", "flow"
+    children: List["CostBasisChainNode"] = []       # Source lots (backward, toward origin)
+
+
+class CostBasisChainResponse(BaseModel):
+    """Full backward cost basis chain for a lot, P&L entry, or event."""
+    chain: List[CostBasisChainNode] = []
+    depth: int = 0                                   # Maximum depth reached
 
 
 class ProcessedUnitResponse(BaseModel):
@@ -552,6 +739,14 @@ def build_cost_lot_response(lot: CostLot) -> CostLotResponse:
         is_zero_cost=lot.is_zero_cost,
         is_negative=lot.is_negative,
         notes=lot.notes,
+        # Cost provenance
+        cost_source=lot.cost_source,
+        cost_fmv_price=float(lot.cost_fmv_price) if lot.cost_fmv_price is not None else None,
+        cost_fmv_source=lot.cost_fmv_source,
+        cost_fmv_timestamp=lot.cost_fmv_timestamp,
+        cost_fmv_stale=lot.cost_fmv_stale,
+        # Cost basis chain
+        source_lot_id=getattr(lot, 'source_lot_id', None),
     )
 
 
@@ -589,6 +784,10 @@ def build_realized_entry_response(entry: RealizedPnl, is_fee: bool = False) -> R
         pnl_in_base=float(entry.pnl_in_base),
         disposal_taxable=entry.disposal_taxable,
         is_fee=is_fee,
+        proceeds_source=entry.proceeds_source,
+        proceeds_price=float(entry.proceeds_price) if entry.proceeds_price else None,
+        proceeds_price_source=entry.proceeds_price_source,
+        proceeds_price_timestamp=entry.proceeds_price_timestamp,
     )
 
 
@@ -738,6 +937,12 @@ class PnLVersionResponse(BaseModel):
     base_currency_symbol: Optional[str] = None
     allow_negative_balances: bool = False
     residual_tolerance_pct: float = 0.05
+    compute_residuals: bool = True
+    # Full config for reproducibility
+    crypto_swap_taxable: bool = False
+    fee_taxable: bool = False
+    use_price_fallback: bool = True
+    price_staleness_window_days: int = 7
     
     # Account filter - which accounts were included in this calculation
     # None means all accounts were included
@@ -745,6 +950,10 @@ class PnLVersionResponse(BaseModel):
     
     # Summary
     total_realized_pnl: float
+    taxable_realized_pnl: float = 0.0
+    current_value: float = 0.0
+    cost_basis: float = 0.0
+    unrealized_pnl: float = 0.0
     
     # Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: float = 0.0  # Total fee expense at FMV
@@ -778,6 +987,12 @@ class VersionListItem(BaseModel):
     base_currency_symbol: Optional[str] = None
     allow_negative_balances: bool = False
     residual_tolerance_pct: float = 0.05
+    compute_residuals: bool = True
+    # Full config for display
+    crypto_swap_taxable: bool = False
+    fee_taxable: bool = False
+    use_price_fallback: bool = True
+    price_staleness_window_days: int = 7
 
 
 # =============================================================================
@@ -835,22 +1050,6 @@ def _determine_related_asset(
         return (asset.asset_id, asset.symbol, asset.label)
     
     return None
-
-
-def compute_total_realized_pnl(session: Session, version_id: int) -> Decimal:
-    """
-    Compute total taxable realized P&L for a version via SQL aggregation.
-    
-    Sums RealizedPnl.pnl_in_base WHERE disposal_taxable=True for all entries
-    linked to the version via CalculationUnit.
-    """
-    result = session.exec(
-        select(func.coalesce(func.sum(RealizedPnl.pnl_in_base), 0))
-        .join(RealizedPnl.origin_unit)
-        .where(CalculationUnit.version_id == version_id)
-        .where(RealizedPnl.disposal_taxable == True)
-    ).one()
-    return Decimal(str(result)) if result else Decimal(0)
 
 
 def fetch_version_entity_ids(session: Session, version_id: int) -> Dict[str, List[int]]:
@@ -918,6 +1117,10 @@ def build_version_response(
     version: CalculationVersion,
     base_currency_symbol: Optional[str] = None,
     total_realized_pnl: float = 0.0,
+    taxable_realized_pnl: float = 0.0,
+    current_value: float = 0.0,
+    cost_basis: float = 0.0,
+    unrealized_pnl: float = 0.0,
     total_fees_in_base: float = 0.0,
     fee_entry_count: int = 0,
     calculation_unit_ids: List[int] = [],
@@ -946,8 +1149,17 @@ def build_version_response(
         base_currency_symbol=base_currency_symbol,
         allow_negative_balances=version.allow_negative_balances,
         residual_tolerance_pct=float(version.residual_tolerance_pct),
-        account_ids=version.account_ids,  # Include account filter in response
+        compute_residuals=version.compute_residuals,
+        crypto_swap_taxable=version.crypto_swap_taxable,
+        fee_taxable=version.fee_taxable,
+        use_price_fallback=version.use_price_fallback,
+        price_staleness_window_days=version.price_staleness_window_days,
+        account_ids=version.account_ids,
         total_realized_pnl=total_realized_pnl,
+        taxable_realized_pnl=taxable_realized_pnl,
+        current_value=current_value,
+        cost_basis=cost_basis,
+        unrealized_pnl=unrealized_pnl,
         total_fees_in_base=total_fees_in_base,
         fee_entry_count=fee_entry_count,
         calculation_unit_ids=calculation_unit_ids,
@@ -1035,6 +1247,13 @@ def calculate_pnl(
         version.trigger = "manual"
         session.add(version)
         session.commit()
+
+        # Persist compute_residuals preference in AppSettings for future refresh calculations
+        settings = session.get(AppSettings, 1)
+        if settings and settings.pnl_compute_residuals != request.compute_residuals:
+            settings.pnl_compute_residuals = request.compute_residuals
+            session.add(settings)
+            session.commit()
 
         log.info(
             "pnl_calculation_complete",
@@ -1269,9 +1488,6 @@ def get_current_prices(
 # and eager loading for efficient queries. This separates read path from write path.
 
 
-# VersionSummaryResponse removed - use PnLVersionResponse for detail, VersionListItem for list
-
-
 @router.get("/versions", response_model=List[VersionListItem])
 def list_versions(
     status: Optional[str] = None,
@@ -1316,6 +1532,11 @@ def list_versions(
             base_currency_symbol=base_currencies.get(v.base_currency_id),
             allow_negative_balances=v.allow_negative_balances,
             residual_tolerance_pct=float(v.residual_tolerance_pct),
+            compute_residuals=v.compute_residuals,
+            crypto_swap_taxable=v.crypto_swap_taxable,
+            fee_taxable=v.fee_taxable,
+            use_price_fallback=v.use_price_fallback,
+            price_staleness_window_days=v.price_staleness_window_days,
         )
         for v in versions
     ]
@@ -1327,10 +1548,11 @@ def get_version(
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Get details of a specific calculation version with balances and total P&L.
+    Get metadata and summary for a specific calculation version.
     
-    Computes total_realized_pnl via SQL aggregation and builds balances from
-    cost lots with qty_remaining > 0.
+    Returns version config, entity ID counts, and lightweight realized P&L / fee
+    aggregates.  Price-dependent metrics (unrealized P&L, current value) are NOT
+    computed here — use GET /versions/{id}/metrics for those.
     """
     version = session.get(CalculationVersion, version_id)
     if not version:
@@ -1342,10 +1564,29 @@ def get_version(
         asset = session.get(Asset, version.base_currency_id)
         base_currency_symbol = asset.symbol if asset else None
     
-    # Compute total realized P&L via SQL aggregation
-    total_pnl = compute_total_realized_pnl(session, version_id)
-    
-    # Compute fee summary from FeeEntry records
+    # --- Lightweight DB aggregates (no price fetching) ---
+
+    # Realized P&L totals (all + taxable-only)
+    rpnl_query = (
+        select(
+            func.coalesce(func.sum(RealizedPnl.pnl_in_base), 0).label("total"),
+        )
+        .join(CalculationUnit, RealizedPnl.origin_unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    total_realized_pnl = float(session.exec(rpnl_query).one())
+
+    taxable_rpnl_query = (
+        select(
+            func.coalesce(func.sum(RealizedPnl.pnl_in_base), 0).label("total"),
+        )
+        .join(CalculationUnit, RealizedPnl.origin_unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(RealizedPnl.disposal_taxable == True)  # noqa: E712
+    )
+    taxable_realized_pnl = float(session.exec(taxable_rpnl_query).one())
+
+    # Fee summary
     fee_summary = session.exec(
         select(
             func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0).label("total_fees"),
@@ -1362,7 +1603,8 @@ def get_version(
     return build_version_response(
         version=version,
         base_currency_symbol=base_currency_symbol,
-        total_realized_pnl=float(total_pnl),
+        total_realized_pnl=total_realized_pnl,
+        taxable_realized_pnl=taxable_realized_pnl,
         total_fees_in_base=total_fees_in_base,
         fee_entry_count=fee_entry_count,
         calculation_unit_ids=entity_ids["calculation_unit_ids"],
@@ -1395,6 +1637,8 @@ def get_version_lots(
     include_unsettled_negative: bool = True,
     asset_id: Optional[int] = None,
     account_id: Optional[int] = None,
+    lot_status: Optional[str] = None,  # Comma-sep: open,exhausted,negative
+    search: Optional[str] = None,       # Search asset symbol / account name
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -1440,6 +1684,33 @@ def get_version_lots(
     
     if account_id:
         base_query = base_query.where(CostLot.account_id == account_id)
+
+    # Filter by lot_status (comma-separated: open, exhausted, negative)
+    if lot_status:
+        statuses = [s.strip() for s in lot_status.split(",") if s.strip()]
+        status_conditions = []
+        for s in statuses:
+            if s == "open":
+                status_conditions.append((CostLot.qty_remaining > 0) & (~CostLot.is_negative))
+            elif s == "exhausted":
+                status_conditions.append(CostLot.qty_remaining == 0)
+            elif s == "negative":
+                status_conditions.append(CostLot.is_negative == True)
+        if status_conditions:
+            base_query = base_query.where(or_(*status_conditions))
+
+    # Search on asset symbol or account name
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.outerjoin(Asset, CostLot.asset_id == Asset.asset_id).outerjoin(
+            Account, CostLot.account_id == Account.id
+        ).where(
+            or_(
+                Asset.symbol.ilike(search_term),
+                Asset.label.ilike(search_term),
+                Account.name.ilike(search_term),
+            )
+        )
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -1483,11 +1754,329 @@ def get_version_lots(
             is_zero_cost=lot.is_zero_cost,
             is_negative=lot.is_negative,
             notes=lot.notes,
+            # Cost provenance
+            cost_source=lot.cost_source,
+            cost_fmv_price=float(lot.cost_fmv_price) if lot.cost_fmv_price is not None else None,
+            cost_fmv_source=lot.cost_fmv_source,
+            cost_fmv_timestamp=lot.cost_fmv_timestamp,
+            cost_fmv_stale=lot.cost_fmv_stale,
         )
         for lot in lots
     ]
     
     return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/versions/{version_id}/lots/filter-options", response_model=LotsFilterOptionsResponse)
+def get_lots_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """Return available filter values for the lots list, scoped by context filters."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    base_q = (
+        select(CostLot.cost_lot_id)
+        .join(CostLot.unit)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=CostLot.unit_id)
+    scoped_sq = base_q.subquery()
+
+    # Assets with counts
+    asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(CostLot.cost_lot_id))
+        .join(CostLot, CostLot.asset_id == Asset.asset_id)
+        .where(CostLot.cost_lot_id.in_(select(scoped_sq)))
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(CostLot.cost_lot_id).desc())
+    )
+    asset_rows = session.exec(asset_q).all()
+    assets = [FilterOptionWithCount(value=str(aid), label=sym or lbl or str(aid), count=c)
+              for aid, sym, lbl, c in asset_rows]
+
+    # Accounts with counts
+    acct_q = (
+        select(Account.id, Account.name, func.count(CostLot.cost_lot_id))
+        .join(CostLot, CostLot.account_id == Account.id)
+        .where(CostLot.cost_lot_id.in_(select(scoped_sq)))
+        .group_by(Account.id, Account.name)
+        .order_by(func.count(CostLot.cost_lot_id).desc())
+    )
+    acct_rows = session.exec(acct_q).all()
+    accounts = [FilterOptionWithCount(value=str(aid), label=name or str(aid), count=c)
+                for aid, name, c in acct_rows]
+
+    # Status counts:  open / exhausted / negative
+    status_q = (
+        select(
+            func.count(CostLot.cost_lot_id).filter((CostLot.qty_remaining > 0) & (~CostLot.is_negative)),
+            func.count(CostLot.cost_lot_id).filter(CostLot.qty_remaining == 0),
+            func.count(CostLot.cost_lot_id).filter(CostLot.is_negative == True),
+        )
+        .join(CostLot.unit)
+        .where(CalculationUnit.version_id == version_id)
+        .where(CostLot.cost_lot_id.in_(select(scoped_sq)))
+    )
+    open_c, exhausted_c, negative_c = session.exec(status_q).one()
+
+    statuses = [
+        FilterOptionWithCount(value="open", label="Open", count=open_c or 0),
+        FilterOptionWithCount(value="exhausted", label="Exhausted", count=exhausted_c or 0),
+        FilterOptionWithCount(value="negative", label="Negative", count=negative_c or 0),
+    ]
+
+    return LotsFilterOptionsResponse(
+        assets=assets,
+        accounts=accounts,
+        statuses=statuses,
+    )
+
+
+@router.get("/versions/{version_id}/lots/{lot_id}/lineage", response_model=CostLotLineageResponse)
+def get_lot_lineage(
+    version_id: int,
+    lot_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get full lineage for a single cost lot.
+
+    Returns the lot with consumed slices, settlements, recent events,
+    and origin transaction — everything needed for a traceability tooltip.
+    """
+    lot = session.get(CostLot, lot_id)
+    if not lot:
+        raise HTTPException(status_code=404, detail=f"Cost lot {lot_id} not found")
+
+    # Verify lot belongs to this version
+    unit = session.get(CalculationUnit, lot.unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(status_code=404, detail=f"Cost lot {lot_id} not found in version {version_id}")
+
+    # Eager-load asset/account for building response
+    if not lot.asset:
+        from sqlalchemy.orm import selectinload as _sil
+        lot = session.exec(
+            select(CostLot)
+            .where(CostLot.cost_lot_id == lot_id)
+            .options(_sil(CostLot.asset), _sil(CostLot.account), _sil(CostLot.unit))
+        ).one()
+
+    lot_response = build_cost_lot_response(lot)
+
+    # Consumed slices (disposals that consumed from this lot)
+    slices = session.exec(
+        select(ConsumedLotSlice)
+        .where(ConsumedLotSlice.cost_lot_id == lot_id)
+        .options(
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+            selectinload(ConsumedLotSlice.pnl).selectinload(RealizedPnl.origin_unit),
+        )
+        .order_by(ConsumedLotSlice.created_at)
+    ).all()
+    consumed = [build_consumed_slice_response(s) for s in slices]
+
+    # Settlements (for negative lots)
+    settlements_q = session.exec(
+        select(LotSettlement)
+        .where(LotSettlement.negative_lot_id == lot_id)
+        .order_by(LotSettlement.settled_at)
+    ).all()
+    settlements = [build_settlement_response(s) for s in settlements_q]
+
+    # Events (count + last 5)
+    events_count_val = session.exec(
+        select(func.count()).select_from(CostLotEvent).where(CostLotEvent.lot_id == lot_id)
+    ).one()
+    recent_events_q = session.exec(
+        select(CostLotEvent)
+        .where(CostLotEvent.lot_id == lot_id)
+        .options(
+            selectinload(CostLotEvent.lot).selectinload(CostLot.asset),
+            selectinload(CostLotEvent.lot).selectinload(CostLot.account),
+        )
+        .order_by(CostLotEvent.timestamp.desc())
+        .limit(5)
+    ).all()
+    recent_events = [
+        CostLotEventResponse(
+            event_id=ev.event_id,
+            event_type=ev.event_type,
+            lot_id=ev.lot_id,
+            asset=AssetRef(
+                id=ev.lot.asset.asset_id, symbol=ev.lot.asset.symbol, label=ev.lot.asset.label
+            ) if ev.lot and ev.lot.asset else None,
+            account_id=ev.lot.account_id if ev.lot else None,
+            account_name=ev.lot.account.name if ev.lot and ev.lot.account else None,
+            quantity_delta=float(ev.quantity_delta),
+            cost_basis_delta=float(ev.cost_basis_delta) if ev.cost_basis_delta else None,
+            qty_remaining_after=float(ev.qty_remaining_after),
+            cost_basis_remaining_after=float(ev.cost_basis_remaining_after) if ev.cost_basis_remaining_after else None,
+            related_lot_id=ev.related_lot_id,
+            triggered_by_transaction_id=ev.triggered_by_transaction_id,
+            triggered_by_unit_id=ev.triggered_by_unit_id,
+            timestamp=ev.timestamp,
+        )
+        for ev in recent_events_q
+    ]
+
+    # Origin transaction
+    origin_tx = None
+    if lot.origin_transaction_id:
+        tx = session.get(NormalizedTransaction, lot.origin_transaction_id)
+        if tx:
+            origin_tx = build_transaction_summary(tx)
+
+    return CostLotLineageResponse(
+        lot=lot_response,
+        consumed_slices=consumed,
+        settlements=settlements,
+        events_count=events_count_val,
+        recent_events=recent_events,
+        origin_transaction=origin_tx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cost Basis Chain — recursive backward traversal
+# ---------------------------------------------------------------------------
+
+def _walk_lot_chain(
+    lot: CostLot,
+    session: Session,
+    visited: set,
+    max_depth: int = 100,
+    current_depth: int = 0,
+) -> CostBasisChainNode:
+    """
+    Recursively walk backward through the cost basis chain from a lot.
+
+    Terminal conditions:
+      - cost_source in ("fmv", "base_currency", "provisional") → origin acquisition
+      - source_lot_id is None and cost_source != "proceeds" → origin lot
+      - cost_source == "proceeds" → follows origin_pnl_id → consumed lots → recurse
+      - max_depth reached or cycle detected → stop
+    """
+    # Build this node
+    tx = session.get(NormalizedTransaction, lot.origin_transaction_id) if lot.origin_transaction_id else None
+    unit = session.get(CalculationUnit, lot.unit_id) if lot.unit_id else None
+    node = CostBasisChainNode(
+        lot_id=lot.cost_lot_id,
+        transaction_id=lot.origin_transaction_id,
+        transaction_type=tx.transaction_type if tx else None,
+        transaction_source_type=tx.source_transaction_type if tx else None,
+        timestamp=tx.date_time if tx else lot.acquired_at,
+        asset_symbol=lot.asset.symbol if lot.asset else None,
+        asset_id=lot.asset_id,
+        account_name=lot.account.name if lot.account else None,
+        account_id=lot.account_id,
+        qty=float(lot.qty),
+        unit_cost=float(lot.unit_cost_in_base),
+        cost_source=lot.cost_source,
+        unit_pattern=unit.pattern if unit else None,
+        children=[],
+    )
+
+    if current_depth >= max_depth or lot.cost_lot_id in visited:
+        return node
+    visited.add(lot.cost_lot_id)
+
+    # Case 1: Inherited/split — follow source_lot_id
+    if lot.cost_source == "inherited" and lot.source_lot_id:
+        source = session.exec(
+            select(CostLot)
+            .where(CostLot.cost_lot_id == lot.source_lot_id)
+            .options(
+                selectinload(CostLot.asset),
+                selectinload(CostLot.account),
+            )
+        ).first()
+        if source and source.cost_lot_id not in visited:
+            node.children.append(
+                _walk_lot_chain(source, session, visited, max_depth, current_depth + 1)
+            )
+
+    # Case 2: Proceeds from swap — follow origin_pnl_id → consumed lots
+    elif lot.cost_source == "proceeds" and lot.origin_pnl_id:
+        slices = session.exec(
+            select(ConsumedLotSlice)
+            .where(ConsumedLotSlice.pnl_id == lot.origin_pnl_id)
+            .options(
+                selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+                selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.account),
+            )
+        ).all()
+        for s in slices:
+            if s.cost_lot and s.cost_lot.cost_lot_id not in visited:
+                node.children.append(
+                    _walk_lot_chain(s.cost_lot, session, visited, max_depth, current_depth + 1)
+                )
+
+    # Case 3: Inherited but no source_lot_id (old data without backfill)
+    # Try to parse notes: "Transfer (from lot 123)"
+    elif lot.cost_source == "inherited" and not lot.source_lot_id and lot.notes:
+        import re
+        m = re.search(r"from lot (\d+)", lot.notes)
+        if m:
+            parsed_id = int(m.group(1))
+            source = session.exec(
+                select(CostLot)
+                .where(CostLot.cost_lot_id == parsed_id)
+                .options(
+                    selectinload(CostLot.asset),
+                    selectinload(CostLot.account),
+                )
+            ).first()
+            if source and source.cost_lot_id not in visited:
+                node.children.append(
+                    _walk_lot_chain(source, session, visited, max_depth, current_depth + 1)
+                )
+
+    # Cases "fmv", "base_currency", "provisional", or no further link → terminal
+    return node
+
+
+def _compute_chain_depth(node: CostBasisChainNode) -> int:
+    """Compute the maximum depth of a chain tree rooted at node."""
+    if not node.children:
+        return 0
+    return 1 + max(_compute_chain_depth(c) for c in node.children)
+
+
+@router.get("/versions/{version_id}/lots/{lot_id}/chain", response_model=CostBasisChainResponse)
+def get_lot_chain(
+    version_id: int,
+    lot_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get the full backward cost basis chain for a cost lot.
+
+    Walks recursively through inherited/split lots (via source_lot_id) and
+    swap proceeds (via origin_pnl_id → consumed lots) until reaching the
+    original acquisition transaction.
+    """
+    lot = session.exec(
+        select(CostLot)
+        .where(CostLot.cost_lot_id == lot_id)
+        .options(selectinload(CostLot.asset), selectinload(CostLot.account))
+    ).first()
+    if not lot:
+        raise HTTPException(status_code=404, detail=f"Cost lot {lot_id} not found")
+
+    unit = session.get(CalculationUnit, lot.unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(status_code=404, detail=f"Cost lot {lot_id} not found in version {version_id}")
+
+    visited: set = set()
+    root = _walk_lot_chain(lot, session, visited, max_depth=100)
+    depth = _compute_chain_depth(root)
+
+    return CostBasisChainResponse(chain=[root], depth=depth)
 
 
 @router.get("/versions/{version_id}/consumed-slices", response_model=List[ConsumedSliceResponse])
@@ -1547,6 +2136,10 @@ def get_version_consumed_slices(
 def get_version_realized_pnl(
     version_id: int,
     asset_id: Optional[int] = None,
+    is_taxable: Optional[bool] = None,         # Filter by disposal_taxable
+    pnl_sign: Optional[str] = None,            # "gain" or "loss"
+    holding_period: Optional[str] = None,      # "short" (<=365d) or "long" (>365d)
+    search: Optional[str] = None,              # Search asset symbol
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -1576,6 +2169,32 @@ def get_version_realized_pnl(
     
     if asset_id:
         base_query = base_query.where(RealizedPnl.asset_id == asset_id)
+
+    if is_taxable is not None:
+        base_query = base_query.where(RealizedPnl.disposal_taxable == is_taxable)
+
+    if pnl_sign == "gain":
+        base_query = base_query.where(RealizedPnl.pnl_in_base > 0)
+    elif pnl_sign == "loss":
+        base_query = base_query.where(RealizedPnl.pnl_in_base < 0)
+
+    if holding_period == "short":
+        base_query = base_query.where(
+            (RealizedPnl.holding_period_days != None) & (RealizedPnl.holding_period_days <= 365)
+        )
+    elif holding_period == "long":
+        base_query = base_query.where(
+            (RealizedPnl.holding_period_days != None) & (RealizedPnl.holding_period_days > 365)
+        )
+
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.outerjoin(Asset, RealizedPnl.asset_id == Asset.asset_id).where(
+            or_(
+                Asset.symbol.ilike(search_term),
+                Asset.label.ilike(search_term),
+            )
+        )
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -1594,6 +2213,7 @@ def get_version_realized_pnl(
     
     items = [
         RealizedPnLResponse(
+            pnl_id=e.pnl_id,
             asset=AssetRef(
                 id=e.asset.asset_id if e.asset else e.asset_id,
                 symbol=e.asset.symbol if e.asset else f"#{e.asset_id}",
@@ -1620,6 +2240,244 @@ def get_version_realized_pnl(
     return {"items": items, "total": total, "page": page, "limit": limit}
 
 
+@router.get("/versions/{version_id}/realized-pnl/filter-options", response_model=RealizedPnLFilterOptionsResponse)
+def get_realized_pnl_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """Return available filter values for the realized P&L list."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    base_q = (
+        select(RealizedPnl.pnl_id)
+        .join(RealizedPnl.origin_unit)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=RealizedPnl.origin_unit_id)
+    scoped_sq = base_q.subquery()
+
+    # Assets
+    asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(RealizedPnl.pnl_id))
+        .join(RealizedPnl, RealizedPnl.asset_id == Asset.asset_id)
+        .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(RealizedPnl.pnl_id).desc())
+    )
+    asset_rows = session.exec(asset_q).all()
+    assets = [FilterOptionWithCount(value=str(aid), label=sym or lbl or str(aid), count=c)
+              for aid, sym, lbl, c in asset_rows]
+
+    # Taxable / non-taxable counts
+    tax_q = (
+        select(
+            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == True),
+            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == False),
+        )
+        .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+    )
+    taxable_count, non_taxable_count = session.exec(tax_q).one()
+
+    # Gain / loss counts
+    sign_q = (
+        select(
+            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.pnl_in_base > 0),
+            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.pnl_in_base < 0),
+        )
+        .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+    )
+    gain_count, loss_count = session.exec(sign_q).one()
+
+    # Holding period counts
+    hp_q = (
+        select(
+            func.count(RealizedPnl.pnl_id).filter(
+                (RealizedPnl.holding_period_days != None) & (RealizedPnl.holding_period_days <= 365)
+            ),
+            func.count(RealizedPnl.pnl_id).filter(
+                (RealizedPnl.holding_period_days != None) & (RealizedPnl.holding_period_days > 365)
+            ),
+        )
+        .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+    )
+    short_count, long_count = session.exec(hp_q).one()
+
+    return RealizedPnLFilterOptionsResponse(
+        assets=assets,
+        taxable_options=[
+            FilterOptionWithCount(value="true", label="Taxable", count=taxable_count or 0),
+            FilterOptionWithCount(value="false", label="Non-taxable", count=non_taxable_count or 0),
+        ],
+        pnl_sign_options=[
+            FilterOptionWithCount(value="gain", label="Gain", count=gain_count or 0),
+            FilterOptionWithCount(value="loss", label="Loss", count=loss_count or 0),
+        ],
+        holding_period_options=[
+            FilterOptionWithCount(value="short", label="Short-term (≤365d)", count=short_count or 0),
+            FilterOptionWithCount(value="long", label="Long-term (>365d)", count=long_count or 0),
+        ],
+    )
+
+
+@router.get("/versions/{version_id}/realized-pnl/{pnl_id}/lineage", response_model=RealizedPnlLineageResponse)
+def get_realized_pnl_lineage(
+    version_id: int,
+    pnl_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get full lineage for a single realized P&L entry.
+
+    Returns the PnL entry with source lots (via consumed slices),
+    the consumed slice bridge records, and the disposal transaction.
+    """
+    rpnl = session.exec(
+        select(RealizedPnl)
+        .where(RealizedPnl.pnl_id == pnl_id)
+        .options(selectinload(RealizedPnl.asset))
+    ).first()
+    if not rpnl:
+        raise HTTPException(status_code=404, detail=f"Realized P&L entry {pnl_id} not found")
+
+    # Verify belongs to version
+    unit = session.get(CalculationUnit, rpnl.origin_unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(status_code=404, detail=f"Realized P&L {pnl_id} not found in version {version_id}")
+
+    pnl_response = RealizedPnLResponse(
+        pnl_id=rpnl.pnl_id,
+        asset=AssetRef(
+            id=rpnl.asset.asset_id if rpnl.asset else rpnl.asset_id,
+            symbol=rpnl.asset.symbol if rpnl.asset else f"#{rpnl.asset_id}",
+            label=rpnl.asset.label if rpnl.asset else None,
+        ),
+        qty=float(rpnl.qty),
+        proceeds_in_base=float(rpnl.proceeds_in_base),
+        cost_basis_in_base=float(rpnl.cost_basis_in_base),
+        pnl_in_base=float(rpnl.pnl_in_base),
+        taxable=rpnl.disposal_taxable,
+        transaction_id=rpnl.transaction_id,
+        unit_id=rpnl.origin_unit_id,
+        realized_at=rpnl.realized_at,
+        holding_period_days=rpnl.holding_period_days,
+        proceeds_source=rpnl.proceeds_source,
+        proceeds_price=float(rpnl.proceeds_price) if rpnl.proceeds_price else None,
+        proceeds_price_source=rpnl.proceeds_price_source,
+        proceeds_price_timestamp=rpnl.proceeds_price_timestamp,
+    )
+
+    # Consumed slices for this PnL entry (bridge to source lots)
+    slices = session.exec(
+        select(ConsumedLotSlice)
+        .where(ConsumedLotSlice.pnl_id == pnl_id)
+        .options(
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.account),
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.unit),
+        )
+        .order_by(ConsumedLotSlice.created_at)
+    ).all()
+
+    consumed = [build_consumed_slice_response(s) for s in slices]
+    source_lots = [build_cost_lot_response(s.cost_lot) for s in slices if s.cost_lot]
+
+    # Disposal transaction
+    disposal_tx = None
+    if rpnl.transaction_id:
+        tx = session.get(NormalizedTransaction, rpnl.transaction_id)
+        if tx:
+            disposal_tx = build_transaction_summary(tx)
+
+    return RealizedPnlLineageResponse(
+        pnl=pnl_response,
+        source_lots=source_lots,
+        consumed_slices=consumed,
+        disposal_transaction=disposal_tx,
+    )
+
+
+@router.get("/versions/{version_id}/realized-pnl/{pnl_id}/chain", response_model=CostBasisChainResponse)
+def get_realized_pnl_chain(
+    version_id: int,
+    pnl_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get the full backward cost basis chain for a realized P&L entry.
+
+    Finds all lots consumed by this disposal, then walks each lot's
+    backward chain to the original acquisition.
+    """
+    rpnl = session.exec(
+        select(RealizedPnl).where(RealizedPnl.pnl_id == pnl_id)
+    ).first()
+    if not rpnl:
+        raise HTTPException(status_code=404, detail=f"Realized P&L entry {pnl_id} not found")
+
+    unit = session.get(CalculationUnit, rpnl.origin_unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(status_code=404, detail=f"Realized P&L {pnl_id} not found in version {version_id}")
+
+    slices = session.exec(
+        select(ConsumedLotSlice)
+        .where(ConsumedLotSlice.pnl_id == pnl_id)
+        .options(
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.asset),
+            selectinload(ConsumedLotSlice.cost_lot).selectinload(CostLot.account),
+        )
+    ).all()
+
+    visited: set = set()
+    chain_nodes = []
+    max_d = 0
+    for s in slices:
+        if s.cost_lot and s.cost_lot.cost_lot_id not in visited:
+            root = _walk_lot_chain(s.cost_lot, session, visited, max_depth=100)
+            chain_nodes.append(root)
+            d = _compute_chain_depth(root)
+            if d > max_d:
+                max_d = d
+
+    return CostBasisChainResponse(chain=chain_nodes, depth=max_d)
+
+
+@router.get("/versions/{version_id}/events/{event_id}/chain", response_model=CostBasisChainResponse)
+def get_event_chain(
+    version_id: int,
+    event_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get the full backward cost basis chain for a cost lot event.
+
+    Uses the event's lot_id to walk the chain backward.
+    """
+    event = session.get(CostLotEvent, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail=f"Cost lot event {event_id} not found")
+
+    lot = session.exec(
+        select(CostLot)
+        .where(CostLot.cost_lot_id == event.lot_id)
+        .options(selectinload(CostLot.asset), selectinload(CostLot.account))
+    ).first()
+    if not lot:
+        raise HTTPException(status_code=404, detail=f"Cost lot {event.lot_id} not found")
+
+    unit = session.get(CalculationUnit, lot.unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found in version {version_id}")
+
+    visited: set = set()
+    root = _walk_lot_chain(lot, session, visited, max_depth=100)
+    depth = _compute_chain_depth(root)
+
+    return CostBasisChainResponse(chain=[root], depth=depth)
+
+
 class FeesResponse(BaseModel):
     """Response for fees endpoint with items, summary, and pagination."""
     fees: List[FeeEntryResponse]
@@ -1634,6 +2492,8 @@ def get_version_fees(
     version_id: int,
     asset_id: Optional[int] = None,
     unit_id: Optional[int] = None,
+    related_asset_id: Optional[int] = None,   # Filter by FeeEntry.related_asset_id
+    search: Optional[str] = None,              # Search asset symbol
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -1670,6 +2530,18 @@ def get_version_fees(
         query = query.where(CalculationUnitLeg.asset_id == asset_id)
     if unit_id:
         query = query.where(FeeEntry.unit_id == unit_id)
+
+    if related_asset_id:
+        query = query.where(FeeEntry.related_asset_id == related_asset_id)
+
+    if search:
+        search_term = f"%{search}%"
+        query = query.where(
+            or_(
+                Asset.symbol.ilike(search_term),
+                Asset.label.ilike(search_term),
+            )
+        )
     
     # Get all for summary calculation first
     all_results = session.exec(query).all()
@@ -1760,6 +2632,57 @@ def get_version_fees(
         total=len(all_results),
         page=page,
         limit=limit,
+    )
+
+
+@router.get("/versions/{version_id}/fees/filter-options", response_model=FeesFilterOptionsResponse)
+def get_fees_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """Return available filter values for the fees list."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Base scoped FeeEntry ids
+    base_q = (
+        select(FeeEntry.id)
+        .where(FeeEntry.version_id == version_id)
+    )
+    base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=FeeEntry.unit_id)
+    scoped_sq = base_q.subquery()
+
+    # Fee assets (the asset on the leg, i.e. the fee currency)
+    fee_asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(FeeEntry.id))
+        .join(CalculationUnitLeg, FeeEntry.fee_leg_id == CalculationUnitLeg.id)
+        .join(Asset, CalculationUnitLeg.asset_id == Asset.asset_id)
+        .where(FeeEntry.id.in_(select(scoped_sq)))
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(FeeEntry.id).desc())
+    )
+    fee_asset_rows = session.exec(fee_asset_q).all()
+    assets = [FilterOptionWithCount(value=str(aid), label=sym or lbl or str(aid), count=c)
+              for aid, sym, lbl, c in fee_asset_rows]
+
+    # Related assets (the asset being traded when the fee was incurred)
+    related_asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(FeeEntry.id))
+        .join(FeeEntry, FeeEntry.related_asset_id == Asset.asset_id)
+        .where(FeeEntry.id.in_(select(scoped_sq)))
+        .where(FeeEntry.related_asset_id != None)
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(FeeEntry.id).desc())
+    )
+    related_asset_rows = session.exec(related_asset_q).all()
+    related_assets = [FilterOptionWithCount(value=str(aid), label=sym or lbl or str(aid), count=c)
+                      for aid, sym, lbl, c in related_asset_rows]
+
+    return FeesFilterOptionsResponse(
+        assets=assets,
+        related_assets=related_assets,
     )
 
 
@@ -1991,6 +2914,10 @@ def get_version_balances(
 @router.get("/versions/{version_id}/warnings")
 def get_version_warnings(
     version_id: int,
+    warning_type: Optional[str] = None,   # Comma-sep warning types
+    level: Optional[str] = None,           # "error", "warning", "info"
+    asset_id: Optional[int] = None,
+    search: Optional[str] = None,          # Search message text
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -2014,6 +2941,29 @@ def get_version_warnings(
         .where(CalculationUnit.version_id == version_id)
     )
     base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=PnlWarning.unit_id)
+
+    # Filter by warning_type (comma-separated)
+    if warning_type:
+        types = [t.strip() for t in warning_type.split(",") if t.strip()]
+        if types:
+            base_query = base_query.where(PnlWarning.warning_type.in_(types))
+
+    # Filter by severity level
+    if level:
+        levels = [l.strip() for l in level.split(",") if l.strip()]
+        matching_types = []
+        for lv in levels:
+            matching_types.extend(SEVERITY_TO_WARNING_TYPES.get(lv, []))
+        if matching_types:
+            base_query = base_query.where(PnlWarning.warning_type.in_(matching_types))
+
+    # Filter by asset_id
+    if asset_id is not None:
+        base_query = base_query.where(PnlWarning.asset_id == asset_id)
+
+    # Search on message text
+    if search:
+        base_query = base_query.where(PnlWarning.message.ilike(f"%{search}%"))
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -2033,6 +2983,8 @@ def get_version_warnings(
             transaction_id=w.transaction_id,
             unit_id=w.unit_id,
             unit_label=w.unit.unit_label if w.unit_id else None,
+            asset_id=w.asset_id,
+            details=w.details,
         )
         for w in warnings
     ]
@@ -2062,6 +3014,62 @@ def get_version_warning_type_counts(
     ).all()
 
     return {wtype: count for wtype, count in rows}
+
+
+@router.get("/versions/{version_id}/warnings/filter-options", response_model=WarningsFilterOptionsResponse)
+def get_warnings_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """Return available filter values for the warnings list."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    base_q = (
+        select(PnlWarning.id)
+        .join(PnlWarning.unit)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=PnlWarning.unit_id)
+    scoped_sq = base_q.subquery()
+
+    # Warning types with counts
+    type_q = (
+        select(PnlWarning.warning_type, func.count(PnlWarning.id))
+        .where(PnlWarning.id.in_(select(scoped_sq)))
+        .group_by(PnlWarning.warning_type)
+    )
+    type_rows = session.exec(type_q).all()
+    warning_types = [FilterOptionWithCount(value=wt, label=wt.replace("_", " ").title(), count=c)
+                     for wt, c in type_rows]
+
+    # Severity levels with counts (derived from warning_type)
+    level_counts: Dict[str, int] = {"error": 0, "warning": 0, "info": 0}
+    for wt, c in type_rows:
+        lv = _get_warning_level(wt)
+        level_counts[lv] = level_counts.get(lv, 0) + c
+    levels = [FilterOptionWithCount(value=lv, label=lv.title(), count=cnt)
+              for lv, cnt in level_counts.items() if cnt > 0]
+
+    # Assets with counts (only warnings that have asset_id)
+    asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(PnlWarning.id))
+        .join(PnlWarning, PnlWarning.asset_id == Asset.asset_id)
+        .where(PnlWarning.id.in_(select(scoped_sq)))
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(PnlWarning.id).desc())
+    )
+    asset_rows = session.exec(asset_q).all()
+    assets = [FilterOptionWithCount(value=str(aid), label=sym or lbl or str(aid), count=c)
+              for aid, sym, lbl, c in asset_rows]
+
+    return WarningsFilterOptionsResponse(
+        warning_types=warning_types,
+        levels=levels,
+        assets=assets,
+    )
 
 
 @router.get("/versions/{version_id}/settlements", response_model=List[SettlementResponse])
@@ -2120,6 +3128,7 @@ def get_version_lot_events(
     unit_id: Optional[int] = None,
     date_start: Optional[str] = None,  # ISO datetime string for filtering
     date_end: Optional[str] = None,  # ISO datetime string for filtering
+    search: Optional[str] = None,  # Search event description / asset symbol
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 100,
@@ -2213,6 +3222,19 @@ def get_version_lot_events(
             base_query = base_query.where(CostLotEvent.timestamp <= end_dt)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid date_end format: {date_end}")
+
+    # Search on asset symbol
+    if search:
+        search_term = f"%{search}%"
+        lot_asset_alias = Asset.__table__.alias("lot_asset_search")
+        base_query = base_query.outerjoin(
+            lot_asset_alias, CostLot.asset_id == lot_asset_alias.c.asset_id
+        ).where(
+            or_(
+                lot_asset_alias.c.symbol.ilike(search_term),
+                lot_asset_alias.c.label.ilike(search_term),
+            )
+        )
     
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
@@ -2254,6 +3276,12 @@ def get_version_lot_events(
             triggered_by_unit_label=e.triggered_by_unit.unit_label if e.triggered_by_unit else None,
             triggered_by_unit_pattern=e.triggered_by_unit.pattern if e.triggered_by_unit else None,
             timestamp=e.timestamp,
+            # FMV details from the associated CostLot (for 'created' events with FMV cost)
+            cost_source=e.lot.cost_source if e.lot and e.event_type in ('created', 'created-negative') and e.lot.cost_source in ('fmv', 'provisional') else None,
+            cost_fmv_price=float(e.lot.cost_fmv_price) if e.lot and e.event_type in ('created', 'created-negative') and e.lot.cost_fmv_price is not None else None,
+            cost_fmv_source=e.lot.cost_fmv_source if e.lot and e.event_type in ('created', 'created-negative') else None,
+            cost_fmv_timestamp=e.lot.cost_fmv_timestamp if e.lot and e.event_type in ('created', 'created-negative') else None,
+            cost_fmv_stale=e.lot.cost_fmv_stale if e.lot and e.event_type in ('created', 'created-negative') and e.lot.cost_fmv_stale else None,
         )
         for e in events
     ]
@@ -2852,10 +3880,218 @@ def get_unit_warnings(
     ]
 
 
+# =============================================================================
+# Investigation View endpoints
+# =============================================================================
+
+
+@router.get("/versions/{version_id}/audit-summary", response_model=AuditSummaryResponse)
+def get_audit_summary(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get aggregate summary for the investigation view quick stats bar.
+
+    Returns counts and breakdowns for units, lots, realized P&L, fees,
+    and warnings — all scoped to the active transaction filters (investigation context).
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Resolve filtered unit IDs once for reuse across all sub-queries
+    filtered_unit_ids = None
+    if tx_filters.has_active_filters:
+        filtered_unit_ids = resolve_filtered_unit_ids(
+            session, version_id, tx_filters.applied_filters,
+            non_owned=tx_filters.non_owned,
+        )
+
+    def _unit_filter(query, col):
+        if filtered_unit_ids is not None:
+            return query.where(col.in_(filtered_unit_ids))
+        return query
+
+    # --- Units count ---
+    units_q = (
+        select(func.count(CalculationUnit.id))
+        .where(CalculationUnit.version_id == version_id)
+    )
+    units_q = _unit_filter(units_q, CalculationUnit.id)
+    units_count = session.exec(units_q).one()
+
+    # --- Lots summary ---
+    lots_base = (
+        select(
+            func.count(CostLot.cost_lot_id).label("total"),
+            func.sum(case(
+                (CostLot.is_negative == True, 1),  # noqa: E712
+                else_=0
+            )).label("negative"),
+            func.sum(case(
+                ((CostLot.is_negative == False) & (CostLot.qty_remaining > 0), 1),  # noqa: E712
+                else_=0
+            )).label("open"),
+            func.sum(case(
+                ((CostLot.is_negative == False) & (CostLot.qty_remaining <= 0), 1),  # noqa: E712
+                else_=0
+            )).label("exhausted"),
+        )
+        .join(CostLot.unit)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    lots_base = _unit_filter(lots_base, CostLot.unit_id)
+    lots_row = session.exec(lots_base).one()
+    lots_summary = AuditLotsSummary(
+        total=lots_row.total or 0,
+        open=lots_row.open or 0,
+        exhausted=lots_row.exhausted or 0,
+        negative=lots_row.negative or 0,
+    )
+
+    # --- Realized P&L summary ---
+    rpnl_base = (
+        select(
+            func.count(RealizedPnl.pnl_id).label("total"),
+            func.sum(case((RealizedPnl.disposal_taxable == True, 1), else_=0)).label("taxable"),  # noqa: E712
+            func.sum(case((RealizedPnl.disposal_taxable == False, 1), else_=0)).label("non_taxable"),  # noqa: E712
+            func.sum(case((RealizedPnl.pnl_in_base > 0, 1), else_=0)).label("gain"),
+            func.sum(case((RealizedPnl.pnl_in_base < 0, 1), else_=0)).label("loss"),
+            func.sum(case((RealizedPnl.holding_period_days < 365, 1), else_=0)).label("short_term"),
+            func.sum(case(
+                ((RealizedPnl.holding_period_days >= 365) | (RealizedPnl.holding_period_days == None), 1),  # noqa: E711
+                else_=0
+            )).label("long_term"),
+            func.sum(case((RealizedPnl.pnl_in_base > 0, RealizedPnl.pnl_in_base), else_=0)).label("total_gain_val"),
+            func.sum(case((RealizedPnl.pnl_in_base < 0, RealizedPnl.pnl_in_base), else_=0)).label("total_loss_val"),
+        )
+        .join(RealizedPnl.origin_unit)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    rpnl_base = _unit_filter(rpnl_base, RealizedPnl.origin_unit_id)
+    rpnl_row = session.exec(rpnl_base).one()
+    realized_summary = AuditRealizedSummary(
+        total=rpnl_row.total or 0,
+        taxable=rpnl_row.taxable or 0,
+        non_taxable=rpnl_row.non_taxable or 0,
+        total_gain=float(rpnl_row.total_gain_val or 0),
+        total_loss=float(rpnl_row.total_loss_val or 0),
+        short_term=rpnl_row.short_term or 0,
+        long_term=rpnl_row.long_term or 0,
+    )
+
+    # --- Fees summary ---
+    fees_count_q = (
+        select(func.count(FeeEntry.id), func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0))
+        .where(FeeEntry.version_id == version_id)
+    )
+    fees_count_q = _unit_filter(fees_count_q, FeeEntry.unit_id)
+    # Apply entity-level related_asset_id filter to match /fees endpoint behaviour
+    if tx_filters.applied_filters.related_asset_ids:
+        fees_count_q = fees_count_q.where(
+            FeeEntry.related_asset_id.in_(tx_filters.applied_filters.related_asset_ids)
+        )
+    fees_total, fees_total_val = session.exec(fees_count_q).one()
+
+    # Fees by source (join through leg → transaction)
+    from backend.db.models import CalculationUnitLeg as CUL_alias
+    fees_source_q = (
+        select(NormalizedTransaction.source, func.count(FeeEntry.id))
+        .join(CUL_alias, FeeEntry.fee_leg_id == CUL_alias.id)
+        .outerjoin(NormalizedTransaction, CUL_alias.transaction_id == NormalizedTransaction.id)
+        .where(FeeEntry.version_id == version_id)
+        .group_by(NormalizedTransaction.source)
+    )
+    fees_source_q = _unit_filter(fees_source_q, FeeEntry.unit_id)
+    if tx_filters.applied_filters.related_asset_ids:
+        fees_source_q = fees_source_q.where(
+            FeeEntry.related_asset_id.in_(tx_filters.applied_filters.related_asset_ids)
+        )
+    fees_by_source = [
+        AuditFeeSourceCount(source=src or "unknown", count=cnt)
+        for src, cnt in session.exec(fees_source_q).all()
+    ]
+    fees_summary = AuditFeesSummary(
+        total=fees_total or 0,
+        total_value_in_base=float(fees_total_val or 0),
+        by_source=fees_by_source,
+    )
+
+    # --- Warnings summary ---
+    warn_type_q = (
+        select(PnlWarning.warning_type, func.count(PnlWarning.id))
+        .join(PnlWarning.unit)
+        .where(CalculationUnit.version_id == version_id)
+        .group_by(PnlWarning.warning_type)
+    )
+    warn_type_q = _unit_filter(warn_type_q, PnlWarning.unit_id)
+    warn_type_rows = session.exec(warn_type_q).all()
+
+    warn_total = 0
+    by_level = {"error": 0, "warning": 0, "info": 0}
+    by_type = []
+    for wtype, cnt in warn_type_rows:
+        warn_total += cnt
+        level = _get_warning_level(wtype)
+        by_level[level] = by_level.get(level, 0) + cnt
+        by_type.append(AuditWarningTypeCount(type=wtype, count=cnt))
+
+    warnings_summary = AuditWarningsSummary(
+        total=warn_total,
+        by_level=AuditWarningsByLevel(**by_level),
+        by_type=by_type,
+    )
+
+    # --- Cost Lot Events count ---
+    events_q = (
+        select(func.count(CostLotEvent.event_id))
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    events_q = _unit_filter(events_q, CostLot.unit_id)
+    events_count = session.exec(events_q).one()
+
+    # --- Transactions count (included / excluded) ---
+    included_q = (
+        select(func.count(func.distinct(NormalizedTransaction.id)))
+        .join(CalculationUnitLeg, CalculationUnitLeg.transaction_id == NormalizedTransaction.id)
+        .join(CalculationUnit, CalculationUnitLeg.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    included_q = _unit_filter(included_q, CalculationUnitLeg.unit_id)
+    included_count = session.exec(included_q).one()
+
+    # Excluded = total transactions in date range minus included
+    # For now, just provide included count; excluded requires knowing the full scope
+    tx_summary = AuditTransactionsSummary(
+        included=included_count,
+        excluded=0,  # TODO: compute from full transaction scope if needed
+    )
+
+    return AuditSummaryResponse(
+        units_count=units_count,
+        lots=lots_summary,
+        realized=realized_summary,
+        fees=fees_summary,
+        warnings=warnings_summary,
+        events_count=events_count,
+        transactions=tx_summary,
+    )
+
+
 @router.get("/versions/{version_id}/units")
 def get_version_units(
     version_id: int,
     asset_id: Optional[int] = None,
+    unit_pattern: Optional[str] = None,   # Comma-separated patterns (swap, flow, etc.)
+    has_warnings: Optional[bool] = None,   # Filter units with warnings
+    warning_type: Optional[str] = None,    # Comma-separated warning types to filter by
+    has_realized_pnl: Optional[bool] = None,  # Filter units with non-zero realized P&L
+    has_fees: Optional[bool] = None,       # Filter units with fees
+    search: Optional[str] = None,          # Search unit_id or unit_label
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     page: int = 1,
     limit: int = 50,
@@ -2893,7 +4129,75 @@ def get_version_units(
         base_query = base_query.join(CalculationUnit.legs).where(
             CalculationUnitLeg.asset_id == asset_id
         ).distinct()
-    
+
+    # Filter by unit_pattern (comma-separated list, e.g. "swap,flow")
+    if unit_pattern:
+        patterns = [p.strip() for p in unit_pattern.split(",") if p.strip()]
+        if patterns:
+            base_query = base_query.where(CalculationUnit.pattern.in_(patterns))
+
+    # Filter by has_warnings
+    if has_warnings is not None:
+        warning_exists = (
+            select(PnlWarning.id)
+            .where(PnlWarning.unit_id == CalculationUnit.id)
+            .correlate(CalculationUnit)
+            .exists()
+        )
+        if has_warnings:
+            base_query = base_query.where(warning_exists)
+        else:
+            base_query = base_query.where(~warning_exists)
+
+    # Filter by specific warning_type(s) — units that have at least one warning of the given type(s)
+    if warning_type:
+        wt_list = [w.strip() for w in warning_type.split(",") if w.strip()]
+        if wt_list:
+            wt_exists = (
+                select(PnlWarning.id)
+                .where(PnlWarning.unit_id == CalculationUnit.id)
+                .where(PnlWarning.warning_type.in_(wt_list))
+                .correlate(CalculationUnit)
+                .exists()
+            )
+            base_query = base_query.where(wt_exists)
+
+    # Filter by has_realized_pnl (units with at least one RealizedPnl record)
+    if has_realized_pnl is not None:
+        rpnl_exists = (
+            select(RealizedPnl.pnl_id)
+            .where(RealizedPnl.origin_unit_id == CalculationUnit.id)
+            .correlate(CalculationUnit)
+            .exists()
+        )
+        if has_realized_pnl:
+            base_query = base_query.where(rpnl_exists)
+        else:
+            base_query = base_query.where(~rpnl_exists)
+
+    # Filter by has_fees (units with at least one FeeEntry)
+    if has_fees is not None:
+        fee_exists = (
+            select(FeeEntry.id)
+            .where(FeeEntry.unit_id == CalculationUnit.id)
+            .correlate(CalculationUnit)
+            .exists()
+        )
+        if has_fees:
+            base_query = base_query.where(fee_exists)
+        else:
+            base_query = base_query.where(~fee_exists)
+
+    # Search on unit_id (cast to text) or unit_label (ILIKE)
+    if search:
+        search_term = f"%{search}%"
+        base_query = base_query.where(
+            or_(
+                cast(CalculationUnit.id, SAString).ilike(search_term),
+                CalculationUnit.unit_label.ilike(search_term),
+            )
+        )
+
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
     total = session.exec(count_query).one()
@@ -3051,6 +4355,81 @@ def get_version_units(
     return {"items": result, "total": total, "page": page, "limit": limit}
 
 
+@router.get("/versions/{version_id}/units/filter-options", response_model=UnitsFilterOptionsResponse)
+def get_units_filter_options(
+    version_id: int,
+    tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get available filter values for the units list.
+    Returns patterns with counts, and boolean-filter counts, scoped by context filters.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Base scope: all units in version, filtered by context (tx_filters)
+    base_q = select(CalculationUnit.id).where(CalculationUnit.version_id == version_id)
+    base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=CalculationUnit.id)
+    scoped_ids_sq = base_q.subquery()
+
+    # Pattern options with counts
+    pattern_q = (
+        select(CalculationUnit.pattern, func.count(CalculationUnit.id))
+        .where(CalculationUnit.id.in_(select(scoped_ids_sq)))
+        .group_by(CalculationUnit.pattern)
+    )
+    pattern_rows = session.exec(pattern_q).all()
+    patterns = [FilterOptionWithCount(value=p or "unknown", count=c) for p, c in pattern_rows]
+
+    # Counts for boolean toggles
+    total_scoped = sum(c for _, c in pattern_rows)
+
+    has_warnings_q = (
+        select(func.count(func.distinct(PnlWarning.unit_id)))
+        .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
+    )
+    has_warnings_count = session.exec(has_warnings_q).one() or 0
+
+    has_realized_q = (
+        select(func.count(func.distinct(RealizedPnl.origin_unit_id)))
+        .where(RealizedPnl.origin_unit_id.in_(select(scoped_ids_sq)))
+    )
+    has_realized_pnl_count = session.exec(has_realized_q).one() or 0
+
+    has_fees_q = (
+        select(func.count(func.distinct(FeeEntry.unit_id)))
+        .where(FeeEntry.unit_id.in_(select(scoped_ids_sq)))
+    )
+    has_fees_count = session.exec(has_fees_q).one() or 0
+
+    # Warning types with per-type unit counts (for multi-select dropdown)
+    warning_type_q = (
+        select(PnlWarning.warning_type, func.count(func.distinct(PnlWarning.unit_id)))
+        .where(PnlWarning.unit_id.in_(select(scoped_ids_sq)))
+        .group_by(PnlWarning.warning_type)
+    )
+    wt_rows = session.exec(warning_type_q).all()
+    warning_types = [
+        FilterOptionWithCount(
+            value=wt,
+            label=wt.replace('_', ' ').title(),
+            count=c,
+        )
+        for wt, c in wt_rows
+    ]
+
+    return UnitsFilterOptionsResponse(
+        patterns=patterns,
+        total_units=total_scoped,
+        has_warnings_count=has_warnings_count,
+        has_realized_pnl_count=has_realized_pnl_count,
+        has_fees_count=has_fees_count,
+        warning_types=warning_types,
+    )
+
+
 @router.post("/versions/{version_id}/commit")
 def commit_version(
     version_id: int,
@@ -3162,6 +4541,7 @@ def get_portfolio_timeline(
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
     category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
     session: Session = Depends(get_session_dependency),
 ):
     """Get portfolio value timeline for charts."""
@@ -3183,6 +4563,7 @@ def get_portfolio_timeline(
         asset_ids=parsed_asset_ids,
         account_ids=parsed_account_ids,
         category_ids=parsed_category_ids,
+        include_unsettled_negative=include_unsettled_negative,
     )
 
     return {
@@ -3214,41 +4595,76 @@ def get_portfolio_timeline(
 
 
 # =============================================================================
-# Period Summary (All ranges at once: all, 1y, 6m, 3m, 1m)
+# Version Metrics (replaces period-summary)
 # =============================================================================
 
-@router.get("/versions/{version_id}/period-summary")
-def get_period_summary(
+@router.get("/versions/{version_id}/metrics")
+def get_version_metrics(
     version_id: int,
-    top_n: int = Query(5, ge=1, le=20),
+    group_by: str = Query("asset", regex="^(asset|account|category)$"),
+    top_n: int = Query(5, ge=1, le=25),
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
     category_ids: Optional[str] = Query(None),
+    dimension_id: Optional[int] = Query(None),
+    include_unsettled_negative: bool = Query(False),
     session: Session = Depends(get_session_dependency),
 ):
     """
-    Compute portfolio performance for all standard ranges (all, 1y, 6m, 3m, 1m).
+    Compute portfolio metrics for all standard ranges (all, 1y, 6m, 3m, 1m).
 
-    Returns per-range: total_return, roi%, value, cost basis, unrealized/realized PnL,
-    and top/flop performers ranked by total return.
+    Centralized metrics computation with server-side group_by for performers.
+    Replaces the old /period-summary endpoint.
+
+    Query params:
+      - group_by: 'asset' (default), 'account', or 'category'
+      - top_n: number of top/flop performers (1-25, default 5)
+      - dimension_id: when group_by=category, restrict to this dimension
     """
-    from backend.services.pnl.portfolio_timeline import compute_period_summary
+    from backend.services.pnl.metrics_service import compute_version_metrics
 
     parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
     parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
     parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
 
-    ranges = compute_period_summary(
+    metrics = compute_version_metrics(
         session=session,
         version_id=version_id,
+        group_by=group_by,
         top_n=top_n,
         asset_ids=parsed_asset_ids,
         account_ids=parsed_account_ids,
         category_ids=parsed_category_ids,
+        dimension_id=dimension_id,
+        include_unsettled_negative=include_unsettled_negative,
+        refresh_prices=False,
     )
 
+    if metrics is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    def _serialize_performer(p):
+        return {
+            "id": p.id,
+            "name": p.name,
+            "label": p.label,
+            "group_type": p.group_type,
+            "total_return": p.total_return,
+            "roi_pct": p.roi_pct,
+            "unrealized_pnl": p.unrealized_pnl,
+        }
+
     return {
-        "version_id": version_id,
+        "version_id": metrics.version_id,
+        "summary": {
+            "current_value": metrics.summary.current_value,
+            "cost_basis": metrics.summary.cost_basis,
+            "unrealized_pnl": metrics.summary.unrealized_pnl,
+            "realized_pnl": metrics.summary.realized_pnl,
+            "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
+            "total_fees": metrics.summary.total_fees,
+            "fee_entry_count": metrics.summary.fee_entry_count,
+        },
         "ranges": {
             key: {
                 "total_return": m.total_return,
@@ -3257,29 +4673,15 @@ def get_period_summary(
                 "cost_basis": m.cost_basis,
                 "unrealized_pnl": m.unrealized_pnl,
                 "realized_pnl": m.realized_pnl,
+                "taxable_realized_pnl": m.taxable_realized_pnl,
                 "realized_in_period": m.realized_in_period,
-                "top_performers": [
-                    {
-                        "asset_id": p.asset_id,
-                        "symbol": p.symbol,
-                        "label": p.label,
-                        "total_return": p.total_return,
-                        "roi_pct": p.roi_pct,
-                    }
-                    for p in m.top_performers
-                ],
-                "flop_performers": [
-                    {
-                        "asset_id": p.asset_id,
-                        "symbol": p.symbol,
-                        "label": p.label,
-                        "total_return": p.total_return,
-                        "roi_pct": p.roi_pct,
-                    }
-                    for p in m.flop_performers
-                ],
+                "cost_basis_in_period": m.cost_basis_in_period,
+                "unrealized_in_period": m.unrealized_in_period,
+                "fees_in_period": m.fees_in_period,
+                "top_performers": [_serialize_performer(p) for p in m.top_performers],
+                "flop_performers": [_serialize_performer(p) for p in m.flop_performers],
             }
-            for key, m in ranges.items()
+            for key, m in metrics.ranges.items()
         },
     }
 

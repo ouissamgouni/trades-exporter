@@ -35,7 +35,7 @@ export const BundleMemberTransactionsTable: React.FC<BundleMemberTransactionsTab
 }) => {
     const tableConfig: TableConfig<Transaction> = useMemo(() => ({
         columnPreset: 'minimal',
-        shownColumns: ['accounts'],
+        shownColumns: ['accounts', 'price', 'total'],
         features: {
             filters: false,
             selection: false,
@@ -44,7 +44,7 @@ export const BundleMemberTransactionsTable: React.FC<BundleMemberTransactionsTab
     }), []);
 
     const initialColumnVisibility = useMemo(
-        () => presetToVisibility('minimal', [], ['accounts']),
+        () => presetToVisibility('minimal', [], ['accounts', 'price', 'total']),
         [],
     );
 

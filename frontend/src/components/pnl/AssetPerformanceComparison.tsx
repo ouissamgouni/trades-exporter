@@ -13,13 +13,12 @@
  * Industry-standard rebased comparison chart (like Yahoo Finance, Bloomberg).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Badge, Box, Flex, Heading, NativeSelect, Spinner, Switch, Text } from '@chakra-ui/react';
-import { FiInfo } from 'react-icons/fi';
+import { Badge, Box, Flex, Heading, Popover, Portal, Spinner, Switch, Text } from '@chakra-ui/react';
+import { FiInfo, FiX, FiChevronDown } from 'react-icons/fi';
 import { ResponsiveLine } from '@nivo/line';
-import { CATEGORY_COLOR_PALETTE } from '../../constants/colors';
 import {
     usePortfolioTimeline,
-    useBenchmarkSeries,
+    useMultiBenchmarkSeries,
     BENCHMARK_PRESETS,
     type TimelinePoint,
 } from '../../hooks/useChartData';
@@ -41,7 +40,23 @@ const ZOOM_PRESETS: Record<ZoomPreset, { label: string; days: number | null }> =
 };
 
 const PORTFOLIO_LINE_COLOR = '#718096'; // gray.500
-const BENCHMARK_LINE_COLOR = '#D69E2E'; // yellow.600
+
+/** Distinct benchmark line colors (one per simultaneously-active benchmark) */
+const BENCHMARK_COLORS = [
+    '#D69E2E', // yellow
+    '#805AD5', // purple  
+    '#DD6B20', // orange
+    '#319795', // teal
+    '#E53E3E', // red  
+    '#3182CE', // blue
+];
+
+/** Maximally-distinct asset color palette (Tableau-10 inspired) */
+const COMPARISON_PALETTE = [
+    '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
+    '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac',
+    '#4dc9f6', '#f67019', '#537bc4', '#acc236', '#166a8f',
+];
 
 /** Preset portfolio line colors for the color picker */
 const PORTFOLIO_COLOR_PRESETS = [
@@ -121,21 +136,12 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const [zoom, setZoom] = useState<ZoomPreset>('all');
     const [showPortfolio, setShowPortfolio] = useState(true);
-    const [benchmarkTicker, setBenchmarkTicker] = useState<string>('');
-    const [hasAutoSelected, setHasAutoSelected] = useState(false);
+    const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>(['^GSPC']);
     const [scaleMode, setScaleMode] = useState<ScaleMode>('auto');
     const [portfolioColor, setPortfolioColor] = useState(PORTFOLIO_LINE_COLOR);
-
-    // ---- Auto-select top 10 assets by cost basis ----
-    useEffect(() => {
-        if (hasAutoSelected || assets.length === 0) return;
-        const sorted = [...assets]
-            .filter(a => a.asset.id != null && a.cost_basis > 0)
-            .sort((a, b) => b.cost_basis - a.cost_basis)
-            .slice(0, 10);
-        setSelectedIds(sorted.map(a => a.asset.id!));
-        setHasAutoSelected(true);
-    }, [assets, hasAutoSelected]);
+    const [colorOverrides, setColorOverrides] = useState<Record<number, string>>({});
+    const [benchmarkColorOverrides, setBenchmarkColorOverrides] = useState<Record<string, string>>({});
+    const [colorPopoverKey, setColorPopoverKey] = useState<string | null>(null);
 
     // ---- Data fetching ----
     // Use shared timeline from PnLPanel if available; otherwise fetch own
@@ -168,13 +174,15 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         };
     }, [filteredPoints]);
 
-    // ---- Benchmark data ----
-    const benchmarkResult = useBenchmarkSeries(
-        benchmarkTicker || null,
+    // ---- Benchmark data (multiple simultaneous) ----
+    const benchmarkResults = useMultiBenchmarkSeries(
+        benchmarkTickers,
         dateRange.start,
         dateRange.end,
-        !!benchmarkTicker && filteredPoints.length > 0,
+        filteredPoints.length > 0,
     );
+    const anyBenchmarkLoading = benchmarkResults.some(r => r.isLoading);
+    const benchmarkErrors = benchmarkResults.filter(r => r.error).map(r => `${r.ticker}: ${r.error}`);
 
     // ---- Build chart series (useMemo) ----
     const { chartData, colorMap } = useMemo(() => {
@@ -184,15 +192,14 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         if (!filteredPoints.length) return { chartData: series, colorMap: colors };
 
         // 1) Per-asset price return series
-        const selectedSet = new Set(selectedIds);
         let colorIdx = 0;
         for (const assetId of selectedIds) {
-            if (!selectedSet.has(assetId)) continue;
-
-            // Find asset symbol
             const assetRow = assets.find(a => a.asset.id === assetId);
-            const symbol = assetRow?.asset.symbol || `Asset #${assetId}`;
-            const color = CATEGORY_COLOR_PALETTE[colorIdx % CATEGORY_COLOR_PALETTE.length];
+            // Use label (truncated to 10 chars) instead of symbol
+            const rawLabel = assetRow?.asset.label || assetRow?.asset.symbol || `Asset #${assetId}`;
+            const seriesId = rawLabel.length > 10 ? rawLabel.slice(0, 10) + '…' : rawLabel;
+            const color = colorOverrides[assetId]
+                ?? COMPARISON_PALETTE[colorIdx % COMPARISON_PALETTE.length];
             colorIdx++;
 
             // Build return series
@@ -212,15 +219,25 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                 }
             }
 
+            // Trim stale tail: if last 7+ points have identical y, truncate
+            if (data.length >= 10) {
+                let staleStart = data.length;
+                for (let i = data.length - 2; i >= 0; i--) {
+                    if (Math.abs(data[i].y - data[data.length - 1].y) < 0.01) {
+                        staleStart = i;
+                    } else break;
+                }
+                const staleLen = data.length - staleStart;
+                if (staleLen >= 7) data.length = staleStart + 1; // keep one point for the last valid value
+            }
+
             if (data.length >= 2) {
-                series.push({ id: symbol, data });
-                colors[symbol] = color;
+                series.push({ id: seriesId, data });
+                colors[seriesId] = color;
             }
         }
 
         // 2) Portfolio benchmark — ROI%: (unrealized + realized) / cost_basis
-        //    This measures actual return on invested capital, independent of
-        //    deposits/withdrawals (unlike value growth which conflates inflows).
         if (showPortfolio && filteredPoints.length >= 2) {
             const data: { x: string; y: number }[] = [];
             for (const pt of filteredPoints) {
@@ -237,23 +254,25 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
             }
         }
 
-        // 3) External benchmark
-        if (benchmarkResult.data && benchmarkResult.data.points.length >= 2) {
-            const bPoints = benchmarkResult.data.points;
+        // 3) External benchmarks (multiple simultaneous)
+        benchmarkResults.forEach((br, idx) => {
+            if (!br.data || br.data.points.length < 2) return;
+            const bPoints = br.data.points;
             const close0 = bPoints[0].close;
             if (close0 > 0) {
                 const data = bPoints.map(bp => ({
                     x: bp.date,
                     y: ((bp.close / close0) - 1) * 100,
                 }));
-                const label = benchmarkResult.data.label;
+                const label = br.data.label;
                 series.push({ id: label, data });
-                colors[label] = BENCHMARK_LINE_COLOR;
+                colors[label] = benchmarkColorOverrides[br.ticker]
+                    ?? BENCHMARK_COLORS[idx % BENCHMARK_COLORS.length];
             }
-        }
+        });
 
         return { chartData: series, colorMap: colors };
-    }, [filteredPoints, selectedIds, assets, showPortfolio, benchmarkResult.data, portfolioColor]);
+    }, [filteredPoints, selectedIds, assets, showPortfolio, benchmarkResults, portfolioColor, colorOverrides, benchmarkColorOverrides]);
 
     // ---- Derived values ----
     const totalDays = filteredPoints.length > 1
@@ -263,13 +282,17 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         )
         : 0;
 
-    const benchmarkLabel = benchmarkResult.data?.label ?? null;
     const portfolioId = '📊 Portfolio ROI';
 
     // Identify which series are "benchmarks" (dashed lines)
-    const benchmarkSeriesIds = new Set<string>();
-    if (showPortfolio) benchmarkSeriesIds.add(portfolioId);
-    if (benchmarkLabel) benchmarkSeriesIds.add(benchmarkLabel);
+    const benchmarkSeriesIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (showPortfolio) ids.add(portfolioId);
+        for (const br of benchmarkResults) {
+            if (br.data?.label) ids.add(br.data.label);
+        }
+        return ids;
+    }, [showPortfolio, benchmarkResults]);
 
     // Y-axis bounds: auto mode clips outliers to P5-P95
     const yBounds = useMemo((): { min: number | 'auto'; max: number | 'auto' } => {
@@ -373,24 +396,85 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                         />
                     </Box>
 
-                    {/* Benchmark selector */}
-                    <Flex align="center" gap={2} flexShrink={0}>
-                        <Text fontSize="xs" color="gray.500" whiteSpace="nowrap">Benchmark:</Text>
-                        <NativeSelect.Root size="sm" w="140px">
-                            <NativeSelect.Field
-                                value={benchmarkTicker}
-                                onChange={e => setBenchmarkTicker(e.target.value)}
+                    {/* Benchmark multiselect dropdown */}
+                    <Popover.Root
+                        positioning={{ placement: 'bottom-start' }}
+                        lazyMount
+                        unmountOnExit
+                    >
+                        <Popover.Trigger asChild>
+                            <Flex
+                                align="center"
+                                gap={1}
+                                px={2}
+                                py={1}
+                                border="1px solid"
+                                borderColor="gray.200"
+                                borderRadius="md"
+                                cursor="pointer"
+                                _hover={{ borderColor: 'gray.400' }}
+                                transition="all 0.15s"
+                                flexShrink={0}
                             >
-                                <option value="">None</option>
-                                {BENCHMARK_PRESETS.map(bp => (
-                                    <option key={bp.ticker} value={bp.ticker}>{bp.label}</option>
-                                ))}
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                        {benchmarkResult.isLoading && <Spinner size="xs" color="yellow.500" />}
-                    </Flex>
+                                <Text fontSize="xs" color="gray.500" whiteSpace="nowrap">
+                                    Benchmarks{benchmarkTickers.length > 0 ? ` (${benchmarkTickers.length})` : ''}
+                                </Text>
+                                <FiChevronDown size={12} />
+                                {anyBenchmarkLoading && <Spinner size="xs" color="yellow.500" />}
+                            </Flex>
+                        </Popover.Trigger>
+                        <Portal>
+                            <Popover.Positioner>
+                                <Popover.Content width="200px" p={2} shadow="lg" bg="white" borderWidth={1} borderColor="gray.200">
+                                    <Flex direction="column" gap={1}>
+                                        {BENCHMARK_PRESETS.map(bp => {
+                                            const isActive = benchmarkTickers.includes(bp.ticker);
+                                            return (
+                                                <Flex
+                                                    key={bp.ticker}
+                                                    align="center"
+                                                    gap={2}
+                                                    px={2}
+                                                    py={1}
+                                                    borderRadius="sm"
+                                                    cursor="pointer"
+                                                    bg={isActive ? 'yellow.50' : 'transparent'}
+                                                    _hover={{ bg: isActive ? 'yellow.100' : 'gray.50' }}
+                                                    onClick={() =>
+                                                        setBenchmarkTickers(prev =>
+                                                            prev.includes(bp.ticker)
+                                                                ? prev.filter(t => t !== bp.ticker)
+                                                                : [...prev, bp.ticker]
+                                                        )
+                                                    }
+                                                >
+                                                    <Box
+                                                        w="14px"
+                                                        h="14px"
+                                                        borderRadius="sm"
+                                                        border="1.5px solid"
+                                                        borderColor={isActive ? 'yellow.500' : 'gray.300'}
+                                                        bg={isActive ? 'yellow.500' : 'transparent'}
+                                                        display="flex"
+                                                        alignItems="center"
+                                                        justifyContent="center"
+                                                        flexShrink={0}
+                                                    >
+                                                        {isActive && (
+                                                            <Text fontSize="2xs" color="white" lineHeight={1}>✓</Text>
+                                                        )}
+                                                    </Box>
+                                                    <Text fontSize="xs" color="gray.700">{bp.label}</Text>
+                                                </Flex>
+                                            );
+                                        })}
+                                    </Flex>
+                                </Popover.Content>
+                            </Popover.Positioner>
+                        </Portal>
+                    </Popover.Root>
 
-                    {/* Portfolio toggle + color picker */}
+                    {/* Portfolio toggle */}
                     <Flex align="center" gap={2} flexShrink={0}>
                         <Switch.Root
                             size="sm"
@@ -403,26 +487,219 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                             </Switch.Control>
                         </Switch.Root>
                         <Text fontSize="xs" color="gray.500" whiteSpace="nowrap">Portfolio</Text>
-                        {showPortfolio && (
-                            <Flex gap={0.5} ml={1}>
-                                {PORTFOLIO_COLOR_PRESETS.map(c => (
-                                    <Box
-                                        key={c}
-                                        w="14px"
-                                        h="14px"
-                                        borderRadius="full"
-                                        bg={c}
-                                        cursor="pointer"
-                                        border="2px solid"
-                                        borderColor={portfolioColor === c ? 'gray.700' : 'transparent'}
-                                        onClick={() => setPortfolioColor(c)}
-                                        _hover={{ transform: 'scale(1.2)' }}
-                                        transition="all 0.15s"
-                                    />
-                                ))}
-                            </Flex>
-                        )}
                     </Flex>
+                </Flex>
+
+                {/* Unified badge bar — all selected items with color dot + remove */}
+                <Flex gap={1.5} mb={2} wrap="wrap" align="center">
+                    {/* Portfolio badge */}
+                    {showPortfolio && (
+                        <Popover.Root
+                            open={colorPopoverKey === 'portfolio'}
+                            onOpenChange={(e) => setColorPopoverKey(e.open ? 'portfolio' : null)}
+                            positioning={{ placement: 'bottom' }}
+                            lazyMount
+                            unmountOnExit
+                        >
+                            <Popover.Trigger asChild>
+                                <Badge
+                                    variant="outline"
+                                    colorPalette="gray"
+                                    size="sm"
+                                    px={2}
+                                    cursor="pointer"
+                                    display="flex"
+                                    alignItems="center"
+                                    gap={1}
+                                >
+                                    <Box
+                                        w="8px"
+                                        h="8px"
+                                        borderRadius="full"
+                                        bg={portfolioColor}
+                                        flexShrink={0}
+                                    />
+                                    <Text fontSize="xs">Portfolio ROI</Text>
+                                </Badge>
+                            </Popover.Trigger>
+                            <Portal>
+                                <Popover.Positioner>
+                                    <Popover.Content width="auto" p={2} shadow="md" bg="white" borderWidth={1} borderColor="gray.200">
+                                        <Flex gap={1} wrap="wrap" maxW="140px">
+                                            {PORTFOLIO_COLOR_PRESETS.map(c => (
+                                                <Box
+                                                    key={c}
+                                                    w="16px"
+                                                    h="16px"
+                                                    borderRadius="full"
+                                                    bg={c}
+                                                    cursor="pointer"
+                                                    border="2px solid"
+                                                    borderColor={portfolioColor === c ? 'gray.700' : 'transparent'}
+                                                    onClick={() => { setPortfolioColor(c); setColorPopoverKey(null); }}
+                                                    _hover={{ transform: 'scale(1.2)' }}
+                                                    transition="all 0.15s"
+                                                />
+                                            ))}
+                                        </Flex>
+                                    </Popover.Content>
+                                </Popover.Positioner>
+                            </Portal>
+                        </Popover.Root>
+                    )}
+
+                    {/* Asset badges */}
+                    {selectedIds.map((id, idx) => {
+                        const row = assets.find(a => a.asset.id === id);
+                        if (!row) return null;
+                        const currentColor = colorOverrides[id] ?? COMPARISON_PALETTE[idx % COMPARISON_PALETTE.length];
+                        const name = row.asset.label ?? row.asset.symbol ?? '???';
+                        const label = name.length > 14 ? name.slice(0, 14) + '…' : name;
+                        const popKey = `asset-${id}`;
+                        return (
+                            <Popover.Root
+                                key={id}
+                                open={colorPopoverKey === popKey}
+                                onOpenChange={(e) => setColorPopoverKey(e.open ? popKey : null)}
+                                positioning={{ placement: 'bottom' }}
+                                lazyMount
+                                unmountOnExit
+                            >
+                                <Popover.Trigger asChild>
+                                    <Badge
+                                        variant="outline"
+                                        colorPalette="gray"
+                                        size="sm"
+                                        px={2}
+                                        cursor="pointer"
+                                        display="flex"
+                                        alignItems="center"
+                                        gap={1}
+                                    >
+                                        <Box
+                                            w="8px"
+                                            h="8px"
+                                            borderRadius="full"
+                                            bg={currentColor}
+                                            flexShrink={0}
+                                        />
+                                        <Text fontSize="xs">{label}</Text>
+                                        <Box
+                                            as="span"
+                                            ml={0.5}
+                                            color="gray.400"
+                                            _hover={{ color: 'red.500' }}
+                                            onClick={(e: React.MouseEvent) => {
+                                                e.stopPropagation();
+                                                setSelectedIds(prev => prev.filter(x => x !== id));
+                                            }}
+                                        >
+                                            <FiX size={10} />
+                                        </Box>
+                                    </Badge>
+                                </Popover.Trigger>
+                                <Portal>
+                                    <Popover.Positioner>
+                                        <Popover.Content width="auto" p={2} shadow="md" bg="white" borderWidth={1} borderColor="gray.200">
+                                            <Flex gap={1} wrap="wrap" maxW="140px">
+                                                {COMPARISON_PALETTE.map(c => (
+                                                    <Box
+                                                        key={c}
+                                                        w="16px"
+                                                        h="16px"
+                                                        borderRadius="full"
+                                                        bg={c}
+                                                        cursor="pointer"
+                                                        border="2px solid"
+                                                        borderColor={currentColor === c ? 'gray.700' : 'transparent'}
+                                                        onClick={() => { setColorOverrides(prev => ({ ...prev, [id]: c })); setColorPopoverKey(null); }}
+                                                        _hover={{ transform: 'scale(1.2)' }}
+                                                        transition="all 0.15s"
+                                                    />
+                                                ))}
+                                            </Flex>
+                                        </Popover.Content>
+                                    </Popover.Positioner>
+                                </Portal>
+                            </Popover.Root>
+                        );
+                    })}
+
+                    {/* Benchmark badges */}
+                    {benchmarkTickers.map((ticker, idx) => {
+                        const preset = BENCHMARK_PRESETS.find(b => b.ticker === ticker);
+                        if (!preset) return null;
+                        const currentColor = benchmarkColorOverrides[ticker]
+                            ?? BENCHMARK_COLORS[idx % BENCHMARK_COLORS.length];
+                        const popKey = `bench-${ticker}`;
+                        return (
+                            <Popover.Root
+                                key={ticker}
+                                open={colorPopoverKey === popKey}
+                                onOpenChange={(e) => setColorPopoverKey(e.open ? popKey : null)}
+                                positioning={{ placement: 'bottom' }}
+                                lazyMount
+                                unmountOnExit
+                            >
+                                <Popover.Trigger asChild>
+                                    <Badge
+                                        variant="outline"
+                                        colorPalette="yellow"
+                                        size="sm"
+                                        px={2}
+                                        cursor="pointer"
+                                        display="flex"
+                                        alignItems="center"
+                                        gap={1}
+                                    >
+                                        <Box
+                                            w="8px"
+                                            h="8px"
+                                            borderRadius="full"
+                                            bg={currentColor}
+                                            flexShrink={0}
+                                        />
+                                        <Text fontSize="xs">{preset.label}</Text>
+                                        <Box
+                                            as="span"
+                                            ml={0.5}
+                                            color="gray.400"
+                                            _hover={{ color: 'red.500' }}
+                                            onClick={(e: React.MouseEvent) => {
+                                                e.stopPropagation();
+                                                setBenchmarkTickers(prev => prev.filter(t => t !== ticker));
+                                            }}
+                                        >
+                                            <FiX size={10} />
+                                        </Box>
+                                    </Badge>
+                                </Popover.Trigger>
+                                <Portal>
+                                    <Popover.Positioner>
+                                        <Popover.Content width="auto" p={2} shadow="md" bg="white" borderWidth={1} borderColor="gray.200">
+                                            <Flex gap={1} wrap="wrap" maxW="140px">
+                                                {[...BENCHMARK_COLORS, ...COMPARISON_PALETTE.slice(0, 4)].map(c => (
+                                                    <Box
+                                                        key={c}
+                                                        w="16px"
+                                                        h="16px"
+                                                        borderRadius="full"
+                                                        bg={c}
+                                                        cursor="pointer"
+                                                        border="2px solid"
+                                                        borderColor={currentColor === c ? 'gray.700' : 'transparent'}
+                                                        onClick={() => { setBenchmarkColorOverrides(prev => ({ ...prev, [ticker]: c })); setColorPopoverKey(null); }}
+                                                        _hover={{ transform: 'scale(1.2)' }}
+                                                        transition="all 0.15s"
+                                                    />
+                                                ))}
+                                            </Flex>
+                                        </Popover.Content>
+                                    </Popover.Positioner>
+                                </Portal>
+                            </Popover.Root>
+                        );
+                    })}
                 </Flex>
 
                 {/* Error states */}
@@ -431,9 +708,11 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                         <Text fontSize="xs" color="red.600">Timeline error: {timeline.error}</Text>
                     </Box>
                 )}
-                {benchmarkResult.error && (
+                {benchmarkErrors.length > 0 && (
                     <Box bg="yellow.50" border="1px solid" borderColor="yellow.200" borderRadius="md" p={2} mb={3}>
-                        <Text fontSize="xs" color="yellow.700">Benchmark: {benchmarkResult.error}</Text>
+                        {benchmarkErrors.map((e, i) => (
+                            <Text key={i} fontSize="xs" color="yellow.700">Benchmark: {e}</Text>
+                        ))}
                     </Box>
                 )}
 
@@ -450,9 +729,10 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                         </Text>
                     </Box>
                 ) : (
-                    <Box h="400px">
+                    <Box h="400px" key={`chart-${zoom}-${selectedIds.join(',')}-${benchmarkTickers.join(',')}`}>
                         <ResponsiveLine
                             data={chartData}
+                            animate={false}
                             margin={{ top: 20, right: 130, bottom: 50, left: 65 }}
                             xScale={{ type: 'time', format: '%Y-%m-%d', precision: 'day', useUTC: false }}
                             xFormat="time:%Y-%m-%d"

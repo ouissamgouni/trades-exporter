@@ -17,6 +17,7 @@ export { WarningsPanel } from './WarningsPanel';
 export { PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 export { SlidePanel } from './SlidePanel';
 export { CategoryFilterBar } from './CategoryFilterBar';
+export { PnLBreakdownBar } from './PnLBreakdownBar';
 export { MarketValuePieChart } from './MarketValuePieChart';
 export { ChartsDashboard } from './ChartsDashboard';
 export { TotalReturnScorecard } from './TotalReturnScorecard';

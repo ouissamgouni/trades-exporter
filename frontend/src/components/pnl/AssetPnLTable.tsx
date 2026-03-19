@@ -31,16 +31,17 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiUsers, FiFilter, FiX, FiList } from 'react-icons/fi';
+import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck } from 'react-icons/fi';
 import { AssetPnLCard } from './AssetPnLCard';
 import { AccountPnLCard } from './AccountPnLCard';
 import { AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
-import { Account } from '../../types';
+import { Account, DimensionWithCategories } from '../../types';
 import { Tooltip } from '../ui/tooltip';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { ValueDisplay } from '../ValueDisplay';
 import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
+import { PnLBreakdownBar } from './PnLBreakdownBar';
 import { computeDelta, formatPct } from './deltaUtils';
 
 // ------------------------------------------------------------------
@@ -101,6 +102,12 @@ interface AssetPnLTableProps {
     accountBalances?: Map<number, AccountBalanceBreakdown[]>;
     /** All accounts for name lookup */
     accounts?: Account[];
+    /** Available dimensions with their categories (from /categories/tree) */
+    dimensions?: DimensionWithCategories[];
+    /** Account IDs present in current P&L results */
+    availableAccountIds?: Set<number>;
+    /** Category IDs present in current P&L results */
+    availableCategoryIds?: Set<number>;
     /** Optional callback to load account balances on-demand when row is expanded */
     onLoadAccountBalances?: () => void;
 
@@ -132,7 +139,7 @@ const isPriceStale = (fetchedAt?: string): boolean => {
     return fetchedTime < oneHourAgo;
 };
 
-type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl';
+type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl' | 'efficiency';
 type SortDirection = 'asc' | 'desc';
 
 // ------------------------------------------------------------------
@@ -238,6 +245,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     loading = false,
     accountBalances,
     accounts = [],
+    dimensions = [],
+    availableAccountIds,
+    availableCategoryIds,
     onLoadAccountBalances,
     liveBalances,
     liveAccountBalances,
@@ -258,11 +268,30 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     const [minMarketValue, setMinMarketValue] = useState(5);
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('all');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
+    const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
     const [filtersExpanded, setFiltersExpanded] = useState(false);
 
     // --- Pagination state ---
     const [page, setPage] = useState(0);
     const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
+    // Filter to only show accounts present in results
+    const availableAccounts = useMemo(() => {
+        if (!availableAccountIds || availableAccountIds.size === 0) return [];
+        return accounts.filter(acc => availableAccountIds.has(acc.id));
+    }, [accounts, availableAccountIds]);
+
+    // Filter to only show dimensions/categories present in results
+    const relevantDimensions = useMemo(() => {
+        if (!availableCategoryIds || availableCategoryIds.size === 0) return [];
+        return dimensions
+            .map(dim => ({
+                ...dim,
+                categories: dim.categories.filter(cat => availableCategoryIds.has(cat.id)),
+            }))
+            .filter(dim => dim.categories.length > 0);
+    }, [dimensions, availableCategoryIds]);
 
     // Active filter count
     const activeFilterCount = useMemo(() => {
@@ -271,14 +300,46 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         if (minMarketValue > 0) count++;
         if (pnlStatus !== 'all') count++;
         if (balanceStatus !== 'all') count++;
+        if (selectedAccountIds.length > 0) count++;
+        if (selectedCategoryIds.length > 0) count++;
         return count;
-    }, [search, minMarketValue, pnlStatus, balanceStatus]);
+    }, [search, minMarketValue, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds]);
+
+    const hasAccountOrCategoryFilter = selectedAccountIds.length > 0 || selectedCategoryIds.length > 0;
+
+    // Build active filter chips for display when collapsed
+    const activeFilterChips = useMemo(() => {
+        const chips: { id: string; label: string; color: string; onRemove: () => void }[] = [];
+        if (search) {
+            chips.push({ id: 'search', label: `"${search}"`, color: 'purple', onRemove: () => setSearch('') });
+        }
+        if (minMarketValue > 0) {
+            chips.push({ id: 'minValue', label: `Min $${minMarketValue}`, color: 'gray', onRemove: () => setMinMarketValue(0) });
+        }
+        if (pnlStatus !== 'all') {
+            chips.push({ id: 'pnlStatus', label: pnlStatus === 'with_pnl' ? 'With P&L' : 'No P&L', color: 'teal', onRemove: () => setPnlStatus('all') });
+        }
+        if (balanceStatus !== 'all') {
+            chips.push({ id: 'balanceStatus', label: balanceStatus === 'mapped' ? 'Has balance' : 'No balance', color: 'cyan', onRemove: () => setBalanceStatus('all') });
+        }
+        for (const accId of selectedAccountIds) {
+            const acc = accounts.find(a => a.id === accId);
+            chips.push({ id: `acc-${accId}`, label: acc?.name ?? `Account ${accId}`, color: 'blue', onRemove: () => setSelectedAccountIds(prev => prev.filter(id => id !== accId)) });
+        }
+        for (const catId of selectedCategoryIds) {
+            const cat = dimensions.flatMap(d => d.categories).find(c => c.id === catId);
+            chips.push({ id: `cat-${catId}`, label: cat?.label ?? `Category ${catId}`, color: 'orange', onRemove: () => setSelectedCategoryIds(prev => prev.filter(id => id !== catId)) });
+        }
+        return chips;
+    }, [search, minMarketValue, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, accounts, dimensions]);
 
     const clearAllFilters = () => {
         setSearch('');
         setMinMarketValue(0);
         setPnlStatus('all');
         setBalanceStatus('all');
+        setSelectedAccountIds([]);
+        setSelectedCategoryIds([]);
         setPage(0);
     };
 
@@ -356,6 +417,21 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     return false;
                 }
 
+                // Account filter
+                if (selectedAccountIds.length > 0) {
+                    if (!a.account_ids || a.account_ids.length === 0) return false;
+                    if (!a.account_ids.some(id => selectedAccountIds.includes(id))) return false;
+                }
+
+                // Category filter
+                if (selectedCategoryIds.length > 0) {
+                    if (!a.category_ids || a.category_ids.length === 0) return false;
+                    if (!a.category_ids.some(id => selectedCategoryIds.includes(id))) return false;
+                }
+
+                // Exclude unmapped rows when account/category filters are active
+                if (hasAccountOrCategoryFilter && a.is_unmapped) return false;
+
                 // P&L status filter
                 if (pnlStatus === 'with_pnl' && !a.has_lots) return false;
                 if (pnlStatus === 'no_pnl' && a.has_lots) return false;
@@ -386,6 +462,12 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 if (sortField === 'asset_symbol') {
                     aVal = a.asset.symbol ?? '';
                     bVal = b.asset.symbol ?? '';
+                } else if (sortField === 'efficiency') {
+                    // Efficiency = |total return / cost basis| * 100, same as treemap
+                    const atr = (a.unrealized_pnl + a.realized_pnl);
+                    const btr = (b.unrealized_pnl + b.realized_pnl);
+                    aVal = a.cost_basis > 1 ? (atr / a.cost_basis) * 100 : 0;
+                    bVal = b.cost_basis > 1 ? (btr / b.cost_basis) * 100 : 0;
                 } else {
                     aVal = a[sortField];
                     bVal = b[sortField];
@@ -401,7 +483,32 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             });
 
         return { filtered: result, dustHiddenCount: dustCount };
-    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus]);
+    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, hasAccountOrCategoryFilter]);
+
+    // Compute filtered totals for summary bar
+    const filteredTotals = useMemo(() => {
+        let totalCost = 0;
+        let totalUnrealized = 0;
+        let totalRealized = 0;
+        let totalFees = 0;
+        let totalValue = 0;
+        for (const row of filtered) {
+            if (!row.has_lots) continue;
+            totalCost += row.cost_basis;
+            totalUnrealized += row.unrealized_pnl;
+            totalRealized += row.realized_pnl;
+            totalFees += row.total_fees;
+            totalValue += row.market_value;
+        }
+        return { totalCost, totalUnrealized, totalRealized, totalFees, totalValue };
+    }, [filtered]);
+
+    // Compute unrealized PnL range for heatmap coloring across all visible cards
+    const unrealizedPnlRange = useMemo(() => {
+        const vals = filtered.filter(a => a.has_lots).map(a => a.unrealized_pnl);
+        if (vals.length === 0) return { min: 0, max: 0 };
+        return { min: Math.min(...vals), max: Math.max(...vals) };
+    }, [filtered]);
 
     // --- Aggregated "by account" rows ---
     const byAccountRows = useMemo((): AggregatedAccountRow[] => {
@@ -537,7 +644,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     }, [liveAccountBalances, allAssets]);
 
     // Reset page when filters/sort/grouping change
-    useEffect(() => { resetPage(); }, [search, minMarketValue, pnlStatus, balanceStatus, sortField, sortDir, groupBy, displayMode, resetPage]);
+    useEffect(() => { resetPage(); }, [search, minMarketValue, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, sortField, sortDir, groupBy, displayMode, resetPage]);
 
     // Trigger load of per-account data when switching to "by account" mode
     const handleGroupByChange = (newGroupBy: GroupBy) => {
@@ -718,6 +825,34 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                         )}
                     </Flex>
 
+                    {/* Active filter chips — shown when filters are collapsed */}
+                    {!filtersExpanded && activeFilterChips.length > 0 && (
+                        <Flex flexWrap="wrap" gap={1.5} pt={1} pb={1}>
+                            {activeFilterChips.map(chip => (
+                                <Badge
+                                    key={chip.id}
+                                    size="sm"
+                                    colorPalette={chip.color}
+                                    display="inline-flex"
+                                    alignItems="center"
+                                    gap={1}
+                                    px={2}
+                                    py={0.5}
+                                    borderRadius="md"
+                                    cursor="pointer"
+                                    transition="all 0.15s"
+                                    _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
+                                    onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
+                                >
+                                    <Text fontSize="xs">{chip.label}</Text>
+                                    <Box as="span" display="flex" alignItems="center">
+                                        <FiX size={10} />
+                                    </Box>
+                                </Badge>
+                            ))}
+                        </Flex>
+                    )}
+
                     <Collapsible.Content>
                         <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} gap={3} mt={2} pb={1}>
                             {/* Asset name search */}
@@ -791,46 +926,151 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 />
                             </Box>
                         </SimpleGrid>
-                        {/* Sort-by dropdown (visible in card mode) */}
-                        {displayMode === 'cards' && (
-                            <Flex align="center" gap={2} mt={2}>
-                                <Text fontSize="2xs" fontWeight="medium" color="gray.500">Sort by</Text>
-                                <Flex
-                                    borderRadius="md"
-                                    border="1px solid"
-                                    borderColor="gray.200"
-                                    overflow="hidden"
-                                    display="inline-flex"
-                                >
-                                    {[
-                                        { value: 'market_value', label: 'Value' },
-                                        { value: 'cost_basis', label: 'Cost' },
-                                        { value: 'unrealized_pnl', label: 'Unrealized' },
-                                        { value: 'realized_pnl', label: 'Realized' },
-                                        { value: 'asset_symbol', label: 'Symbol' },
-                                        { value: 'quantity', label: 'Qty' },
-                                    ].map((opt) => (
-                                        <Button
-                                            key={opt.value}
-                                            size="2xs"
-                                            variant={sortField === opt.value ? 'solid' : 'ghost'}
-                                            colorPalette={sortField === opt.value ? 'blue' : 'gray'}
-                                            borderRadius="0"
-                                            onClick={() => handleSort(opt.value as SortField)}
-                                            px={2}
-                                            fontSize="xs"
-                                        >
-                                            {opt.label}
-                                            {sortField === opt.value && (
-                                                <Text as="span" ml={0.5}>{sortDir === 'asc' ? '↑' : '↓'}</Text>
-                                            )}
-                                        </Button>
-                                    ))}
-                                </Flex>
-                            </Flex>
+
+                        {/* Account / Category filter cards */}
+                        {(availableAccounts.length > 0 || relevantDimensions.length > 0) && (
+                            <SimpleGrid columns={{ base: 1, md: 2, lg: Math.min(1 + relevantDimensions.length, 3) }} gap={3} mt={3}>
+                                {/* Accounts card */}
+                                {availableAccounts.length > 0 && (
+                                    <Card.Root size="sm" variant="outline" borderColor={selectedAccountIds.length > 0 ? 'blue.200' : 'gray.200'} bg={selectedAccountIds.length > 0 ? 'blue.50' : 'white'}>
+                                        <Card.Body p={3}>
+                                            <Flex align="center" gap={2} mb={2}>
+                                                <Text fontSize="2xs" fontWeight="semibold" color={selectedAccountIds.length > 0 ? 'blue.700' : 'gray.700'}>
+                                                    Accounts
+                                                </Text>
+                                                <Badge size="xs" colorPalette={selectedAccountIds.length > 0 ? 'blue' : 'gray'} ml="auto">
+                                                    {selectedAccountIds.length || 'All'}/{availableAccounts.length}
+                                                </Badge>
+                                            </Flex>
+                                            <Flex gap={1} flexWrap="wrap">
+                                                {availableAccounts.map((account) => {
+                                                    const isSelected = selectedAccountIds.includes(account.id);
+                                                    const color = getAccountColor(account.id);
+                                                    return (
+                                                        <Button
+                                                            key={account.id}
+                                                            size="2xs"
+                                                            variant={isSelected ? 'solid' : 'outline'}
+                                                            onClick={() => setSelectedAccountIds(prev =>
+                                                                prev.includes(account.id)
+                                                                    ? prev.filter(id => id !== account.id)
+                                                                    : [...prev, account.id]
+                                                            )}
+                                                            bg={isSelected ? color : 'white'}
+                                                            color={isSelected ? 'white' : 'gray.700'}
+                                                            borderColor={color}
+                                                            _hover={{ bg: isSelected ? color : `${color}15`, opacity: 0.9 }}
+                                                            gap={1}
+                                                        >
+                                                            <Box w="6px" h="6px" borderRadius="full" bg={isSelected ? 'currentColor' : color} opacity={isSelected ? 0.7 : 1} />
+                                                            {account.name}
+                                                        </Button>
+                                                    );
+                                                })}
+                                            </Flex>
+                                        </Card.Body>
+                                    </Card.Root>
+                                )}
+
+                                {/* Category dimension cards */}
+                                {relevantDimensions.map((dimension) => {
+                                    const selectedInDim = dimension.categories.filter(
+                                        cat => selectedCategoryIds.includes(cat.id)
+                                    ).length;
+                                    return (
+                                        <Card.Root key={dimension.id} size="sm" variant="outline" borderColor={selectedInDim > 0 ? 'blue.200' : 'gray.200'} bg={selectedInDim > 0 ? 'blue.50' : 'white'}>
+                                            <Card.Body p={3}>
+                                                <Flex align="center" gap={2} mb={2}>
+                                                    <Text fontSize="2xs" fontWeight="semibold" color={selectedInDim > 0 ? 'blue.700' : 'gray.700'}>
+                                                        {dimension.label}
+                                                    </Text>
+                                                    <Badge size="xs" colorPalette={selectedInDim > 0 ? 'blue' : 'gray'} ml="auto">
+                                                        {selectedInDim || 'All'}/{dimension.categories.length}
+                                                    </Badge>
+                                                </Flex>
+                                                <Flex gap={1} flexWrap="wrap">
+                                                    {dimension.categories.map((category) => {
+                                                        const isSelected = selectedCategoryIds.includes(category.id);
+                                                        return (
+                                                            <Button
+                                                                key={category.id}
+                                                                size="2xs"
+                                                                variant={isSelected ? 'solid' : 'outline'}
+                                                                colorPalette={isSelected ? 'blue' : 'gray'}
+                                                                onClick={() => setSelectedCategoryIds(prev =>
+                                                                    prev.includes(category.id)
+                                                                        ? prev.filter(id => id !== category.id)
+                                                                        : [...prev, category.id]
+                                                                )}
+                                                                borderColor={category.color || undefined}
+                                                                bg={isSelected && category.color ? category.color : undefined}
+                                                                color={isSelected && category.color ? 'white' : undefined}
+                                                                _hover={{ bg: isSelected ? undefined : 'gray.100', opacity: 0.9 }}
+                                                            >
+                                                                {category.label}
+                                                            </Button>
+                                                        );
+                                                    })}
+                                                </Flex>
+                                            </Card.Body>
+                                        </Card.Root>
+                                    );
+                                })}
+                            </SimpleGrid>
                         )}
                     </Collapsible.Content>
                 </Collapsible.Root>
+
+                {/* Filtered totals summary bar */}
+                {filtered.length > 0 && filteredTotals.totalCost > 0 && (
+                    <Box mt={2} p={2} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.100">
+                        <PnLBreakdownBar
+                            costBasis={filteredTotals.totalCost}
+                            unrealizedPnl={filteredTotals.totalUnrealized}
+                            realizedPnl={filteredTotals.totalRealized}
+                            fees={filteredTotals.totalFees}
+                            baseCurrency={baseCurrency}
+                            showLabels
+                            height={8}
+                        />
+                    </Box>
+                )}
+
+                {/* Sort-by — always visible below the collapsible filter section */}
+                <Flex align="center" gap={2} mt={2}>
+                    <Text fontSize="2xs" fontWeight="medium" color="gray.500">Sort by</Text>
+                    <Flex
+                        borderRadius="md"
+                        border="1px solid"
+                        borderColor="gray.200"
+                        overflow="hidden"
+                        display="inline-flex"
+                    >
+                        {[
+                            { value: 'market_value', label: 'Value' },
+                            { value: 'cost_basis', label: 'Cost' },
+                            { value: 'unrealized_pnl', label: 'Unrealized' },
+                            { value: 'realized_pnl', label: 'Realized' },
+                            { value: 'efficiency', label: 'Efficiency' },
+                        ].map((opt) => (
+                            <Button
+                                key={opt.value}
+                                size="2xs"
+                                variant={sortField === opt.value ? 'solid' : 'ghost'}
+                                colorPalette={sortField === opt.value ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => handleSort(opt.value as SortField)}
+                                px={2}
+                                fontSize="xs"
+                            >
+                                {opt.label}
+                                {sortField === opt.value && (
+                                    <Text as="span" ml={0.5}>{sortDir === 'asc' ? '↑' : '↓'}</Text>
+                                )}
+                            </Button>
+                        ))}
+                    </Flex>
+                </Flex>
             </Card.Header>
 
             <Card.Body p={0}>
@@ -838,7 +1078,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 {displayMode === 'cards' ? (
                     <Box p={3}>
                         {loading ? (
-                            <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                            <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
                                 {Array.from({ length: 8 }).map((_, i) => (
                                     <Card.Root key={i} size="sm">
                                         <Card.Body py={6}>
@@ -855,7 +1095,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                         : 'Loading account breakdown...'}
                                 </Text>
                             ) : (
-                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
                                     {paginatedByAccount.map((row) => (
                                         <AccountPnLCard
                                             key={row.account_id}
@@ -875,7 +1115,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                             filtered.length === 0 ? (
                                 <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
                             ) : (
-                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 3, xl: 4 }} gap={3}>
+                                <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
                                     {paginatedFiltered.map((assetpnlrow) => {
                                         const assetId = assetpnlrow.asset.id;
                                         const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
@@ -905,6 +1145,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                 liveAccountErrors={liveAccountErrors}
                                                 assetErrorAccounts={assetErrorAccounts}
                                                 hasLiveErrors={!!hasLiveErrors}
+                                                unrealizedPnlRange={unrealizedPnlRange}
                                             />
                                         );
                                     })}

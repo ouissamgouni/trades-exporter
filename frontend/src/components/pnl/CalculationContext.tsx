@@ -189,10 +189,22 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                         </Flex>
 
                         {selectedVersion && (
-                            <Text fontSize="xs" color="gray.500" mt={2}>
-                                <FiClock style={{ display: 'inline', marginRight: 4 }} />
-                                Calculated: {formatDateTimeLocale(selectedVersion.created_at)}
-                            </Text>
+                            <Box mt={2}>
+                                <Text fontSize="xs" color="gray.500">
+                                    <FiClock style={{ display: 'inline', marginRight: 4 }} />
+                                    Calculated: {formatDateTimeLocale(selectedVersion.created_at)}
+                                </Text>
+                                <Text fontSize="xs" color="gray.500" mt={1}>
+                                    Base: {selectedVersion.base_currency_symbol || '?'} ·
+                                    Tolerance: {selectedVersion.residual_tolerance_pct === 0 ? 'OFF' : `${selectedVersion.residual_tolerance_pct}%`} ·
+                                    Neg. balances: {selectedVersion.allow_negative_balances ? '✓' : '✗'} ·
+                                    Swaps taxable: {selectedVersion.crypto_swap_taxable ? '✓' : '✗'} ·
+                                    Fees taxable: {selectedVersion.fee_taxable ? '✓' : '✗'}
+                                    {selectedVersion.use_price_fallback !== undefined && (
+                                        <> · Price fallback: {selectedVersion.use_price_fallback ? `✓ (${selectedVersion.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                    )}
+                                </Text>
+                            </Box>
                         )}
                     </Box>
                 )}
@@ -447,6 +459,20 @@ export const CalculationContext: React.FC<CalculationContextProps> = ({
                                 </Button>
                             )}
                         </Flex>
+
+                        {/* Config summary for draft/preview calculations */}
+                        {(status === 'preview' || status === 'persisted') && (
+                            <Text fontSize="xs" color="gray.500" mt={3}>
+                                {config.lot_method} / {config.lot_mode} · Base: {config.base_currency_symbol || '?'} ·{' '}
+                                Tolerance: {config.residual_tolerance_pct === 0 ? 'OFF' : `${config.residual_tolerance_pct}%`} ·{' '}
+                                Neg. balances: {config.allow_negative_balances ? '✓' : '✗'} ·{' '}
+                                Swaps taxable: {config.crypto_swap_taxable_by_default ? '✓' : '✗'} ·{' '}
+                                Fees taxable: {config.fee_taxable_by_default ? '✓' : '✗'}
+                                {config.use_price_fallback !== undefined && (
+                                    <> · Price fallback: {config.use_price_fallback ? `✓ (${config.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                )}
+                            </Text>
+                        )}
                     </>
                 )}
 

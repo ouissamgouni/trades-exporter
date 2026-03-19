@@ -203,6 +203,7 @@ def _process_disposals(
             lot_manager=lot_manager,
             config=config,
             unit=unit,
+            fmv_service=fmv_service,
         )
 
         if negative_lot:
@@ -277,15 +278,33 @@ def _process_disposals(
                 # cost-basis transfer — they would create phantom lots.
                 if not is_cost_basis_transfer:
                     all_consumed_slices.extend(slices)
-                _proceeds_and_pnl_entry(
-                    disposal=disposal,
-                    slices=slices,
-                    inflows=inflows,
-                    non_fee_outflows=[d for d in disposals if not d.is_fee],
-                    fmv_service=fmv_service,
-                    config=config,
-                    unit=unit,
-                )
+                # Skip RealizedPnl for base currency fees — pnl is always 0.
+                # Still create FeeEntry for reporting visibility.
+                if asset_id == config.base_currency_id:
+                    fee_value = sum(s.total_cost_in_base for s in slices)
+                    _create_fee_entry(
+                        disposal=disposal,
+                        unit=unit,
+                        realized_pnl=None,
+                        base_currency_id=config.base_currency_id,
+                        fee_value_in_base=fee_value,
+                    )
+                    log.debug(
+                        "base_currency_fee_skipped_pnl",
+                        asset_id=asset_id,
+                        asset_symbol=asset_symbol,
+                        qty=float(qty),
+                    )
+                else:
+                    _proceeds_and_pnl_entry(
+                        disposal=disposal,
+                        slices=slices,
+                        inflows=inflows,
+                        non_fee_outflows=[d for d in disposals if not d.is_fee],
+                        fmv_service=fmv_service,
+                        config=config,
+                        unit=unit,
+                    )
             continue  # Skip pattern checks for fees
 
         # Non-fee legs always contribute to all_consumed_slices
@@ -309,6 +328,17 @@ def _process_disposals(
             # Cost basis will be preserved and transferred to new lots in _handle_cost_basis_transfer
             if is_cost_basis_transfer :
                 continue  # No P&L realization for transfers/splits
+            
+            # Skip RealizedPnl for base currency disposals — pnl is always 0
+            # (proceeds = qty × 1.0 = cost_basis). These entries are pure noise.
+            if asset_id == config.base_currency_id:
+                log.debug(
+                    "base_currency_disposal_skipped_pnl",
+                    asset_id=asset_id,
+                    asset_symbol=asset_symbol,
+                    qty=float(qty),
+                )
+                continue
             
             # Compute P&L for taxable disposals (not transfers/splits)
             _proceeds_and_pnl_entry(
@@ -432,6 +462,7 @@ def _consume_lots(
     lot_manager: LotManager,
     config: PnLConfig,
     unit: CalculationUnit,
+    fmv_service: Optional[FMVService] = None,
 ) -> tuple[List[ConsumedLotSlice], Optional[CostLot]]:
     """Consume lots for a disposal transaction."""
     asset_id = disposal.asset_id
@@ -444,6 +475,19 @@ def _consume_lots(
     unit_id = unit.id
     disposal_dt = ensure_utc(disposal.date_time) if hasattr(disposal, 'date_time') and disposal.date_time else None
     
+    # Compute FMV for negative lot fallback cost (instead of using 0)
+    fmv_unit_cost = None
+    fmv_metadata = None
+    if fmv_service and disposal.asset_id != config.base_currency_id:
+        fmv_result = fmv_service.get_fmv_in_base(disposal, skip_on_error=True)
+        if fmv_result.success and fmv_result.price and fmv_result.price > 0:
+            fmv_unit_cost = Decimal(str(fmv_result.price))
+            fmv_metadata = {
+                "source": fmv_result.source,
+                "price": Decimal(str(fmv_result.price)),
+                "timestamp": fmv_result.timestamp,
+                "is_stale": getattr(fmv_result, 'is_stale', None),
+            }
 
     try:
         slices, negative_lot = lot_manager.consume_lots(
@@ -453,7 +497,9 @@ def _consume_lots(
             qty=qty,
             allow_negative=config.allow_negative_balances,
             triggered_by_transaction=disposal.transaction,
-            triggered_by_unit=unit
+            triggered_by_unit=unit,
+            fmv_unit_cost=fmv_unit_cost,
+            fmv_metadata=fmv_metadata,
         )
     except ValueError as e:
         if unit.warnings is None:
@@ -485,16 +531,45 @@ def _consume_lots(
         # Set unit_id (FK to calculation_units)
         negative_lot.unit_id = unit.id
         
-        if unit.warnings is None:
-            unit.warnings = []
-        unit.warnings.append(
-            PnlWarning(
-                warning_type=WarningType.NEGATIVE_BALANCE.value,
-                message=f"Created negative lot for {asset_symbol} (id={asset_id}) (insufficient balance)",
-                transaction_id=origin_tx_id,
-                unit=unit,
+        # Only emit warning when allow_negative_balances is off —
+        # if the user opted in, negative lots are expected and not noise.
+        if not config.allow_negative_balances:
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.NEGATIVE_BALANCE.value,
+                    message=f"Created negative lot for {asset_symbol} (id={asset_id}) (insufficient balance)",
+                    transaction_id=origin_tx_id,
+                    unit=unit,
+                )
             )
-        )
+        
+        # Emit PROVISIONAL_COST_LOT warning when negative lot has FMV-based cost
+        # (cost is an estimate that will be corrected when the acquisition arrives)
+        if negative_lot.cost_source == "fmv" and negative_lot.asset_id != config.base_currency_id:
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.PROVISIONAL_COST_LOT.value,
+                    message=f"Provisional cost basis for {asset_symbol} (id={asset_id}): "
+                            f"unit_cost={float(negative_lot.unit_cost_in_base):.6g} via FMV "
+                            f"(source: {negative_lot.cost_fmv_source or 'unknown'}). "
+                            f"Will be corrected when acquisition transaction is processed.",
+                    transaction_id=origin_tx_id,
+                    asset_id=asset_id,
+                    unit=unit,
+                    details={
+                        "lot_id": negative_lot.cost_lot_id,
+                        "fmv_price": float(negative_lot.cost_fmv_price) if negative_lot.cost_fmv_price else None,
+                        "fmv_source": negative_lot.cost_fmv_source,
+                        "cost_source": negative_lot.cost_source,
+                        "qty": float(negative_lot.qty),
+                        "transaction_date": disposal_dt.isoformat() if disposal_dt else None,
+                    },
+                )
+            )
 
     return slices, negative_lot
 
@@ -573,6 +648,39 @@ def _proceeds_and_pnl_entry(
     
     pnl = proceeds - cost_basis
 
+    # Warn if cost basis is zero for a non-base-currency asset (likely a zero-cost lot bug)
+    is_base = config.base_currency_id and asset_id == config.base_currency_id
+    if cost_basis == Decimal(0) and qty > 0 and not is_base:
+        if unit.warnings is None:
+            unit.warnings = []
+        unit.warnings.append(
+            PnlWarning(
+                warning_type=WarningType.ZERO_COST_LOT.value,
+                message=f"Zero cost basis on disposal of {asset_symbol} (id={asset_id}): "
+                        f"{float(qty):.6g} units disposed with cost_basis=0. "
+                        f"This may indicate a missing price or an unsettled negative lot.",
+                transaction_id=origin_tx_id,
+                asset_id=asset_id,
+                unit=unit,
+                details={
+                    "qty": float(qty),
+                    "proceeds": float(proceeds),
+                    "pnl": float(pnl),
+                    "slices_count": len(slices),
+                    "slice_costs": [float(s.total_cost_in_base) for s in slices],
+                },
+            )
+        )
+        log.warning(
+            "zero_cost_basis_on_disposal",
+            asset_id=asset_id,
+            asset_symbol=asset_symbol,
+            qty=float(qty),
+            proceeds=float(proceeds),
+            pnl=float(pnl),
+            slices=len(slices),
+        )
+
     # Calculate holding period (now uses slice.holding_period_days property)
     min_acquired = min(ensure_utc(s.cost_lot.acquired_at) for s in slices)
     holding_days = (ensure_utc(disposal_dt) - ensure_utc(min_acquired)).days
@@ -602,6 +710,12 @@ def _proceeds_and_pnl_entry(
         proceeds_price_source=proceeds_metadata.get("price_source"),
         proceeds_price_timestamp=proceeds_metadata.get("timestamp"),
     )
+
+    # RealizedPnl.slices is viewonly (CostLot owns slices via cascade), so
+    # setting slices= above populates the in-memory list but does NOT write
+    # pnl_id FK on the slice rows. Set it from the non-viewonly side.
+    for s in slices:
+        s.pnl = entry
 
     log.info(
         "pnl_realized",
@@ -686,6 +800,7 @@ def _process_inflows(
             absorbed_fee_cost=absorbed_fee_cost,
             lot_manager=lot_manager,
             unit=unit,
+            config=config,
         )
     else:
         _handle_acquisition(
@@ -987,6 +1102,7 @@ def _handle_cost_basis_transfer(
     absorbed_fee_cost: Decimal,
     lot_manager: LotManager,
     unit: CalculationUnit,
+    config: PnLConfig,
 ) -> None:
     """
     Handle transfer or same-asset swap by preserving individual lot slices.
@@ -1053,6 +1169,10 @@ def _handle_cost_basis_transfer(
         if not original_acquired_at:
             original_acquired_at = utc_now()
 
+        # Flag zero-cost transfer lots (inherited from source lot with zero cost)
+        is_base = config.base_currency_id and inflow.asset_id == config.base_currency_id
+        lot_is_zero_cost = (unit_cost == Decimal(0) and not is_base)
+        
         new_lot = CostLot(
             # FK IDs for runtime access; relationship objects set separately below
             # to avoid triggering dual cascade collections simultaneously in the
@@ -1071,6 +1191,9 @@ def _handle_cost_basis_transfer(
             origin_transaction=inflow.origin_transaction,
             unit_id=unit.id,  # FK only — relationship set via manual append below
             notes=f"Transfer (from lot {slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else 'unknown'})",
+            is_zero_cost=lot_is_zero_cost,
+            cost_source="inherited",
+            source_lot_id=slice.cost_lot_id if hasattr(slice, 'cost_lot_id') and slice.cost_lot_id else None,
         )
         lot_manager.add_lot(
             new_lot,
@@ -1134,18 +1257,84 @@ def _handle_acquisition(
     if taxable_non_fee_entries:
         # Taxable disposals: new asset cost = proceeds from non-fee disposals only
         total_cost = sum(e.proceeds_in_base for e in taxable_non_fee_entries)
-        cost_source = "realized_proceeds"
+        cost_source = "proceeds"
+        acq_fmv_metadata = None  # No FMV metadata — cost from realized proceeds
+        # Link to the primary disposal entry that generated the proceeds
+        origin_pnl_entry = taxable_non_fee_entries[0]
     elif consumed_slices:
         # Non-taxable disposals: new asset inherits cost basis from all consumed slices
         total_cost = sum(s.total_cost_in_base for s in consumed_slices)
-        cost_source = "inherited_cost_basis"
+        cost_source = "inherited"
+        acq_fmv_metadata = None  # No FMV metadata — cost inherited from source lots
+        origin_pnl_entry = None  # No single origin P&L — cost inherited from consumed lots
     else:
         # Pure acquisition (airdrop, deposit): cost = FMV
         total_cost = Decimal(0)
+        acq_fmv_metadata = None  # Will be set from last successful FMV result
+        origin_pnl_entry = None  # No origin P&L — cost from FMV lookup
+        fmv_failed_any = False
         for inflow in inflows:
             fmv_result = fmv_service.get_fmv_in_base(inflow, skip_on_error=True)
             total_cost += fmv_result.value
-        cost_source = "fmv_at_acquisition"
+            if fmv_result.success and fmv_result.price:
+                # Capture FMV metadata from the result (last successful one wins)
+                acq_fmv_metadata = {
+                    "source": fmv_result.source,
+                    "price": Decimal(str(fmv_result.price)),
+                    "timestamp": fmv_result.timestamp,
+                    "is_stale": getattr(fmv_result, 'is_stale', None),
+                }
+            # Emit warning when FMV lookup fails for an acquisition
+            if not fmv_result.success and inflow.asset_id != config.base_currency_id:
+                fmv_failed_any = True
+                if unit.warnings is None:
+                    unit.warnings = []
+                unit.warnings.append(
+                    PnlWarning(
+                        warning_type=WarningType.MISSING_PRICE.value,
+                        message=f"FMV lookup failed for {inflow.asset_symbol} (id={inflow.asset_id}) "
+                                f"on acquisition: {fmv_result.error}. "
+                                f"Cost lot will be created with zero cost basis.",
+                        transaction_id=inflow.origin_transaction_id,
+                        asset_id=inflow.asset_id,
+                        unit=unit,
+                        details={
+                            "error": fmv_result.error,
+                            "source": fmv_result.source,
+                            "acquisition_date": inflow.date_time.isoformat() if inflow.date_time else None,
+                            "qty": float(inflow.quantity) if inflow.quantity else 0,
+                        },
+                    )
+                )
+                log.warning(
+                    "fmv_failed_on_acquisition",
+                    asset_id=inflow.asset_id,
+                    asset_symbol=inflow.asset_symbol,
+                    error=fmv_result.error,
+                    tx_id=inflow.origin_transaction_id,
+                )
+        cost_source = "provisional" if fmv_failed_any else "fmv"
+
+        # Emit stale-price warning when FMV used for acquisition cost is from an old date
+        if acq_fmv_metadata and acq_fmv_metadata.get("is_stale"):
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.STALE_PRICE.value,
+                    message=f"Stale price used for {inflows[0].asset_symbol} acquisition cost: "
+                            f"price from {acq_fmv_metadata.get('source', 'unknown')} source "
+                            f"may be outdated.",
+                    transaction_id=inflows[0].origin_transaction_id,
+                    asset_id=inflows[0].asset_id,
+                    unit=unit,
+                    details={
+                        "fmv_source": acq_fmv_metadata.get("source"),
+                        "fmv_timestamp": acq_fmv_metadata["timestamp"].isoformat() if acq_fmv_metadata.get("timestamp") else None,
+                        "acquisition_date": inflows[0].date_time.isoformat() if inflows[0].date_time else None,
+                    },
+                )
+            )
 
     # Bug #3 fix: Use FMV-based allocation when inflows contain different assets.
     # When all inflows are the same asset, quantity-based allocation is used (backward compat).
@@ -1186,8 +1375,12 @@ def _handle_acquisition(
             continue
 
         # Special case: base currency (e.g., EUR) always has unit_cost = 1.0
+        lot_cost_source = cost_source  # Default from branch above
+        lot_fmv_metadata = acq_fmv_metadata  # Default from branch above
         if inflow.asset_id == config.base_currency_id:
             unit_cost = Decimal(1)
+            lot_cost_source = "base_currency"
+            lot_fmv_metadata = None
         else:
             if multi_asset_inflows:
                 # Allocate cost proportionally by FMV (handles different asset units correctly)
@@ -1217,6 +1410,10 @@ def _handle_acquisition(
         if is_unmatched_internal_transfer and cost_source == "fmv_at_acquisition":
             notes = "Unmatched internal transfer (provisional FMV cost basis)"
         
+        # Flag zero-cost acquisition lots (non-base-currency with unit_cost=0)
+        is_base = config.base_currency_id and inflow.asset_id == config.base_currency_id
+        lot_is_zero_cost = (unit_cost == Decimal(0) and not is_base)
+        
         settling_lot = CostLot(
             # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
             # relationship objects needed for persistence when objects aren't yet persisted)
@@ -1232,10 +1429,46 @@ def _handle_acquisition(
             origin_transaction=inflow.origin_transaction,  # Use relationship object from ExpandedLeg
             unit_id=unit.id,  # FK to calculation_units
             notes=notes,
+            is_zero_cost=lot_is_zero_cost,
+            cost_source=lot_cost_source,
+            cost_fmv_price=lot_fmv_metadata["price"] if lot_fmv_metadata else None,
+            cost_fmv_source=lot_fmv_metadata["source"] if lot_fmv_metadata else None,
+            cost_fmv_timestamp=lot_fmv_metadata["timestamp"] if lot_fmv_metadata else None,
+            cost_fmv_stale=lot_fmv_metadata.get("is_stale") if lot_fmv_metadata else None,
+            origin_pnl=origin_pnl_entry,  # Link to the disposal that generated this lot's cost basis
         )
+        
+        # Emit warning for zero-cost lots (likely a missing price or FMV failure)
+        if lot_is_zero_cost:
+            if unit.warnings is None:
+                unit.warnings = []
+            unit.warnings.append(
+                PnlWarning(
+                    warning_type=WarningType.ZERO_COST_LOT.value,
+                    message=f"Zero-cost lot created for {inflow.asset_symbol} (id={inflow.asset_id}): "
+                            f"{float(inflow_qty):.6g} units acquired with unit_cost=0. "
+                            f"Cost source: {lot_cost_source}. This may indicate a missing price.",
+                    transaction_id=inflow.origin_transaction_id,
+                    asset_id=inflow.asset_id,
+                    unit=unit,
+                    details={
+                        "qty": float(inflow_qty),
+                        "unit_cost": float(unit_cost),
+                        "cost_source": lot_cost_source,
+                        "total_cost": float(total_cost),
+                    },
+                )
+            )
+            log.warning(
+                "zero_cost_lot_created",
+                asset_id=inflow.asset_id,
+                asset_symbol=inflow.asset_symbol,
+                qty=float(inflow_qty),
+                cost_source=lot_cost_source,
+            )
 
         # Check for negative lots to settle (pass the settling_lot for relationship)
-        remaining_qty, settlement_records = lot_manager.settle_negative_lots(
+        remaining_qty, settlement_info = lot_manager.settle_negative_lots(
             account=inflow.account,
             asset=inflow.asset,
             available_qty=inflow_qty,
@@ -1283,7 +1516,7 @@ def _handle_acquisition(
         # (1 EUR = 1 EUR always, spending and receiving is not a taxable event)
         is_base_currency = config.base_currency_id and inflow.asset_id == config.base_currency_id
         
-        for settlement in settlement_records:
+        for settlement, provisional_unit_cost in settlement_info:
             if is_base_currency:
                 # Skip P&L adjustment for base currency - no real gain/loss
                 log.debug(
@@ -1294,20 +1527,27 @@ def _handle_acquisition(
                 continue
                 
             # Create adjustment entry to correct provisional P&L for non-base currencies
-            cost_applied = settlement.cost_basis_applied or Decimal(0)
+            # The negative lot already had provisional cost (FMV or 0) baked into the original P&L.
+            # The adjustment is the DELTA between actual settlement cost and provisional cost.
+            actual_cost = settlement.cost_basis_applied or Decimal(0)
+            # provisional_unit_cost comes from the settle_negative_lots tuple
+            provisional_cost = provisional_unit_cost * settlement.qty_settled
+            cost_delta = actual_cost - provisional_cost  # Positive = more cost, negative = less cost
+            
             adjustment_entry = RealizedPnl(
                 # Set both FK IDs and relationship objects (FK IDs needed for runtime access,
                 # relationship objects needed for persistence when objects aren't yet persisted)
                 asset=inflow.asset,  # Use relationship object
                 qty=settlement.qty_settled,
                 proceeds_in_base=Decimal(0),  # Adjustment only affects cost
-                cost_basis_in_base=cost_applied,
-                pnl_in_base=-cost_applied,  # Reduces P&L (cost was 0, now has real cost)
+                cost_basis_in_base=cost_delta,
+                pnl_in_base=-cost_delta,  # Corrects P&L: positive delta = lower P&L, negative delta = higher P&L
                 disposal_taxable=True,  # Non-base currency adjustments are taxable
                 transaction=inflow.origin_transaction,  # Use relationship object
                 origin_unit=unit,  # FK to calculation_units
                 realized_at=inflow_date,
-                notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id}",
+                notes=f"Cost basis settlement for negative lot #{settlement.negative_lot_id} "
+                      f"(provisional={float(provisional_cost):.2f}, actual={float(actual_cost):.2f})",
             )
             # Manual append - back-population unreliable for transient objects
             if unit.realized_pnl_records is None:
@@ -1316,7 +1556,9 @@ def _handle_acquisition(
                 unit.realized_pnl_records.append(adjustment_entry)
             log.info(
                 "pnl_adjustment_created",
-                cost_applied=float(cost_applied),
+                actual_cost=float(actual_cost),
+                provisional_cost=float(provisional_cost),
+                cost_delta=float(cost_delta),
                 qty=float(settlement.qty_settled),
                 negative_lot_id=settlement.negative_lot_id,
             )

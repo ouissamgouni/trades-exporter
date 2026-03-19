@@ -1118,6 +1118,261 @@ class TestRule4bSplitDetection:
 
 
 # =============================================================================
+# Rule 4c: Multi-leg Swap / Rebalance Detection Tests
+# =============================================================================
+
+
+class TestRule4cMultiLegSwap:
+    """Tests for Rule 4c: multi-leg swap / rebalance detection."""
+
+    def test_one_sell_three_buys_same_account_same_time(self, engine):
+        """Classic rebalance: 1 outflow → 3 inflows, same account, value-balanced."""
+        now = datetime.now()
+
+        outflow = make_tx(
+            id=1,
+            direction="outflow",
+            symbol="FUND_A",
+            asset_id=100,
+            account_id=1,
+            dt=now,
+            total_in_base=Decimal("1500"),
+        )
+        inflow1 = make_tx(
+            id=2,
+            direction="inflow",
+            symbol="FUND_B",
+            asset_id=101,
+            account_id=1,
+            dt=now,
+            total_in_base=Decimal("300"),
+        )
+        inflow2 = make_tx(
+            id=3,
+            direction="inflow",
+            symbol="FUND_C",
+            asset_id=102,
+            account_id=1,
+            dt=now,
+            total_in_base=Decimal("900"),
+        )
+        inflow3 = make_tx(
+            id=4,
+            direction="inflow",
+            symbol="FUND_D",
+            asset_id=103,
+            account_id=1,
+            dt=now,
+            total_in_base=Decimal("300"),
+        )
+
+        suggestions = engine.suggest_groups([outflow, inflow1, inflow2, inflow3])
+
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+
+        s = swap_suggestions[0]
+        assert set(s.transaction_ids) == {1, 2, 3, 4}
+        assert "Rebalance" in s.label
+        assert s.confidence == engine.config.medium_confidence
+
+    def test_two_sells_two_buys_rebalance(self, engine):
+        """M:N rebalance: 2 outflows + 2 inflows, same account, value-balanced."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now, total_in_base=Decimal("500")),
+            make_tx(id=2, direction="outflow", symbol="B", asset_id=11, account_id=1, dt=now, total_in_base=Decimal("500")),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1, dt=now, total_in_base=Decimal("600")),
+            make_tx(id=4, direction="inflow",  symbol="D", asset_id=13, account_id=1, dt=now, total_in_base=Decimal("400")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+        assert set(swap_suggestions[0].transaction_ids) == {1, 2, 3, 4}
+        assert "Rebalance" in swap_suggestions[0].label
+
+    def test_value_mismatch_beyond_tolerance(self, engine):
+        """Should NOT group when total outflow ≠ total inflow (beyond tolerance)."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now, total_in_base=Decimal("1000")),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1, dt=now, total_in_base=Decimal("200")),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1, dt=now, total_in_base=Decimal("200")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        # Value diff = |1000-400|/1000 = 60% >> 10% tolerance
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 0
+
+    def test_mixed_accounts_not_grouped(self, engine):
+        """Should NOT group when transactions span different accounts."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now, total_in_base=Decimal("1000")),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=2, dt=now, total_in_base=Decimal("500")),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=2, dt=now, total_in_base=Decimal("500")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 0
+
+    def test_time_gap_too_large(self, engine):
+        """Should NOT group when time gap between transactions exceeds window."""
+        now = datetime.now()
+        # Default swap_time_window is 60s
+        far_future = now + timedelta(seconds=120)
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now, total_in_base=Decimal("1000")),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1, dt=now, total_in_base=Decimal("500")),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1, dt=far_future, total_in_base=Decimal("500")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        # tx3 is too far from tx1/tx2, so the cluster splits.
+        # The 2-tx cluster (tx1+tx2) has only 2 txs, so it goes to Rule 4 (pair), not 4c.
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 0
+
+    def test_only_two_transactions_deferred_to_rule4(self, engine):
+        """With only 1 outflow + 1 inflow, Rule 4c should skip (min 3 txs); Rule 4 handles it."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now, total_in_base=Decimal("1000")),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1, dt=now, total_in_base=Decimal("1000")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        # Should be handled by Rule 4 as a regular swap, not rebalance
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+        assert "Rebalance" not in swap_suggestions[0].label
+
+    def test_same_asset_on_all_legs_not_grouped(self, engine):
+        """Should NOT group when all transactions are the same asset (not a swap/rebalance)."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="ETH", asset_id=1, account_id=1, dt=now, total_in_base=Decimal("500")),
+            make_tx(id=2, direction="inflow",  symbol="ETH", asset_id=1, account_id=1, dt=now, total_in_base=Decimal("250")),
+            make_tx(id=3, direction="inflow",  symbol="ETH", asset_id=1, account_id=1, dt=now, total_in_base=Decimal("250")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 0
+
+    def test_csv_broker_rebalance_real_world(self, engine):
+        """Real-world scenario: CSV-imported broker rebalance like TXs #9738-#9741."""
+        now = datetime(2025, 9, 3, 0, 0, 0)
+
+        txs = [
+            make_tx(
+                id=9738, direction="outflow", symbol="990000084289", asset_id=327,
+                account_id=336, dt=now, total_in_base=Decimal("1528.977"),
+                source_transaction_id="d1b7bc1a2a09629ebe5da6c4118b01ce",
+            ),
+            make_tx(
+                id=9739, direction="inflow", symbol="LU0124384867", asset_id=328,
+                account_id=336, dt=now, total_in_base=Decimal("305.683"),
+                source_transaction_id="6ad25e6031f1349483508604ac62b30b",
+            ),
+            make_tx(
+                id=9740, direction="inflow", symbol="LU1897556517", asset_id=329,
+                account_id=336, dt=now, total_in_base=Decimal("917.274"),
+                source_transaction_id="d39ee4aaa58bf06a3ad882bcf1047ee5",
+            ),
+            make_tx(
+                id=9741, direction="inflow", symbol="LU0104884860", asset_id=330,
+                account_id=336, dt=now, total_in_base=Decimal("305.978"),
+                source_transaction_id="00a64061c35a69abc5afad662d29f855",
+            ),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+
+        s = swap_suggestions[0]
+        assert set(s.transaction_ids) == {9738, 9739, 9740, 9741}
+        assert "Rebalance" in s.label
+        assert s.confidence == engine.config.medium_confidence
+
+    def test_no_value_data_not_grouped(self, engine):
+        """Should NOT group when no value data is available on any transaction."""
+        now = datetime.now()
+
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=now),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1, dt=now),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1, dt=now),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 0
+
+    def test_rule4c_doesnt_steal_from_rule3(self, engine):
+        """Transactions already consumed by Rule 3 should not be re-grouped by 4c."""
+        now = datetime.now()
+        shared_source = "shared_order_123"
+
+        # These 3 share a source_transaction_id → Rule 3 grabs them first
+        txs = [
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1,
+                    dt=now, total_in_base=Decimal("1000"), source_transaction_id=shared_source),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1,
+                    dt=now, total_in_base=Decimal("500"), source_transaction_id=shared_source),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1,
+                    dt=now, total_in_base=Decimal("500"), source_transaction_id=shared_source),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        # Rule 3 should handle these (Multi-leg Trade)
+        swap_suggestions = [s for s in suggestions if s.pattern == PATTERN_SWAP]
+        assert len(swap_suggestions) == 1
+        assert "Multi-leg" in swap_suggestions[0].label
+
+    def test_multiple_clusters_same_account(self, engine):
+        """Two separate rebalancing events on same account, hours apart → two suggestions."""
+        t1 = datetime(2025, 6, 1, 10, 0, 0)
+        t2 = datetime(2025, 6, 1, 15, 0, 0)  # 5 hours later
+
+        txs = [
+            # Cluster 1
+            make_tx(id=1, direction="outflow", symbol="A", asset_id=10, account_id=1, dt=t1, total_in_base=Decimal("1000")),
+            make_tx(id=2, direction="inflow",  symbol="B", asset_id=11, account_id=1, dt=t1, total_in_base=Decimal("500")),
+            make_tx(id=3, direction="inflow",  symbol="C", asset_id=12, account_id=1, dt=t1, total_in_base=Decimal("500")),
+            # Cluster 2
+            make_tx(id=4, direction="outflow", symbol="D", asset_id=13, account_id=1, dt=t2, total_in_base=Decimal("800")),
+            make_tx(id=5, direction="inflow",  symbol="E", asset_id=14, account_id=1, dt=t2, total_in_base=Decimal("400")),
+            make_tx(id=6, direction="inflow",  symbol="F", asset_id=15, account_id=1, dt=t2, total_in_base=Decimal("400")),
+        ]
+
+        suggestions = engine.suggest_groups(txs)
+
+        rebalance = [s for s in suggestions if "Rebalance" in s.label]
+        assert len(rebalance) == 2
+        assert set(rebalance[0].transaction_ids) | set(rebalance[1].transaction_ids) == {1, 2, 3, 4, 5, 6}
+
+
+# =============================================================================
 # Rule 5: Bridge Detection Tests
 # =============================================================================
 

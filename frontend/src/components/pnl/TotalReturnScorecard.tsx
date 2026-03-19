@@ -15,9 +15,9 @@ import React, { useMemo, useState } from 'react';
 import { Badge, Box, Card, Flex, SimpleGrid, Slider, Text } from '@chakra-ui/react';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign } from 'react-icons/fi';
 import { Tooltip } from '../ui/tooltip';
-import type { TimelinePoint, PeriodSummaryResponse, RangeKey, AssetPerformer } from '../../hooks/useChartData';
-import type { DimensionWithCategories, Account } from '../../types';
-import type { AssetPnLRow } from './types';
+import { PnLBreakdownBar } from './PnLBreakdownBar';
+import type { TimelinePoint, VersionMetricsResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
+import type { DimensionWithCategories } from '../../types';
 
 /** Authoritative totals from the P&L calculation engine */
 export interface ScorecardSummary {
@@ -60,12 +60,14 @@ export function fmtCurrencySigned(val: number, currency: string): string {
     return `${prefix}${abs.toFixed(2)} ${sym}`;
 }
 
-export type Range = 'all' | '1y' | '6m' | '3m' | '1m';
+export type Range = 'all' | '3y' | '1y' | '6m' | '3m' | '1m' | '1w';
 export const RANGES: { key: Range; label: string; days: number | null }[] = [
+    { key: '1w', label: '1W', days: 7 },
     { key: '1m', label: '1M', days: 30 },
     { key: '3m', label: '3M', days: 90 },
     { key: '6m', label: '6M', days: 180 },
     { key: '1y', label: '1Y', days: 365 },
+    { key: '3y', label: '3Y', days: 1095 },
     { key: 'all', label: 'All', days: null },
 ];
 
@@ -79,6 +81,9 @@ export interface RangeMetrics {
     realizedInPeriod: number;
     totalFees: number;
     feeEntryCount: number;
+    costBasisInPeriod: number;
+    unrealizedInPeriod: number;
+    feesInPeriod: number;
 }
 
 /** Compute metrics for a given range from timeline points + optional authoritative summary */
@@ -100,6 +105,9 @@ export function computeMetricsForRange(
             realizedInPeriod: summary.realizedPnl,
             totalFees: summary.totalFees,
             feeEntryCount: summary.feeEntryCount,
+            costBasisInPeriod: summary.costBasis,
+            unrealizedInPeriod: summary.unrealizedPnl,
+            feesInPeriod: summary.totalFees,
         };
     }
 
@@ -141,6 +149,9 @@ export function computeMetricsForRange(
         realizedInPeriod,
         totalFees: summary?.totalFees ?? 0,
         feeEntryCount: summary?.feeEntryCount ?? 0,
+        costBasisInPeriod: costBasis - (first.cost_basis_in_base || 0),
+        unrealizedInPeriod: unrealizedChange,
+        feesInPeriod: 0,
     };
 }
 
@@ -193,14 +204,27 @@ export const AllTimeIndicators: React.FC<AllTimeIndicatorsProps> = ({
                         <Text fontSize="md" fontWeight="bold" color={color(totalReturn)} ml="auto">
                             {fmtCurrencySigned(totalReturn, baseCurrency)}
                         </Text>
-                        <Badge
-                            colorPalette={roi >= 0 ? 'green' : 'red'}
-                            variant="subtle"
-                            size="sm"
+                        <Text
+                            fontSize="xl"
+                            fontWeight="extrabold"
+                            color={roi >= 0 ? 'green.600' : 'red.600'}
                         >
                             {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
-                        </Badge>
+                        </Text>
                     </Flex>
+
+                    {/* Breakdown bar */}
+                    <Box mb={2}>
+                        <PnLBreakdownBar
+                            costBasis={summary.costBasis}
+                            unrealizedPnl={summary.unrealizedPnl}
+                            realizedPnl={summary.realizedPnl}
+                            fees={summary.totalFees}
+                            baseCurrency={baseCurrency}
+                            showLabels
+                            height={8}
+                        />
+                    </Box>
 
                     {/* Compact breakdown — single row of 5 metrics */}
                     <SimpleGrid columns={5} gap={1}>
@@ -229,23 +253,21 @@ interface TimeframeIndicatorsProps {
     range: Range;
     /** Called when user clicks a different range card */
     onRangeChange: (range: Range) => void;
-    /** Backend period summary — used when available instead of client computation */
-    periodSummaryData?: PeriodSummaryResponse;
-    /** Pre-computed top performers from backend */
-    topPerformers?: AssetPerformer[];
-    /** Pre-computed flop performers from backend */
-    flopPerformers?: AssetPerformer[];
+    /** Backend version metrics — used when available instead of client computation */
+    periodSummaryData?: VersionMetricsResponse;
+    /** Current group_by mode for performers */
+    groupBy?: GroupBy;
+    /** Called when user clicks a different performer type badge */
+    onGroupByChange?: (groupBy: GroupBy) => void;
     /** Callback when user clicks an asset in best/worst list */
     onAssetClick?: (assetId: number) => void;
-    /** All assets — needed for category/account aggregation */
-    assets?: AssetPnLRow[];
-    /** Dimensions (for category aggregation) */
+    /** Available category dimensions for grouping */
     dimensions?: DimensionWithCategories[];
-    /** Accounts (for account aggregation) */
-    accounts?: Account[];
+    /** Currently selected dimension ID (when groupBy=category) */
+    selectedDimensionId?: number | null;
+    /** Called when user selects a dimension */
+    onDimensionChange?: (dimensionId: number) => void;
 }
-
-type PerformerItemType = 'asset' | 'category' | 'account';
 
 interface PerformerItem {
     id: number;
@@ -254,59 +276,9 @@ interface PerformerItem {
     roiPct: number;
 }
 
-/** Aggregate assets by category → compute total return per category */
-function aggregatePerformersByCategory(
-    assets: AssetPnLRow[],
-    dimensions: DimensionWithCategories[],
-): PerformerItem[] {
-    const catMap = new Map<number, string>();
-    for (const dim of dimensions) {
-        for (const cat of dim.categories) catMap.set(cat.id, cat.label);
-    }
-    const agg = new Map<number, { costBasis: number; unrealized: number; realized: number; name: string }>();
-    for (const a of assets) {
-        if (!a.category_ids?.length) continue;
-        const share = 1 / a.category_ids.length;
-        for (const catId of a.category_ids) {
-            const label = catMap.get(catId);
-            if (!label) continue;
-            const e = agg.get(catId) ?? { costBasis: 0, unrealized: 0, realized: 0, name: label };
-            e.costBasis += a.cost_basis * share;
-            e.unrealized += a.unrealized_pnl * share;
-            e.realized += a.realized_pnl * share;
-            agg.set(catId, e);
-        }
-    }
-    return Array.from(agg.entries()).map(([id, e]) => {
-        const totalReturn = e.unrealized + e.realized;
-        return { id, name: e.name, totalReturn, roiPct: e.costBasis !== 0 ? (totalReturn / e.costBasis) * 100 : 0 };
-    });
-}
-
-/** Aggregate assets by account → compute total return per account */
-function aggregatePerformersByAccount(
-    assets: AssetPnLRow[],
-    accounts: Account[],
-): PerformerItem[] {
-    const acctMap = new Map<number, string>();
-    for (const a of accounts) acctMap.set(a.id, a.name);
-    const agg = new Map<number, { costBasis: number; unrealized: number; realized: number; name: string }>();
-    for (const a of assets) {
-        if (!a.account_ids?.length) continue;
-        const share = 1 / a.account_ids.length;
-        for (const acctId of a.account_ids) {
-            const label = acctMap.get(acctId) ?? `Account #${acctId}`;
-            const e = agg.get(acctId) ?? { costBasis: 0, unrealized: 0, realized: 0, name: label };
-            e.costBasis += a.cost_basis * share;
-            e.unrealized += a.unrealized_pnl * share;
-            e.realized += a.realized_pnl * share;
-            agg.set(acctId, e);
-        }
-    }
-    return Array.from(agg.entries()).map(([id, e]) => {
-        const totalReturn = e.unrealized + e.realized;
-        return { id, name: e.name, totalReturn, roiPct: e.costBasis !== 0 ? (totalReturn / e.costBasis) * 100 : 0 };
-    });
+/** Map backend performer to local display shape */
+function toLocalPerformer(p: BackendPerformerItem): PerformerItem {
+    return { id: p.id, name: p.label || p.name, totalReturn: p.total_return, roiPct: p.roi_pct };
 }
 
 export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
@@ -317,19 +289,18 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     range,
     onRangeChange,
     periodSummaryData,
-    topPerformers,
-    flopPerformers,
+    groupBy = 'asset',
+    onGroupByChange,
     onAssetClick,
-    assets = [],
     dimensions = [],
-    accounts = [],
+    selectedDimensionId,
+    onDimensionChange,
 }) => {
     const [performerCount, setPerformerCount] = useState(5);
-    const [performerType, setPerformerType] = useState<PerformerItemType>('asset');
 
     // Pre-compute ROI% for all ranges: prefer backend, fallback to client
     const allRangeRois = useMemo(() => {
-        const result: Record<Range, number | null> = { all: null, '1y': null, '6m': null, '3m': null, '1m': null };
+        const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
         for (const r of RANGES) {
             const backendRange = periodSummaryData?.ranges?.[r.key as RangeKey];
             if (backendRange) {
@@ -356,6 +327,9 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 realizedInPeriod: backendRange.realized_in_period,
                 totalFees: summary?.totalFees ?? 0,
                 feeEntryCount: summary?.feeEntryCount ?? 0,
+                costBasisInPeriod: backendRange.cost_basis_in_period ?? 0,
+                unrealizedInPeriod: backendRange.unrealized_in_period ?? 0,
+                feesInPeriod: backendRange.fees_in_period ?? 0,
             } as RangeMetrics;
         }
         return computeMetricsForRange(range, points, summary);
@@ -363,33 +337,14 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
 
     const color = (val: number) => (val >= 0 ? 'green.600' : 'red.600');
 
-    // Build performer lists depending on selected type
+    // Build performer lists from server-side data
     const { topItems, flopItems, maxPerformerCount } = useMemo(() => {
-        let items: PerformerItem[];
-
-        if (performerType === 'category') {
-            items = aggregatePerformersByCategory(assets, dimensions);
-        } else if (performerType === 'account') {
-            items = aggregatePerformersByAccount(assets, accounts);
-        } else {
-            // Asset mode — use backend data
-            const backendToItem = (p: AssetPerformer): PerformerItem => ({
-                id: p.asset_id,
-                name: p.label || p.symbol,
-                totalReturn: p.total_return,
-                roiPct: p.roi_pct,
-            });
-            const top = (topPerformers ?? []).map(backendToItem);
-            const flop = (flopPerformers ?? []).map(backendToItem);
-            const maxCount = Math.max(top.length, flop.length, 3);
-            return { topItems: top, flopItems: flop, maxPerformerCount: maxCount };
-        }
-
-        const top = items.filter(i => i.totalReturn >= 0).sort((a, b) => b.totalReturn - a.totalReturn);
-        const flop = items.filter(i => i.totalReturn < 0).sort((a, b) => a.totalReturn - b.totalReturn);
-        const maxCount = Math.max(top.length, flop.length, 3);
-        return { topItems: top, flopItems: flop, maxPerformerCount: maxCount };
-    }, [performerType, topPerformers, flopPerformers, assets, dimensions, accounts]);
+        const rangeData = periodSummaryData?.ranges?.[range as RangeKey];
+        const topRaw = (rangeData?.top_performers ?? []).map(toLocalPerformer);
+        const flopRaw = (rangeData?.flop_performers ?? []).map(toLocalPerformer);
+        const maxCount = Math.max(topRaw.length, flopRaw.length, 3);
+        return { topItems: topRaw, flopItems: flopRaw, maxPerformerCount: maxCount };
+    }, [periodSummaryData, range]);
 
     const visibleTop = topItems.slice(0, performerCount);
     const visibleFlop = flopItems.slice(0, performerCount);
@@ -446,21 +401,21 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
             {isLoading ? (
                 <Text fontSize="xs" color="gray.400">Loading...</Text>
             ) : metrics ? (
-                <Box display="grid" gridTemplateColumns={{ base: '1fr', md: '2fr 3fr' }} gap={3}>
+                <Box display="grid" gridTemplateColumns={{ base: '1fr', md: '2fr 5fr' }} gap={3}>
                     {/* Left: Period metrics */}
                     <Box>
                         {/* Period hero — bigger total return */}
-                        <Flex align="baseline" gap={1.5} mb={1.5}>
+                        <Flex align="baseline" gap={1.5} mb={1}>
                             <Text fontSize="lg" fontWeight="bold" color={color(metrics.totalReturn)}>
                                 {fmtCurrencySigned(metrics.totalReturn, baseCurrency)}
                             </Text>
-                            <Badge
-                                colorPalette={metrics.roi >= 0 ? 'green' : 'red'}
-                                variant="subtle"
-                                size="sm"
+                            <Text
+                                fontSize="xl"
+                                fontWeight="extrabold"
+                                color={metrics.roi >= 0 ? 'green.600' : 'red.600'}
                             >
                                 {metrics.roi >= 0 ? '+' : ''}{metrics.roi.toFixed(2)}%
-                            </Badge>
+                            </Text>
                         </Flex>
 
                         {/* Compact breakdown — 2 columns */}
@@ -470,24 +425,62 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                             <MetricItem label="Unrealized" value={fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)} color={color(metrics.unrealizedPnl)} />
                             <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} subValue={`${fmtCurrencySigned(metrics.realizedInPeriod, baseCurrency)} in period`} />
                         </SimpleGrid>
+
+                        {/* Period breakdown bar */}
+                        <Box mt={1.5}>
+                            <PnLBreakdownBar
+                                costBasis={metrics.costBasisInPeriod}
+                                unrealizedPnl={metrics.unrealizedInPeriod}
+                                realizedPnl={metrics.realizedInPeriod}
+                                fees={metrics.feesInPeriod}
+                                baseCurrency={baseCurrency}
+                                height={6}
+                            />
+                        </Box>
                     </Box>
 
-                    {/* Right: Best & Worst — wider, with controls */}
+                    {/* Right: Best & Worst */}
                     <Box>
                         {/* Controls row: item-type badges + slider */}
                         <Flex justify="space-between" align="center" mb={1.5} gap={2}>
-                            <Flex gap={0.5}>
-                                {(['asset', 'category', 'account'] as const).map(t => (
+                            <Flex gap={0.5} flexWrap="wrap">
+                                {/* Asset badge */}
+                                <Badge
+                                    cursor="pointer"
+                                    variant={groupBy === 'asset' ? 'solid' : 'outline'}
+                                    colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
+                                    size="xs"
+                                    px={1.5}
+                                    onClick={() => onGroupByChange?.('asset')}
+                                >
+                                    Asset
+                                </Badge>
+                                {/* Account badge (right after assets) */}
+                                <Badge
+                                    cursor="pointer"
+                                    variant={groupBy === 'account' ? 'solid' : 'outline'}
+                                    colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
+                                    size="xs"
+                                    px={1.5}
+                                    onClick={() => onGroupByChange?.('account')}
+                                >
+                                    Account
+                                </Badge>
+                                {/* Dimension badges (replacing single "Category") */}
+                                {dimensions.map(dim => (
                                     <Badge
-                                        key={t}
+                                        key={dim.id}
                                         cursor="pointer"
-                                        variant={performerType === t ? 'solid' : 'outline'}
-                                        colorPalette={performerType === t ? 'blue' : 'gray'}
+                                        variant={groupBy === 'category' && selectedDimensionId === dim.id ? 'solid' : 'outline'}
+                                        colorPalette={groupBy === 'category' && selectedDimensionId === dim.id ? 'teal' : 'gray'}
                                         size="xs"
                                         px={1.5}
-                                        onClick={() => setPerformerType(t)}
+                                        onClick={() => {
+                                            onGroupByChange?.('category');
+                                            onDimensionChange?.(dim.id);
+                                        }}
                                     >
-                                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                                        {dim.label}
                                     </Badge>
                                 ))}
                             </Flex>
@@ -533,7 +526,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                     maxAbs={maxAbsReturn}
                                                     baseCurrency={baseCurrency}
                                                     isPositive
-                                                    onClick={performerType === 'asset' && onAssetClick ? () => onAssetClick(p.id) : undefined}
+                                                    onClick={groupBy === 'asset' && onAssetClick ? () => onAssetClick(p.id) : undefined}
                                                 />
                                             ))}
                                         </Flex>
@@ -560,7 +553,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                                     maxAbs={maxAbsReturn}
                                                     baseCurrency={baseCurrency}
                                                     isPositive={false}
-                                                    onClick={performerType === 'asset' && onAssetClick ? () => onAssetClick(p.id) : undefined}
+                                                    onClick={groupBy === 'asset' && onAssetClick ? () => onAssetClick(p.id) : undefined}
                                                 />
                                             ))}
                                         </Flex>
@@ -642,7 +635,7 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
     const metrics = useMemo(() => computeMetricsForRange(range, points, summary), [points, range, summary]);
 
     const allRangeRois = useMemo(() => {
-        const result: Record<Range, number | null> = { all: null, '1y': null, '6m': null, '3m': null, '1m': null };
+        const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
         for (const r of RANGES) {
             const m = computeMetricsForRange(r.key, points, summary);
             result[r.key] = m ? m.roi : null;

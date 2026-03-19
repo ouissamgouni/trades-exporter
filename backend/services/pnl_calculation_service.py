@@ -189,6 +189,7 @@ class PnLCalculationService:
                     base_currency_symbol=base_currency.symbol,
                     residual_tolerance_pct=Decimal(str(settings.pnl_residual_tolerance_pct)),
                     allow_negative_balances=settings.pnl_allow_negative_balances,
+                    compute_residuals=settings.pnl_compute_residuals,
                     crypto_swap_taxable_by_default=settings.pnl_crypto_swap_taxable,
                     fee_taxable_by_default=settings.pnl_fee_taxable,
                     use_price_fallback=settings.pnl_use_price_fallback,

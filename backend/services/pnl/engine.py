@@ -286,6 +286,42 @@ class PnLEngine:
                     unit.warnings = []
                 unit.warnings.append(warning)
 
+        # Post-calculation sweep: emit warnings for negative lots that remain unsettled
+        # These are lots created from out-of-order disposals where the acquisition never arrived
+        base_ccy_id = self.config.base_currency_id
+        for key, neg_lots in self.lot_manager.negative_lots_map.items():
+            for neg_lot in neg_lots:
+                if not neg_lot.is_settled:
+                    # Skip base currency — unsettled EUR lots have zero P&L impact (1 EUR = 1 EUR)
+                    if base_ccy_id and neg_lot.asset_id == base_ccy_id:
+                        continue
+                    # Find the unit this negative lot belongs to
+                    target_unit = neg_lot.unit
+                    if target_unit is None:
+                        continue
+                    if target_unit.warnings is None:
+                        target_unit.warnings = []
+                    target_unit.warnings.append(
+                        PnlWarning(
+                            warning_type=WarningType.UNSETTLED_NEGATIVE_LOT.value,
+                            message=(
+                                f"Negative lot for {neg_lot.asset.symbol if neg_lot.asset else 'unknown'} "
+                                f"(qty={float(neg_lot.qty):.6g}) was never settled by an incoming acquisition. "
+                                f"Cost basis is {'provisional (FMV)' if neg_lot.cost_source in ('fmv', 'provisional') else 'zero'}."
+                            ),
+                            transaction_id=neg_lot.origin_transaction_id,
+                            asset_id=neg_lot.asset_id,
+                            unit=target_unit,
+                            details={
+                                "lot_id": neg_lot.cost_lot_id,
+                                "negative_lot_qty": float(neg_lot.qty),
+                                "unit_cost": float(neg_lot.unit_cost_in_base),
+                                "cost_source": neg_lot.cost_source,
+                                "acquired_at": neg_lot.acquired_at.isoformat() if neg_lot.acquired_at else None,
+                            },
+                        )
+                    )
+
         log.info(
             "calculation_completed",
             units_processed=len(result.calculation_units),
@@ -325,6 +361,11 @@ class PnLEngine:
             base_currency_id=self.config.base_currency_id,
             allow_negative_balances=self.config.allow_negative_balances,
             residual_tolerance_pct=self.config.residual_tolerance_pct,
+            compute_residuals=self.config.compute_residuals,
+            crypto_swap_taxable=self.config.crypto_swap_taxable_by_default,
+            fee_taxable=self.config.fee_taxable_by_default,
+            use_price_fallback=self.config.use_price_fallback,
+            price_staleness_window_days=self.config.price_staleness_window_days,
             account_ids=account_ids,  # Store which accounts were included
             status="draft",  # Will be updated on persist
         )

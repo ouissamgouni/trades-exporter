@@ -29,6 +29,7 @@ import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { ValueDisplay } from '../ValueDisplay';
 import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
+import { PnLBreakdownBar } from './PnLBreakdownBar';
 import { computeDelta, formatPct, type DeltaInfo } from './deltaUtils';
 
 // ------------------------------------------------------------------
@@ -68,6 +69,8 @@ export interface AssetPnLCardProps {
     /** Error account IDs relevant to this asset */
     assetErrorAccounts: number[];
     hasLiveErrors: boolean;
+    /** Min/max unrealized PnL across all visible cards (for heatmap coloring) */
+    unrealizedPnlRange?: { min: number; max: number };
 }
 
 // ------------------------------------------------------------------
@@ -85,6 +88,20 @@ const Metric: React.FC<{
         {children}
     </Box>
 );
+
+/** Heatmap background: green for best, red for worst, white in the middle */
+function unrealizedHeatmapBg(val: number, range: { min: number; max: number }): string {
+    const span = Math.max(Math.abs(range.min), Math.abs(range.max), 1);
+    const t = Math.max(-1, Math.min(1, val / span)); // -1..1
+    if (t >= 0) {
+        const a = Math.min(t, 1) * 0.18;
+        return `rgba(56, 161, 105, ${a.toFixed(3)})`; // green
+    }
+    const a = Math.min(Math.abs(t), 1) * 0.18;
+    return `rgba(229, 62, 62, ${a.toFixed(3)})`; // red
+}
+
+/* CostPnlBar replaced by the reusable PnLBreakdownBar component */
 
 // ------------------------------------------------------------------
 // Component
@@ -106,6 +123,7 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
     liveAccountErrors,
     assetErrorAccounts,
     hasLiveErrors,
+    unrealizedPnlRange,
 }) => {
     const assetId = row.asset.id;
     const isNoPnl = !row.has_lots;
@@ -164,7 +182,11 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                 maxW="100px"
                                 truncate
                             >
-                                {row.asset.symbol}
+                                {row.asset.label
+                                    ? row.asset.label.length > 10
+                                        ? row.asset.label.slice(0, 10) + '…'
+                                        : row.asset.label
+                                    : row.asset.symbol}
                             </Badge>
                         </Tooltip>
 
@@ -322,15 +344,36 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                     </Flex>
                 )}
 
+                {/* ── Cost vs PnL bar ── */}
+                {!isNoPnl && row.cost_basis > 0 && (
+                    <Box mb={2}>
+                        <PnLBreakdownBar
+                            costBasis={row.cost_basis}
+                            unrealizedPnl={row.unrealized_pnl}
+                            realizedPnl={row.realized_pnl}
+                            fees={row.total_fees}
+                            height={6}
+                        />
+                    </Box>
+                )}
+
                 {/* ── Zone 3: P&L row ── */}
                 {!isNoPnl && (
                     <Flex gap={3} align="flex-start">
-                        <Metric label="Unrealized" flex="1">
+                        <Box
+                            flex="1"
+                            minW={0}
+                            bg={unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined}
+                            borderRadius="md"
+                            px={1}
+                            py={0.5}
+                        >
+                            <Text fontSize="2xs" color="gray.500" mb={0.5} lineClamp={1}>Unrealized</Text>
                             <Text fontSize="xs" fontWeight="medium" color={row.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
                                 <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
                             </Text>
                             <Text fontSize="2xs" color="gray.500">{formatPct(row.unrealized_pnl_pct)}</Text>
-                        </Metric>
+                        </Box>
 
                         <Metric label="Realized" flex="1">
                             <Text fontSize="xs" fontWeight="medium" color={row.realized_pnl >= 0 ? 'green.600' : 'red.600'}>

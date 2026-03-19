@@ -113,8 +113,7 @@ def mock_cost_lot():
     lot.asset = MagicMock()
     lot.asset.asset_id = 2
     lot.asset.symbol = "BTC"
-    
-    # Mock account relationship
+    lot.asset.label = "Bitcoin"
     lot.account = MagicMock()
     lot.account.name = "Binance"
     
@@ -126,6 +125,13 @@ def mock_cost_lot():
     # Mock computed properties
     lot.qty_consumed = Decimal("2")
     lot.remaining_cost_in_base = Decimal("800")
+    
+    # Cost provenance fields
+    lot.cost_source = "fmv"
+    lot.cost_fmv_price = Decimal("50000.00")
+    lot.cost_fmv_source = "coingecko"
+    lot.cost_fmv_timestamp = datetime.utcnow()
+    lot.cost_fmv_stale = False
     
     return lot
 
@@ -147,6 +153,7 @@ def mock_balance():
     balance.asset = MagicMock()
     balance.asset.asset_id = 2
     balance.asset.symbol = "BTC"
+    balance.asset.label = "Bitcoin"
     
     # Mock account relationship
     balance.account = None
@@ -181,6 +188,7 @@ def mock_realized_pnl():
     entry.asset = MagicMock()
     entry.asset.asset_id = 2
     entry.asset.symbol = "BTC"
+    entry.asset.label = "Bitcoin"
     
     return entry
 

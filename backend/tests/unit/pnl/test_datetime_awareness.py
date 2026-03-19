@@ -244,7 +244,7 @@ class TestLotManagerTimezoneHandling:
         lot_manager.add_lot(settling_lot, emit_event=False)
 
         # Settle
-        remaining, settlements = lot_manager.settle_negative_lots(
+        remaining, settlement_info = lot_manager.settle_negative_lots(
             account=make_account(1),
             asset=make_asset(2),
             available_qty=Decimal("1"),
@@ -253,8 +253,9 @@ class TestLotManagerTimezoneHandling:
             emit_event=False,
         )
 
-        assert len(settlements) == 1
-        assert settlements[0].settled_at.tzinfo is not None, (
+        assert len(settlement_info) == 1
+        settlement, _prov_cost = settlement_info[0]
+        assert settlement.settled_at.tzinfo is not None, (
             "LotSettlement.settled_at must be timezone-aware"
         )
 

@@ -380,7 +380,7 @@ class TestNegativeLotSettlementIntegration:
     ):
         """
         Scenario: Sell asset before buying (no lots available).
-        Should create negative lot with zero cost basis.
+        Should create negative lot with FMV-based cost basis (no longer zero).
         """
         config = PnLConfig(
             lot_method=CostMethod.FIFO,
@@ -400,14 +400,14 @@ class TestNegativeLotSettlementIntegration:
 
         result = engine.process_calculation_units([sell_group], version=mock_version)
 
-        # Should have realized P&L with zero cost basis (provisional)
+        # Should have realized P&L with FMV-based cost basis (BTC mock price = 40000)
         taxable_entries = [e for e in result.realized_pnl_entries if e.disposal_taxable]
         assert len(taxable_entries) == 1
 
         entry = taxable_entries[0]
         assert entry.proceeds_in_base == Decimal("50000")
-        assert entry.cost_basis_in_base == Decimal("0")  # No cost known yet
-        assert entry.pnl_in_base == Decimal("50000")  # Provisional (too high)
+        assert entry.cost_basis_in_base == Decimal("40000")  # FMV-based cost (not zero)
+        assert entry.pnl_in_base == Decimal("10000")  # Provisional P&L (proceeds - FMV cost)
 
         # Check negative lot was created
         balance = engine.lot_manager.get_balance(account_id=1, asset_id=2)
@@ -457,10 +457,11 @@ class TestNegativeLotSettlementIntegration:
 
         result = engine.process_calculation_units([sell_group, buy_group], version=mock_version)
 
-        # After settlement:
-        # - Original sell: proceeds=50000, cost=0, P&L=50000 (provisional)
-        # - Adjustment: cost_applied=30000 (1 unit * 30000), P&L adjustment=-30000
-        # - Net correct P&L: 50000 - 30000 = 20000
+        # After settlement (FMV-based negative lot cost):
+        # - Original sell: proceeds=50000, cost=40000 (FMV), P&L=10000
+        # - Adjustment: cost_delta = actual(30000) - provisional(40000) = -10000
+        #   → pnl_adjustment = +10000
+        # - Net correct P&L: 10000 + 10000 = 20000
 
         # Check balance: 2 BTC bought - 1 BTC used for settlement = 1 BTC remaining
         balance = engine.lot_manager.get_balance(account_id=1, asset_id=2)
@@ -474,8 +475,10 @@ class TestNegativeLotSettlementIntegration:
         assert len(adjustment_entries) == 1
 
         adj = adjustment_entries[0]
-        assert adj.cost_basis_in_base == Decimal("30000")  # 1 * 30000
-        assert adj.pnl_in_base == Decimal("-30000")  # Reduces the inflated P&L
+        # cost_delta = actual_cost(30000) - provisional_cost(40000) = -10000
+        assert adj.cost_basis_in_base == Decimal("-10000")
+        # pnl adjustment = -cost_delta = +10000 (P&L increases because actual cost is lower)
+        assert adj.pnl_in_base == Decimal("10000")
 
     def test_partial_settlement(
         self, mock_session, mock_price_service, base_datetime, mock_version
@@ -537,8 +540,9 @@ class TestNegativeLotSettlementIntegration:
         ]
         assert len(adjustment_entries) == 2
 
-        # Total cost applied: 30000 + 70000 = 100000
-        # Original sale proceeds: 150000
-        # Net P&L: 150000 - 100000 = 50000
+        # Total cost delta: (30000-40000) + (70000-80000) = -10000 + -10000 = -20000
+        # Original sale: proceeds=150000, cost=120000 (FMV), P&L=30000
+        # Adjustments: pnl = +20000 (actual cost is lower)
+        # Net P&L: 30000 + 20000 = 50000
         total_adjustment_cost = sum(e.cost_basis_in_base for e in adjustment_entries)
-        assert total_adjustment_cost == Decimal("100000")
+        assert total_adjustment_cost == Decimal("-20000")

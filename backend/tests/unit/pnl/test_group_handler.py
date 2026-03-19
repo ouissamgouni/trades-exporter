@@ -70,11 +70,9 @@ class TestBuyScenarios:
 
         result = handle_unit(group, lot_manager, fmv_service, fifo_config)
 
-        # Now creates RealizedPnl for all disposals, but non-taxable ones are flagged
-        assert len(result.realized_pnl_records) == 1
-        entry = result.realized_pnl_records[0]
-        assert entry.disposal_taxable is False
-        assert entry.pnl_in_base == Decimal("0")  # Base currency disposal: no P&L
+        # Base currency (EUR) disposals no longer create RealizedPnl entries
+        # (pnl is always 0, disposal_taxable is always False — they were pure noise)
+        assert len(result.realized_pnl_records) == 0
 
         # Should create lot for AAPL
         assert len(result.cost_lots) == 1

@@ -445,6 +445,7 @@ class PriceService:
         """Get the asset_id for a quote currency symbol."""
         statement = select(Asset).where(Asset.symbol == quote_symbol.upper())
         quote_asset = session.exec(statement).first()
+        return quote_asset.asset_id if quote_asset else None
 
     def _get_cache_exclude_sources(self, session: Session) -> Optional[List[str]]:
         """Return sources to exclude from cache when mock mode is off."""
@@ -452,7 +453,6 @@ class PriceService:
         if settings and settings.mock_mode_enabled:
             return None  # mock mode on — don't exclude anything
         return ["mock"]  # mock mode off — exclude stale mock snapshots
-        return quote_asset.asset_id if quote_asset else None
 
     def _fetch_price(
         self,
@@ -921,14 +921,16 @@ class PriceService:
                     raise
             
             # Fallback: look for latest cached price before requested date
+            # Search window = max of staleness_window * 10 or 90 days (always search wider than staleness threshold)
+            fallback_search_days = max(staleness_window_days * 10, 90)
             log.info(
                 f"Attempting fallback lookup for {asset.symbol}, "
-                f"looking back up to {staleness_window_days} days"
+                f"looking back up to {fallback_search_days} days (staleness threshold: {staleness_window_days}d)"
             )
             
-            # Look back for any cached price (use large window for fallback search)
+            # Look back for any cached price within search window
             fallback_snapshot = self.cache.get_latest_before(
-                session, asset_id, quote_asset_id, dt, max_days_back=365,  # Search up to 1 year
+                session, asset_id, quote_asset_id, dt, max_days_back=fallback_search_days,
                 exclude_sources=exclude,
             )
             

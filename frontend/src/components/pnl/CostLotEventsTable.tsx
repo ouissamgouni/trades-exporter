@@ -18,10 +18,10 @@
  */
 
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Box, Flex, Input, Button, Badge, Text, IconButton, Spinner } from '@chakra-ui/react';
+import { Box, Flex, Button, Badge, Text, IconButton, Spinner } from '@chakra-ui/react';
 import { Table } from '@chakra-ui/react';
 import { Tooltip } from '../ui/tooltip';
-import { FiSearch, FiHelpCircle, FiCalendar, FiRefreshCw } from 'react-icons/fi';
+import { FiHelpCircle, FiRefreshCw } from 'react-icons/fi';
 import { usePagination } from '../../hooks/usePagination';
 import { TablePagination } from '../TablePagination';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
@@ -29,13 +29,14 @@ import { CostLotEventEntry, LotEventType } from './types';
 import { AssetRef, API_URL } from '../../types';
 import {
     EVENT_TYPE_CONFIG,
-    getDefaultVisibleTypes,
     getSortedEventTypes,
     countEventsByType,
     getEventConfig
 } from './eventConfig';
 import { CostLotEventsFilterBar, FilterState, getDefaultEventTypes, getDefaultUnitPatterns } from './CostLotEventsFilterBar';
 import { TransactionTooltip } from '../TransactionTooltip';
+import { CostBasisChainTooltip } from './CostBasisChainTooltip';
+import { FmvBadge } from './FmvBadge';
 
 // ============================================================================
 // Types
@@ -46,11 +47,15 @@ interface CostLotEventsTableProps {
     versionId: number;
     baseCurrency: string;
     onTransactionClick?: (txId: number) => void;
+    onUnitClick?: (unitId: number) => void;
 
     // Optional filters for specific contexts
     lotId?: number;        // Filter to specific lot
     unitId?: number;       // Filter to specific unit
     assetContext?: AssetRef;  // For asset-specific filtering
+
+    // Context-level transaction filters (from InvestigationView filter bar)
+    txFilterParams?: Record<string, string | undefined>;
 
     // Column visibility options
     showColumns?: {
@@ -64,6 +69,7 @@ interface CostLotEventsTableProps {
         accountBalance?: boolean;
         assetBalance?: boolean;
         triggeredBy?: boolean;
+        chain?: boolean;
     };
 
     // External filters (for programmatic control)
@@ -86,6 +92,9 @@ interface CostLotEventsTableProps {
         dateRangeFilter?: boolean;
         eventLegend?: boolean;
     };
+
+    // Filter bar collapse state
+    defaultFiltersCollapsed?: boolean;
 
     // Pagination
     hidePagination?: boolean;
@@ -244,6 +253,7 @@ interface UseLotEventsQueryParams {
     unitPatterns?: string[];
     dateStart?: string;  // ISO datetime string
     dateEnd?: string;    // ISO datetime string
+    txFilterParams?: Record<string, string | undefined>;  // Context-level transaction filters
     page: number;
     limit: number;
 }
@@ -274,6 +284,7 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
     const relatedAssetIdsKey = JSON.stringify(params.relatedAssetIds ?? []);
     const accountIdsKey = JSON.stringify(params.accountIds ?? []);
     const unitPatternsKey = JSON.stringify(params.unitPatterns ?? []);
+    const txFilterParamsKey = JSON.stringify(params.txFilterParams ?? {});
 
     const fetchEvents = useCallback(async (isInitial = false) => {
         // Prevent concurrent fetches
@@ -318,6 +329,15 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
                 queryParams.append('date_end', params.dateEnd);
             }
 
+            // Context-level transaction filters (from InvestigationView filter bar)
+            if (params.txFilterParams) {
+                Object.entries(params.txFilterParams).forEach(([key, value]) => {
+                    if (value !== undefined && value !== '') {
+                        queryParams.append(key, value);
+                    }
+                });
+            }
+
             const response = await fetch(
                 `${API_URL}/pnl/versions/${params.versionId}/lot-events?${queryParams.toString()}`
             );
@@ -338,7 +358,7 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
             setIsRefreshing(false);
             fetchingRef.current = false;
         }
-    }, [params.versionId, params.lotId, params.unitId, params.page, params.limit, params.dateStart, params.dateEnd, eventTypesKey, assetIdsKey, relatedAssetIdsKey, accountIdsKey, unitPatternsKey]);
+    }, [params.versionId, params.lotId, params.unitId, params.page, params.limit, params.dateStart, params.dateEnd, eventTypesKey, assetIdsKey, relatedAssetIdsKey, accountIdsKey, unitPatternsKey, txFilterParamsKey]);
 
     useEffect(() => {
         if (!initialFetchDoneRef.current) {
@@ -426,6 +446,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
     unitId,
     baseCurrency,
     onTransactionClick,
+    onUnitClick,
     showColumns = {},
     filters: externalFilters,
     features = {},
@@ -434,6 +455,8 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
     compact = false,
     maxHeight,
     assetContext,
+    txFilterParams,
+    defaultFiltersCollapsed = true,
 }) => {
     // Default column visibility
     const columns = {
@@ -446,6 +469,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
         accountBalance: showColumns.accountBalance ?? false,
         assetBalance: showColumns.assetBalance ?? false,
         triggeredBy: showColumns.triggeredBy ?? true,
+        chain: showColumns.chain ?? true,
     };
 
     // Default feature flags
@@ -508,6 +532,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
         unitPatterns: filterState.unitPatterns,
         dateStart: filterState.dateStart,
         dateEnd: filterState.dateEnd,
+        txFilterParams,
         page: enabledFeatures.pagination ? pagination.page : 1,
         limit: enabledFeatures.pagination ? pagination.pageSize : 1000,
     });
@@ -674,7 +699,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                         showAccountFilter={true}
                         showAssetFilter={enabledFeatures.assetFilter}
                         showSearch={enabledFeatures.search}
-                        defaultCollapsed={true}
+                        defaultCollapsed={defaultFiltersCollapsed}
                     />
                 )}
                 {/* Compact mode filter header */}
@@ -767,7 +792,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     showAccountFilter={true}
                     showAssetFilter={enabledFeatures.assetFilter}
                     showSearch={enabledFeatures.search}
-                    defaultCollapsed={true}
+                    defaultCollapsed={defaultFiltersCollapsed}
                 />
             )}
 
@@ -875,7 +900,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
             {!compact && (
                 <Flex gap={4} mb={3} fontSize="sm" color="gray.600" wrap="wrap">
                     <Text>
-                        Showing: <Text as="span" fontWeight="bold">{filtered.length}</Text> of {events.length} events
+                        Showing: <Text as="span" fontWeight="bold">{filtered.length}</Text> of {total} events
                     </Text>
                 </Flex>
             )}
@@ -899,25 +924,27 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                 )}
                 <Box
                     overflowX="auto"
-                    style={{ fontSize: compact ? '8px' : '10px' }}
+                    style={{ fontSize: compact ? '8px' : '9px' }}
                     maxH={maxHeight}
                     overflowY={maxHeight ? 'auto' : undefined}
                     opacity={isRefreshing ? 0.5 : 1}
                     transition="opacity 0.2s"
                 >
-                    <Table.Root size="sm">
+                    <Table.Root size="s">
                         <Table.Header>
                             <Table.Row>
+                                <Table.ColumnHeader width="50px">ID</Table.ColumnHeader>
                                 <Table.ColumnHeader width="60px">Type</Table.ColumnHeader>
                                 {columns.timestamp && <Table.ColumnHeader>Timestamp</Table.ColumnHeader>}
                                 {columns.asset && <Table.ColumnHeader>Asset</Table.ColumnHeader>}
                                 {columns.account && <Table.ColumnHeader>Account</Table.ColumnHeader>}
-                                {columns.unit && <Table.ColumnHeader>Unit</Table.ColumnHeader>}
                                 {columns.quantityDelta && <Table.ColumnHeader textAlign="right">Qty Δ</Table.ColumnHeader>}
                                 {columns.costDelta && <Table.ColumnHeader textAlign="right">Cost Δ</Table.ColumnHeader>}
                                 {columns.accountBalance && <Table.ColumnHeader textAlign="right">Acct Balance</Table.ColumnHeader>}
-                                {columns.assetBalance && <Table.ColumnHeader textAlign="right">Asset Balance</Table.ColumnHeader>}
+                                {columns.assetBalance && <Table.ColumnHeader textAlign="right" pr={6}>Asset Balance</Table.ColumnHeader>}
+                                {columns.unit && <Table.ColumnHeader pl={4}>Unit</Table.ColumnHeader>}
                                 {columns.triggeredBy && <Table.ColumnHeader>Triggered By</Table.ColumnHeader>}
+                                {columns.chain && <Table.ColumnHeader textAlign="center" width="40px">Chain</Table.ColumnHeader>}
                             </Table.Row>
                         </Table.Header>
                         <Table.Body>
@@ -928,6 +955,9 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                 return (
                                     <Table.Row key={event.event_id} bg={cfg.bgColor}>
                                         <Table.Cell>
+                                            <Text fontSize="2xs" color="gray.400" fontFamily="mono">#{event.event_id}</Text>
+                                        </Table.Cell>
+                                        <Table.Cell>
                                             <Tooltip content={cfg.description}>
                                                 <Badge size="xs" colorPalette={cfg.color}>
                                                     {cfg.icon}
@@ -936,7 +966,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                         </Table.Cell>
 
                                         {columns.timestamp && (
-                                            <Table.Cell fontSize={compact ? '2xs' : 'xs'}>
+                                            <Table.Cell fontSize="2xs">
                                                 {compact ? formatCompactDateTime(event.timestamp) : formatDateTimeLocale(event.timestamp)}
                                             </Table.Cell>
                                         )}
@@ -948,29 +978,13 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                         )}
 
                                         {columns.account && (
-                                            <Table.Cell fontSize="xs">
+                                            <Table.Cell fontSize="2xs">
                                                 {event.account_name || '—'}
                                             </Table.Cell>
                                         )}
 
-                                        {columns.unit && (
-                                            <Table.Cell fontSize="2xs" fontFamily="mono">
-                                                {event.triggered_by_unit_id && event.triggered_by_unit_pattern ? (
-                                                    <Flex gap={1} align="center">
-                                                        <span style={{ color: 'var(--chakra-colors-gray-600)' }}>#{event.triggered_by_unit_id}</span>
-                                                        <span style={{ color: 'var(--chakra-colors-gray-400)' }}>·</span>
-                                                        <Badge size="xs" colorPalette={getPatternColor(event.triggered_by_unit_pattern)}>
-                                                            {event.triggered_by_unit_pattern}
-                                                        </Badge>
-                                                    </Flex>
-                                                ) : (
-                                                    <span style={{ color: 'var(--chakra-colors-gray-400)' }}>—</span>
-                                                )}
-                                            </Table.Cell>
-                                        )}
-
                                         {columns.quantityDelta && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs">
                                                 <Text color={event.quantity_delta >= 0 ? 'green.600' : 'red.600'}>
                                                     {event.quantity_delta >= 0 ? '+' : ''}{formatSmartNumber(event.quantity_delta)}
                                                 </Text>
@@ -978,17 +992,29 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                         )}
 
                                         {columns.costDelta && (
-                                            <Table.Cell textAlign="right" fontSize="xs">
+                                            <Table.Cell textAlign="right" fontSize="2xs">
                                                 {event.cost_basis_delta != null ? (
-                                                    <Text color={event.cost_basis_delta >= 0 ? 'green.600' : 'red.600'}>
-                                                        {event.cost_basis_delta >= 0 ? '+' : ''}{formatSmartNumber(event.cost_basis_delta)}
-                                                    </Text>
+                                                    (event.event_type === 'created' || event.event_type === 'created-negative') && event.cost_source && (event.cost_source === 'fmv' || event.cost_source === 'provisional') ? (
+                                                        <FmvBadge
+                                                            value={event.cost_basis_delta}
+                                                            baseCurrency={baseCurrency}
+                                                            source={event.cost_source}
+                                                            price={event.cost_fmv_price}
+                                                            priceSource={event.cost_fmv_source}
+                                                            timestamp={event.cost_fmv_timestamp}
+                                                            stale={event.cost_fmv_stale}
+                                                        />
+                                                    ) : (
+                                                        <Text color={event.cost_basis_delta >= 0 ? 'green.600' : 'red.600'}>
+                                                            {event.cost_basis_delta >= 0 ? '+' : ''}{formatSmartNumber(event.cost_basis_delta)}
+                                                        </Text>
+                                                    )
                                                 ) : '—'}
                                             </Table.Cell>
                                         )}
 
                                         {columns.accountBalance && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs">
                                                 <Tooltip content="Balance for this account after event">
                                                     <Text
                                                         color={
@@ -1013,7 +1039,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                         )}
 
                                         {columns.assetBalance && (
-                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="xs">
+                                            <Table.Cell textAlign="right" fontFamily="mono" fontSize="2xs" pr={6}>
                                                 <Tooltip content="Total asset balance across all accounts after event">
                                                     <Text
                                                         fontWeight="medium"
@@ -1035,6 +1061,37 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                         ) : '—'}
                                                     </Text>
                                                 </Tooltip>
+                                            </Table.Cell>
+                                        )}
+
+                                        {columns.unit && (
+                                            <Table.Cell fontSize="2xs" fontFamily="mono" pl={4}>
+                                                {event.triggered_by_unit_id && event.triggered_by_unit_pattern ? (
+                                                    <Flex gap={1} align="center">
+                                                        <Tooltip content={event.triggered_by_unit_pattern}>
+                                                            <Badge size="xs" colorPalette={getPatternColor(event.triggered_by_unit_pattern)}>
+                                                                {event.triggered_by_unit_pattern === 'internal_transfer' ? '⇄' :
+                                                                    event.triggered_by_unit_pattern === 'unmatched_internal_transfer' ? '⇄?' :
+                                                                        event.triggered_by_unit_pattern === 'swap' ? '⇋' :
+                                                                            event.triggered_by_unit_pattern === 'flow' ? '→' :
+                                                                                event.triggered_by_unit_pattern === 'split' ? '✂' :
+                                                                                    event.triggered_by_unit_pattern.charAt(0).toUpperCase()}
+                                                            </Badge>
+                                                        </Tooltip>
+                                                        <Text
+                                                            as="span"
+                                                            color={onUnitClick ? 'blue.500' : 'gray.500'}
+                                                            fontSize="9px"
+                                                            cursor={onUnitClick ? 'pointer' : undefined}
+                                                            _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
+                                                            onClick={() => onUnitClick?.(event.triggered_by_unit_id!)}
+                                                        >
+                                                            #{event.triggered_by_unit_id}
+                                                        </Text>
+                                                    </Flex>
+                                                ) : (
+                                                    <span style={{ color: 'var(--chakra-colors-gray-400)' }}>—</span>
+                                                )}
                                             </Table.Cell>
                                         )}
 
@@ -1060,6 +1117,19 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                                                 ) : (
                                                     <span style={{ color: 'var(--chakra-colors-gray-400)' }}>—</span>
                                                 )}
+                                            </Table.Cell>
+                                        )}
+
+                                        {columns.chain && (
+                                            <Table.Cell textAlign="center">
+                                                <CostBasisChainTooltip
+                                                    eventId={event.event_id}
+                                                    versionId={versionId}
+                                                    baseCurrency={baseCurrency}
+                                                    onTransactionClick={onTransactionClick}
+                                                >
+                                                    <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
+                                                </CostBasisChainTooltip>
                                             </Table.Cell>
                                         )}
                                     </Table.Row>

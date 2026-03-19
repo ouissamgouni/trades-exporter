@@ -383,6 +383,46 @@ export interface PaginatedPriceSnapshotsResponse {
     offset: number;
 }
 
+// ============================================================================
+// Price Health Types
+// ============================================================================
+
+export interface PriceHealthRow {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    last_price: number;
+    last_source?: string | null;
+    last_updated: string;
+    first_snapshot: string;
+    total_snapshots: number;
+    days_stale: number;
+    is_flatline: boolean;
+    status: 'healthy' | 'warning' | 'stale';
+}
+
+export interface PriceHealthResponse {
+    items: PriceHealthRow[];
+    staleness_threshold_days: number;
+    summary: { healthy: number; warning: number; stale: number };
+}
+
+export interface PriceTimeseriesPoint {
+    date: string;
+    price: number;
+}
+
+export interface PriceTimeseriesAsset {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    points: PriceTimeseriesPoint[];
+}
+
+export interface PriceTimeseriesResponse {
+    assets: PriceTimeseriesAsset[];
+}
+
 export interface RawAsset {
     symbol: string;
     source: string;

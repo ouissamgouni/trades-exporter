@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from sqlmodel import Session, select
 from sqlalchemy import func, union_all, literal
 
-from backend.db.models import NormalizedTransaction, ReviewStatus, Asset, Account
+from backend.db.models import NormalizedTransaction, ReviewStatus, TransactionType, Asset, Account
 from backend.api.schemas import TransactionIssue, IssueType, SuggestionInfo
 from .base import IssueDetector
 
@@ -137,6 +137,8 @@ class MissingDataDetector(IssueDetector):
             )
         
         # Subquery for missing source asset (no source_asset_symbol and no asset_id)
+        # Exclude fee-only (cost) transactions: they legitimately have no main asset;
+        # the relevant asset is fee_quote_asset_id, tracked separately.
         missing_source_asset_subq = (
             select(
                 NormalizedTransaction.id.label('tx_id'),
@@ -149,6 +151,9 @@ class MissingDataDetector(IssueDetector):
                 (NormalizedTransaction.source_asset_symbol == '')
             )
             .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+            .where(
+                NormalizedTransaction.transaction_type != TransactionType.COST.value
+            )
         )
         if account_ids:
             missing_source_asset_subq = missing_source_asset_subq.where(

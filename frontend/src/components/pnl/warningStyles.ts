@@ -44,6 +44,24 @@ export function getWarningTypeConfig(warningType: string): WarningTypeConfig {
         };
     }
 
+    // Provisional cost lot — acquisition TX missing, cost estimated at zero
+    if (warningType === 'provisional_cost_lot') {
+        return {
+            colorPalette: 'orange',
+            icon: '⏳',
+            level: 'warning',
+        };
+    }
+
+    // Unsettled negative lot — disposal before acquisition, negative balance
+    if (warningType === 'unsettled_negative_lot') {
+        return {
+            colorPalette: 'red',
+            icon: '📉',
+            level: 'error',
+        };
+    }
+
     // Value mismatches
     if (warningType === 'residual_mismatch') {
         return {

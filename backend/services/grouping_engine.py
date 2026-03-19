@@ -8,6 +8,7 @@ This engine analyzes ungrouped transactions and suggests CalculationUnit groupin
 - Rule 3b: On-chain swap grouping by network_transaction_id (e.g. Solana SWAP)
 - Rule 4: Swap detection (different assets, same account, short time window)
 - Rule 4b: Split detection (same asset, different quantities, same total value)
+- Rule 4c: Multi-leg swap/rebalance (1 outflow → N inflows or M:N, value-balanced)
 - Rule 5: Bridge detection (same asset, different accounts)
 - Rule 5b: Same-account cross-chain bridge (same asset, same account, different networks)
 - Rule 6: Catch-all for remaining ungrouped transactions
@@ -167,9 +168,11 @@ class GroupingEngine:
         # Rule 2: Same asset transfer between owned accounts
         suggestions.extend(self._rule2_same_asset_transfer(outflows, inflows))
 
+        # Rule 4c: Multi-leg swap / rebalance (must run before Rule 4 pair matching)
+        suggestions.extend(self._rule4c_multi_leg_swap(outflows, inflows))
+
         # Rule 4: Swap detection
         suggestions.extend(self._rule4_swap_detection(outflows, inflows))
-
 
         # Rule 5b: Same-account cross-chain bridge (higher priority - more specific match)
         suggestions.extend(self._rule5b_same_account_bridge(outflows, inflows))
@@ -592,6 +595,143 @@ class GroupingEngine:
                     )
                 )
                 break
+
+        return suggestions
+
+    def _rule4c_multi_leg_swap(
+        self, outflows: List[NormalizedTransaction], inflows: List[NormalizedTransaction]
+    ) -> List[GroupingSuggestion]:
+        """
+        Rule 4c: Multi-leg swap / rebalance detection.
+
+        Detects portfolio rebalancing trades where one or more sells fund
+        multiple buys (or vice-versa) on the same account within a short
+        time window.  Typical for broker CSV imports where each row gets
+        its own source_transaction_id.
+
+        Conditions:
+        - All transactions on the same account
+        - At least 3 transactions (otherwise Rule 4 handles the pair)
+        - At least 1 inflow + 1 outflow
+        - All within swap_time_window of each other
+        - Total outflow value ≈ total inflow value (within value_tolerance)
+        - At least two different assets involved
+
+        Confidence: 0.85 (medium – no shared ID, only timing + value match)
+        """
+        suggestions = []
+
+        # Group unused outflows and inflows by account_id
+        account_outflows: Dict[int, List[NormalizedTransaction]] = {}
+        account_inflows: Dict[int, List[NormalizedTransaction]] = {}
+
+        for tx in outflows:
+            if tx.id in self._used_tx_ids or tx.account_id is None:
+                continue
+            account_outflows.setdefault(tx.account_id, []).append(tx)
+
+        for tx in inflows:
+            if tx.id in self._used_tx_ids or tx.account_id is None:
+                continue
+            account_inflows.setdefault(tx.account_id, []).append(tx)
+
+        # Process each account that has both outflows and inflows
+        common_accounts = set(account_outflows.keys()) & set(account_inflows.keys())
+
+        for account_id in common_accounts:
+            acct_outs = sorted(account_outflows[account_id], key=lambda t: t.date_time)
+            acct_ins = sorted(account_inflows[account_id], key=lambda t: t.date_time)
+
+            # Combine and cluster by time window
+            all_txs = sorted(acct_outs + acct_ins, key=lambda t: t.date_time)
+
+            # Build time-based clusters: walk through sorted transactions,
+            # start a new cluster whenever the gap exceeds swap_time_window.
+            clusters: List[List[NormalizedTransaction]] = []
+            current_cluster: List[NormalizedTransaction] = []
+
+            for tx in all_txs:
+                if tx.id in self._used_tx_ids:
+                    continue
+                if not current_cluster:
+                    current_cluster = [tx]
+                else:
+                    gap = abs((tx.date_time - current_cluster[-1].date_time).total_seconds())
+                    if gap <= self.config.swap_time_window:
+                        current_cluster.append(tx)
+                    else:
+                        clusters.append(current_cluster)
+                        current_cluster = [tx]
+            if current_cluster:
+                clusters.append(current_cluster)
+
+            for cluster in clusters:
+                # Re-check for consumed IDs (prior cluster in same account may have consumed some)
+                cluster = [tx for tx in cluster if tx.id not in self._used_tx_ids]
+
+                if len(cluster) < 3:
+                    continue  # Rule 4 handles pairs
+
+                cl_outs = [tx for tx in cluster if tx.direction == "outflow"]
+                cl_ins = [tx for tx in cluster if tx.direction == "inflow"]
+
+                if not cl_outs or not cl_ins:
+                    continue  # Need both sides
+
+                # Require at least two different assets across the whole cluster
+                asset_keys = set()
+                for tx in cluster:
+                    key = tx.asset_id if tx.asset_id is not None else (tx.source_asset_symbol or "").upper()
+                    asset_keys.add(key)
+                if len(asset_keys) < 2:
+                    continue
+
+                # Value-balance check: total outflow ≈ total inflow
+                total_out = sum(float(tx.total) for tx in cl_outs if tx.total)
+                total_in = sum(float(tx.total) for tx in cl_ins if tx.total)
+
+                if total_out == 0 and total_in == 0:
+                    continue  # No value data at all
+
+                denominator = max(total_out, total_in)
+                if denominator > 0:
+                    value_diff = abs(total_out - total_in) / denominator
+                    if value_diff > self.config.value_tolerance:
+                        continue  # Value mismatch too large
+
+                # All checks passed — mark as used and build suggestion
+                for tx in cluster:
+                    self._used_tx_ids.add(tx.id)
+
+                # Label: main outflow → main inflow + extras
+                main_out = max(cl_outs, key=lambda t: float(t.total) if t.total else 0)
+                main_in = max(cl_ins, key=lambda t: float(t.total) if t.total else 0)
+                out_sym = main_out.source_asset_symbol or "?"
+                in_sym = main_in.source_asset_symbol or "?"
+
+                extra_count = len(cluster) - 2  # beyond the main pair
+                label = f"{out_sym} → {in_sym}"
+                if extra_count > 0:
+                    label += f" + {extra_count} more"
+                label += " Rebalance"
+
+                time_span = abs(
+                    (cluster[-1].date_time - cluster[0].date_time).total_seconds()
+                )
+
+                suggestions.append(
+                    GroupingSuggestion(
+                        pattern=PATTERN_SWAP,
+                        label=label,
+                        reason=(
+                            f"Multi-leg swap: {len(cl_outs)} outflow(s) + {len(cl_ins)} inflow(s) "
+                            f"on same account within {time_span:.0f}s "
+                            f"(value diff: {value_diff:.1%})"
+                        ),
+                        confidence=self.config.medium_confidence,
+                        transactions=[self._make_tx_summary(tx) for tx in cluster],
+                    )
+                )
 
         return suggestions
 

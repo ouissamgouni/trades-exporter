@@ -11,11 +11,11 @@
  *   Row 3: Accordion — Cost Basis vs Market Value | Performance Comparison (one at a time)
  */
 import React, { useMemo, useState, useCallback } from 'react';
-import { Badge, Box, Flex, Heading, Spinner, Text } from '@chakra-ui/react';
+import { Badge, Box, Collapsible, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
-import { usePortfolioTimeline, type ChartFilterParams, type PeriodSummaryResponse, type RangeKey } from '../../hooks/useChartData';
+import { usePortfolioTimeline, type ChartFilterParams, type VersionMetricsResponse, type RangeKey, type GroupBy } from '../../hooks/useChartData';
 import { DimensionWithCategories, Account } from '../../types';
-import type { AssetPnLRow } from './types';
+import type { AssetPnLRow, AccountBalanceBreakdown } from './types';
 import type { ScorecardSummary, Range } from './TotalReturnScorecard';
 
 // Chart components
@@ -26,7 +26,6 @@ import { MarketValuePieChart } from './MarketValuePieChart';
 import { AssetPerformanceComparison } from './AssetPerformanceComparison';
 
 type VisualizationMode = 'treemap' | 'pie';
-type AccordionPanel = 'cost_basis' | 'benchmark';
 
 interface ChartsDashboardProps {
     versionId: number | null;
@@ -35,17 +34,16 @@ interface ChartsDashboardProps {
     accounts: Account[];
     /** Filtered assets with category_ids for category mapping */
     assets: AssetPnLRow[];
-    /** P&L filter state to pass through as chart filters */
-    selectedAccountIds?: number[];
-    selectedCategoryIds?: number[];
-    /** Callback when a pie slice is clicked (category filter toggle) */
-    onCategoryClick?: (categoryId: number | null) => void;
     /** Callback when a bar item is clicked (asset or category) */
     onItemClick?: (itemId: number, type: 'asset' | 'category') => void;
     /** Shared timeline data from PnLPanel (React Query cached) */
     sharedTimeline?: { data: { points: any[] } | null; isLoading: boolean; error: string | null };
-    /** Backend period summary — passed from PnLPanel */
-    periodSummaryData?: PeriodSummaryResponse;
+    /** Backend version metrics — passed from PnLPanel */
+    periodSummaryData?: VersionMetricsResponse;
+    /** Current performer group-by mode */
+    groupBy?: GroupBy;
+    /** Called when user changes performer group-by */
+    onGroupByChange?: (groupBy: GroupBy) => void;
     /** Authoritative summary from P&L engine */
     summary?: ScorecardSummary;
     /** Current timeframe range (controlled by PnLPanel) */
@@ -54,6 +52,12 @@ interface ChartsDashboardProps {
     onTimeframeRangeChange?: (range: Range) => void;
     /** Callback when an asset is clicked */
     onAssetClick?: (assetId: number) => void;
+    /** Per-account balance breakdown keyed by asset ID (for treemap account grouping) */
+    accountBalances?: Map<number, AccountBalanceBreakdown[]>;
+    /** Currently selected dimension ID for performer category grouping */
+    performerDimensionId?: number | null;
+    /** Called when user selects a performer dimension */
+    onPerformerDimensionChange?: (dimensionId: number) => void;
 }
 
 export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
@@ -62,46 +66,52 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
     dimensions,
     accounts,
     assets,
-    selectedAccountIds,
-    selectedCategoryIds,
-    onCategoryClick,
     onItemClick,
     sharedTimeline,
     periodSummaryData,
+    groupBy,
+    onGroupByChange,
     summary,
     timeframeRange: controlledRange,
     onTimeframeRangeChange,
     onAssetClick,
+    accountBalances,
+    performerDimensionId,
+    onPerformerDimensionChange,
 }) => {
     // Visualization toggle: Treemap (default) or Pie
     const [vizMode, setVizMode] = useState<VisualizationMode>('treemap');
 
-    // Accordion: only one panel visible at a time (cost_basis default)
-    const [openPanel, setOpenPanel] = useState<AccordionPanel>('cost_basis');
+    // Accordion: independent open/close for each chart
+    const [treemapOpen, setTreemapOpen] = useState(true);
+    const [costBasisOpen, setCostBasisOpen] = useState(true);
+    const [benchmarkOpen, setBenchmarkOpen] = useState(true);
 
     // Local range state as fallback if not controlled
-    const [localRange, setLocalRange] = useState<Range>('1m');
+    const [localRange, setLocalRange] = useState<Range>('1w');
     const activeRange = controlledRange ?? localRange;
     const setActiveRange = onTimeframeRangeChange ?? setLocalRange;
 
-    // Build asset_id → category label mapping from assets + dimensions
-    const assetCategoryMap = useMemo(() => {
-        const catMap = new Map<number, string>();
+    // Build per-dimension asset_id → category label maps
+    const assetCategoryMaps = useMemo(() => {
+        const result: Record<number, Record<number, string>> = {};
         for (const dim of dimensions) {
+            const catIdToLabel = new Map<number, string>();
             for (const cat of dim.categories) {
-                catMap.set(cat.id, cat.label);
+                catIdToLabel.set(cat.id, cat.label);
             }
-        }
-        const result: Record<number, string> = {};
-        for (const a of assets) {
-            if (a.asset.id != null && a.category_ids?.length) {
-                for (const catId of a.category_ids) {
-                    if (catMap.has(catId)) {
-                        result[a.asset.id] = catMap.get(catId)!;
-                        break;
+            const dimMap: Record<number, string> = {};
+            for (const a of assets) {
+                if (a.asset.id != null && a.category_ids?.length) {
+                    for (const catId of a.category_ids) {
+                        if (catIdToLabel.has(catId)) {
+                            dimMap[a.asset.id] = catIdToLabel.get(catId)!;
+                            break;
+                        }
                     }
                 }
             }
+            result[dim.id] = dimMap;
         }
         return result;
     }, [assets, dimensions]);
@@ -109,16 +119,11 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
     // Use shared timeline from PnLPanel when available, otherwise fetch own
     const timelineParams: ChartFilterParams = {
         granularity: 'daily',
-        accountIds: selectedAccountIds?.length ? selectedAccountIds : undefined,
-        categoryIds: selectedCategoryIds?.length ? selectedCategoryIds : undefined,
     };
     const ownTimeline = usePortfolioTimeline(versionId, timelineParams, !sharedTimeline);
     const timeline = sharedTimeline ?? ownTimeline;
 
     const points = timeline.data?.points || [];
-
-    // Period summary performers for the active range
-    const rangeData = periodSummaryData?.ranges?.[activeRange as RangeKey];
 
     if (!versionId) {
         return (
@@ -154,18 +159,34 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
                 range={activeRange}
                 onRangeChange={setActiveRange}
                 periodSummaryData={periodSummaryData}
-                topPerformers={rangeData?.top_performers}
-                flopPerformers={rangeData?.flop_performers}
+                groupBy={groupBy}
+                onGroupByChange={onGroupByChange}
                 onAssetClick={onAssetClick}
-                assets={assets}
                 dimensions={dimensions}
-                accounts={accounts}
+                selectedDimensionId={performerDimensionId}
+                onDimensionChange={onPerformerDimensionChange}
             />
 
-            {/* Row 2: Treemap / Pie toggle (full width) */}
-            <Box mb={4} mt={4}>
-                <Flex justify="space-between" align="center" mb={2}>
-                    <Flex gap={1} align="center">
+            {/* Row 2: Treemap / Pie — collapsible accordion */}
+            <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden" mb={2} mt={4}>
+                <Flex
+                    align="center"
+                    gap={2}
+                    px={3}
+                    py={2}
+                    bg={treemapOpen ? 'blue.50' : 'gray.50'}
+                    cursor="pointer"
+                    _hover={{ bg: treemapOpen ? 'blue.100' : 'gray.100' }}
+                    transition="all 0.15s"
+                    onClick={() => setTreemapOpen(prev => !prev)}
+                    userSelect="none"
+                >
+                    {treemapOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                    <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                        Allocation
+                    </Text>
+                    {/* Viz mode toggle inside header */}
+                    <Flex gap={1} ml="auto" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                         {(['treemap', 'pie'] as const).map(mode => (
                             <Badge
                                 key={mode}
@@ -181,97 +202,103 @@ export const ChartsDashboard: React.FC<ChartsDashboardProps> = ({
                         ))}
                     </Flex>
                 </Flex>
-
-                {vizMode === 'treemap' ? (
-                    <AllocationTreemap
-                        points={points}
-                        assetCategoryMap={assetCategoryMap}
-                        accounts={accounts}
-                        assets={assets}
-                        baseCurrency={baseCurrency}
-                        isLoading={timeline.isLoading}
-                    />
-                ) : dimensions.length > 0 ? (
-                    <MarketValuePieChart
-                        assets={assets}
-                        dimensions={dimensions}
-                        baseCurrency={baseCurrency}
-                        selectedCategoryIds={selectedCategoryIds ?? []}
-                        onCategoryClick={(id) => onCategoryClick?.(id)}
-                    />
-                ) : (
-                    <Box p={4} textAlign="center">
-                        <Text fontSize="sm" color="gray.400">No dimensions configured for pie chart.</Text>
-                    </Box>
-                )}
+                <Collapsible.Root open={treemapOpen}>
+                    <Collapsible.Content>
+                        <Box>
+                            {vizMode === 'treemap' ? (
+                                <AllocationTreemap
+                                    points={points}
+                                    dimensions={dimensions}
+                                    assetCategoryMaps={assetCategoryMaps}
+                                    accounts={accounts}
+                                    assets={assets}
+                                    baseCurrency={baseCurrency}
+                                    isLoading={timeline.isLoading}
+                                    accountBalances={accountBalances}
+                                />
+                            ) : dimensions.length > 0 ? (
+                                <MarketValuePieChart
+                                    assets={assets}
+                                    dimensions={dimensions}
+                                    baseCurrency={baseCurrency}
+                                />
+                            ) : (
+                                <Box p={4} textAlign="center">
+                                    <Text fontSize="sm" color="gray.400">No dimensions configured for pie chart.</Text>
+                                </Box>
+                            )}
+                        </Box>
+                    </Collapsible.Content>
+                </Collapsible.Root>
             </Box>
 
-            {/* Row 3: Accordion — Cost Basis | Benchmark (one open at a time) */}
-            <Box>
-                {/* Accordion header: Cost Basis vs Market Value */}
-                <Flex
-                    align="center"
-                    gap={2}
-                    py={2}
-                    px={3}
-                    cursor="pointer"
-                    bg={openPanel === 'cost_basis' ? 'blue.50' : 'gray.50'}
-                    borderRadius="md"
-                    border="1px solid"
-                    borderColor={openPanel === 'cost_basis' ? 'blue.200' : 'gray.200'}
-                    onClick={() => setOpenPanel('cost_basis')}
-                    _hover={{ bg: openPanel === 'cost_basis' ? 'blue.50' : 'gray.100' }}
-                    transition="all 0.15s"
-                    mb={openPanel === 'cost_basis' ? 0 : 2}
-                    borderBottomRadius={openPanel === 'cost_basis' ? 0 : 'md'}
-                >
-                    {openPanel === 'cost_basis' ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                    <Heading size="sm" color={openPanel === 'cost_basis' ? 'blue.700' : 'gray.600'}>
-                        Cost Basis vs Market Value
-                    </Heading>
-                </Flex>
-                {openPanel === 'cost_basis' && (
-                    <Box mb={2}>
-                        <CostBasisVsMarketValueChart
-                            points={points}
-                            baseCurrency={baseCurrency}
-                            isLoading={timeline.isLoading}
-                        />
-                    </Box>
-                )}
+            {/* Row 3: Independent horizontal accordions for each chart */}
+            <Flex direction="column" gap={2}>
+                {/* Cost Basis vs Market Value */}
+                <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                    <Flex
+                        align="center"
+                        gap={2}
+                        px={3}
+                        py={2}
+                        bg={costBasisOpen ? 'blue.50' : 'gray.50'}
+                        cursor="pointer"
+                        _hover={{ bg: costBasisOpen ? 'blue.100' : 'gray.100' }}
+                        transition="all 0.15s"
+                        onClick={() => setCostBasisOpen(prev => !prev)}
+                        userSelect="none"
+                    >
+                        {costBasisOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                        <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                            Cost Basis vs Market Value
+                        </Text>
+                    </Flex>
+                    <Collapsible.Root open={costBasisOpen}>
+                        <Collapsible.Content>
+                            <Box>
+                                <CostBasisVsMarketValueChart
+                                    points={points}
+                                    baseCurrency={baseCurrency}
+                                    isLoading={timeline.isLoading}
+                                />
+                            </Box>
+                        </Collapsible.Content>
+                    </Collapsible.Root>
+                </Box>
 
-                {/* Accordion header: Performance Comparison (Benchmark) */}
-                <Flex
-                    align="center"
-                    gap={2}
-                    py={2}
-                    px={3}
-                    cursor="pointer"
-                    bg={openPanel === 'benchmark' ? 'blue.50' : 'gray.50'}
-                    borderRadius="md"
-                    border="1px solid"
-                    borderColor={openPanel === 'benchmark' ? 'blue.200' : 'gray.200'}
-                    onClick={() => setOpenPanel('benchmark')}
-                    _hover={{ bg: openPanel === 'benchmark' ? 'blue.50' : 'gray.100' }}
-                    transition="all 0.15s"
-                    borderBottomRadius={openPanel === 'benchmark' ? 0 : 'md'}
-                >
-                    {openPanel === 'benchmark' ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                    <Heading size="sm" color={openPanel === 'benchmark' ? 'blue.700' : 'gray.600'}>
-                        Performance Comparison
-                    </Heading>
-                </Flex>
-                {openPanel === 'benchmark' && (
-                    <Box mb={2}>
-                        <AssetPerformanceComparison
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            assets={assets}
-                            sharedTimeline={sharedTimeline}
-                        />
-                    </Box>
-                )}
-            </Box>
+                {/* Performance Comparison */}
+                <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                    <Flex
+                        align="center"
+                        gap={2}
+                        px={3}
+                        py={2}
+                        bg={benchmarkOpen ? 'blue.50' : 'gray.50'}
+                        cursor="pointer"
+                        _hover={{ bg: benchmarkOpen ? 'blue.100' : 'gray.100' }}
+                        transition="all 0.15s"
+                        onClick={() => setBenchmarkOpen(prev => !prev)}
+                        userSelect="none"
+                    >
+                        {benchmarkOpen ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+                        <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                            Performance Comparison
+                        </Text>
+                    </Flex>
+                    <Collapsible.Root open={benchmarkOpen}>
+                        <Collapsible.Content>
+                            <Box>
+                                <AssetPerformanceComparison
+                                    versionId={versionId}
+                                    baseCurrency={baseCurrency}
+                                    assets={assets}
+                                    sharedTimeline={sharedTimeline}
+                                />
+                            </Box>
+                        </Collapsible.Content>
+                    </Collapsible.Root>
+                </Box>
+            </Flex>
         </Box>
     );
 };

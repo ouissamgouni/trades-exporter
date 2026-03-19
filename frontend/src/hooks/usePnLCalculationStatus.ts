@@ -52,6 +52,7 @@ export function usePnLCalculationStatus(
     });
 
     const previousVersionIdRef = useRef<number | null>(null);
+    const hasInitializedRef = useRef(false);
     const onNewVersionRef = useRef(onNewVersion);
     onNewVersionRef.current = onNewVersion;
 
@@ -63,12 +64,15 @@ export function usePnLCalculationStatus(
                 setStatusData(data);
 
                 // Detect new version
-                if (
-                    data.current_version_id !== null &&
-                    previousVersionIdRef.current !== null &&
-                    data.current_version_id !== previousVersionIdRef.current
-                ) {
-                    onNewVersionRef.current?.(data.current_version_id);
+                if (data.current_version_id !== null) {
+                    if (!hasInitializedRef.current) {
+                        // First poll — store version but don't fire callback
+                        // (PnLPanel handles initial load via its own useEffect)
+                        hasInitializedRef.current = true;
+                    } else if (data.current_version_id !== previousVersionIdRef.current) {
+                        // Subsequent poll — version changed, notify parent
+                        onNewVersionRef.current?.(data.current_version_id);
+                    }
                 }
                 previousVersionIdRef.current = data.current_version_id;
             }

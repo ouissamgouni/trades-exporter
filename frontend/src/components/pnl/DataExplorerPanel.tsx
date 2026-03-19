@@ -500,7 +500,8 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                     <Table.Header>
                                         <Table.Row>
                                             <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="right">FMV</Table.ColumnHeader>
+                                            <Table.ColumnHeader fontSize="xs" textAlign="right">Proceeds</Table.ColumnHeader>
+                                            <Table.ColumnHeader fontSize="xs">FMV</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="right">Cost</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="right">P&L</Table.ColumnHeader>
                                             <Table.ColumnHeader fontSize="xs" textAlign="center">Type</Table.ColumnHeader>
@@ -514,6 +515,22 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
                                                     <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
+                                                </Table.Cell>
+                                                <Table.Cell fontSize="xs">
+                                                    {entry.proceeds_price != null ? (
+                                                        <Flex gap={1} align="center" wrap="wrap">
+                                                            <Text fontSize="2xs" fontFamily="mono" color="gray.600">
+                                                                {formatQuantity(entry.proceeds_price)}
+                                                            </Text>
+                                                            {entry.proceeds_price_source && (
+                                                                <Badge size="xs" colorPalette={entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'cyan' : entry.proceeds_source === 'provisional' ? 'orange' : 'gray'} variant="subtle">
+                                                                    {entry.proceeds_price_source}
+                                                                </Badge>
+                                                            )}
+                                                        </Flex>
+                                                    ) : (
+                                                        <Text fontSize="2xs" color="gray.400">-</Text>
+                                                    )}
                                                 </Table.Cell>
                                                 <Table.Cell fontSize="xs" textAlign="right">
                                                     <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
@@ -1079,6 +1096,7 @@ const CostLotsTab: React.FC<{
                             <Table.ColumnHeader textAlign="right">Qty Remaining</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Unit Cost</Table.ColumnHeader>
                             <Table.ColumnHeader textAlign="right">Total Cost</Table.ColumnHeader>
+                            <Table.ColumnHeader>Source</Table.ColumnHeader>
                             <Table.ColumnHeader>Account</Table.ColumnHeader>
                             <Table.ColumnHeader>Origin TX</Table.ColumnHeader>
                         </Table.Row>
@@ -1121,7 +1139,41 @@ const CostLotsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="purple">Zero</Badge>
+                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
+                                        ) : lot.cost_source === 'provisional' ? (
+                                            <Tooltip
+                                                content={
+                                                    <Box fontSize="xs">
+                                                        <Text fontWeight="semibold">Provisional Cost</Text>
+                                                        <Text>FMV-based estimate for negative lot.</Text>
+                                                        {lot.cost_fmv_price != null && <Text>FMV: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
+                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
+                                                        <Text mt={1} color="orange.300">Will be settled when acquisition arrives.</Text>
+                                                    </Box>
+                                                }
+                                                openDelay={200}
+                                            >
+                                                <Badge size="xs" colorPalette="orange" cursor="help">
+                                                    <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
+                                                </Badge>
+                                            </Tooltip>
+                                        ) : lot.cost_source === 'fmv' && lot.cost_fmv_stale ? (
+                                            <Tooltip
+                                                content={
+                                                    <Box fontSize="xs">
+                                                        <Text fontWeight="semibold">Stale FMV Price</Text>
+                                                        {lot.cost_fmv_price != null && <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
+                                                        {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
+                                                        {lot.cost_fmv_timestamp && <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>}
+                                                        <Text mt={1} color="orange.300">⚠ Price exceeds staleness window</Text>
+                                                    </Box>
+                                                }
+                                                openDelay={200}
+                                            >
+                                                <Badge size="xs" colorPalette="yellow" cursor="help">
+                                                    <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
+                                                </Badge>
+                                            </Tooltip>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
                                                 <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
@@ -1130,12 +1182,61 @@ const CostLotsTab: React.FC<{
                                     </Table.Cell>
                                     <Table.Cell textAlign="right" fontSize="xs">
                                         {lot.is_zero_cost ? (
-                                            <Badge size="xs" colorPalette="purple">Zero</Badge>
+                                            <Badge size="xs" colorPalette="red" title="Zero cost — likely missing price">Zero</Badge>
                                         ) : (
                                             <Text color={isNegative ? 'red.600' : undefined}>
                                                 <ValueDisplay value={lot.total_cost_in_base} currency={baseCurrency} />
                                             </Text>
                                         )}
+                                    </Table.Cell>
+                                    <Table.Cell fontSize="xs">
+                                        {lot.cost_source ? (
+                                            (lot.cost_fmv_price || lot.cost_fmv_source || lot.cost_fmv_timestamp) ? (
+                                                <Tooltip
+                                                    content={
+                                                        <Box fontSize="xs" lineHeight="tall">
+                                                            <Text fontWeight="semibold" mb={1}>FMV Details</Text>
+                                                            {lot.cost_fmv_price != null && (
+                                                                <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_source && (
+                                                                <Text>Source: {lot.cost_fmv_source}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_timestamp && (
+                                                                <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>
+                                                            )}
+                                                            {lot.cost_fmv_stale && (
+                                                                <Text color="orange.300">⚠ Stale price</Text>
+                                                            )}
+                                                        </Box>
+                                                    }
+                                                    openDelay={200}
+                                                    closeDelay={100}
+                                                >
+                                                    <Badge size="xs" cursor="help" colorPalette={
+                                                        lot.cost_source === 'base_currency' ? 'gray' :
+                                                            lot.cost_source === 'proceeds' ? 'green' :
+                                                                lot.cost_source === 'inherited' ? 'blue' :
+                                                                    lot.cost_source === 'fmv' ? 'cyan' :
+                                                                        lot.cost_source === 'provisional' ? 'orange' :
+                                                                            'gray'
+                                                    }>
+                                                        {lot.cost_source}
+                                                    </Badge>
+                                                </Tooltip>
+                                            ) : (
+                                                <Badge size="xs" colorPalette={
+                                                    lot.cost_source === 'base_currency' ? 'gray' :
+                                                        lot.cost_source === 'proceeds' ? 'green' :
+                                                            lot.cost_source === 'inherited' ? 'blue' :
+                                                                lot.cost_source === 'fmv' ? 'cyan' :
+                                                                    lot.cost_source === 'provisional' ? 'orange' :
+                                                                        'gray'
+                                                }>
+                                                    {lot.cost_source}
+                                                </Badge>
+                                            )
+                                        ) : '-'}
                                     </Table.Cell>
                                     <Table.Cell fontSize="xs">{lot.account_name || '-'}</Table.Cell>
                                     <Table.Cell>

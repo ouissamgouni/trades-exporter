@@ -70,35 +70,6 @@ export const AssetComparisonPicker: React.FC<AssetComparisonPickerProps> = ({
 
     return (
         <Flex wrap="wrap" gap={2} align="center" position="relative">
-            {/* Selected asset chips */}
-            {selectedIds.map((id, idx) => {
-                const asset = assetMap.get(id);
-                if (!asset) return null;
-                const color = CATEGORY_COLOR_PALETTE[idx % CATEGORY_COLOR_PALETTE.length];
-                return (
-                    <Badge
-                        key={id}
-                        variant="outline"
-                        size="sm"
-                        px={2}
-                        py={1}
-                        borderRadius="full"
-                        display="flex"
-                        alignItems="center"
-                        gap={1}
-                        cursor="pointer"
-                        _hover={{ bg: 'gray.50' }}
-                        onClick={() => handleRemove(id)}
-                    >
-                        <Box w="8px" h="8px" borderRadius="full" bg={color} flexShrink={0} />
-                        <Text fontSize="xs" fontWeight="medium">
-                            {asset.asset.symbol || asset.asset.label || `#${id}`}
-                        </Text>
-                        <Box as={FiX} fontSize="10px" color="gray.500" />
-                    </Badge>
-                );
-            })}
-
             {/* Add button + popover */}
             <Box position="relative">
                 <Badge

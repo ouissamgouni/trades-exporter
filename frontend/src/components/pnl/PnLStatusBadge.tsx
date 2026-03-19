@@ -10,6 +10,7 @@ import React from 'react';
 import { Badge, Flex, Spinner, Text } from '@chakra-ui/react';
 import { Tooltip } from '../ui/tooltip';
 import { PnLCalcStatus } from './types';
+import { parseApiDate, formatDateTimeLocale } from '../../utils/dateUtils';
 
 interface PnLStatusBadgeProps {
     status: PnLCalcStatus;
@@ -33,7 +34,8 @@ const STATUS_CONFIG: Record<PnLCalcStatus, {
 
 /** Format a datetime string to a compact relative or absolute form */
 function formatCalcTime(isoString: string): string {
-    const date = new Date(isoString);
+    const date = parseApiDate(isoString);
+    if (!date) return isoString;
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMin = Math.floor(diffMs / 60_000);
@@ -66,7 +68,7 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
     const tooltipContent = status === 'stale' && staleReasons.length > 0
         ? `Changes detected:\n${staleReasons.slice(0, 5).join('\n')}${staleReasons.length > 5 ? `\n...and ${staleReasons.length - 5} more` : ''}`
         : lastCalculatedAt
-            ? `Last calculated: ${new Date(lastCalculatedAt).toLocaleString()}`
+            ? `Last calculated: ${formatDateTimeLocale(lastCalculatedAt)}`
             : undefined;
 
     const badge = (

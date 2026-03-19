@@ -315,7 +315,9 @@ class LotManager:
         allow_negative: bool = False,
         triggered_by_transaction: Optional[NormalizedTransaction] = None,
         triggered_by_unit: Optional[Any] = None,
-        emit_event: bool = True
+        emit_event: bool = True,
+        fmv_unit_cost: Optional[Decimal] = None,
+        fmv_metadata: Optional[dict] = None,
     ) -> Tuple[List[ConsumedLotSlice], Optional[CostLot]]:
         """
         Consume lots for a disposal.
@@ -329,7 +331,8 @@ class LotManager:
             triggered_by_transaction: Transaction that triggered this consumption (required if emit_event=True)
             triggered_by_unit: Calculation unit context (required if emit_event=True)
             emit_event: Whether to emit CONSUMED events (False for testing)
-            transfer_metadata: Optional metadata for transfer events (e.g., {"is_transfer": true, "pending_transfer": true})
+            fmv_unit_cost: Optional FMV-based unit cost for negative lots (used instead of 0 when available)
+            fmv_metadata: Optional FMV metadata dict with keys: source, price, timestamp, is_stale
 
         Returns:
             Tuple of (consumed_slices, negative_lot if created)
@@ -386,8 +389,20 @@ class LotManager:
         if remaining_qty > 0:
             if allow_negative:
                 # For base currency, unit_cost is always 1
+                # For other assets, use FMV if available, otherwise 0 (provisional)
                 is_base_currency = asset_id == self.config.base_currency_id
-                unit_cost = Decimal("1") if is_base_currency else Decimal("0")
+                if is_base_currency:
+                    unit_cost = Decimal("1")
+                    cost_source = "base_currency"
+                elif fmv_unit_cost is not None and fmv_unit_cost > 0:
+                    unit_cost = fmv_unit_cost
+                    cost_source = "fmv"
+                else:
+                    unit_cost = Decimal("0")
+                    cost_source = "provisional"
+                
+                # Extract FMV metadata if available
+                _fmv_meta = fmv_metadata or {}
                 
                 # Create negative lot to track the shortfall
                 # This will be settled when a later acquisition arrives
@@ -402,11 +417,16 @@ class LotManager:
                     ),
                     qty=-remaining_qty,  # Negative qty indicates debt
                     qty_remaining=-remaining_qty,  # Negative - amount of debt outstanding
-                    unit_cost=unit_cost,
+                    unit_cost_in_base=unit_cost,
                     acquired_at=triggered_by_transaction.date_time if triggered_by_transaction and triggered_by_transaction.date_time else utc_now(),
-                    is_zero_cost=not is_base_currency,
+                    is_zero_cost=(cost_source == "provisional"),
                     is_negative=True,
                     is_settled=False,  # Will be settled by later acquisition
+                    cost_source=cost_source,
+                    cost_fmv_price=_fmv_meta.get("price"),
+                    cost_fmv_source=_fmv_meta.get("source"),
+                    cost_fmv_timestamp=_fmv_meta.get("timestamp"),
+                    cost_fmv_stale=_fmv_meta.get("is_stale"),
                     notes="Negative lot - provisional cost basis until settled",
                 )
                 # Set version relationship at creation time
@@ -540,6 +560,10 @@ class LotManager:
         - Settlement records link negative lots to the settling positive lot
         - Both qty_remaining are updated for correct balance calculation
         
+        Each settlement record has a `provisional_unit_cost` attribute (set after
+        creation) containing the negative lot's original unit cost, used for
+        computing delta-based P&L adjustments.
+        
         Args:
             account: Account object (None in MEGA_WALLET mode)
             asset: Asset object being settled
@@ -551,7 +575,8 @@ class LotManager:
             emit_event: Whether to emit SETTLED events (False for testing)
             
         Returns:
-            (remaining_qty, settlement_records)
+            (remaining_qty, settlement_info_list) where each element is a tuple of
+            (LotSettlement, provisional_unit_cost: Decimal) for delta-based P&L adjustment
         """
         account_id = account.id if account else None
         asset_id = asset.asset_id
@@ -559,7 +584,7 @@ class LotManager:
         
         key = self._get_key(account_id, asset_id)
         negative_lots = self.negative_lots_map.get(key, [])
-        settlement_records: List[LotSettlement] = []
+        settlement_info: List[Tuple[LotSettlement, Decimal]] = []
         remaining_qty = available_qty
         
         for neg_lot in negative_lots:
@@ -606,6 +631,8 @@ class LotManager:
                 settled_at=utc_now(),
                 cost_basis_applied=cost_applied,
             )
+            # Store provisional unit cost from negative lot for delta-based P&L adjustment
+            neg_lot_provisional_cost = neg_lot.unit_cost_in_base
             
             # Add settlement to settling_lot's collection for cascade persistence
             # (settlements are owned by settling_lot, not by the transaction)
@@ -614,7 +641,7 @@ class LotManager:
                     settling_lot.outgoing_settlements = []
                 settling_lot.outgoing_settlements.append(settlement)
 
-            settlement_records.append(settlement)
+            settlement_info.append((settlement, neg_lot_provisional_cost))
             
             # Emit settlement event (unless disabled for testing)
             if emit_event:
@@ -639,7 +666,7 @@ class LotManager:
                 settling_tx=settling_transaction.id if settling_transaction else None,
             )
         
-        return remaining_qty, settlement_records
+        return remaining_qty, settlement_info
 
     def get_all_lots(self) -> List[CostLot]:
         """Get all lots including negative lots (for persistence)."""

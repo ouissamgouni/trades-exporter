@@ -94,6 +94,12 @@ export interface VersionListItem {
     base_currency_symbol?: string;
     allow_negative_balances: boolean;
     residual_tolerance_pct: number;
+    compute_residuals?: boolean;
+    // Full config for history display
+    crypto_swap_taxable?: boolean;
+    fee_taxable?: boolean;
+    use_price_fallback?: boolean;
+    price_staleness_window_days?: number;
 }
 
 /**
@@ -122,9 +128,19 @@ export interface PnLVersionResponse {
     base_currency_symbol?: string;
     allow_negative_balances: boolean;
     residual_tolerance_pct: number;
+    compute_residuals?: boolean;
+    // Full config for reproducibility
+    crypto_swap_taxable?: boolean;
+    fee_taxable?: boolean;
+    use_price_fallback?: boolean;
+    price_staleness_window_days?: number;
 
-    // Summary
+    // Summary (from metrics_service — authoritative)
     total_realized_pnl: number;
+    current_value: number;
+    cost_basis: number;
+    unrealized_pnl: number;
+    taxable_realized_pnl: number;
 
     // Fee summary (populated for /calculate, for immediate summary card display)
     total_fees_in_base: number;
@@ -270,9 +286,45 @@ export interface CostLot {
     holding_days?: number;
     is_long_term?: boolean;
 
+    // Cost provenance
+    cost_source?: string;  // "fmv" | "proceeds" | "inherited" | "provisional" | "base_currency"
+    cost_fmv_price?: number;  // FMV unit price used (if cost_source is fmv/provisional)
+    cost_fmv_source?: string;  // Price source (e.g., "coingecko", "fallback:cached")
+    cost_fmv_timestamp?: string;  // When the FMV price was snapped
+    cost_fmv_stale?: boolean;  // Whether the FMV price was flagged stale
+
     // Settlement tracking for negative lots
     total_settled?: number;  // Amount already settled
     settlement_count?: number;  // Number of settlements
+
+    // Cost basis chain (for transfers/splits — links to source lot)
+    source_lot_id?: number;  // The lot this was created from (if inherited/split)
+}
+
+// ============================================================================
+// Cost Basis Chain Types (Backward Provenance Trail)
+// ============================================================================
+
+export interface CostBasisChainNode {
+    lot_id: number;
+    transaction_id?: number;
+    transaction_type?: string;        // e.g. "buy", "transfer", "swap", "split"
+    transaction_source_type?: string; // Source-level type
+    timestamp?: string;               // TX date or lot acquired_at
+    asset_symbol?: string;
+    asset_id?: number;
+    account_name?: string;
+    account_id?: number;
+    qty: number;
+    unit_cost: number;
+    cost_source?: string;             // "fmv", "inherited", "proceeds", "provisional", "base_currency"
+    unit_pattern?: string;            // "transfer", "swap", "split", "flow"
+    children: CostBasisChainNode[];   // Source lots (backward, toward origin)
+}
+
+export interface CostBasisChainResponse {
+    chain: CostBasisChainNode[];
+    depth: number;                     // Maximum depth reached
 }
 
 // ============================================================================
@@ -317,7 +369,7 @@ export interface RealizedPnLRow {
     cost_price_in_base?: number;
 
     // Proceeds tracking - how FMV was determined (for transparency)
-    proceeds_source?: 'fmv_lookup' | 'base_currency' | 'transfer';
+    proceeds_source?: 'fmv_lookup' | 'fmv' | 'provisional' | 'base_currency' | 'transfer';
     proceeds_price?: number;  // Unit price used (if applicable)
     proceeds_price_source?: string;  // 'price_service', 'coingecko', 'manual', 'fallback'
     proceeds_price_timestamp?: string;  // When price was fetched/valid
@@ -515,6 +567,13 @@ export interface CostLotEventEntry {
     triggered_by_unit_pattern?: string;
 
     timestamp: string;
+
+    // FMV details for 'created' events where cost basis used FMV
+    cost_source?: string;  // 'fmv' | 'provisional' | 'inherited' | 'proceeds' | 'base_currency'
+    cost_fmv_price?: number;  // FMV unit price used
+    cost_fmv_source?: string;  // Price provider (e.g., 'coingecko', 'fallback')
+    cost_fmv_timestamp?: string;  // When price was snapped
+    cost_fmv_stale?: boolean;  // Whether the FMV price was flagged stale
 }
 
 // ============================================================================
@@ -529,6 +588,12 @@ export interface RealizedEntryDetail {
     pnl_in_base: number;
     disposal_taxable: boolean;
     is_fee?: boolean;  // True if this entry is from a fee disposal
+
+    // Proceeds tracking - how FMV was determined (for transparency)
+    proceeds_source?: 'fmv_lookup' | 'fmv' | 'provisional' | 'base_currency' | 'transfer';
+    proceeds_price?: number;  // Unit price used
+    proceeds_price_source?: string;  // 'coingecko', 'manual', 'fallback'
+    proceeds_price_timestamp?: string;  // When price was fetched/valid
 }
 
 // ============================================================================

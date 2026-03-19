@@ -23,11 +23,13 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Switch, Text } from '@chakra-ui/react';
 import { FiRefreshCw, FiClock, FiSliders } from 'react-icons/fi';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
 import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
 import { useDataHealth } from '../../contexts/DataHealthContext';
+import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { useBalance } from '../../hooks/useBalance';
 import { useAssets } from '../../hooks/useAssets';
 import { usePnLCalculationStatus } from '../../hooks/usePnLCalculationStatus';
@@ -42,14 +44,14 @@ import { SummaryCards, SummaryBar, CompactStatusBar, RefreshPricesCard, Warnings
 import { AssetPnLTable } from './AssetPnLTable';
 import AssetDetailView from './AssetDetailView';
 import { PnLImpactPanel } from './PnLImpactPanel';
-import { PnLAuditView } from './DataExplorerPanel';
-import { PnLFilterBar } from './PnLFilterBar';
+import { InvestigationView } from './InvestigationView';
+
 import { PriceStatusList } from './PriceStatusList';
 import { ChartsDashboard } from './ChartsDashboard';
 import { TotalReturnScorecard, AllTimeIndicators, TimeframeIndicators } from './TotalReturnScorecard';
 import type { Range } from './TotalReturnScorecard';
-import { usePortfolioTimeline, usePeriodSummary } from '../../hooks/useChartData';
-import type { RangeKey } from '../../hooks/useChartData';
+import { usePortfolioTimeline, useVersionMetrics } from '../../hooks/useChartData';
+import type { RangeKey, GroupBy } from '../../hooks/useChartData';
 import { SlidePanel } from './SlidePanel';
 import { TransactionDetailDrawer } from '../TransactionDetailDrawer';
 
@@ -66,7 +68,6 @@ import {
     PnLWarningItem,
     PnLView,
     CalculationUnit,
-    PnLFilterState,
     PerAccountBalanceItem,
     AccountBalanceBreakdown,
     UnmappedLiveAsset,
@@ -93,6 +94,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Refs to track state without causing closure issues
     const isCalculatingRef = useRef(false);
     const skipHealthCheckRef = useRef(false);  // Flag to skip health check after user confirms
+    const balancesJustLoadedRef = useRef(false);  // Skip duplicate balance re-fetch after version load
 
     // --- Custom Calculation Drawer & History Panel state ---
     const [showCustomCalcDrawer, setShowCustomCalcDrawer] = useState(false);
@@ -140,8 +142,21 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const [currentVersionId, setCurrentVersionId] = useState<number | null>(null);
     const [currentVersionStatus, setCurrentVersionStatus] = useState<'draft' | 'committed' | null>(null);
     const [loadedVersionCreatedAt, setLoadedVersionCreatedAt] = useState<string | null>(null);
-    const [availableVersions, setAvailableVersions] = useState<VersionListItem[]>([]);
-    const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+
+    // React Query for versions list — single source of truth, auto-dedup
+    const queryClient = useQueryClient();
+    const versionsQuery = useQuery<VersionListItem[]>({
+        queryKey: ['pnl-versions'],
+        queryFn: async () => {
+            const response = await fetch(`${API_URL}/pnl/versions?limit=50`);
+            if (!response.ok) throw new Error('Failed to fetch versions');
+            return response.json();
+        },
+        enabled: isActive,
+        staleTime: 30_000,
+    });
+    const availableVersions = versionsQuery.data ?? [];
+    const isLoadingVersions = versionsQuery.isLoading;
 
     // Calculation mode: 'load' existing version OR 'new' calculation
     const [calculationMode, setCalculationMode] = useState<CalculationMode>('new');
@@ -157,13 +172,6 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Display filter: show/hide unsettled negative lots (e.g., base currency debt)
     const [showUnsettledNegative, setShowUnsettledNegative] = useState(false);
     const [totalUnsettledNegativeCount, setTotalUnsettledNegativeCount] = useState(0);
-
-    // Unified filter state for Portfolio View (accounts + categories + options)
-    const [filterState, setFilterState] = useState<PnLFilterState>({
-        selectedAccountIds: [],
-        selectedCategoryIds: [],
-        includeUnsettledNegative: false,
-    });
 
     // Category dimensions for filter
     const [dimensions, setDimensions] = useState<DimensionWithCategories[]>([]);
@@ -238,11 +246,21 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     // Main view mode: 'portfolio' (filtered view), 'charts' (dashboard), or 'audit' (full unfiltered audit)
     const [viewMode, setViewMode] = useState<'portfolio' | 'charts' | 'audit'>('portfolio');
 
+    // Performer group-by mode (asset / account / category) — triggers server-side re-fetch
+    const [performerGroupBy, setPerformerGroupBy] = useState<GroupBy>('asset');
+
+    // Selected dimension ID for performer category grouping
+    const [performerDimensionId, setPerformerDimensionId] = useState<number | null>(null);
+
     // Portfolio timeline data — always enabled so React Query caches across tab switches
     const heroTimeline = usePortfolioTimeline(currentVersionId, { granularity: 'daily' }, !!currentVersionId);
 
-    // Period summary data (all ranges at once) — always enabled, cached across tabs
-    const periodSummary = usePeriodSummary(currentVersionId, {}, !!currentVersionId);
+    // Version metrics data (all ranges + performers) — always enabled, cached across tabs
+    const versionMetrics = useVersionMetrics(currentVersionId, {
+        groupBy: performerGroupBy,
+        topN: 25,
+        dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
+    }, !!currentVersionId);
 
     // Update URL when account filter changes (for shareable links)
     useEffect(() => {
@@ -298,44 +316,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         fetchCategories();
     }, [isActive]);
 
-    // Read category_ids from URL on init (for shareable links)
+    // Default performerDimensionId to first dimension when dimensions arrive
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const urlCategories = params.get('categories');
-        const urlFilterAccounts = params.get('filter_accounts');
-        if (urlCategories || urlFilterAccounts) {
-            const categoryIds = urlCategories
-                ? urlCategories.split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n))
-                : [];
-            const accountIds = urlFilterAccounts
-                ? urlFilterAccounts.split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n))
-                : [];
-            setFilterState(prev => ({
-                ...prev,
-                selectedCategoryIds: categoryIds,
-                selectedAccountIds: accountIds,
-            }));
+        if (performerDimensionId === null && dimensions.length > 0) {
+            setPerformerDimensionId(dimensions[0].id);
         }
-    }, []);
-
-    // Update URL when filter state changes (for shareable links)
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        if (filterState.selectedCategoryIds.length > 0) {
-            params.set('categories', filterState.selectedCategoryIds.join(','));
-        } else {
-            params.delete('categories');
-        }
-        if (filterState.selectedAccountIds.length > 0) {
-            params.set('filter_accounts', filterState.selectedAccountIds.join(','));
-        } else {
-            params.delete('filter_accounts');
-        }
-        const newUrl = params.toString()
-            ? `${window.location.pathname}?${params.toString()}`
-            : window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
-    }, [filterState.selectedCategoryIds, filterState.selectedAccountIds]);
+    }, [dimensions, performerDimensionId]);
 
     // Result data
     const [summary, setSummary] = useState<PnLSummary | null>(null);
@@ -374,65 +360,39 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         return [...pnlAssets, ...nonPnlRows];
     }, [pnlAssets, allDbAssets]);
 
-    // Filter assets client-side by selected accounts and categories
-    // An asset matches if:
-    // - No account filter OR asset has at least one account_id in selectedAccountIds
-    // - No category filter OR asset has at least one category_id in selectedCategoryIds
-    // Non-P&L assets (has_lots=false) are excluded when account/category filters are active
-    const filteredAssets = useMemo(() => {
-        let result = assets;
-
-        // Filter by accounts
-        if (filterState.selectedAccountIds.length > 0) {
-            result = result.filter(asset =>
-                asset.account_ids.some(accId => filterState.selectedAccountIds.includes(accId))
-            );
+    // Backend-authoritative scorecard summary — single source of truth for AllTimeIndicators + TimeframeIndicators.
+    // Falls back to client-side computation when backend metrics haven't loaded yet.
+    const scorecardSummary = useMemo(() => {
+        const ms = versionMetrics.data?.summary;
+        if (ms) {
+            return {
+                portfolioValue: ms.current_value,
+                costBasis: ms.cost_basis,
+                unrealizedPnl: ms.unrealized_pnl,
+                realizedPnl: ms.realized_pnl,
+                totalFees: ms.total_fees,
+                feeEntryCount: ms.fee_entry_count,
+            };
         }
-
-        // Filter by categories
-        if (filterState.selectedCategoryIds.length > 0) {
-            result = result.filter(asset =>
-                asset.category_ids.some(catId => filterState.selectedCategoryIds.includes(catId))
-            );
+        // Fallback: reconstruct from client-side asset data while backend is loading
+        if (summary && assets.length > 0) {
+            return {
+                portfolioValue: assets.reduce((s, a) => s + (a.market_value || 0), 0),
+                costBasis: assets.reduce((s, a) => s + a.cost_basis, 0),
+                unrealizedPnl: summary.total_unrealized_pnl,
+                realizedPnl: summary.total_realized_pnl,
+                totalFees: summary.total_fees,
+                feeEntryCount: summary.fee_entry_count,
+            };
         }
-
-        return result;
-    }, [assets, filterState.selectedAccountIds, filterState.selectedCategoryIds]);
-
-    // Check if any filters are active
-    const hasActiveFilters = filterState.selectedAccountIds.length > 0 || filterState.selectedCategoryIds.length > 0;
-
-    // Recompute summary from filtered assets
-    const filteredSummary = useMemo((): PnLSummary | null => {
-        if (!summary) return null;
-        if (!hasActiveFilters) return summary;
-
-        // Recompute totals from filtered assets
-        const totalPortfolioValue = filteredAssets.reduce((sum, a) => sum + a.cost_basis, 0);
-        const totalUnrealizedPnL = filteredAssets.reduce((sum, a) => sum + a.unrealized_pnl, 0);
-        const totalRealizedPnL = filteredAssets.reduce((sum, a) => sum + a.realized_pnl, 0);
-        const totalFees = filteredAssets.reduce((sum, a) => sum + a.total_fees, 0);
-        const warningCount = filteredAssets.reduce((sum, a) => sum + a.warning_count, 0);
-        const lotsCount = filteredAssets.reduce((sum, a) => sum + a.lot_count, 0);
-        const realizedEventCount = filteredAssets.reduce((sum, a) => sum + a.realized_event_count, 0);
-
-        return {
-            ...summary,
-            total_portfolio_value: totalPortfolioValue,
-            total_unrealized_pnl: totalUnrealizedPnL,
-            total_realized_pnl: totalRealizedPnL,
-            total_fees: totalFees,
-            warning_count: warningCount,
-            lots_created_count: lotsCount,
-            consumed_slices_count: realizedEventCount,
-        };
-    }, [summary, filteredAssets, hasActiveFilters]);
+        return null;
+    }, [versionMetrics.data, summary, assets]);
 
     // Delta threshold percentage for balance health (configurable via card slider)
     const [deltaThreshold, setDeltaThreshold] = useState(5);
 
-    // Timeframe range for the period section (default: last 30 days)
-    const [timeframeRange, setTimeframeRange] = useState<Range>('1m');
+    // Timeframe range for the period section (default: last 7 days)
+    const [timeframeRange, setTimeframeRange] = useState<Range>('1w');
 
     // Compute balance health data from live deltas (P&L qty vs exchange qty)
     // Only report discrepancies where |pct| > deltaThreshold
@@ -491,15 +451,15 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
     // Apply mismatch filter when Balance Health card is clicked
     const displayAssets = useMemo(() => {
-        if (!showMismatchedOnly) return filteredAssets;
-        return filteredAssets.filter(row => {
+        if (!showMismatchedOnly) return assets;
+        return assets.filter(row => {
             const sym = row.asset.symbol?.toUpperCase() ?? '';
             const liveQty = liveBalanceMap.get(sym);
             if (liveQty === undefined) return false;
             const d = computeDelta(row.quantity, liveQty);
             return d !== null && !d.matched && Math.abs(d.pct) > deltaThreshold;
         });
-    }, [filteredAssets, showMismatchedOnly, liveBalanceMap, deltaThreshold]);
+    }, [assets, showMismatchedOnly, liveBalanceMap, deltaThreshold]);
 
     // Build unmapped live assets list (symbols in live balance but not in P&L assets)
     const unmappedLiveAssets = useMemo<UnmappedLiveAsset[]>(() => {
@@ -539,24 +499,6 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         return ids;
     }, [assets]);
 
-    // Handler for pie chart category click - toggles category filter
-    const handlePieCategoryClick = useCallback((categoryId: number | null) => {
-        if (categoryId === null) {
-            // Clicking "Uncategorized" clears category filter
-            setFilterState(prev => ({ ...prev, selectedCategoryIds: [] }));
-        } else {
-            // Toggle the category in selection
-            setFilterState(prev => {
-                const currentIds = prev.selectedCategoryIds;
-                if (currentIds.includes(categoryId)) {
-                    return { ...prev, selectedCategoryIds: currentIds.filter(id => id !== categoryId) };
-                } else {
-                    return { ...prev, selectedCategoryIds: [...currentIds, categoryId] };
-                }
-            });
-        }
-    }, []);
-
     // View state
     const [currentView, setCurrentView] = useState<PnLView>('summary');
     const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
@@ -573,8 +515,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
     const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
 
-    // Audit sub-tab state: which tab to show inside P&L Audit view
-    const [auditSubTab, setAuditSubTab] = useState<'units' | 'lots' | 'realized' | 'fees' | 'warnings' | 'events'>('units');
+    // Slide panel to auto-open in InvestigationView when navigating from portfolio
+    const [auditDefaultPanel, setAuditDefaultPanel] = useState<'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | null>(null);
 
     // Fees and warnings data
     const [fees, setFees] = useState<FeeEntry[]>([]);
@@ -722,6 +664,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     useEffect(() => {
         // Skip if calculation is in progress to prevent duplicate API calls
         if (isCalculatingRef.current) return;
+
+        // Skip if balances were just loaded by loadVersionById/runCalculation
+        if (balancesJustLoadedRef.current) {
+            balancesJustLoadedRef.current = false;
+            return;
+        }
 
         if (currentVersionId) {
             // Re-fetch balances with new filter setting
@@ -1120,6 +1068,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             });
 
             // Store version info
+            balancesJustLoadedRef.current = true;  // Prevent useEffect duplicate fetch
             setCurrentVersionId(versionId);
             setCurrentVersionStatus(calcResult.status === 'draft' ? 'draft' : 'committed');
             setLoadedVersionCreatedAt(calcResult.created_at ?? new Date().toISOString());
@@ -1186,32 +1135,11 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
 
     // Independent loader: Load calculation units with pagination
-    // Handle audit tab changes - just update state, the useEffect will handle loading
-    const handleAuditTabChange = useCallback((tab: string) => {
-        setAuditSubTab(tab as 'units' | 'lots' | 'realized' | 'fees' | 'warnings' | 'events');
-        // Note: Data loading is handled by the useEffect that watches mainTab/auditSubTab changes
-    }, []);
 
-    // Fetch available versions from API
-    const fetchAvailableVersions = useCallback(async () => {
-        setIsLoadingVersions(true);
-        try {
-            const response = await fetch(`${API_URL}/pnl/versions?limit=50`);
-            if (!response.ok) throw new Error('Failed to fetch versions');
-            const versions: VersionListItem[] = await response.json();
-            setAvailableVersions(versions);
-        } catch (err) {
-            console.error('Failed to fetch versions:', err);
-        } finally {
-            setIsLoadingVersions(false);
-        }
-    }, []);
-
-    // Load versions when tab becomes active
-    useEffect(() => {
-        if (!isActive) return;
-        fetchAvailableVersions();
-    }, [isActive, fetchAvailableVersions]);
+    // Invalidate versions query to trigger a refetch (replaces fetchAvailableVersions)
+    const refreshVersionsList = useCallback(() => {
+        queryClient.invalidateQueries({ queryKey: ['pnl-versions'] });
+    }, [queryClient]);
 
     // Handle continuing calculation despite health issues
     const handleContinueAnyway = useCallback(() => {
@@ -1244,6 +1172,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             const versionData: PnLVersionResponse = await versionResponse.json();
 
             // Store version info
+            balancesJustLoadedRef.current = true;  // Prevent useEffect duplicate fetch
             setCurrentVersionId(versionId);
             setCurrentVersionStatus(versionData.status === 'draft' ? 'draft' : 'committed');
             setLoadedVersionCreatedAt(versionData.created_at ?? null);
@@ -1255,6 +1184,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                 lot_mode: versionData.lot_mode as any,
                 base_currency_id: versionData.base_currency_id ?? prev.base_currency_id,
                 base_currency_symbol: versionData.base_currency_symbol ?? prev.base_currency_symbol,
+                compute_residuals: versionData.compute_residuals ?? prev.compute_residuals,
             }));
 
             // Store ID counts from version response ID lists
@@ -1339,7 +1269,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             // Auto-load the new version when background calculation completes
             loadVersionByIdRef.current?.(versionId);
             // Also refresh the versions list
-            fetchAvailableVersions();
+            refreshVersionsList();
         },
     });
 
@@ -1390,7 +1320,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             });
 
             // Refresh available versions list
-            fetchAvailableVersions();
+            refreshVersionsList();
         } catch (err) {
             toaster.error({
                 title: 'Save Failed',
@@ -1399,7 +1329,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         } finally {
             setIsPersisting(false);
         }
-    }, [currentVersionId, fetchAvailableVersions]);
+    }, [currentVersionId, refreshVersionsList]);
 
     // Asset click handler - TEMPORARILY DISABLED during refactoring
     const handleAssetClick = useCallback(async (assetId: number | null | undefined) => {
@@ -1468,9 +1398,14 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
     }, []);
 
     const handleUnitClick = useCallback((unitId: number) => {
+        // Switch to audit view if not already there
+        if (viewMode !== 'audit') {
+            setViewMode('audit');
+        }
+        // Clear any open slide panel so the feed is visible
+        setAuditDefaultPanel(null);
         console.log('Navigate to calculation unit:', unitId);
-        // In real app: navigate to /pnl/audit?unit=unitId
-    }, []);
+    }, [viewMode]);
 
     // Version management handlers
     const handleLoadVersion = useCallback(async (versionId: number) => {
@@ -1491,7 +1426,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                 method: 'DELETE',
             });
             // Refresh versions list
-            fetchAvailableVersions();
+            refreshVersionsList();
             if (currentVersionId === versionId) {
                 setCurrentVersionId(null);
                 setLoadedVersionCreatedAt(null);
@@ -1500,10 +1435,10 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
         } finally {
             setIsDeleting(false);
         }
-    }, [currentVersionId, fetchAvailableVersions]);
+    }, [currentVersionId, refreshVersionsList]);
 
     // --- Manual Refresh Button ---
-    const handleRefreshPrices = useCallback(() => {
+    const handleRefreshPrices = useCallback(async () => {
         // Build balance entries from current assets
         if (assets && assets.length > 0) {
             const balanceEntries: BalanceEntry[] = assets.map(a => ({
@@ -1513,9 +1448,11 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                 avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
                 lot_count: a.lot_count,
             }));
-            fetchPrices(balanceEntries, config.base_currency_symbol);
+            await fetchPrices(balanceEntries, config.base_currency_symbol);
+            // Re-fetch server metrics so scorecards & performers use the updated DB prices
+            versionMetrics.refetch();
         }
-    }, [assets, config.base_currency_symbol, fetchPrices]);
+    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
 
     // --- Recompute unrealized P&L using live prices ---
     useEffect(() => {
@@ -1628,7 +1565,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         variant="outline"
                         onClick={() => {
                             setShowHistoryPanel(true);
-                            fetchAvailableVersions();
+                            refreshVersionsList();
                         }}
                     >
                         <FiClock />
@@ -1692,9 +1629,6 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                     onClick={() => setViewMode('portfolio')}
                                 >
                                     📊 Portfolio
-                                    {hasActiveFilters && viewMode === 'portfolio' && (
-                                        <Badge ml={2} colorPalette="blue" size="xs" variant="subtle">filtered</Badge>
-                                    )}
                                 </Button>
                                 <Button
                                     size="sm"
@@ -1716,49 +1650,8 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         </Flex>
                     )}
 
-                    {/* Category Filter Bar (post-calculation display filter) - before summary cards */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && (
-                        <PnLFilterBar
-                            allAccounts={accounts}
-                            dimensions={dimensions}
-                            availableAccountIds={availableAccountIds}
-                            availableCategoryIds={availableCategoryIds}
-                            filterState={filterState}
-                            onFilterChange={(newState) => {
-                                setFilterState(newState);
-                                // Sync includeUnsettledNegative with the existing showUnsettledNegative state
-                                if (newState.includeUnsettledNegative !== showUnsettledNegative) {
-                                    setShowUnsettledNegative(newState.includeUnsettledNegative);
-                                }
-                            }}
-                            totalAssetCount={assets.length}
-                            filteredAssetCount={filteredAssets.length}
-                            isLoading={isLoadingCategories || isLoadingAccounts}
-                            unsettledNegativeCount={totalUnsettledNegativeCount}
-                        />
-                    )}
-
-                    {/* Filter active indicator banner */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && hasActiveFilters && (
-                        <Box
-                            bg="blue.50"
-                            border="1px solid"
-                            borderColor="blue.200"
-                            borderRadius="md"
-                            px={3}
-                            py={2}
-                            mb={4}
-                        >
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="sm" color="blue.700">
-                                    ⚠️ Showing {filteredAssets.length} of {assets.length} assets (filters applied)
-                                </Text>
-                            </Flex>
-                        </Box>
-                    )}
-
                     {/* ═══════ ROW 1: All-Time Indicators + Status Cards ═══════ */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && filteredSummary && filteredAssets.length > 0 && (
+                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && summary && assets.length > 0 && (
                         <Box
                             display="grid"
                             gridTemplateColumns={{ base: '1fr', md: '1fr 1fr' }}
@@ -1767,19 +1660,12 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         >
                             {/* Left: All-time indicators */}
                             <AllTimeIndicators
-                                summary={{
-                                    portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
-                                    costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
-                                    unrealizedPnl: filteredSummary.total_unrealized_pnl,
-                                    realizedPnl: filteredSummary.total_realized_pnl,
-                                    totalFees: filteredSummary.total_fees,
-                                    feeEntryCount: filteredSummary.fee_entry_count,
-                                }}
+                                summary={scorecardSummary}
                                 baseCurrency={config.base_currency_symbol}
                                 isLoading={heroTimeline.isLoading}
                                 onFeesClick={() => {
                                     setViewMode('audit');
-                                    setAuditSubTab('fees');
+                                    setAuditDefaultPanel('fees');
                                 }}
                             />
 
@@ -1799,10 +1685,10 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                     refreshDisabled={!currentVersionId}
                                 />
                                 <WarningsCard
-                                    summary={filteredSummary}
+                                    summary={summary}
                                     onWarningsClick={() => {
                                         setViewMode('audit');
-                                        setAuditSubTab('warnings');
+                                        setAuditDefaultPanel('warnings');
                                     }}
                                     warningTypeCounts={warningTypeCounts}
                                 />
@@ -1819,34 +1705,30 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     )}
 
                     {/* ═══════ ROW 2: Timeframe Indicators (includes Best & Worst) ═══════ */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && filteredAssets.length > 0 && (
+                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && assets.length > 0 && (
                         <Box mb={4}>
                             <TimeframeIndicators
                                 points={heroTimeline.data?.points || []}
                                 baseCurrency={config.base_currency_symbol}
-                                isLoading={heroTimeline.isLoading || periodSummary.isLoading}
-                                summary={filteredSummary ? {
-                                    portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
-                                    costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
-                                    unrealizedPnl: filteredSummary.total_unrealized_pnl,
-                                    realizedPnl: filteredSummary.total_realized_pnl,
-                                    totalFees: filteredSummary.total_fees,
-                                    feeEntryCount: filteredSummary.fee_entry_count,
-                                } : null}
-                                periodSummaryData={periodSummary.data ?? undefined}
+                                isLoading={heroTimeline.isLoading || versionMetrics.isLoading}
+                                summary={scorecardSummary}
+                                periodSummaryData={versionMetrics.data ?? undefined}
                                 range={timeframeRange}
                                 onRangeChange={setTimeframeRange}
-                                topPerformers={periodSummary.data?.ranges?.[timeframeRange as RangeKey]?.top_performers}
-                                flopPerformers={periodSummary.data?.ranges?.[timeframeRange as RangeKey]?.flop_performers}
+                                groupBy={performerGroupBy}
+                                onGroupByChange={setPerformerGroupBy}
                                 onAssetClick={handleAssetClick}
+                                dimensions={dimensions}
+                                selectedDimensionId={performerDimensionId}
+                                onDimensionChange={setPerformerDimensionId}
                             />
                         </Box>
                     )}
 
                     {/* Compact summary bar when in detail view */}
-                    {currentView === 'asset-detail' && filteredSummary && (
+                    {currentView === 'asset-detail' && summary && (
                         <SummaryBar
-                            summary={filteredSummary}
+                            summary={summary}
                             baseCurrency={config.base_currency_symbol}
                         />
                     )}
@@ -1858,31 +1740,24 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             baseCurrency={config.base_currency_symbol}
                             dimensions={dimensions}
                             accounts={accounts}
-                            assets={filteredAssets}
-                            selectedAccountIds={filterState.selectedAccountIds}
-                            selectedCategoryIds={filterState.selectedCategoryIds}
-                            onCategoryClick={handlePieCategoryClick}
+                            assets={assets}
                             onItemClick={(itemId: number, type: 'asset' | 'category') => {
                                 if (type === 'asset') {
                                     handleAssetClick(itemId);
-                                } else {
-                                    handlePieCategoryClick(itemId);
                                 }
                             }}
                             /* Shared data from PnLPanel — avoids duplicate fetches */
                             sharedTimeline={heroTimeline}
-                            periodSummaryData={periodSummary.data ?? undefined}
-                            summary={filteredSummary ? {
-                                portfolioValue: filteredAssets.reduce((s, a) => s + (a.market_value || 0), 0),
-                                costBasis: filteredAssets.reduce((s, a) => s + a.cost_basis, 0),
-                                unrealizedPnl: filteredSummary.total_unrealized_pnl,
-                                realizedPnl: filteredSummary.total_realized_pnl,
-                                totalFees: filteredSummary.total_fees,
-                                feeEntryCount: filteredSummary.fee_entry_count,
-                            } : undefined}
+                            periodSummaryData={versionMetrics.data ?? undefined}
+                            groupBy={performerGroupBy}
+                            onGroupByChange={setPerformerGroupBy}
+                            summary={scorecardSummary ?? undefined}
                             timeframeRange={timeframeRange}
                             onTimeframeRangeChange={setTimeframeRange}
                             onAssetClick={handleAssetClick}
+                            accountBalances={accountBalances}
+                            performerDimensionId={performerDimensionId}
+                            onPerformerDimensionChange={setPerformerDimensionId}
                         />
                     )}
 
@@ -1913,6 +1788,9 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                 onAccountClick={handleAccountClick}
                                 accountBalances={accountBalances}
                                 accounts={accounts}
+                                dimensions={dimensions}
+                                availableAccountIds={availableAccountIds}
+                                availableCategoryIds={availableCategoryIds}
                                 onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
                                 liveBalances={liveBalanceMap}
                                 liveAccountBalances={liveAccountBalanceMap}
@@ -1924,38 +1802,21 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         </>
                     )}
 
-                    {/* Full Audit View - only shown when viewMode is 'audit' */}
+                    {/* Full Audit View — Investigation workflow */}
                     {currentView === 'assets' && viewMode === 'audit' && currentVersionId && (
-                        <>
-                            {/* Info banner for audit view */}
-                            <Box
-                                bg="gray.50"
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                px={3}
-                                py={2}
-                                mb={4}
-                            >
-                                <Text fontSize="sm" color="gray.600">
-                                    📋 Complete P&L calculation audit — no filters applied
-                                </Text>
-                            </Box>
-                            <PnLAuditView
-                                versionId={currentVersionId}
-                                baseCurrency={config.base_currency_symbol}
-                                onTransactionClick={handleTransactionClick}
-                                onAssetClick={handleAssetClick}
-                                onUnitClick={handleUnitClick}
-                                defaultTab={auditSubTab}
-                                onTabChange={handleAuditTabChange}
-                                idCounts={idCounts}
-                                quoteAssetId={config.base_currency_id ?? undefined}
-                                onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
-                                assets={assets.map(a => a.asset)}
-                                assetBalanceMap={assetBalanceMap}
-                            />
-                        </>
+                        <InvestigationView
+                            versionId={currentVersionId}
+                            baseCurrency={config.base_currency_symbol}
+                            onTransactionClick={handleTransactionClick}
+                            onAssetClick={handleAssetClick}
+                            onUnitClick={handleUnitClick}
+                            defaultPanel={auditDefaultPanel}
+                            onPanelChange={(panel) => setAuditDefaultPanel(panel as any)}
+                            quoteAssetId={config.base_currency_id ?? undefined}
+                            onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
+                            assets={assets.map(a => ({ id: a.asset.id ?? 0, symbol: a.asset.symbol ?? '', label: a.asset.label ?? undefined }))}
+                            assetBalanceMap={assetBalanceMap}
+                        />
                     )}
 
                     {currentView === 'asset-detail' && selectedAsset && currentVersionId && (
@@ -2162,14 +2023,14 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                         </Flex>
                                         <Text fontSize="xs" color="gray.500">
                                             {version.created_at
-                                                ? new Date(version.created_at).toLocaleString()
+                                                ? formatDateTimeLocale(version.created_at)
                                                 : 'Unknown date'}
                                         </Text>
                                     </Flex>
                                     {version.description && (
                                         <Text fontSize="xs" color="gray.600" mt={1}>{version.description}</Text>
                                     )}
-                                    <Flex gap={3} mt={1}>
+                                    <Flex gap={3} mt={1} flexWrap="wrap">
                                         <Text fontSize="xs" color="gray.400">
                                             Base: {version.base_currency_symbol || '—'}
                                         </Text>
@@ -2177,6 +2038,15 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                             ID: {version.version_id}
                                         </Text>
                                     </Flex>
+                                    <Text fontSize="xs" color="gray.400" mt={1}>
+                                        Tolerance: {version.residual_tolerance_pct === 0 ? 'OFF' : `${version.residual_tolerance_pct}%`} ·{' '}
+                                        Neg. balances: {version.allow_negative_balances ? '✓' : '✗'} ·{' '}
+                                        Swaps taxable: {version.crypto_swap_taxable ? '✓' : '✗'} ·{' '}
+                                        Fees taxable: {version.fee_taxable ? '✓' : '✗'}
+                                        {version.use_price_fallback !== undefined && (
+                                            <> · Price fallback: {version.use_price_fallback ? `✓ (${version.price_staleness_window_days ?? 7}d)` : '✗'}</>
+                                        )}
+                                    </Text>
                                 </Box>
                             ))}
                         </Box>
