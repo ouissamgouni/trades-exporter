@@ -7,11 +7,7 @@ Object-oriented design implementing BaseConnector interface.
 from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
-from backend.connectors.onchain.chain_config import (
-    get_chain_config,
-    get_blockscout_api_url,
-    CHAIN_CONFIG,
-)
+from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging
 
 log = configure_logging(__name__)
@@ -55,19 +51,21 @@ class ConnectorBlockscoutHub(BaseHubConnector):
             raise ValueError("Missing wallet address")
 
         # Validate chain is supported
-        chain_config = get_chain_config(self.chain_name)
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("blockscout", self.chain_name)
         if not chain_config:
+            all_chains = list(registry.get_chain_configs("blockscout").keys())
             raise ValueError(
-                f"Unknown chain '{chain_name}'. Available: {list(CHAIN_CONFIG.keys())}"
+                f"Unknown chain '{chain_name}'. Available: {all_chains}"
             )
 
-        # Get test mode from config
-        test_mode = kwargs.get("config", {}).get("test_mode", False)
+        # Get test/renormalize mode from config
+        test_mode = (config or {}).get("test_mode", False)
+        renormalize_mode = (config or {}).get("renormalize_mode", False)
         
-        if not test_mode:
+        if not test_mode and not renormalize_mode:
             # Live mode: validate API-related configuration
-            blockscout_url = get_blockscout_api_url(self.chain_name)
-            if not blockscout_url:
+            if not chain_config.base_url:
                 raise ValueError(
                     f"Blockscout API not available for chain '{chain_name}'"
                 )
@@ -82,18 +80,26 @@ class ConnectorBlockscoutHub(BaseHubConnector):
         )
 
         # Create specialized connectors with parent output path
-        # In test mode, each child connector will return its own test data
+        # In test/renormalize mode, each child connector will skip API config
         child_config = {"parent_output_path": self.output_path}
+        if test_mode:
+            child_config["test_mode"] = True
+        if renormalize_mode:
+            child_config["renormalize_mode"] = True
         
         normal_tx_connector = ConnectorBlockscoutNormalTx(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            account_id=account_id,
+            connector_id=connector_id,
             config=child_config,
         )
 
         token_transfers_connector = ConnectorBlockscoutTokenTransfers(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            account_id=account_id,
+            connector_id=connector_id,
             config=child_config,
         )
 
@@ -105,6 +111,77 @@ class ConnectorBlockscoutHub(BaseHubConnector):
         # Update child connectors after creation
         self.child_connectors = child_connectors
 
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
 
-# Tests available at:
-# pytest tests/unit/connectors/onchain/test_blockscout_connector.py -v
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("blockscout", self.chain_name)
+        if not chain_config:
+            log.warning(f"No chain config for {self.chain_name}, cannot fetch balance")
+            return []
+
+        base_url = chain_config.base_url
+        entries = []
+
+        # Native balance from address info
+        try:
+            resp = requests.get(
+                f"{base_url}/addresses/{self.wallet_address}", timeout=15
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            coin_balance = data.get("coin_balance")
+            if coin_balance and int(coin_balance) > 0:
+                decimals = 18  # ETH-like native tokens
+                total = Decimal(coin_balance) / Decimal(10 ** decimals)
+                native_symbol = {
+                    "ethereum": "ETH", "base": "ETH", "arbitrum": "ETH",
+                    "optimism": "ETH", "polygon": "MATIC", "bsc": "BNB",
+                    "hyperevm": "HYPE",
+                }.get(self.chain_name, "ETH")
+                entries.append(BalanceEntry(
+                    asset_symbol=native_symbol,
+                    total=total,
+                    available=total,
+                    chain=self.chain_name,
+                    raw={"coin_balance": coin_balance},
+                ))
+        except Exception as e:
+            log.warning(f"Failed to fetch native balance from Blockscout: {e}")
+
+        # Token balances
+        try:
+            resp = requests.get(
+                f"{base_url}/addresses/{self.wallet_address}/token-balances",
+                timeout=15,
+            )
+            resp.raise_for_status()
+            tokens = resp.json()
+            for tok in tokens:
+                value = tok.get("value")
+                token_info = tok.get("token", {})
+                symbol = token_info.get("symbol", "UNKNOWN")
+                decimals = int(token_info.get("decimals", 18))
+                if value and int(value) > 0:
+                    total = Decimal(value) / Decimal(10 ** decimals)
+                    entries.append(BalanceEntry(
+                        asset_symbol=symbol,
+                        total=total,
+                        available=total,
+                        chain=self.chain_name,
+                        raw=tok,
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to fetch token balances from Blockscout: {e}")
+
+        return entries

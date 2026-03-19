@@ -12,7 +12,7 @@ Includes:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from backend.services.price_getters.base import PriceGetterConfig, PriceResult
@@ -120,7 +120,7 @@ class TestYahooPriceGetterIntegration:
 
     def test_get_historical_price_aapl(self, yahoo_getter, mock_asset_aapl):
         """Should fetch historical AAPL price and return PriceResult."""
-        target_date = datetime.utcnow() - timedelta(days=7)
+        target_date = datetime.now(timezone.utc) - timedelta(days=7)
         result = yahoo_getter.get_historical_price(mock_asset_aapl, target_date)
 
         assert isinstance(result, PriceResult)
@@ -130,7 +130,7 @@ class TestYahooPriceGetterIntegration:
 
     def test_get_historical_price_30_days_ago(self, yahoo_getter, mock_asset_spy):
         """Should fetch historical price from 30 days ago and return PriceResult."""
-        target_date = datetime.utcnow() - timedelta(days=30)
+        target_date = datetime.now(timezone.utc) - timedelta(days=30)
         result = yahoo_getter.get_historical_price(mock_asset_spy, target_date)
 
         assert isinstance(result, PriceResult)

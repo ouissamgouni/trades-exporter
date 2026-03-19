@@ -1,39 +1,47 @@
 import {
     Badge, Box,
-    Button, Card, Checkbox, Collapsible, Dialog, Flex,
-    Heading, HStack, Input, NativeSelect, Portal, Spinner,
-    Switch, Table, Tabs, Text, Progress
+    Button, Checkbox, Dialog, Flex,
+    Heading, HStack, Portal, Spinner,
+    Switch, Table, Text
 } from '@chakra-ui/react';
-import { BiTransfer } from 'react-icons/bi';
-import { RiExchangeFundsLine } from 'react-icons/ri';
-import { FaQuestion } from 'react-icons/fa';
-import { LuPencil, LuUpload } from 'react-icons/lu';
-import { FiActivity, FiFileText } from 'react-icons/fi';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LuArrowUp, LuArrowDown, LuArrowUpDown, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { API_URL, Account, Asset, Bundle, BundleSuggestion, Transaction, TransactionStatus, WorkflowStatus, TaxabilityStatus, ValidationSummary } from '../types';
-import { Direction, ReviewStatus, TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../enums';
-import { AssetSelector } from './AssetSelector';
-import { AccountSelector } from './AccountSelector';
-import { ACCOUNT_OPTIONS, ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
-import { TransactionEditorDialog } from './TransactionEditorDialog';
-import { BundleTransactionList } from './BundleTransactionList';
-import { BundleTable } from './BundleTable';
+import {
+    useReactTable,
+    getCoreRowModel,
+    SortingState,
+    VisibilityState,
+} from '@tanstack/react-table';
+import { API_URL, Account, Asset, Transaction, TransactionStatus, TransactionListResponse, FilterMetadata, AppliedFilters } from '../types';
+import { Direction, ReviewStatus, UnitPattern } from '../enums';
+import { useDataHealth } from '../contexts/DataHealthContext';
+import { useAssets } from '../hooks/useAssets';
+import { useAccounts } from '../hooks/useAccounts';
+import { useAccountSuggestionsBatch, BatchItem } from '../hooks/useAccountSuggestionsBatch';
+import { ComboSelect, TRANSACTION_TYPE_OPTIONS } from './ComboSelect';
+
+
 import { TransactionDetailDrawer } from './TransactionDetailDrawer';
 import { TransactionFilters, TransactionFilterState, defaultFilterState } from './TransactionFilters';
-import { DataHealthCheckDrawer } from './DataHealthCheckDrawer';
 import { toaster } from './ui/toaster';
-import { Tooltip } from './ui/tooltip';
-import { AssetBadge } from './AssetBadge';
-import { AccountBadge } from './AccountBadge';
-import { getAccountSuggestions, getAssetSuggestions, getConfidenceColor, formatConfidence, SuggestedMatch } from '../utils/similarity';
+import { getAssetSuggestions } from '../utils/similarity';
+import { linkRawAccount } from '../utils/rawAccountApi';
+import { fetchAccountSuggestionsBatch, AccountSuggestion } from '../hooks/useAccountSuggestions';
 import {
     formatDateTimeCompact,
-    toDateTimeLocalString,
     dateTimeLocalToISO,
 } from '../utils/dateUtils';
-import { usePagination, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
+import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
+import { useBundleSuggestionMap } from '../hooks/useBundleSuggestionMap';
+import { useBundleColorMap } from '../hooks/useBundleColorMap';
 import { TablePagination } from './TablePagination';
+import { TableConfig, ColumnPlugin, RowAction, BulkAction, TransactionColumnKey, resolveTableConfig, presetToVisibility, ColumnVisibilityPopover } from './tables';
+import { useDuplicateMap } from '../hooks/useDuplicateMap';
+import AccountFormDialog, { AccountPrefill } from './AccountFormDialog';
+import AssetFormDialog, { AssetPrefill } from './AssetFormDialog';
+import { BundleCreateDialog, BundleCreateDefaults } from './bundles/BundleCreateDialog';
+import { TransactionTableRow, TransactionRowCallbacks, EditableField } from './TransactionTableRow';
 
 // Types for CSV import
 interface TradesImportPreviewTransaction {
@@ -79,225 +87,350 @@ const directionRowColors: Record<string, string> = {
     internal: 'gray.50',
 };
 
-// Status badge color mapping (for review_status column display)
-const statusBadgeColors: Record<TransactionStatus, string> = {
-    [ReviewStatus.VALID]: 'green',
-    [ReviewStatus.PENDING]: 'yellow',
-    [ReviewStatus.INVALID]: 'red',
-};
-
-// Review status options for filter dropdown (same as TransactionStatus)
-const reviewStatusOptions = [
-    { value: '', label: 'All Status' },
-    { value: ReviewStatus.PENDING, label: 'Pending' },
-    { value: ReviewStatus.VALID, label: 'Valid' },
-    { value: ReviewStatus.INVALID, label: 'Invalid' },
-];
-
-// Taxability colors
-const taxabilityColors: Record<TaxabilityStatus, string> = {
-    [TaxabilityStatusEnum.TAXABLE]: 'orange',
-    [TaxabilityStatusEnum.NON_TAXABLE]: 'green',
-    [TaxabilityStatusEnum.UNKNOWN]: 'yellow',
-};
-
-// Pattern colors for suggestions (simplified to swap and transfer)
-const patternColors: Record<string, string> = {
-    [UnitPattern.TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-};
-
-// SourceInfoCell - Merged cell displaying Source Account + Source + Source Type + Source Symbol
-interface SourceInfoCellProps {
-    sourceAccount?: string;      // Raw source_account field
-    accountId?: number | null;   // Resolved account_id (to show warning if missing)
-    resolvedAccount?: Account;   // Full resolved account object
-    resolvedAccountName?: string; // Resolved account name for display
-    source: string;
-    sourceType?: string;
-    sourceSymbol?: string;
-    onClick?: () => void;
-    /** Account suggestions for quick linking */
-    accountSuggestions?: SuggestedMatch<Account>[];
-    /** Callback to accept a suggested account */
-    onAcceptSuggestion?: (accountId: number) => void;
-}
-
-const SourceInfoCell: React.FC<SourceInfoCellProps> = ({
-    sourceAccount,
-    accountId,
-    resolvedAccount,
-    resolvedAccountName,
-    source,
-    sourceType,
-    sourceSymbol,
-    onClick,
-    accountSuggestions = [],
-    onAcceptSuggestion,
-}) => {
-    // Build the secondary line: source · type · symbol (only non-empty parts)
-    const parts = [
-        source,
-        sourceType,
-        sourceSymbol
-    ].filter(Boolean);
-    const secondaryText = parts.join(' · ');
-
-    // Determine if account is linked (resolved)
-    const isAccountLinked = accountId != null;
-
-    return (
-        <Flex
-            direction="column"
-            gap={0}
-            minW="100px"
-            maxW="180px"
-        >
-            {/* Primary line: Account - show resolved badge or warning with source */}
-            {isAccountLinked ? (
-                <AccountBadge
-                    account={resolvedAccount}
-                    accountId={accountId}
-                    accountName={resolvedAccountName}
-                    size="sm"
-                    maxLength={18}
-                    onClick={onClick}
-                />
-            ) : (
-                <Flex direction="column" gap={1}>
-                    <Text
-                        fontSize="8px"
-                        color="orange.500"
-                        fontWeight="bold"
-                        overflow="hidden"
-                        textOverflow="ellipsis"
-                        whiteSpace="nowrap"
-                        cursor="pointer"
-                        onClick={onClick}
-                        title={sourceAccount ? `Unlinked: ${sourceAccount}` : 'No account linked'}
-                    >
-                        ⚠ {sourceAccount || 'Link'}
-                    </Text>
-                    {/* Show compact suggestion chips for unlinked accounts */}
-                    {accountSuggestions.length > 0 && (
-                        <HStack gap={1} flexWrap="wrap">
-                            {accountSuggestions.slice(0, 2).map((s, idx) => (
-                                <Tooltip
-                                    key={idx}
-                                    content={`${formatConfidence(s.confidence)} match - Click to link`}
-                                    openDelay={100}
-                                >
-                                    <Badge
-                                        size="xs"
-                                        colorPalette={getConfidenceColor(s.confidence)}
-                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                        cursor="pointer"
-                                        fontSize="7px"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onAcceptSuggestion?.(s.item.id);
-                                        }}
-                                    >
-                                        {s.item.name.slice(0, 10)}{s.item.name.length > 10 ? '…' : ''}
-                                        {s.confidence >= 0.9 && ' ✓'}
-                                    </Badge>
-                                </Tooltip>
-                            ))}
-                        </HStack>
-                    )}
-                </Flex>
-            )}
-            {/* Secondary line: source · type · symbol */}
-            <Text
-                fontSize="7px"
-                color="gray.500"
-                overflow="hidden"
-                textOverflow="ellipsis"
-                whiteSpace="nowrap"
-                title={secondaryText}
-                mt="1px"
-            >
-                {secondaryText || '-'}
-            </Text>
-        </Flex>
-    );
-};
-
-// Date formatting utilities imported from utils/dateUtils
-
 // Props interface for configurable behavior
-export interface TransactionsTableProps {
+export interface TransactionsTableProps<T extends Transaction = Transaction> {
     /** Title displayed in the header */
     title?: string;
     /** Subtitle/description text */
     subtitle?: string;
     /** Default workflow filter (e.g., 'pending' for inbox) */
     defaultWorkflowFilter?: string;
+    /** Current filter state (controlled) */
+    filters?: TransactionFilterState;
+    /** Callback when filters change */
+    onFiltersChange?: (filters: TransactionFilterState) => void;
+    /** Base filters to reset to (optional, defaults to defaultFilterState) */
+    resetFilters?: TransactionFilterState;
+    /** Message to display when no transactions match filters */
+    emptyMessage?: string;
+    /** Compact mode for embedded views (smaller fonts, tighter spacing) */
+    compact?: boolean;
+    /** Embedded mode for popovers/cards: hides title, toolbar, pagination, legend, checkbox, status and actions columns (detail icon is kept) */
+    embeddedMode?: boolean;
+    /** When embeddedMode=true, also show checkboxes and status column (for duplicate resolution UX) */
+    showSelectionInEmbedded?: boolean;
+    /** Callback fired whenever the internal row selection changes (works both in normal and embedded+selection mode) */
+    onSelectionChange?: (ids: Set<number>) => void;
+    /** Pre-select these IDs when the table mounts – changing this (via `key`) can reset selection */
+    initialSelectedIds?: number[];
     /** Whether to show the filter bar */
     showFilters?: boolean;
+    /** Whether to start with filters collapsed */
+    defaultFiltersCollapsed?: boolean;
     /** Whether to show the bundles section */
     showBundles?: boolean;
     /** Whether to show bundle suggestions */
     showSuggestions?: boolean;
     /** Callback when data changes (for parent refresh) */
     onDataChange?: () => void;
+    /** Custom API URL to fetch transactions from (overrides default /transactions endpoint) */
+    customApiUrl?: string;
+
+    // ============== Plugin Architecture Props ==============
+
+    /** 
+     * Unique identifier for this table instance.
+     * Used for localStorage keys for column visibility/sizing persistence.
+     * Example: 'inbox', 'all', 'assetLinkage'
+     */
+    tableId?: string;
+
+    /**
+     * Initial column visibility override.
+     * If provided, overrides localStorage-persisted visibility for this session.
+     */
+    initialColumnVisibility?: VisibilityState;
+
+    /** 
+     * Table configuration for endpoint, column preset, and features.
+     * Provides a declarative way to configure the table's behavior.
+     */
+    config?: TableConfig<T>;
+
+    /**
+     * Additional columns to render after the standard columns.
+     * These are plugin columns that extend the default table layout.
+     */
+    additionalColumns?: ColumnPlugin<T>[];
+
+    /**
+     * Additional row actions to render in the actions column.
+     * These are added alongside the default edit/delete actions.
+     */
+    additionalRowActions?: RowAction<T>[];
+
+    /**
+     * Additional bulk actions to render in the bulk action toolbar.
+     * These are added alongside the default status/type/delete actions.
+     */
+    additionalBulkActions?: BulkAction<T>[];
 }
 
-// Editable cell types
-type EditableField = 'account_id' | 'source_transaction_type' | 'direction' | 'transaction_type' | 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id' | 'review_status' | 'review_notes' | 'date_time' | 'source' | 'source_asset_symbol' | 'quantity' | 'price' | 'fee' | 'user_calculation_unit_id';
+// EditableField type is imported from './TransactionTableRow'
 
-export const TransactionsTable: React.FC<TransactionsTableProps> = ({
+export const TransactionsTable = <T extends Transaction = Transaction>({
     title = 'Transactions',
     subtitle = 'View, filter, and edit transaction details. Select transactions to create a bundle.',
     defaultWorkflowFilter = '',
+    filters: controlledFilters,
+    onFiltersChange,
+    resetFilters,
+    emptyMessage,
+    compact = false,
+    embeddedMode = false,
+    showSelectionInEmbedded = false,
+    onSelectionChange,
+    initialSelectedIds,
     showFilters = true,
+    defaultFiltersCollapsed = false,
     showBundles = true,
     showSuggestions = false,
     onDataChange,
-}) => {
+    customApiUrl,
+    // Plugin architecture props
+    tableId = 'default',
+    initialColumnVisibility: initialVisibilityProp,
+    config: configProp,
+    additionalColumns = [],
+    additionalRowActions = [],
+    additionalBulkActions = [],
+}: TransactionsTableProps<T>) => {
     const queryClient = useQueryClient();
-    const [bundles, setBundles] = useState<Bundle[]>([]);
-    const [suggestions, setSuggestions] = useState<BundleSuggestion[]>([]);
-    const [suggestionTaxabilityOverrides, setSuggestionTaxabilityOverrides] = useState<Record<number, TaxabilityStatus>>({});
-    const [assets, setAssets] = useState<Asset[]>([]);
-    const [accounts, setAccounts] = useState<Account[]>([]);
+
+    // Centralized cache invalidation after any transaction mutation.
+    // Ensures both the transaction list AND bundle suggestions are refreshed together.
+    // Uses refetchType: 'active' to only refetch queries with mounted observers,
+    // preventing unnecessary fetches for inactive cached queries from other tabs.
+    const invalidateTransactionData = () => {
+        queryClient.invalidateQueries({ queryKey: ['transactions'], refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'], refetchType: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['filterOptions'], refetchType: 'active' });
+    };
+
+    // Resolve table configuration with defaults
+    const tableConfig = useMemo(() => resolveTableConfig(configProp), [configProp]);
+
+    // ============== TanStack Table State ==============
+
+    // Storage keys for persistence
+    const visibilityStorageKey = `txTable:${tableId}:visibility`;
+    const sortingStorageKey = `txTable:${tableId}:sorting`;
+
+    // Load initial column visibility from prop, localStorage, or preset
+    const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+        // Priority: prop > localStorage > preset
+        if (initialVisibilityProp) {
+            return initialVisibilityProp;
+        }
+        try {
+            const stored = localStorage.getItem(visibilityStorageKey);
+            if (stored) {
+                return JSON.parse(stored);
+            }
+        } catch { }
+        // Fall back to preset-based visibility
+        return presetToVisibility(
+            tableConfig.columnPreset,
+            tableConfig.hiddenColumns,
+            tableConfig.shownColumns
+        );
+    });
+
+    // Sorting state - default to date_time descending
+    const [sorting, setSorting] = useState<SortingState>(() => {
+        try {
+            const stored = localStorage.getItem(sortingStorageKey);
+            if (stored) {
+                return JSON.parse(stored);
+            }
+        } catch { }
+        return [{ id: 'date', desc: true }];
+    });
+
+    // Map TanStack column IDs to backend sort_by values
+    const SORT_COLUMN_MAP: Record<string, string> = {
+        id: 'id',
+        date: 'date',
+        source: 'source',
+        direction: 'direction',
+        type: 'type',
+        qty: 'qty',
+        price: 'price',
+        total: 'total',
+        fee: 'fee',
+        feeInBase: 'include_fee',
+        taxability: 'taxability',
+        status: 'status',
+        sourceTransactionId: 'source_transaction_id',
+    };
+
+    // Persist column visibility to localStorage
+    useEffect(() => {
+        try {
+            localStorage.setItem(visibilityStorageKey, JSON.stringify(columnVisibility));
+        } catch { }
+    }, [columnVisibility, visibilityStorageKey]);
+
+    // Persist sorting to localStorage
+    useEffect(() => {
+        try {
+            localStorage.setItem(sortingStorageKey, JSON.stringify(sorting));
+        } catch { }
+    }, [sorting, sortingStorageKey]);
+
+    // Column visibility checker that uses TanStack state
+    const showColumn = useCallback(
+        (key: TransactionColumnKey) => columnVisibility[key] !== false,
+        [columnVisibility]
+    );
+
+    // Count visible columns for colSpan calculations
+    const visibleColumnCount = useMemo(() => {
+        const keys: TransactionColumnKey[] = [
+            'id', 'date', 'source', 'accounts', 'direction', 'type', 'asset', 'qty',
+            'price', 'total', 'fee', 'taxability', 'feeInBase', 'bundle', 'tags', 'sourceTransactionId', 'status'
+        ];
+        // +2 for checkbox column and actions column (always visible)
+        return keys.filter(k => columnVisibility[k] !== false).length + 2;
+    }, [columnVisibility]);
+
+    const { assets, refetchAssets } = useAssets();
+    const { accounts, refetchAccounts } = useAccounts();
     // Cell-level editing: "txId:field" format, e.g., "123:account"
     const [editingCell, setEditingCell] = useState<string | null>(null);
     const [editValues, setEditValues] = useState<Partial<Transaction>>({});
     const editInputRef = useRef<HTMLInputElement | HTMLSelectElement>(null);
     const editValuesRef = useRef<Partial<Transaction>>({});
     const escapePressedRef = useRef(false);
-    // New unified filter state
-    const [filters, setFilters] = useState<TransactionFilterState>(() => ({
-        ...defaultFilterState,
-        reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : [],
-    }));
+
+    // Use controlled filters if provided, otherwise fallback to internal state
+    // Use resetFilters as initial state if provided, otherwise use defaultFilterState
+    const [internalFilters, setInternalFilters] = useState<TransactionFilterState>(() => {
+        const baseFilters = resetFilters || defaultFilterState;
+        return {
+            ...baseFilters,
+            reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : baseFilters.reviewStatus,
+        };
+    });
+
+    const filters = controlledFilters || internalFilters;
+    const rawSetFilters = onFiltersChange || setInternalFilters;
+
+    // Single source of truth for the effective reset state.
+    // Combines resetFilters (or defaultFilterState) with the workflow filter override.
+    // Used by all reset paths: handleReset, onClear, and forwarded to TransactionFilters.
+    const effectiveResetFilters = useMemo(() => {
+        const baseFilters = resetFilters || defaultFilterState;
+        return {
+            ...baseFilters,
+            reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : baseFilters.reviewStatus,
+        };
+    }, [resetFilters, defaultWorkflowFilter]);
+
+    // Wrap filter updates in startTransition so React doesn't block the main thread
+    const [, startFilterTransition] = useTransition();
+    const setFilters = useCallback(
+        (newFilters: TransactionFilterState) => {
+            startFilterTransition(() => {
+                rawSetFilters(newFilters);
+            });
+        },
+        [rawSetFilters]
+    );
+
+    // Store applied filters and metadata from backend response
+    const [appliedFilters, setAppliedFilters] = useState<AppliedFilters | null>(null);
+    const [filterMetadata, setFilterMetadata] = useState<FilterMetadata | null>(null);
     // Pagination via unified hook (client-side pagination for transactions table)
     const pagination = usePagination({
-        storageKey: 'transactions',
+        storageKey: tableId || 'transactions',
         initialPageSize: DEFAULT_PAGE_SIZE,
     });
-    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-    const [showBundleDialog, setShowBundleDialog] = useState(false);
-    const [bundleLabel, setBundleLabel] = useState('');
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(
+        () => new Set<number>(initialSelectedIds ?? [])
+    );
+
+    // Notify parent of selection changes
+    const onSelectionChangeRef = React.useRef(onSelectionChange);
+    React.useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+    React.useEffect(() => {
+        onSelectionChangeRef.current?.(selectedIds);
+    }, [selectedIds]);
     // Transaction detail drawer state (replaces expandedRow)
     const [drawerTransactionId, setDrawerTransactionId] = useState<number | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-    const [bundlesExpanded, setBundlesExpanded] = useState(true);
-    const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
-    const [viewMode, setViewMode] = useState<'transactions' | 'bundles'>('transactions');
+    const [filtersExpanded, setFiltersExpanded] = useState(!defaultFiltersCollapsed);
 
-    // Data Health Check drawer state
-    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
-    const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
-    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
+    // ============== Bundle Suggestion State ==============
+    // Fetch suggestions and build tx→suggestion lookup map
+    const { suggestionMap, getGroupTxIds } = useBundleSuggestionMap(showSuggestions);
+    // Track which suggestion popover is open (by tx.id)
+    const [openSuggestionTxId, setOpenSuggestionTxId] = useState<number | null>(null);
+    // Track which suggestion group is hovered (by groupIndex) for sibling highlighting
+    const [hoveredSuggestionGroup, setHoveredSuggestionGroup] = useState<number | null>(null);
+
+    // ============== Bundle Membership State ==============
+    // Track which bundle membership popover is open (by tx.id)
+    const [openBundleTxId, setOpenBundleTxId] = useState<number | null>(null);
+    // Track which bundle is hovered for sibling highlighting
+    const [hoveredBundleId, setHoveredBundleId] = useState<number | null>(null);
+
+    // ============== Duplicate Suspicion State ==============
+    const { duplicateMap, getGroupTxIds: getDuplicateGroupTxIds } = useDuplicateMap();
+    const [openDuplicateTxId, setOpenDuplicateTxId] = useState<number | null>(null);
+    const [hoveredDuplicateGroup, setHoveredDuplicateGroup] = useState<number | null>(null);
+
+    // ============== Quick-Create Dialog State ==============
+    // When non-null, AccountFormDialog / AssetFormDialog is open for the given tx + field
+    const [quickCreateAccount, setQuickCreateAccount] = useState<{
+        txId: number;
+        field: 'account_id' | 'from_account_id' | 'to_account_id';
+        prefill: AccountPrefill;
+        rawSource?: string;
+        rawLabel?: string;
+        rawNetwork?: string;
+    } | null>(null);
+
+    const [quickCreateAsset, setQuickCreateAsset] = useState<{
+        txId: number;
+        field: 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id';
+        prefill: AssetPrefill;
+        rawSource?: string;
+        rawSymbol?: string;
+    } | null>(null);
+
+    // ============== Invalid Row Collapse State ==============
+    // Invalid rows are collapsed by default; this set tracks which ones are expanded
+    const [expandedInvalidIds, setExpandedInvalidIds] = useState<Set<number>>(new Set());
+
+    const toggleInvalidRow = useCallback((id: number) => {
+        setExpandedInvalidIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    }, []);
+
+    const isInvalidCollapsed = useCallback((tx: Transaction) => {
+        return tx.review_status === 'invalid' && !expandedInvalidIds.has(tx.id);
+    }, [expandedInvalidIds]);
+
+    const collapseAllInvalid = useCallback(() => {
+        setExpandedInvalidIds(new Set());
+    }, []);
+
+    // Use global data health context (for refresh trigger only)
+    // Hook must be called at the top level (React rules of hooks)
+    const { refreshHealthData } = useDataHealth();
 
     // Bulk action states
     const [bulkActionLoading, setBulkActionLoading] = useState(false);
-    const [showBulkStatusDialog, setShowBulkStatusDialog] = useState(false);
     const [showBulkTypeDialog, setShowBulkTypeDialog] = useState(false);
     const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
-    const [bulkStatus, setBulkStatus] = useState<TransactionStatus>(ReviewStatus.VALID);
     const [bulkType, setBulkType] = useState<string>('');
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
@@ -326,9 +459,16 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         }
     };
 
-    // Transaction editor dialog state
-    const [showEditorDialog, setShowEditorDialog] = useState(false);
-    const [transactionToEdit, setTransactionToEdit] = useState<Transaction | null>(null);
+    // Transaction editor dialog state (replaced by drawer)
+    // Pencil icon now opens the detail drawer for inline editing
+
+    // Bundle Create Dialog state
+    const [showBundleCreateDialog, setShowBundleCreateDialog] = useState(false);
+    const [bundleCreateDefaults, setBundleCreateDefaults] = useState<BundleCreateDefaults>({
+        pattern: 'custom',
+        label: 'Bundle',
+        transactionIds: [],
+    });
 
     // CSV Import state
     const [showImportDialog, setShowImportDialog] = useState(false);
@@ -340,19 +480,34 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
     const [dryRunMode, setDryRunMode] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Reset pagination when filters change
-    useEffect(() => { pagination.firstPage(); }, [filters]);
+    // Track filter changes for pagination reset (avoids extra render from useEffect)
+    const prevFilterKeyRef = useRef(JSON.stringify(filters));
+    const filterKey = JSON.stringify(filters);
+    if (filterKey !== prevFilterKeyRef.current) {
+        prevFilterKeyRef.current = filterKey;
+        pagination.firstPage();
+    }
 
-    // TanStack Query for transactions - filters are part of the query key
-    const { data: transactions = [], isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
-        queryKey: ['transactions', filters],
+    // Reset to page 1 when sorting changes
+    const prevSortingRef = useRef(JSON.stringify(sorting));
+    const sortingKey = JSON.stringify(sorting);
+    if (sortingKey !== prevSortingRef.current) {
+        prevSortingRef.current = sortingKey;
+        pagination.firstPage();
+    }
+
+    // Compute sorting params for the API
+    const sortBy = sorting[0] ? (SORT_COLUMN_MAP[sorting[0].id] || 'date') : 'date';
+    const sortDir = sorting[0] ? (sorting[0].desc ? 'desc' : 'asc') : 'desc';
+
+    // TanStack Query for transactions - use stable string key to avoid reference issues
+    const { data: transactionResponse, isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
+        queryKey: ['transactions', 'with-metadata', filterKey, pagination.page, pagination.pageSize, sortBy, sortDir],
         queryFn: async () => {
             const params = new URLSearchParams();
             // Apply review status filter (support multiple via comma-separated)
             if (filters.reviewStatus.length > 0) {
-                // If only one, use it directly; otherwise API doesn't support multiple review_status currently
-                // So we just take the first one for now (or could send comma-separated if backend supports)
-                params.append('review_status', filters.reviewStatus[0]);
+                params.append('review_status', filters.reviewStatus.join(','));
             }
             if (filters.taxability.length > 0) {
                 params.append('taxability', filters.taxability.join(','));
@@ -363,11 +518,35 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (filters.accountIds.length > 0) {
                 params.append('account_id', filters.accountIds.join(','));
             }
+            if (filters.fromAccountIds && filters.fromAccountIds.length > 0) {
+                params.append('from_account_id', filters.fromAccountIds.join(','));
+            }
+            if (filters.toAccountIds && filters.toAccountIds.length > 0) {
+                params.append('to_account_id', filters.toAccountIds.join(','));
+            }
+            if (filters.relatedAccountIds && filters.relatedAccountIds.length > 0) {
+                params.append('related_account_id', filters.relatedAccountIds.join(','));
+            }
             if (filters.assetIds.length > 0) {
                 params.append('asset_id', filters.assetIds.join(','));
             }
+            if (filters.relatedAssetIds && filters.relatedAssetIds.length > 0) {
+                params.append('related_asset_id', filters.relatedAssetIds.join(','));
+            }
             if (filters.categoryIds.length > 0) {
                 params.append('category_id', filters.categoryIds.join(','));
+            }
+            if (filters.connectorRunIds.length > 0) {
+                params.append('connector_run_id', filters.connectorRunIds.join(','));
+            }
+            if (filters.connectorRunOutcome) {
+                params.append('connector_run_outcome', filters.connectorRunOutcome);
+            }
+            if (filters.tagKeys.length > 0) {
+                params.append('tag_key', filters.tagKeys.join(','));
+            }
+            if (filters.networks && filters.networks.length > 0) {
+                params.append('network', filters.networks.join(','));
             }
             if (filters.transactionTypes.length > 0) {
                 params.append('transaction_type', filters.transactionTypes.join(','));
@@ -381,174 +560,152 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (filters.dateTo) {
                 params.append('date_to', filters.dateTo);
             }
-            const response = await fetch(`${API_URL}/transactions?${params}`);
+            // P&L audit filters
+            if (filters.versionId) {
+                params.append('pnl_cal_version', filters.versionId);
+            }
+            if (filters.inclusionStatus) {
+                params.append('pnl_cal_inclusions_status', filters.inclusionStatus);
+            }
+            // Transaction IDs filter (for issue-specific views)
+            if (filters.transactionIds && filters.transactionIds.length > 0) {
+                params.append('ids', filters.transactionIds.join(','));
+            }
+            // Has fees filter
+            if (filters.hasFees) {
+                params.append('has_fee', 'true');
+            }
+
+            // Server-side pagination
+            params.append('limit', String(pagination.pageSize));
+            params.append('offset', String((pagination.page - 1) * pagination.pageSize));
+
+            // Server-side sorting
+            params.append('sort_by', sortBy);
+            params.append('sort_dir', sortDir);
+
+            // Use custom API URL if provided, otherwise default to /transactions
+            const baseUrl = customApiUrl || `${API_URL}/transactions`;
+            // Check if baseUrl already has query params, use & instead of ?
+            const separator = baseUrl.includes('?') ? '&' : '?';
+            const url = `${baseUrl}${separator}${params}`;
+
+            const response = await fetch(url);
             if (!response.ok) throw new Error('Failed to fetch transactions');
-            return response.json() as Promise<Transaction[]>;
+            const data = await response.json() as TransactionListResponse;
+
+            // Store applied filters and metadata
+            setAppliedFilters(data.metadata.applied_filters);
+            setFilterMetadata(data.metadata);
+
+            // Update pagination total from server response
+            pagination.setTotal(data.metadata.filtered_count);
+
+            return data;
         },
     });
 
+    const transactions = transactionResponse?.results || [];
     const error = queryError ? (queryError instanceof Error ? queryError.message : 'Unknown error') : null;
 
-    // Fetch static data once on mount
-    useEffect(() => {
-        if (showBundles) {
-            fetchBundles();
-            fetchSuggestions(); // Always fetch suggestions for Bundles tab
-        }
-        if (showSuggestions && !showBundles) fetchSuggestions();
-        fetchAssets();
-        fetchAccounts();
-    }, [showBundles, showSuggestions]);
+    const expandAllInvalid = useCallback(() => {
+        const invalidIds = new Set(
+            transactions
+                .filter(tx => tx.review_status === 'invalid')
+                .map(tx => tx.id)
+        );
+        setExpandedInvalidIds(invalidIds);
+    }, [transactions]);
+
+    // ============== TanStack Table Instance (for sorting) ==============
+
+    // Column definitions for TanStack - all columns must be defined for the column selector to work
+    const tanstackColumns = useMemo(() => [
+        { id: 'id', accessorKey: 'id' },
+        { id: 'date', accessorFn: (row: Transaction) => new Date(row.date_time).getTime() },
+        { id: 'source', accessorKey: 'source' },
+        { id: 'accounts', accessorFn: (row: Transaction) => row.from_account_id || row.to_account_id || '', enableSorting: false },
+        { id: 'direction', accessorKey: 'direction' },
+        { id: 'type', accessorKey: 'transaction_type' },
+        { id: 'asset', accessorFn: (row: Transaction) => row.linked_asset?.symbol || row.source_asset_symbol || '', enableSorting: false },
+        { id: 'qty', accessorKey: 'quantity' },
+        { id: 'price', accessorKey: 'price' },
+        { id: 'total', accessorKey: 'total' },
+        { id: 'fee', accessorKey: 'fee' },
+        { id: 'feeInBase', accessorKey: 'include_fee' },
+        { id: 'taxability', accessorKey: 'disposal_taxable' },
+        { id: 'bundle', accessorKey: 'user_calculation_unit_id', enableSorting: false },
+        { id: 'tags', accessorKey: 'tags', enableSorting: false },
+        { id: 'sourceTransactionId', accessorKey: 'source_transaction_id' },
+        { id: 'status', accessorKey: 'review_status' },
+    ], []);
+
+    const tanstackTable = useReactTable({
+        data: transactions,
+        columns: tanstackColumns,
+        state: {
+            sorting,
+            columnVisibility,
+        },
+        onSortingChange: setSorting,
+        onColumnVisibilityChange: setColumnVisibility,
+        getCoreRowModel: getCoreRowModel(),
+        manualSorting: true,
+        getRowId: (row) => String(row.id),
+    });
+
+    // Backend handles sorting — sortedTransactions is just the server-ordered list
+    const sortedTransactions = transactions;
 
     // Keep editValuesRef in sync with editValues state
     useEffect(() => { editValuesRef.current = editValues; }, [editValues]);
 
-    const fetchBundles = async () => {
-        try {
-            const response = await fetch(`${API_URL}/bundles?min_transaction_count=1`);
-            if (response.ok) {
-                const data = await response.json();
-                setBundles(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch bundles:', err);
-        }
-    };
-
-    const fetchAssets = async () => {
-        try {
-            const response = await fetch(`${API_URL}/assets?limit=10000`);
-            if (response.ok) {
-                const data = await response.json();
-                setAssets(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch assets:', err);
-        }
-    };
-
-    const fetchAccounts = async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                const data = await response.json();
-                setAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    };
-
-    const fetchSuggestions = async () => {
-        try {
-            const response = await fetch(`${API_URL}/bundles/suggestions?max_suggestions=10`);
-            if (response.ok) {
-                const data = await response.json();
-                setSuggestions(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch suggestions:', err);
-        }
-    };
-
-    // Fetch validation summary for Data Health Check badge
-    const fetchValidationSummary = async () => {
-        try {
-            const response = await fetch(`${API_URL}/transactions/data-health-check`);
-            if (response.ok) {
-                const data: ValidationSummary = await response.json();
-                setValidationSummary(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch validation summary:', err);
-        }
-    };
-
-    // Fetch validation summary on mount and when data changes
-    useEffect(() => {
-        fetchValidationSummary();
-    }, []);
-
-    const acceptSuggestion = async (suggestion: BundleSuggestion, idx: number) => {
-        try {
-            // Use override if set, otherwise use the suggestion's taxability
-            const taxabilityOverride = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
-            const response = await fetch(`${API_URL}/bundles/accept-suggestion`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    pattern: suggestion.pattern,
-                    transaction_ids: suggestion.transactions.map(t => t.id),
-                    label: suggestion.label,
-                    taxability_override: taxabilityOverride,
-                }),
-            });
-            if (response.ok) {
-                queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                await fetchBundles();
-                await fetchSuggestions();
-                // Clear override for this suggestion
-                setSuggestionTaxabilityOverrides(prev => {
-                    const newOverrides = { ...prev };
-                    delete newOverrides[idx];
-                    return newOverrides;
+    // Quick-create handlers: link newly created account/asset to the originating transaction
+    const handleQuickAccountCreated = async (accountId?: number) => {
+        if (accountId && quickCreateAccount) {
+            try {
+                const response = await fetch(`${API_URL}/transactions/${quickCreateAccount.txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [quickCreateAccount.field]: accountId }),
                 });
-                onDataChange?.();
+                if (!response.ok) throw new Error('Failed to link account');
+                // Also link the raw_account
+                if (quickCreateAccount.rawLabel) {
+                    try {
+                        await linkRawAccount({
+                            source: quickCreateAccount.rawSource || '',
+                            label: quickCreateAccount.rawLabel,
+                            network: quickCreateAccount.rawNetwork,
+                            accountId,
+                        });
+                    } catch { }
+                }
+                invalidateTransactionData();
+                refetchAccounts();
+            } catch (err) {
+                toaster.error({ title: 'Error', description: 'Failed to link new account' });
             }
-        } catch (err) {
-            console.error('Failed to accept suggestion:', err);
         }
+        setQuickCreateAccount(null);
     };
 
-    // Bundle update handler
-    const handleBundleUpdate = async (bundleId: number, updates: Partial<Bundle>) => {
-        try {
-            const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates),
-            });
-            if (!response.ok) throw new Error('Failed to update bundle');
-            await fetchBundles();
-            onDataChange?.();
-        } catch (err) {
-            console.error('Failed to update bundle:', err);
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update bundle' });
+    const handleQuickAssetCreated = async (assetId?: number) => {
+        if (assetId && quickCreateAsset) {
+            try {
+                const response = await fetch(`${API_URL}/transactions/${quickCreateAsset.txId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [quickCreateAsset.field]: assetId }),
+                });
+                if (!response.ok) throw new Error('Failed to link asset');
+                invalidateTransactionData();
+                refetchAssets();
+            } catch (err) {
+                toaster.error({ title: 'Error', description: 'Failed to link new asset' });
+            }
         }
-    };
-
-    // Bundle delete handler
-    const handleBundleDelete = async (bundleId: number) => {
-        try {
-            const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
-                method: 'DELETE',
-            });
-            if (!response.ok) throw new Error('Failed to delete bundle');
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
-            await fetchBundles();
-            onDataChange?.();
-        } catch (err) {
-            console.error('Failed to delete bundle:', err);
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete bundle' });
-        }
-    };
-
-    // Remove transaction from bundle handler
-    const handleRemoveTransactionFromBundle = async (bundleId: number, transactionId: number) => {
-        try {
-            const response = await fetch(`${API_URL}/transactions/${transactionId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_calculation_unit_id: null }),
-            });
-            if (!response.ok) throw new Error('Failed to remove transaction from bundle');
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
-            await fetchBundles();
-            onDataChange?.();
-        } catch (err) {
-            console.error('Failed to remove transaction from bundle:', err);
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to remove transaction' });
-        }
+        setQuickCreateAsset(null);
     };
 
     // Helper to update editValues state AND ref synchronously
@@ -570,16 +727,55 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify({ [field]: value })
             });
             if (!response.ok) throw new Error('Failed to update');
-            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
+            // Auto-collapse row when set to invalid
+            if (field === 'review_status' && value === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(txId);
+                    return next;
+                });
+            }
         } catch (err) {
             toaster.error({ title: 'Error', description: `Failed to save ${field}` });
         }
     };
 
-    // Pagination calculations
-    const paginatedTransactions = pagination.paginate(transactions);
+    // Backend handles pagination — transactions are already the current page
+    const paginatedTransactions = transactions;
+
+    // Batch account suggestions: collect all unlinked labels for the current page
+    const batchSuggestionItems = useMemo<BatchItem[]>(() => {
+        const seen = new Set<string>();
+        const items: BatchItem[] = [];
+        for (const tx of transactions) {
+            const labels = [
+                { label: tx.source_account, cond: !tx.account_id },
+                { label: tx.source_from_account, cond: !tx.from_account_id },
+                { label: tx.source_to_account, cond: !tx.to_account_id },
+            ];
+            for (const { label, cond } of labels) {
+                if (cond && label) {
+                    const key = `${label}|${tx.source ?? ''}|${tx.network ?? ''}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        items.push({ label, source: tx.source, network: tx.network });
+                    }
+                }
+            }
+        }
+        return items;
+    }, [transactions]);
+
+    const { suggestionsMap: batchSuggestionsMap } = useAccountSuggestionsBatch(batchSuggestionItems);
+
+    // Pre-compute account lookup map for O(1) access per row
+    const accountsById = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
+
+    // Build bundle color map from visible transactions
+    const { bundleColorMap } = useBundleColorMap(paginatedTransactions);
 
     // Start editing a specific cell
     const startCellEdit = (tx: Transaction, field: EditableField) => {
@@ -590,12 +786,14 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             price_quote_asset_id: tx.price_quote_asset_id,
             fee_quote_asset_id: tx.fee_quote_asset_id,
             account_id: tx.account_id,
+            from_account_id: tx.from_account_id,
+            to_account_id: tx.to_account_id,
             source_transaction_type: tx.source_transaction_type || '',
             transaction_type: tx.transaction_type,
             direction: tx.direction,
             review_status: tx.review_status,
             review_notes: tx.review_notes || '',
-            disposal_taxable: tx.disposal_taxable ?? false,
+            taxability_status: tx.taxability_status ?? 'unknown',
             include_fee: tx.include_fee ?? false,
             date_time: tx.date_time,
             source: tx.source,
@@ -674,7 +872,8 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         try {
             // Convert date_time to ISO format if it's a local datetime string
             const payload = { ...values };
-            if (typeof payload.date_time === 'string' && payload.date_time && !payload.date_time.includes('Z')) {
+            if (typeof payload.date_time === 'string' && payload.date_time
+                && !payload.date_time.includes('Z') && !/[+-]\d{2}:\d{2}$/.test(payload.date_time)) {
                 payload.date_time = dateTimeLocalToISO(payload.date_time);
             }
 
@@ -684,16 +883,24 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error('Failed to update transaction');
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
             setEditingCell(null);
             setEditValues({});
+            // Auto-collapse row when set to invalid
+            if (values.review_status === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
+            }
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
     };
 
     // Quick toggle for taxable/include_fee (saves immediately)
-    const quickToggle = async (tx: Transaction, field: 'disposal_taxable' | 'include_fee') => {
+    const quickToggle = async (tx: Transaction, field: 'include_fee') => {
         try {
             const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
                 method: 'PATCH',
@@ -701,7 +908,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 body: JSON.stringify({ [field]: !tx[field] })
             });
             if (!response.ok) throw new Error('Failed to update');
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
@@ -718,6 +925,23 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             return next;
         });
     };
+
+    // ===== Stable callbacks ref for TransactionTableRow (avoids re-render on callback identity change) =====
+    const rowCallbacksRef = useRef({} as TransactionRowCallbacks);
+    Object.assign(rowCallbacksRef.current, {
+        startCellEdit, saveAndClose, updateEditValues, handleEditKeyDown,
+        saveFieldDirectly, invalidateTransactionData, refetchAccounts,
+        setEditingCell, setEditValues, setSelectedIds,
+        setDrawerTransactionId, setIsDrawerOpen,
+        setQuickCreateAccount, setQuickCreateAsset,
+        setOpenSuggestionTxId, setHoveredSuggestionGroup,
+        setOpenDuplicateTxId, setHoveredDuplicateGroup,
+        setHoveredBundleId, setOpenBundleTxId,
+        toggleInvalidRow, refetchAssets, isEditingCell,
+        toggleSelection, cancelEdit, quickToggle, getEditingTxId,
+        setTransactionToDelete, fetchDeletionImpact, setShowDeleteDialog,
+        invalidateBundleQueries: () => queryClient.invalidateQueries({ queryKey: ['bundles'] }),
+    } satisfies TransactionRowCallbacks);
 
     const toggleSelectAll = () => {
         // Select/deselect only items on current page
@@ -739,30 +963,67 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
         }
     };
 
-    const createBundle = async () => {
-        if (!bundleLabel.trim() || selectedIds.size === 0) return;
-        try {
-            const response = await fetch(`${API_URL}/bundles`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    label: bundleLabel,
-                    pattern: 'custom',
-                    transaction_ids: Array.from(selectedIds)
-                })
-            });
-            if (!response.ok) throw new Error('Failed to create bundle');
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
-            setSelectedIds(new Set());
-            setBundleLabel('');
-            setShowBundleDialog(false);
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create bundle' });
+    // Generate a bundle label from selected transactions, mirroring grouping engine patterns
+    const generateBundleLabel = (pattern: string, txIds: Set<number>): string => {
+        const selectedTxs = transactions.filter(tx => txIds.has(tx.id));
+        const getSymbol = (tx: Transaction) => tx.linked_asset?.symbol || tx.source_asset_symbol || '?';
+        const inflowSymbols = [...new Set(selectedTxs.filter(tx => tx.direction === Direction.INFLOW).map(getSymbol))];
+        const outflowSymbols = [...new Set(selectedTxs.filter(tx => tx.direction === Direction.OUTFLOW).map(getSymbol))];
+        const allSymbols = [...new Set(selectedTxs.map(getSymbol))];
+
+        if (pattern === 'swap') {
+            if (outflowSymbols.length === 1 && inflowSymbols.length === 1) {
+                return `${outflowSymbols[0]} → ${inflowSymbols[0]} Swap`;
+            }
+            if (allSymbols.length > 0) {
+                return `Multi-leg Trade (${allSymbols.slice(0, 4).join(', ')})`;
+            }
+            return 'Swap';
         }
+        if (pattern === 'internal_transfer') {
+            if (allSymbols.length === 1) return `${allSymbols[0]} Transfer`;
+            return `Transfer (${allSymbols.slice(0, 3).join(', ')})`;
+        }
+        return 'Bundle';
+    };
+
+    // Open the bundle create dialog with a specific default pattern
+    const openBundleDialog = (pattern: string) => {
+        if (selectedIds.size === 0) return;
+
+        // Pre-check: warn if any selected transactions are already in a bundle
+        const alreadyBundled = transactions.filter(
+            (tx: Transaction) => selectedIds.has(tx.id) && tx.user_calculation_unit_id != null
+        );
+        if (alreadyBundled.length > 0) {
+            const bundleIds = [...new Set(alreadyBundled.map((tx: Transaction) => tx.user_calculation_unit_id))];
+            toaster.error({
+                title: 'Cannot create bundle',
+                description: `${alreadyBundled.length} selected transaction(s) already belong to bundle(s) #${bundleIds.join(', #')}. Remove them from their current bundle first or deselect them.`,
+            });
+            return;
+        }
+
+        setBundleCreateDefaults({
+            pattern,
+            label: generateBundleLabel(pattern, selectedIds),
+            transactionIds: Array.from(selectedIds),
+        });
+        setShowBundleCreateDialog(true);
+    };
+
+    // Called after the BundleCreateDialog successfully creates a bundle
+    const handleBundleCreated = async () => {
+        await refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundles'] });
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+        refreshHealthData();
+        onDataChange?.();
+        setSelectedIds(new Set());
     };
 
     // Bulk action handlers
-    const bulkUpdateStatus = async () => {
+    const bulkUpdateStatus = async (status: string) => {
         if (selectedIds.size === 0) return;
         setBulkActionLoading(true);
         try {
@@ -771,15 +1032,24 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     transaction_ids: Array.from(selectedIds),
-                    review_status: bulkStatus
+                    review_status: status
                 })
             });
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+            // Auto-collapse rows when bulk-set to invalid
+            if (status === 'invalid') {
+                setExpandedInvalidIds(prev => {
+                    const next = new Set(prev);
+                    selectedIds.forEach(id => next.delete(id));
+                    return next;
+                });
+            }
             setSelectedIds(new Set());
-            setShowBulkStatusDialog(false);
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
         } finally {
@@ -802,12 +1072,106 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to update transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setSelectedIds(new Set());
             setShowBulkTypeDialog(false);
             setBulkType('');
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkUpdateTaxability = async (taxabilityStatus: string) => {
+        if (selectedIds.size === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: Array.from(selectedIds),
+                    taxability_status: taxabilityStatus
+                })
+            });
+            if (!response.ok) throw new Error('Failed to update transactions');
+            const result = await response.json();
+            toaster.success({ title: 'Success', description: result.message });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkUpdateIncludeFee = async (includeFee: boolean) => {
+        if (selectedIds.size === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: Array.from(selectedIds),
+                    include_fee: includeFee
+                })
+            });
+            if (!response.ok) throw new Error('Failed to update transactions');
+            const result = await response.json();
+            toaster.success({ title: 'Success', description: result.message });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkUnbundle = async () => {
+        if (selectedIds.size === 0) return;
+        const selectedTxs = transactions.filter(tx => selectedIds.has(tx.id) && tx.user_calculation_unit_id != null);
+        if (selectedTxs.length === 0) {
+            toaster.error({ title: 'No bundled transactions', description: 'None of the selected transactions belong to a bundle.' });
+            return;
+        }
+        setBulkActionLoading(true);
+        try {
+            // Group by bundle ID to make one request per bundle
+            const byBundle = new Map<number, number[]>();
+            for (const tx of selectedTxs) {
+                const bundleId = tx.user_calculation_unit_id!;
+                if (!byBundle.has(bundleId)) byBundle.set(bundleId, []);
+                byBundle.get(bundleId)!.push(tx.id);
+            }
+            let totalRemoved = 0;
+            for (const [bundleId, txIds] of byBundle) {
+                const response = await fetch(`${API_URL}/bundles/${bundleId}/remove-transactions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transaction_ids: txIds }),
+                });
+                if (!response.ok) throw new Error(`Failed to remove from bundle #${bundleId}`);
+                const result = await response.json();
+                totalRemoved += result.removed_count || 0;
+            }
+            toaster.success({ title: 'Unbundled', description: `${totalRemoved} transaction(s) removed from ${byBundle.size} bundle(s)` });
+            invalidateTransactionData();
+            queryClient.invalidateQueries({ queryKey: ['bundles'] });
+            refreshHealthData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unbundle' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -827,7 +1191,9 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to delete transactions');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setSelectedIds(new Set());
             setShowBulkDeleteDialog(false);
         } catch (err) {
@@ -851,7 +1217,9 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
             if (!response.ok) throw new Error('Failed to delete transaction');
             const result = await response.json();
             toaster.success({ title: 'Success', description: result.message });
-            queryClient.invalidateQueries({ queryKey: ["transactions"] });
+            invalidateTransactionData();
+            refreshHealthData();
+            onDataChange?.();
             setShowDeleteDialog(false);
             setTransactionToDelete(null);
         } catch (err) {
@@ -941,9 +1309,8 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
 
             // Refresh transactions list if not a dry run
             if (!dryRunMode) {
-                queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                fetchValidationSummary();
-                setHealthCheckRefreshTrigger(prev => prev + 1);
+                invalidateTransactionData();
+                refreshHealthData();
                 onDataChange?.();
             }
         } catch (err) {
@@ -967,412 +1334,588 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
 
     const getRowBgColor = (tx: Transaction) => {
         if (selectedIds.has(tx.id)) return 'blue.100';
-        // Highlight if no asset_id linked (needs attention)
-        if (!tx.asset_id) return 'orange.50';
+        // Highlight sibling rows when hovering a suggestion indicator
+        if (hoveredSuggestionGroup !== null && showSuggestions) {
+            const entry = suggestionMap.get(tx.id);
+            if (entry && entry.groupIndex === hoveredSuggestionGroup) return 'teal.50';
+        }
+        // Highlight sibling rows when hovering a bundle membership indicator
+        if (hoveredBundleId !== null && tx.user_calculation_unit_id === hoveredBundleId) return 'purple.50';
+        // Highlight sibling rows when hovering a duplicate indicator
+        if (hoveredDuplicateGroup !== null) {
+            const dupEntry = duplicateMap.get(tx.id);
+            if (dupEntry && dupEntry.groupIndex === hoveredDuplicateGroup) return 'red.50';
+        }
+        // Invalid rows get dark gray background to de-emphasize
+        if (tx.review_status === 'invalid') return 'gray.300';
         return directionRowColors[tx.direction] || 'white';
     };
 
+    // Review status → bottom border color
     const getRowBorderColor = (tx: Transaction) => {
-        // Use workflow status for border color indicator
-        const workflowBorderColors: Record<string, string> = {
+        const reviewStatusBorderColors: Record<string, string> = {
             pending: 'yellow.500',
-            reviewed: 'green.500',
-            excluded: 'gray.400',
+            valid: 'green.500',
+            invalid: 'red.500',
         };
-        return workflowBorderColors[tx.status || 'pending'] || 'gray.300';
+        return reviewStatusBorderColors[tx.review_status || 'pending'] || 'gray.300';
     };
-
-    if (loading) return (
-        <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
-            <Spinner size="xl" color="blue.500" />
-            <Text mt={4}>Loading transactions...</Text>
-        </Box>
-    );
-
-    if (error) return (
-        <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
-            <Text color="red.600">Error: {error}</Text>
-        </Box>
-    );
 
     const currentPageIds = paginatedTransactions.map(tx => tx.id);
     const allCurrentPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
 
-    const handleRefresh = () => {
-        // Force refetch the transactions query directly
-        refetchTransactions();
-        // Always refresh bundles in "All" tab (showBundles=true means we're in All tab)
-        if (showBundles) {
-            fetchBundles();
-            fetchSuggestions();
-        }
-        if (showSuggestions) fetchSuggestions();
-        // Refresh validation summary for Data Health Check
-        fetchValidationSummary();
-        setHealthCheckRefreshTrigger(prev => prev + 1);
+    // Helper to render sortable column header
+    const renderSortableHeader = (columnId: string, label: string, minW?: string, extraProps?: Record<string, any>) => {
+        const column = tanstackTable.getColumn(columnId);
+        const isSorted = column?.getIsSorted();
+
+        return (
+            <Table.ColumnHeader
+                cursor="pointer"
+                onClick={() => column?.toggleSorting()}
+                userSelect="none"
+                minW={minW}
+                _hover={{ bg: 'gray.200' }}
+                {...extraProps}
+            >
+                <Flex align="center" gap={1}>
+                    <Text>{label}</Text>
+                    {isSorted === 'asc' && <LuArrowUp size={10} />}
+                    {isSorted === 'desc' && <LuArrowDown size={10} />}
+                    {!isSorted && <LuArrowUpDown size={10} style={{ opacity: 0.3 }} />}
+                </Flex>
+            </Table.ColumnHeader>
+        );
     };
 
+    const handleRefresh = () => {
+        refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+        // Always refresh validation summary for Data Health Check
+        refreshHealthData();
+    };
+
+    const handleReset = () => {
+        setFilters(effectiveResetFilters);
+    };
+
+    const handleRetry = () => {
+        // Force refetch without changing filters (useful when error occurs with same filter state)
+        refetchTransactions();
+        queryClient.invalidateQueries({ queryKey: ['bundleSuggestions'] });
+        refreshHealthData();
+    };
+
+    // Auto-link high-confidence suggestions (≥95% match) for selected transactions
+    const autoLinkHighConfidence = async () => {
+        const MIN_CONFIDENCE = 0.95;
+        const selectedTxs = paginatedTransactions.filter(tx => selectedIds.has(tx.id));
+
+        let linkedCount = 0;
+        const errors: string[] = [];
+
+        setBulkActionLoading(true);
+
+        // Collect all account labels that need suggestions (batch API call)
+        const accountBatchItems: { label: string; source?: string | null; network?: string | null; txField: string; txId: number }[] = [];
+        for (const tx of selectedTxs) {
+            if (tx.source_from_account && !tx.from_account_id) {
+                accountBatchItems.push({ label: tx.source_from_account, source: tx.source, network: tx.network, txField: 'from_account_id', txId: tx.id });
+            }
+            if (tx.source_to_account && !tx.to_account_id) {
+                accountBatchItems.push({ label: tx.source_to_account, source: tx.source, network: tx.network, txField: 'to_account_id', txId: tx.id });
+            }
+            if (tx.source_account && !tx.account_id) {
+                accountBatchItems.push({ label: tx.source_account, source: tx.source, network: tx.network, txField: 'account_id', txId: tx.id });
+            }
+        }
+
+        // Fetch network-aware account suggestions in one batch
+        const batchResults = accountBatchItems.length > 0
+            ? await fetchAccountSuggestionsBatch(
+                accountBatchItems.map(item => ({
+                    label: item.label,
+                    source: item.source,
+                    network: item.network,
+                    minConfidence: MIN_CONFIDENCE,
+                    maxResults: 1,
+                }))
+            )
+            : [];
+
+        // Build a lookup: txId:field → best suggestion
+        const accountSuggestionLookup = new Map<string, AccountSuggestion>();
+        batchResults.forEach((result, idx) => {
+            if (result.suggestions.length > 0 && result.suggestions[0].confidence >= MIN_CONFIDENCE) {
+                const item = accountBatchItems[idx];
+                accountSuggestionLookup.set(`${item.txId}:${item.txField}`, result.suggestions[0]);
+            }
+        });
+
+        for (const tx of selectedTxs) {
+            const updates: Record<string, number> = {};
+
+            // Check asset (still client-side — no network disambiguation needed for assets)
+            if (tx.source_asset_symbol && !tx.asset_id) {
+                const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, MIN_CONFIDENCE, 1);
+                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
+                    updates.asset_id = suggestions[0].item.asset_id!;
+                }
+            }
+
+            // Check price quote asset
+            if (tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id) {
+                const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, MIN_CONFIDENCE, 1);
+                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
+                    updates.price_quote_asset_id = suggestions[0].item.asset_id!;
+                }
+            }
+
+            // Check fee quote asset
+            if (tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id) {
+                const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, MIN_CONFIDENCE, 1);
+                if (suggestions.length > 0 && suggestions[0].confidence >= MIN_CONFIDENCE) {
+                    updates.fee_quote_asset_id = suggestions[0].item.asset_id!;
+                }
+            }
+
+            // Check account fields — use network-aware batch results
+            const fromSugg = accountSuggestionLookup.get(`${tx.id}:from_account_id`);
+            if (fromSugg) updates.from_account_id = fromSugg.id;
+
+            const toSugg = accountSuggestionLookup.get(`${tx.id}:to_account_id`);
+            if (toSugg) updates.to_account_id = toSugg.id;
+
+            const acctSugg = accountSuggestionLookup.get(`${tx.id}:account_id`);
+            if (acctSugg) updates.account_id = acctSugg.id;
+
+            // Apply updates if any
+            if (Object.keys(updates).length > 0) {
+                try {
+                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updates)
+                    });
+                    if (response.ok) {
+                        linkedCount += Object.keys(updates).length;
+                        // Also link raw accounts for account fields
+                        const rawLinkPromises: Promise<void>[] = [];
+                        if (updates.from_account_id && tx.source_from_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_from_account, network: tx.network || undefined, accountId: updates.from_account_id }).catch(() => { }));
+                        }
+                        if (updates.to_account_id && tx.source_to_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_to_account, network: tx.network || undefined, accountId: updates.to_account_id }).catch(() => { }));
+                        }
+                        if (updates.account_id && tx.source_account) {
+                            rawLinkPromises.push(linkRawAccount({ source: tx.source, label: tx.source_account, network: tx.network || undefined, accountId: updates.account_id }).catch(() => { }));
+                        }
+                        await Promise.all(rawLinkPromises);
+                    } else {
+                        errors.push(`Transaction ${tx.id}: Failed to update`);
+                    }
+                } catch (err) {
+                    errors.push(`Transaction ${tx.id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                }
+            }
+        }
+
+        setBulkActionLoading(false);
+
+        if (linkedCount > 0) {
+            toaster.success({
+                title: 'Auto-link complete',
+                description: `Linked ${linkedCount} field(s) with ≥95% confidence matches${errors.length > 0 ? `. ${errors.length} error(s).` : ''}`
+            });
+            invalidateTransactionData();
+        } else {
+            toaster.info({
+                title: 'No high-confidence matches',
+                description: 'No unlinked fields found with ≥95% confidence match in the selected transactions.'
+            });
+        }
+    };
+
+    // ============== Invalid Row Collapse Counts ==============
+    const invalidTransactions = useMemo(
+        () => transactions.filter(tx => tx.review_status === 'invalid'),
+        [transactions]
+    );
+    const collapsedInvalidCount = useMemo(
+        () => invalidTransactions.filter(tx => !expandedInvalidIds.has(tx.id)).length,
+        [invalidTransactions, expandedInvalidIds]
+    );
+    const totalInvalidCount = invalidTransactions.length;
+
+    // Check if any selected transactions have unlinked fields (for auto-link visibility)
+    const hasUnlinkedFields = useMemo(() => {
+        if (selectedIds.size === 0) return false;
+        return paginatedTransactions.some(tx => {
+            if (!selectedIds.has(tx.id)) return false;
+            return (
+                (tx.source_from_account && !tx.from_account_id) ||
+                (tx.source_to_account && !tx.to_account_id) ||
+                (tx.source_account && !tx.account_id) ||
+                (tx.source_asset_symbol && !tx.asset_id) ||
+                (tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id) ||
+                (tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id)
+            );
+        });
+    }, [selectedIds, paginatedTransactions]);
+
     return (
-        <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
-                <Box>
-                    <Heading as="h2" size="md" mb={1}>{title}</Heading>
-                    <Text color="gray.600" fontSize="sm">{subtitle}</Text>
-                </Box>
-                <Flex gap={2}>
-                    {selectedIds.size > 0 && (
-                        <Button colorPalette="purple" onClick={() => setShowBundleDialog(true)}>
-                            📦 Create Bundle ({selectedIds.size})
-                        </Button>
-                    )}
-                    {/* Data Health Check Button */}
-                    <Tooltip content="Check data completeness for P&L calculations">
-                        <Button
-                            onClick={() => setIsHealthCheckOpen(true)}
-                            variant="outline"
-                            colorPalette={validationSummary?.has_issues ? 'orange' : 'green'}
-                        >
-                            <FiActivity />
-                            {validationSummary?.has_issues ? (
-                                <Badge colorPalette="orange" size="sm" ml={1}>
-                                    {validationSummary.total_issues}
-                                </Badge>
+        <Box pb={selectedIds.size > 0 && !embeddedMode ? '48px' : '0'}>
+            {!embeddedMode && (
+                <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
+                    <Box>
+                        <Heading as="h2" size="md" mb={1}>{title}</Heading>
+                        <Text color="gray.600" fontSize="sm">{subtitle}</Text>
+                    </Box>
+                    {/* Invalid row collapse indicator */}
+                    {totalInvalidCount > 0 && (
+                        <HStack gap={2} fontSize="xs" color="gray.500">
+                            <Badge colorPalette="red" variant="subtle" size="sm">
+                                <LuX size={10} />
+                                {totalInvalidCount} invalid
+                            </Badge>
+                            {collapsedInvalidCount > 0 ? (
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    color="gray.500"
+                                    _hover={{ color: 'red.600' }}
+                                    onClick={expandAllInvalid}
+                                    title="Expand all invalid rows"
+                                >
+                                    <LuPlus size={12} /> Show
+                                </Button>
                             ) : (
-                                <Text ml={1} fontSize="sm">✓</Text>
+                                <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    color="gray.500"
+                                    _hover={{ color: 'red.600' }}
+                                    onClick={collapseAllInvalid}
+                                    title="Collapse all invalid rows"
+                                >
+                                    <LuMinus size={12} /> Hide
+                                </Button>
                             )}
-                        </Button>
-                    </Tooltip>
-                    <Button onClick={handleRefresh} variant="outline">
-                        🔄 Refresh
-                    </Button>
+                        </HStack>
+                    )}
                 </Flex>
-            </Flex>
+            )}
 
-            {/* Data Health Check Drawer */}
-            <DataHealthCheckDrawer
-                isOpen={isHealthCheckOpen}
-                onClose={() => setIsHealthCheckOpen(false)}
-                refreshTrigger={healthCheckRefreshTrigger}
-                assets={assets}
-                accounts={accounts}
-                onAssetsUpdated={fetchAssets}
-                onAccountsUpdated={fetchAccounts}
-                onNavigateToPendingTransactions={() => {
-                    setFilters(prev => ({ ...prev, reviewStatus: ['pending'] }));
-                    setIsHealthCheckOpen(false);
-                }}
-                onNavigateToBundleSuggestions={() => {
-                    setViewMode('bundles');
-                    setIsHealthCheckOpen(false);
-                }}
-            />
-
-            {/* Standalone Suggestions Section - only when showSuggestions but not showBundles */}
-            {showSuggestions && !showBundles && (
-                <Box mb={6} borderWidth={1} borderColor="teal.200" borderRadius="md" bg="teal.50">
-                    <Flex
-                        p={3}
-                        justify="space-between"
-                        align="center"
-                        cursor="pointer"
-                        onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-                        _hover={{ bg: 'teal.100' }}
-                        borderRadius="md"
+            {/* Floating Bulk Actions Bar - pinned to viewport bottom */}
+            {selectedIds.size > 0 && !embeddedMode && (
+                <Portal>
+                    <Box
+                        position="fixed"
+                        bottom={0}
+                        left={0}
+                        right={0}
+                        zIndex={1000}
+                        bg="rgba(255, 255, 255, 0.85)"
+                        backdropFilter="blur(8px)"
+                        borderTop="1px solid"
+                        borderColor="gray.200"
+                        boxShadow="0 -2px 8px rgba(0,0,0,0.08)"
+                        animation="slideUp 150ms ease-out"
+                        css={{
+                            '@keyframes slideUp': {
+                                from: { transform: 'translateY(100%)' },
+                                to: { transform: 'translateY(0)' },
+                            },
+                        }}
                     >
-                        <Flex align="center" gap={2}>
-                            <Text fontWeight="bold" color="teal.700">💡 Suggested Bundles ({suggestions.length})</Text>
-                        </Flex>
-                        <Text color="teal.600">{suggestionsExpanded ? '▼' : '▶'}</Text>
-                    </Flex>
-                    {suggestionsExpanded && (
-                        <Box p={3} pt={0}>
-                            {suggestions.length === 0 ? (
-                                <Text color="teal.600" fontSize="sm">No bundle suggestions available. Add more transactions to get pattern-based suggestions.</Text>
-                            ) : (
-                                <Flex gap={3} flexWrap="wrap">
-                                    {suggestions.map((suggestion, idx) => {
-                                        const currentTaxability = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
-                                        return (
-                                            <Card.Root key={idx} size="sm" width="320px" bg="white">
-                                                <Card.Body p={3}>
-                                                    <Flex justify="space-between" align="center" mb={2}>
-                                                        <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
-                                                            {suggestion.pattern}
-                                                        </Badge>
-                                                        <Text fontSize="xs" color="gray.500">
-                                                            {Math.round(suggestion.confidence * 100)}% confidence
-                                                        </Text>
-                                                    </Flex>
-                                                    <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
-                                                    <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
-                                                    {suggestion.total_quantity && (
-                                                        <Text fontSize="xs" mt={1}>
-                                                            {suggestion.total_quantity} {suggestion.asset_symbol}
-                                                        </Text>
-                                                    )}
-                                                    {/* Taxability Selector */}
-                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                        <Flex align="center" gap={2}>
-                                                            <Text fontSize="xs" color="gray.500">Taxability:</Text>
-                                                            <NativeSelect.Root size="sm" width="100px">
-                                                                <NativeSelect.Field
-                                                                    value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
-                                                                    onChange={e => {
-                                                                        setSuggestionTaxabilityOverrides(prev => ({
-                                                                            ...prev,
-                                                                            [idx]: e.target.value as TaxabilityStatus,
-                                                                        }));
-                                                                    }}
-                                                                    onClick={e => e.stopPropagation()}
-                                                                    style={{
-                                                                        fontSize: '10px',
-                                                                        padding: '2px 4px',
-                                                                        backgroundColor: currentTaxability === TaxabilityStatusEnum.TAXABLE ? '#FED7AA' :
-                                                                            currentTaxability === TaxabilityStatusEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
-                                                                        borderRadius: '4px',
-                                                                    }}
-                                                                >
-                                                                    <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
-                                                                    <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
-                                                                    <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
-                                                                </NativeSelect.Field>
-                                                            </NativeSelect.Root>
-                                                        </Flex>
-                                                    </Box>
-                                                    {/* Expandable Transaction List */}
-                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                        <Text fontSize="xs" color="gray.500" mb={1}>
-                                                            {suggestion.transactions.length} transaction{suggestion.transactions.length !== 1 ? 's' : ''}:
-                                                        </Text>
-                                                        <BundleTransactionList
-                                                            transactions={suggestion.transactions}
-                                                            maxVisible={3}
-                                                            colorScheme="teal"
-                                                            onTransactionClick={(txId) => {
-                                                                setDrawerTransactionId(txId);
-                                                                setIsDrawerOpen(true);
-                                                            }}
-                                                        />
-                                                    </Box>
-                                                    <Flex mt={3} gap={2}>
-                                                        <Button
-                                                            size="xs"
-                                                            colorPalette="green"
-                                                            onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion, idx); }}
-                                                        >
-                                                            ✓ Create Bundle
-                                                        </Button>
-                                                        <Button size="xs" variant="ghost">Dismiss</Button>
-                                                    </Flex>
-                                                </Card.Body>
-                                            </Card.Root>
-                                        );
-                                    })}
-                                </Flex>
-                            )}
-                        </Box>
-                    )}
-                </Box>
-            )}
-
-            {/* Bulk Actions Bar - shown when items are selected */}
-            {selectedIds.size > 0 && (
-                <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
-                    <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                        <Text fontWeight="medium" color="blue.700">
-                            {selectedIds.size} transaction(s) selected
-                        </Text>
-                        <Flex gap={2} flexWrap="wrap">
-                            <Button
-                                size="sm"
-                                colorPalette="green"
-                                variant="outline"
-                                onClick={() => setShowBulkStatusDialog(true)}
-                            >
-                                ✓ Set Status
-                            </Button>
-                            <Button
-                                size="sm"
-                                colorPalette="purple"
-                                variant="outline"
-                                onClick={() => setShowBulkTypeDialog(true)}
-                            >
-                                🏷️ Set Type
-                            </Button>
-                            <Button
-                                size="sm"
-                                colorPalette="purple"
-                                variant="outline"
-                                onClick={() => setShowBundleDialog(true)}
-                            >
-                                📦 Create Bundle
-                            </Button>
-                            <Button
-                                size="sm"
-                                colorPalette="red"
-                                variant="outline"
-                                onClick={() => {
-                                    fetchDeletionImpact(Array.from(selectedIds));
-                                    setShowBulkDeleteDialog(true);
-                                }}
-                            >
-                                🗑️ Delete
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setSelectedIds(new Set())}
-                            >
-                                ✕ Clear Selection
-                            </Button>
-                        </Flex>
-                    </Flex>
-                </Box>
-            )}
-
-            {/* Tabbed View for Transactions/Bundles when showBundles is enabled */}
-            {showBundles && (
-                <Tabs.Root value={viewMode} onValueChange={(e) => setViewMode(e.value as 'transactions' | 'bundles')}>
-                    <Tabs.List mb={4}>
-                        <Tabs.Trigger value="transactions">📋 Transactions ({transactions.length})</Tabs.Trigger>
-                        <Tabs.Trigger value="bundles">📦 Bundles ({bundles.length}) {suggestions.length > 0 && <Badge colorPalette="teal" ml={1}>{suggestions.length} 💡</Badge>}</Tabs.Trigger>
-                    </Tabs.List>
-
-                    <Tabs.Content value="bundles">
-                        {/* Suggestions Section inside Bundles tab */}
-                        <Box mb={4} borderWidth={1} borderColor="teal.200" borderRadius="md" bg="teal.50">
-                            <Flex
-                                p={3}
-                                justify="space-between"
-                                align="center"
-                                cursor="pointer"
-                                onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-                                _hover={{ bg: 'teal.100' }}
-                                borderRadius="md"
-                            >
-                                <Flex align="center" gap={2}>
-                                    <Text fontWeight="bold" color="teal.700">💡 Suggested Bundles ({suggestions.length})</Text>
-                                </Flex>
-                                <Text color="teal.600">{suggestionsExpanded ? '▼' : '▶'}</Text>
-                            </Flex>
-                            {suggestionsExpanded && (
-                                <Box p={3} pt={0}>
-                                    {suggestions.length === 0 ? (
-                                        <Text color="teal.600" fontSize="sm">No bundle suggestions available. Add more transactions to get pattern-based suggestions.</Text>
-                                    ) : (
-                                        <Flex gap={3} flexWrap="wrap">
-                                            {suggestions.map((suggestion, idx) => {
-                                                const currentTaxability = suggestionTaxabilityOverrides[idx] ?? suggestion.taxability_suggestion;
-                                                return (
-                                                    <Card.Root key={idx} size="sm" width="320px" bg="white">
-                                                        <Card.Body p={3}>
-                                                            <Flex justify="space-between" align="center" mb={2}>
-                                                                <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'}>
-                                                                    {suggestion.pattern}
-                                                                </Badge>
-                                                                <Text fontSize="xs" color="gray.500">
-                                                                    {Math.round(suggestion.confidence * 100)}% confidence
-                                                                </Text>
-                                                            </Flex>
-                                                            <Text fontWeight="bold" fontSize="sm">{suggestion.label}</Text>
-                                                            <Text fontSize="xs" color="gray.600" mt={1}>{suggestion.reason}</Text>
-                                                            {suggestion.total_quantity && (
-                                                                <Text fontSize="xs" mt={1}>
-                                                                    {suggestion.total_quantity} {suggestion.asset_symbol}
-                                                                </Text>
-                                                            )}
-                                                            {/* Taxability Selector */}
-                                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                                <Flex align="center" gap={2}>
-                                                                    <Text fontSize="xs" color="gray.500">Taxability:</Text>
-                                                                    <NativeSelect.Root size="sm" width="100px">
-                                                                        <NativeSelect.Field
-                                                                            value={currentTaxability || TaxabilityStatusEnum.UNKNOWN}
-                                                                            onChange={e => {
-                                                                                setSuggestionTaxabilityOverrides(prev => ({
-                                                                                    ...prev,
-                                                                                    [idx]: e.target.value as TaxabilityStatus,
-                                                                                }));
-                                                                            }}
-                                                                            onClick={e => e.stopPropagation()}
-                                                                            style={{
-                                                                                fontSize: '10px',
-                                                                                padding: '2px 4px',
-                                                                                backgroundColor: currentTaxability === TaxabilityStatusEnum.TAXABLE ? '#FED7AA' :
-                                                                                    currentTaxability === TaxabilityStatusEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
-                                                                                borderRadius: '4px',
-                                                                            }}
-                                                                        >
-                                                                            <option value={TaxabilityStatusEnum.UNKNOWN}>Unknown</option>
-                                                                            <option value={TaxabilityStatusEnum.TAXABLE}>Taxable</option>
-                                                                            <option value={TaxabilityStatusEnum.NON_TAXABLE}>Non-Tax</option>
-                                                                        </NativeSelect.Field>
-                                                                    </NativeSelect.Root>
-                                                                </Flex>
-                                                            </Box>
-                                                            {/* Expandable Transaction List */}
-                                                            <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
-                                                                <Text fontSize="xs" color="gray.500" mb={1}>
-                                                                    {suggestion.transactions.length} transaction{suggestion.transactions.length !== 1 ? 's' : ''}:
-                                                                </Text>
-                                                                <BundleTransactionList
-                                                                    transactions={suggestion.transactions}
-                                                                    maxVisible={3}
-                                                                    colorScheme="teal"
-                                                                    onTransactionClick={(txId) => {
-                                                                        setDrawerTransactionId(txId);
-                                                                        setIsDrawerOpen(true);
-                                                                    }}
-                                                                />
-                                                            </Box>
-                                                            <Flex mt={3} gap={2}>
-                                                                <Button
-                                                                    size="xs"
-                                                                    colorPalette="green"
-                                                                    onClick={(e) => { e.stopPropagation(); acceptSuggestion(suggestion, idx); }}
-                                                                >
-                                                                    ✓ Create Bundle
-                                                                </Button>
-                                                                <Button size="xs" variant="ghost">Dismiss</Button>
-                                                            </Flex>
-                                                        </Card.Body>
-                                                    </Card.Root>
-                                                );
-                                            })}
-                                        </Flex>
+                        <Box maxW="1400px" mx="auto" px={4} py={1.5}>
+                            <Flex justify="space-between" align="center" flexWrap="wrap" gap={1.5}>
+                                <Text fontWeight="semibold" color="blue.700" fontSize="xs">
+                                    {selectedIds.size} selected
+                                </Text>
+                                <Flex gap={1} flexWrap="wrap" align="center">
+                                    {/* Additional bulk actions from plugins (rendered first) */}
+                                    {additionalBulkActions
+                                        .filter(action => !action.isVisible || action.isVisible(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]))
+                                        .map(action => (
+                                            <Button
+                                                key={action.id}
+                                                size="2xs"
+                                                fontSize="xs"
+                                                colorPalette={action.colorPalette || 'gray'}
+                                                variant={action.variant || 'outline'}
+                                                onClick={() => action.onClick(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[])}
+                                                disabled={bulkActionLoading || (action.isDisabled ? action.isDisabled(Array.from(selectedIds), paginatedTransactions.filter(tx => selectedIds.has(tx.id)) as T[]) : false)}
+                                            >
+                                                {action.icon} {action.label}
+                                            </Button>
+                                        ))}
+                                    {additionalBulkActions.length > 0 && (
+                                        <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
                                     )}
-                                </Box>
-                            )}
-                        </Box>
 
-                        {/* Existing Bundles - New Table View */}
-                        <BundleTable
-                            bundles={bundles}
-                            onBundleUpdate={handleBundleUpdate}
-                            onBundleDelete={handleBundleDelete}
-                            onRemoveTransaction={handleRemoveTransactionFromBundle}
-                            onRefresh={fetchBundles}
-                            onTransactionClick={(txId) => {
-                                setDrawerTransactionId(txId);
-                                setIsDrawerOpen(true);
-                            }}
-                        />
-                    </Tabs.Content>
-                </Tabs.Root>
+                                    {/* Quick Status Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="green"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateStatus('valid')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        ✓ Valid
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="yellow"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateStatus('pending')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        ⏳ Pending
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="red"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateStatus('invalid')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        ✗ Invalid
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Taxability Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="teal"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateTaxability('taxable')}
+                                        disabled={bulkActionLoading}
+                                        title="Set taxability to Taxable"
+                                    >
+                                        💰 Taxable
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateTaxability('non_taxable')}
+                                        disabled={bulkActionLoading}
+                                        title="Set taxability to Non-Taxable"
+                                    >
+                                        🚫 Non-Tax
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Include Fee Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="blue"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateIncludeFee(true)}
+                                        disabled={bulkActionLoading}
+                                        title="Include fee in cost basis/proceeds"
+                                    >
+                                        Fee ✓
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={() => bulkUpdateIncludeFee(false)}
+                                        disabled={bulkActionLoading}
+                                        title="Exclude fee from cost basis/proceeds"
+                                    >
+                                        Fee ✗
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Quick Bundle Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="orange"
+                                        variant="outline"
+                                        onClick={() => openBundleDialog('swap')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        🔄 Swap
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="blue"
+                                        variant="outline"
+                                        onClick={() => openBundleDialog('internal_transfer')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        ↔ Transfer
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="purple"
+                                        variant="outline"
+                                        onClick={() => openBundleDialog('custom')}
+                                        disabled={bulkActionLoading}
+                                    >
+                                        📦 Bundle
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="gray"
+                                        variant="outline"
+                                        onClick={bulkUnbundle}
+                                        disabled={bulkActionLoading}
+                                        title="Remove selected transactions from their bundles"
+                                    >
+                                        🔓 Unbundle
+                                    </Button>
+
+                                    <Box borderLeft="1px solid" borderColor="gray.300" h="16px" mx={0.5} />
+
+                                    {/* Other Actions */}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="purple"
+                                        variant="outline"
+                                        onClick={() => setShowBulkTypeDialog(true)}
+                                    >
+                                        🏷️ Type
+                                    </Button>
+                                    {hasUnlinkedFields && (
+                                        <Button
+                                            size="2xs"
+                                            fontSize="xs"
+                                            colorPalette="cyan"
+                                            variant="outline"
+                                            onClick={autoLinkHighConfidence}
+                                            disabled={bulkActionLoading}
+                                            title="Auto-link accounts and assets with ≥95% confidence match"
+                                        >
+                                            🔗 Auto-Link
+                                        </Button>
+                                    )}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="red"
+                                        variant="outline"
+                                        onClick={() => {
+                                            fetchDeletionImpact(Array.from(selectedIds));
+                                            setShowBulkDeleteDialog(true);
+                                        }}
+                                    >
+                                        🗑️ Delete
+                                    </Button>
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        variant="ghost"
+                                        onClick={() => setSelectedIds(new Set())}
+                                    >
+                                        ✕ Clear
+                                    </Button>
+                                </Flex>
+                            </Flex>
+                        </Box>
+                    </Box>
+                </Portal>
             )}
 
-            {/* Only show transactions when in transactions view mode (or when bundles tab is not shown) */}
-            {(!showBundles || viewMode === 'transactions') && (
-                <>
-                    {showFilters && (
+            {/* Transactions content */}
+            <>
+                {/* Transactions tab header with actions */}
+                {!embeddedMode && (
+                    <Flex justify="flex-end" align="center" mb={4} gap={2}>
+                        {/* Column visibility picker */}
+                        <ColumnVisibilityPopover
+                            table={tanstackTable}
+                            onReset={() => {
+                                setColumnVisibility(presetToVisibility(
+                                    tableConfig.columnPreset,
+                                    tableConfig.hiddenColumns,
+                                    tableConfig.shownColumns
+                                ));
+                            }}
+                            size="sm"
+                        />
+                        <Button
+                            onClick={error ? handleRetry : handleReset}
+                            variant="outline"
+                            colorPalette={error ? "red" : "gray"}
+                            size="sm"
+                        >
+                            {error ? "🔄 Retry" : "↺ Reset"}
+                        </Button>
+                        <Button
+                            onClick={() => handleRefresh()}
+                            variant="outline"
+                            size="sm"
+                        >
+                            🔄 Refresh
+                        </Button>
+                    </Flex>
+                )}
+
+                {showFilters && (
+                    <Box mb={4}>
                         <TransactionFilters
                             filters={filters}
                             onChange={setFilters}
-                            onClear={() => setFilters({ ...defaultFilterState, reviewStatus: defaultWorkflowFilter ? [defaultWorkflowFilter] : [] })}
+                            onClear={() => setFilters(effectiveResetFilters)}
+                            expanded={filtersExpanded}
+                            onExpandedChange={setFiltersExpanded}
+                            appliedFilters={appliedFilters}
+                            filterMetadata={filterMetadata}
+                            resetFilters={effectiveResetFilters}
                         />
-                    )}
+                    </Box>
+                )}
 
-                    {/* Legend */}
+                {/* Top Pagination - show when more than 15 transactions */}
+                {!loading && !error && !embeddedMode && (filterMetadata?.filtered_count ?? 0) > 15 && (
+                    <Box mb={4}>
+                        <TablePagination
+                            pagination={pagination}
+                            total={filterMetadata?.filtered_count ?? 0}
+                        />
+                    </Box>
+                )}
+
+                {/* Error state for transactions */}
+                {error && (
+                    <Box textAlign="center" py={6} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200" mb={4}>
+                        <Text color="red.600" fontWeight="bold">Error loading transactions</Text>
+                        <Text color="red.600" fontSize="sm">{error}</Text>
+                        <Button mt={3} onClick={handleRetry} colorPalette="red" size="sm">
+                            🔄 Retry
+                        </Button>
+                    </Box>
+                )}
+
+                {/* Loading overlay for transactions */}
+                {loading && !error && (
+                    <Box textAlign="center" py={10} bg="gray.50" borderRadius="md" mb={4}>
+                        <Spinner size="xl" color="blue.500" />
+                        <Text mt={4}>Loading transactions...</Text>
+                    </Box>
+                )}
+
+                {/* Legend */}
+                {!loading && !error && !embeddedMode && (
                     <Flex mb={4} gap={3} align="center" flexWrap="wrap">
                         <Text fontSize="xs" color="gray.500">Dir:</Text>
                         <Flex align="center" gap={1}>
@@ -1387,756 +1930,124 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                             <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
                             <Text fontSize="xs">↔Int</Text>
                         </Flex>
-                        <Text fontSize="xs" color="gray.500" ml={2}>Workflow:</Text>
+                        <Text fontSize="xs" color="gray.500" ml={2}>Review:</Text>
                         <Flex align="center" gap={1}>
                             <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
                             <Text fontSize="xs">Pending</Text>
                         </Flex>
                         <Flex align="center" gap={1}>
                             <Box w={1} h={3} bg="green.500" borderRadius="sm" />
-                            <Text fontSize="xs">Reviewed</Text>
+                            <Text fontSize="xs">Valid</Text>
                         </Flex>
                         <Flex align="center" gap={1}>
-                            <Box w={1} h={3} bg="gray.400" borderRadius="sm" />
-                            <Text fontSize="xs">Excluded</Text>
-                        </Flex>
-                        <Flex align="center" gap={1}>
-                            <Box w={3} h={3} bg="orange.100" borderRadius="sm" />
-                            <Text fontSize="xs">No Asset</Text>
+                            <Box w={1} h={3} bg="red.500" borderRadius="sm" />
+                            <Text fontSize="xs">Invalid</Text>
                         </Flex>
                     </Flex>
+                )}
 
+                {/* Transaction table - only show when not loading or erroring */}
+                {!loading && !error && (
                     <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" css={{ fontSize: '8px' }} position="relative">
                         <Table.Root size="sm" variant="line">
                             <Table.Header css={{ fontSize: '9px' }}>
                                 <Table.Row>
                                     <Table.ColumnHeader position="sticky" left={0} bg="gray.100" zIndex={10} minW="50px" borderRight="2px solid" borderColor="gray.300">
-                                        <Checkbox.Root
-                                            checked={allCurrentPageSelected}
-                                            onCheckedChange={toggleSelectAll}
-                                        >
-                                            <Checkbox.HiddenInput />
-                                            <Checkbox.Control />
-                                        </Checkbox.Root>
+                                        {(!embeddedMode || showSelectionInEmbedded) && (
+                                            <Checkbox.Root
+                                                checked={allCurrentPageSelected}
+                                                onCheckedChange={toggleSelectAll}
+                                            >
+                                                <Checkbox.HiddenInput />
+                                                <Checkbox.Control />
+                                            </Checkbox.Root>
+                                        )}
                                     </Table.ColumnHeader>
-                                    <Table.ColumnHeader>ID</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Date/Time</Table.ColumnHeader>
-                                    <Table.ColumnHeader minW="100px">Source Info</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Dir</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Type</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Qty</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Price</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Total</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Fee</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Tax</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Fee$</Table.ColumnHeader>
-                                    <Table.ColumnHeader>Bundle</Table.ColumnHeader>
-                                    <Table.ColumnHeader position="sticky" right="30px" bg="gray.100" zIndex={10} borderLeft="2px solid" borderColor="gray.300">Status</Table.ColumnHeader>
-                                    <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="30px"></Table.ColumnHeader>
+                                    {showColumn('id') && renderSortableHeader('id', 'ID')}
+                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time')}
+                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', '180px')}
+                                    {showColumn('accounts') && <Table.ColumnHeader width="130px">From / To</Table.ColumnHeader>}
+                                    {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
+                                    {showColumn('type') && renderSortableHeader('type', 'Type')}
+                                    {showColumn('asset') && renderSortableHeader('asset', 'Asset', '60px')}
+                                    {showColumn('qty') && renderSortableHeader('qty', 'Qty')}
+                                    {showColumn('price') && renderSortableHeader('price', 'Price')}
+                                    {showColumn('total') && <Table.ColumnHeader>Total</Table.ColumnHeader>}
+                                    {showColumn('fee') && renderSortableHeader('fee', 'Fee')}
+                                    {showColumn('taxability') && <Table.ColumnHeader>Taxable</Table.ColumnHeader>}
+                                    {showColumn('feeInBase') && <Table.ColumnHeader>Include Fee</Table.ColumnHeader>}
+                                    {showColumn('bundle') && <Table.ColumnHeader>Bundle</Table.ColumnHeader>}
+                                    {showColumn('tags') && <Table.ColumnHeader>Tags</Table.ColumnHeader>}
+                                    {showColumn('sourceTransactionId') && <Table.ColumnHeader>Source Tx ID</Table.ColumnHeader>}
+                                    {/* Additional plugin columns */}
+                                    {additionalColumns.map(col => (
+                                        <Table.ColumnHeader key={col.id} width={col.width}>{col.header}</Table.ColumnHeader>
+                                    ))}
+                                    {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, { position: 'sticky', right: '50px', bg: 'gray.100', zIndex: 10, borderLeft: '2px solid', borderColor: 'gray.300', fontSize: '7px', px: 1 })}
+                                    {!embeddedMode && <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="50px" px={0}></Table.ColumnHeader>}
                                 </Table.Row>
                             </Table.Header>
                             <Table.Body>
                                 {paginatedTransactions.length === 0 ? (
                                     <Table.Row>
-                                        <Table.Cell colSpan={17}>
+                                        <Table.Cell colSpan={visibleColumnCount}>
                                             <Text textAlign="center" py={8} color="gray.500">
-                                                No transactions found
+                                                {emptyMessage || 'No transactions found'}
                                             </Text>
                                         </Table.Cell>
                                     </Table.Row>
                                 ) : (
                                     paginatedTransactions.map(tx => (
-                                        <React.Fragment key={tx.id}>
-                                            <Table.Row bg={getRowBgColor(tx)} _hover={{ bg: 'gray.50' }} borderLeft="4px solid" borderLeftColor={getRowBorderColor(tx)}>
-                                                <Table.Cell position="sticky" left={0} bg={getRowBgColor(tx)} zIndex={5} borderRight="2px solid" borderColor="gray.300">
-                                                    <Flex gap={1} align="center">
-                                                        <Checkbox.Root
-                                                            checked={selectedIds.has(tx.id)}
-                                                            onCheckedChange={() => toggleSelection(tx.id)}
-                                                        >
-                                                            <Checkbox.HiddenInput />
-                                                            <Checkbox.Control />
-                                                        </Checkbox.Root>
-                                                        {/* Details button - opens drawer */}
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => {
-                                                                setDrawerTransactionId(tx.id);
-                                                                setIsDrawerOpen(true);
-                                                            }}
-                                                            p={0}
-                                                            minW="16px"
-                                                            h="16px"
-                                                            color="gray.400"
-                                                            _hover={{ color: 'blue.500' }}
-                                                            title="View transaction details"
-                                                        >
-                                                            <FiFileText size={12} />
-                                                        </Button>
-                                                    </Flex>
-                                                </Table.Cell>
-                                                <Table.Cell py={1}>
-                                                    <Text fontSize="8px" fontFamily="mono" color="gray.500">{tx.id}</Text>
-                                                </Table.Cell>
-                                                {/* Date/Time - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'date_time') ? (
-                                                        <Input
-                                                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                            size="xs"
-                                                            type="datetime-local"
-                                                            value={toDateTimeLocalString(editValues.date_time)}
-                                                            onChange={e => updateEditValues({ date_time: e.target.value })}
-                                                            onKeyDown={handleEditKeyDown}
-                                                            onBlur={saveAndClose}
-                                                            width="130px"
-                                                            fontSize="8px"
-                                                            px={1}
-                                                        />
-                                                    ) : (
-                                                        <Text fontSize="8px">{formatDateTimeCompact(tx.date_time)}</Text>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Source Info - merged column with Source Account, Source, Source Type, Source Symbol */}
-                                                <Table.Cell py={1} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'account_id') ? (
-                                                        <Flex direction="column" gap={1} minW="120px">
-                                                            <AccountSelector
-                                                                value={editValues.account_id ?? null}
-                                                                onChange={(accountId) => {
-                                                                    if (!escapePressedRef.current) {
-                                                                        updateEditValues({ account_id: accountId ?? undefined });
-                                                                        saveAndClose();
-                                                                    }
-                                                                }}
-                                                                accounts={accounts}
-                                                                onAccountCreated={fetchAccounts}
-                                                                defaultName={tx.source_account || ''}
-                                                                placeholder="Link account..."
-                                                                rawAccountSource={tx.source}
-                                                                rawAccountLabel={tx.source_account}
-                                                            />
-                                                            {/* Show asset suggestions below the selector when editing */}
-                                                            {tx.source_account && !tx.account_id && (() => {
-                                                                const suggestions = getAccountSuggestions(tx.source_account, accounts);
-                                                                return suggestions.length > 0 ? (
-                                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                                        <Text fontSize="7px" color="gray.500">Suggestions:</Text>
-                                                                        {suggestions.map((s, idx) => (
-                                                                            <Tooltip
-                                                                                key={idx}
-                                                                                content={`${formatConfidence(s.confidence)} match`}
-                                                                                openDelay={100}
-                                                                            >
-                                                                                <Badge
-                                                                                    size="xs"
-                                                                                    colorPalette={getConfidenceColor(s.confidence)}
-                                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                    cursor="pointer"
-                                                                                    fontSize="7px"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        updateEditValues({ account_id: s.item.id });
-                                                                                        saveAndClose();
-                                                                                    }}
-                                                                                >
-                                                                                    {s.item.name.slice(0, 12)}{s.item.name.length > 12 ? '…' : ''}
-                                                                                    {s.confidence >= 0.9 && ' ✓'}
-                                                                                </Badge>
-                                                                            </Tooltip>
-                                                                        ))}
-                                                                    </HStack>
-                                                                ) : null;
-                                                            })()}
-                                                            {/* Secondary info shown when editing */}
-                                                            <Text fontSize="7px" color="gray.400">
-                                                                {[tx.source, tx.source_transaction_type].filter(Boolean).join(' · ')}
-                                                            </Text>
-                                                        </Flex>
-                                                    ) : (
-                                                        <SourceInfoCell
-                                                            sourceAccount={tx.source_account}
-                                                            accountId={tx.account_id}
-                                                            resolvedAccount={accounts.find(a => a.id === tx.account_id)}
-                                                            resolvedAccountName={accounts.find(a => a.id === tx.account_id)?.name}
-                                                            source={tx.source}
-                                                            sourceType={tx.source_transaction_type}
-                                                            sourceSymbol={tx.source_asset_symbol}
-                                                            onClick={() => startCellEdit(tx, 'account_id')}
-                                                            accountSuggestions={
-                                                                !tx.account_id && tx.source_account
-                                                                    ? getAccountSuggestions(tx.source_account, accounts, 0.5, 2)
-                                                                    : []
-                                                            }
-                                                            onAcceptSuggestion={async (accountId) => {
-                                                                try {
-                                                                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                        method: 'PATCH',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ account_id: accountId })
-                                                                    });
-                                                                    if (!response.ok) throw new Error('Failed to update');
-                                                                    // Also link the raw_account if it exists
-                                                                    if (tx.source_account) {
-                                                                        try {
-                                                                            await fetch(`${API_URL}/raw-accounts/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_account)}`, {
-                                                                                method: 'PATCH',
-                                                                                headers: { 'Content-Type': 'application/json' },
-                                                                                body: JSON.stringify({ account_id: accountId })
-                                                                            });
-                                                                        } catch (linkErr) {
-                                                                            console.warn('Failed to link raw account:', linkErr);
-                                                                        }
-                                                                    }
-                                                                    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-                                                                } catch (err) {
-                                                                    toaster.error({ title: 'Error', description: 'Failed to link account' });
-                                                                }
-                                                            }}
-                                                        />
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Direction - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'direction') && startCellEdit(tx, 'direction')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'direction') ? (
-                                                        <NativeSelect.Root size="sm" width="45px">
-                                                            <NativeSelect.Field
-                                                                value={editValues.direction || tx.direction}
-                                                                onChange={async e => {
-                                                                    const newDir = e.target.value;
-                                                                    // Save directly with the new value
-                                                                    try {
-                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                            method: 'PATCH',
-                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                            body: JSON.stringify({ direction: newDir })
-                                                                        });
-                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
-                                                                    } catch (err) {
-                                                                        toaster.error({ title: 'Error', description: 'Failed to save direction' });
-                                                                    }
-                                                                }}
-                                                                onBlur={() => {
-                                                                    if (!escapePressedRef.current) {
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
-                                                                    }
-                                                                }}
-                                                                style={{ fontSize: '8px', padding: '2px' }}
-                                                                autoFocus
-                                                            >
-                                                                {DIRECTION_OPTIONS.map(opt => (
-                                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                                ))}
-                                                            </NativeSelect.Field>
-                                                        </NativeSelect.Root>
-                                                    ) : (
-                                                        <Badge size="sm" colorPalette={tx.direction === 'inflow' ? 'green' : tx.direction === 'outflow' ? 'red' : 'gray'}>
-                                                            {tx.direction === 'inflow' ? '↓' : tx.direction === 'outflow' ? '↑' : '↔'}
-                                                        </Badge>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Type - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'transaction_type') && startCellEdit(tx, 'transaction_type')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'transaction_type') ? (
-                                                        <NativeSelect.Root size="sm" width="80px">
-                                                            <NativeSelect.Field
-                                                                value={editValues.transaction_type || tx.transaction_type}
-                                                                onChange={async e => {
-                                                                    const newType = e.target.value;
-                                                                    try {
-                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                            method: 'PATCH',
-                                                                            headers: { 'Content-Type': 'application/json' },
-                                                                            body: JSON.stringify({ transaction_type: newType })
-                                                                        });
-                                                                        if (!response.ok) throw new Error('Failed to update');
-                                                                        queryClient.invalidateQueries({ queryKey: ["transactions"] });
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
-                                                                    } catch (err) {
-                                                                        toaster.error({ title: 'Error', description: 'Failed to save type' });
-                                                                    }
-                                                                }}
-                                                                onBlur={() => {
-                                                                    if (!escapePressedRef.current) {
-                                                                        setEditingCell(null);
-                                                                        setEditValues({});
-                                                                    }
-                                                                }}
-                                                                style={{ fontSize: '8px', padding: '2px' }}
-                                                                autoFocus
-                                                            >
-                                                                {TRANSACTION_TYPE_OPTIONS.map(opt => (
-                                                                    <option key={opt} value={opt}>{opt}</option>
-                                                                ))}
-                                                            </NativeSelect.Field>
-                                                        </NativeSelect.Root>
-                                                    ) : (
-                                                        <Flex align="center" gap={1}>
-                                                            {tx.transaction_type === 'transfer' ? (
-                                                                <BiTransfer color="#805AD5" size={12} title="Transfer" />
-                                                            ) : tx.transaction_type === 'trade' ? (
-                                                                <RiExchangeFundsLine color="#3182CE" size={12} title="Trade" />
-                                                            ) : tx.transaction_type === 'technical' ? (
-                                                                <FaQuestion color="#A0AEC0" size={10} title="Technical (approval, contract call)" />
-                                                            ) : (
-                                                                <FaQuestion color="#718096" size={10} title="Other" />
-                                                            )}
-                                                            <Badge size="xs" colorPalette="blue">{tx.transaction_type?.substring(0, 6)}</Badge>
-                                                        </Flex>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Linked Asset - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'asset_id') ? (
-                                                        <Flex direction="column" gap={1} minW="90px">
-                                                            <AssetSelector
-                                                                value={editValues.asset_id ?? null}
-                                                                onChange={(assetId) => {
-                                                                    if (!escapePressedRef.current) {
-                                                                        updateEditValues({ asset_id: assetId ?? undefined });
-                                                                        saveAndClose();
-                                                                    }
-                                                                }}
-                                                                assets={assets}
-                                                                onAssetCreated={fetchAssets}
-                                                                defaultSymbol={tx.source_asset_symbol || ''}
-                                                                placeholder="Link..."
-                                                                rawAssetSource={tx.source}
-                                                                rawAssetSymbol={tx.source_asset_symbol}
-                                                            />
-                                                            {/* Show asset suggestions when editing unlinked asset */}
-                                                            {tx.source_asset_symbol && !tx.asset_id && (() => {
-                                                                const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
-                                                                return suggestions.length > 0 ? (
-                                                                    <HStack gap={1} flexWrap="wrap">
-                                                                        <Text fontSize="7px" color="gray.500">Suggestions:</Text>
-                                                                        {suggestions.map((s, idx) => (
-                                                                            <Tooltip
-                                                                                key={idx}
-                                                                                content={`${formatConfidence(s.confidence)} match`}
-                                                                                openDelay={100}
-                                                                            >
-                                                                                <Badge
-                                                                                    size="xs"
-                                                                                    colorPalette={getConfidenceColor(s.confidence)}
-                                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                    cursor="pointer"
-                                                                                    fontSize="7px"
-                                                                                    onClick={(e) => {
-                                                                                        e.stopPropagation();
-                                                                                        updateEditValues({ asset_id: s.item.asset_id });
-                                                                                        saveAndClose();
-                                                                                    }}
-                                                                                >
-                                                                                    {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
-                                                                                    {s.confidence >= 0.9 && ' ✓'}
-                                                                                </Badge>
-                                                                            </Tooltip>
-                                                                        ))}
-                                                                    </HStack>
-                                                                ) : null;
-                                                            })()}
-                                                        </Flex>
-                                                    ) : (
-                                                        tx.linked_asset_symbol ? (
-                                                            <AssetBadge
-                                                                asset={tx.linked_asset}
-                                                                size="sm"
-                                                                colorPalette="purple"
-                                                                maxLength={15}
-                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
-                                                            />
-                                                        ) : (
-                                                            <Text color="orange.500" fontWeight="bold" fontSize="8px">⚠ Link</Text>
-                                                        )
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Quantity - click to edit */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'quantity') && startCellEdit(tx, 'quantity')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'quantity') ? (
-                                                        <Input
-                                                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                            size="xs"
-                                                            type="number"
-                                                            step="any"
-                                                            value={editValues.quantity ?? tx.quantity ?? ''}
-                                                            onChange={e => updateEditValues({ quantity: parseFloat(e.target.value) || 0 })}
-                                                            onKeyDown={e => {
-                                                                if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity); }
-                                                            }}
-                                                            onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'quantity', editValuesRef.current.quantity)}
-                                                            width="60px"
-                                                            fontSize="8px"
-                                                            px={1}
-                                                        />
-                                                    ) : (
-                                                        <Text fontSize="8px">{tx.quantity?.toFixed(4) ?? '-'}</Text>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Price - click to edit value, click badge to edit quote asset */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'price') && !isEditingCell(tx.id, 'price_quote_asset_id') && startCellEdit(tx, 'price')} cursor="pointer">
-                                                    <Flex direction="column" gap={0}>
-                                                        {isEditingCell(tx.id, 'price') ? (
-                                                            <Input
-                                                                ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                size="xs"
-                                                                type="number"
-                                                                step="any"
-                                                                value={editValues.price ?? tx.price ?? ''}
-                                                                onChange={e => updateEditValues({ price: parseFloat(e.target.value) || 0 })}
-                                                                onKeyDown={e => {
-                                                                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                    else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'price', editValuesRef.current.price); }
-                                                                }}
-                                                                onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'price', editValuesRef.current.price)}
-                                                                width="60px"
-                                                                fontSize="8px"
-                                                                px={1}
-                                                            />
-                                                        ) : (
-                                                            <Text fontSize="8px">{tx.price ? tx.price.toFixed(2) : '-'}</Text>
-                                                        )}
-                                                        {isEditingCell(tx.id, 'price_quote_asset_id') ? (
-                                                            <Flex direction="column" gap={1} minW="70px">
-                                                                <AssetSelector
-                                                                    value={editValues.price_quote_asset_id ?? null}
-                                                                    onChange={(assetId) => {
-                                                                        if (!escapePressedRef.current) {
-                                                                            updateEditValues({ price_quote_asset_id: assetId ?? undefined });
-                                                                            saveAndClose();
-                                                                        }
-                                                                    }}
-                                                                    assets={assets}
-                                                                    onAssetCreated={fetchAssets}
-                                                                    defaultSymbol={tx.source_price_quote_asset_symbol || ''}
-                                                                    placeholder="Quote..."
-                                                                    rawAssetSource={tx.source}
-                                                                    rawAssetSymbol={tx.source_price_quote_asset_symbol}
-                                                                />
-                                                                {/* Show asset suggestions when editing unlinked price quote asset */}
-                                                                {tx.source_price_quote_asset_symbol && !tx.price_quote_asset_id && (() => {
-                                                                    const suggestions = getAssetSuggestions(tx.source_price_quote_asset_symbol, assets, 0.5, 3);
-                                                                    return suggestions.length > 0 ? (
-                                                                        <HStack gap={1} flexWrap="wrap">
-                                                                            {suggestions.map((s, idx) => (
-                                                                                <Tooltip
-                                                                                    key={idx}
-                                                                                    content={`${formatConfidence(s.confidence)} match`}
-                                                                                    openDelay={100}
-                                                                                >
-                                                                                    <Badge
-                                                                                        size="xs"
-                                                                                        colorPalette={getConfidenceColor(s.confidence)}
-                                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                        cursor="pointer"
-                                                                                        fontSize="6px"
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            updateEditValues({ price_quote_asset_id: s.item.asset_id });
-                                                                                            saveAndClose();
-                                                                                        }}
-                                                                                    >
-                                                                                        {s.item.symbol.slice(0, 6)}{s.confidence >= 0.9 && '✓'}
-                                                                                    </Badge>
-                                                                                </Tooltip>
-                                                                            ))}
-                                                                        </HStack>
-                                                                    ) : null;
-                                                                })()}
-                                                            </Flex>
-                                                        ) : tx.linked_price_quote_asset_symbol ? (
-                                                            <AssetBadge
-                                                                asset={tx.price_quote_asset}
-                                                                size="xs"
-                                                                colorPalette="cyan"
-                                                                maxLength={12}
-                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}
-                                                            />
-                                                        ) : tx.source_price_quote_asset_symbol ? (
-                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'price_quote_asset_id'); }}>⚠ {tx.source_price_quote_asset_symbol}</Text>
-                                                        ) : null}
-                                                    </Flex>
-                                                </Table.Cell>
-                                                <Table.Cell py={1}><Text fontSize="8px">{tx.total ? tx.total.toFixed(2) : '-'}</Text></Table.Cell>
-                                                {/* Fee - click to edit value, click badge to edit quote asset */}
-                                                <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'fee') && !isEditingCell(tx.id, 'fee_quote_asset_id') && startCellEdit(tx, 'fee')} cursor="pointer">
-                                                    <Flex direction="column" gap={0}>
-                                                        {isEditingCell(tx.id, 'fee') ? (
-                                                            <Input
-                                                                ref={editInputRef as React.RefObject<HTMLInputElement>}
-                                                                size="xs"
-                                                                type="number"
-                                                                step="any"
-                                                                value={editValues.fee ?? tx.fee ?? ''}
-                                                                onChange={e => updateEditValues({ fee: parseFloat(e.target.value) || 0 })}
-                                                                onKeyDown={e => {
-                                                                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                                                                    else if (e.key === 'Enter') { e.preventDefault(); saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee); }
-                                                                }}
-                                                                onBlur={() => !escapePressedRef.current && saveFieldDirectly(tx.id, 'fee', editValuesRef.current.fee)}
-                                                                width="60px"
-                                                                fontSize="8px"
-                                                                px={1}
-                                                            />
-                                                        ) : (
-                                                            <Text fontSize="8px">{tx.fee ? tx.fee.toFixed(4) : '-'}</Text>
-                                                        )}
-                                                        {isEditingCell(tx.id, 'fee_quote_asset_id') ? (
-                                                            <Flex direction="column" gap={1} minW="70px">
-                                                                <AssetSelector
-                                                                    value={editValues.fee_quote_asset_id ?? null}
-                                                                    onChange={(assetId) => {
-                                                                        if (!escapePressedRef.current) {
-                                                                            updateEditValues({ fee_quote_asset_id: assetId ?? undefined });
-                                                                            saveAndClose();
-                                                                        }
-                                                                    }}
-                                                                    assets={assets}
-                                                                    onAssetCreated={fetchAssets}
-                                                                    defaultSymbol={tx.source_fee_quote_asset_symbol || ''}
-                                                                    placeholder="Fee..."
-                                                                    rawAssetSource={tx.source}
-                                                                    rawAssetSymbol={tx.source_fee_quote_asset_symbol}
-                                                                />
-                                                                {/* Show asset suggestions when editing unlinked fee quote asset */}
-                                                                {tx.source_fee_quote_asset_symbol && !tx.fee_quote_asset_id && (() => {
-                                                                    const suggestions = getAssetSuggestions(tx.source_fee_quote_asset_symbol, assets, 0.5, 3);
-                                                                    return suggestions.length > 0 ? (
-                                                                        <HStack gap={1} flexWrap="wrap">
-                                                                            {suggestions.map((s, idx) => (
-                                                                                <Tooltip
-                                                                                    key={idx}
-                                                                                    content={`${formatConfidence(s.confidence)} match`}
-                                                                                    openDelay={100}
-                                                                                >
-                                                                                    <Badge
-                                                                                        size="xs"
-                                                                                        colorPalette={getConfidenceColor(s.confidence)}
-                                                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                                        cursor="pointer"
-                                                                                        fontSize="6px"
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            updateEditValues({ fee_quote_asset_id: s.item.asset_id });
-                                                                                            saveAndClose();
-                                                                                        }}
-                                                                                    >
-                                                                                        {s.item.symbol.slice(0, 6)}{s.confidence >= 0.9 && '✓'}
-                                                                                    </Badge>
-                                                                                </Tooltip>
-                                                                            ))}
-                                                                        </HStack>
-                                                                    ) : null;
-                                                                })()}
-                                                            </Flex>
-                                                        ) : tx.linked_fee_quote_asset_symbol ? (
-                                                            <AssetBadge
-                                                                asset={tx.fee_quote_asset}
-                                                                size="xs"
-                                                                colorPalette="cyan"
-                                                                maxLength={12}
-                                                                onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}
-                                                            />
-                                                        ) : tx.source_fee_quote_asset_symbol ? (
-                                                            <Text fontSize="8px" color="orange.500" fontWeight="bold" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'fee_quote_asset_id'); }}>⚠ {tx.source_fee_quote_asset_symbol}</Text>
-                                                        ) : null}
-                                                    </Flex>
-                                                </Table.Cell>
-                                                {/* Taxable - always toggle, saves immediately */}
-                                                <Table.Cell py={1}>
-                                                    <Switch.Root
-                                                        size="sm"
-                                                        checked={tx.disposal_taxable ?? false}
-                                                        onCheckedChange={() => quickToggle(tx, 'disposal_taxable')}
-                                                    >
-                                                        <Switch.HiddenInput />
-                                                        <Switch.Control />
-                                                    </Switch.Root>
-                                                </Table.Cell>
-                                                {/* Include Fee - always toggle, saves immediately */}
-                                                <Table.Cell py={1}>
-                                                    <Switch.Root
-                                                        size="sm"
-                                                        checked={tx.include_fee ?? false}
-                                                        onCheckedChange={() => quickToggle(tx, 'include_fee')}
-                                                    >
-                                                        <Switch.HiddenInput />
-                                                        <Switch.Control />
-                                                    </Switch.Root>
-                                                </Table.Cell>
-                                                {/* Bundle - read only */}
-                                                <Table.Cell py={1}>
-                                                    {tx.user_calculation_unit_id ? <Badge size="sm" colorPalette="purple">📦 #{tx.user_calculation_unit_id}</Badge> : <Text fontSize="8px" color="gray.400">-</Text>}
-                                                </Table.Cell>
-                                                {/* Status - click to edit */}
-                                                <Table.Cell position="sticky" right="30px" bg={getRowBgColor(tx)} zIndex={5} borderLeft="2px solid" borderColor="gray.300" onClick={() => !isEditingCell(tx.id, 'review_status') && startCellEdit(tx, 'review_status')} cursor="pointer">
-                                                    {isEditingCell(tx.id, 'review_status') ? (
-                                                        <NativeSelect.Root size="sm" width="70px">
-                                                            <NativeSelect.Field
-                                                                value={editValues.review_status || tx.review_status}
-                                                                onChange={e => updateEditValues({ review_status: e.target.value as TransactionStatus })}
-                                                                onKeyDown={handleEditKeyDown}
-                                                                onBlur={saveAndClose}
-                                                                style={{ fontSize: '8px', padding: '2px' }}
-                                                            >
-                                                                <option value="valid">Valid</option>
-                                                                <option value="pending">Pending</option>
-                                                                <option value="invalid">Invalid</option>
-                                                            </NativeSelect.Field>
-                                                        </NativeSelect.Root>
-                                                    ) : (
-                                                        <Badge size="sm" colorPalette={statusBadgeColors[tx.review_status] || 'gray'}>
-                                                            {tx.review_status}
-                                                        </Badge>
-                                                    )}
-                                                </Table.Cell>
-                                                {/* Actions - show cancel when editing */}
-                                                <Table.Cell position="sticky" right={0} bg={getRowBgColor(tx)} zIndex={5} minW="80px">
-                                                    <Flex gap={1}>
-                                                        {getEditingTxId() === tx.id ? (
-                                                            <Button size="xs" variant="ghost" onClick={cancelEdit} title="Cancel (Esc)">
-                                                                ✗
-                                                            </Button>
-                                                        ) : (
-                                                            <>
-                                                                <Button
-                                                                    size="xs"
-                                                                    variant="ghost"
-                                                                    colorPalette="blue"
-                                                                    onClick={() => {
-                                                                        setTransactionToEdit(tx);
-                                                                        setShowEditorDialog(true);
-                                                                    }}
-                                                                    title="Edit all fields"
-                                                                >
-                                                                    <LuPencil />
-                                                                </Button>
-                                                                <Button
-                                                                    size="xs"
-                                                                    variant="ghost"
-                                                                    colorPalette="red"
-                                                                    onClick={() => {
-                                                                        setTransactionToDelete(tx);
-                                                                        fetchDeletionImpact([tx.id]);
-                                                                        setShowDeleteDialog(true);
-                                                                    }}
-                                                                    title="Delete transaction"
-                                                                >
-                                                                    🗑️
-                                                                </Button>
-                                                            </>
-                                                        )}
-                                                    </Flex>
-                                                </Table.Cell>
-                                            </Table.Row>
-                                        </React.Fragment>
+                                        <TransactionTableRow
+                                            key={tx.id}
+                                            tx={tx}
+                                            suggestionEntry={showSuggestions ? suggestionMap.get(tx.id) : undefined}
+                                            duplicateEntry={duplicateMap.get(tx.id)}
+                                            rowBgColor={getRowBgColor(tx)}
+                                            rowBorderColor={getRowBorderColor(tx)}
+                                            isInvalidCollapsed={isInvalidCollapsed(tx)}
+                                            accounts={accounts}
+                                            accountsById={accountsById}
+                                            assets={assets}
+                                            batchSuggestionsMap={batchSuggestionsMap}
+                                            showColumn={showColumn}
+                                            visibleColumnCount={visibleColumnCount}
+                                            embeddedMode={embeddedMode}
+                                            showSuggestions={showSuggestions}
+                                            showSelectionInEmbedded={showSelectionInEmbedded}
+                                            additionalColumns={additionalColumns as ColumnPlugin[]}
+                                            additionalRowActions={additionalRowActions as RowAction[]}
+                                            editingCell={editingCell}
+                                            editValues={editValues}
+                                            selectedIds={selectedIds}
+                                            expandedInvalidIds={expandedInvalidIds}
+                                            openSuggestionTxId={openSuggestionTxId}
+                                            hoveredSuggestionGroup={hoveredSuggestionGroup}
+                                            openDuplicateTxId={openDuplicateTxId}
+                                            hoveredDuplicateGroup={hoveredDuplicateGroup}
+                                            hoveredBundleId={hoveredBundleId}
+                                            openBundleTxId={openBundleTxId}
+                                            bundleColorMap={bundleColorMap}
+                                            editInputRef={editInputRef}
+                                            escapePressedRef={escapePressedRef}
+                                            editValuesRef={editValuesRef}
+                                            callbacks={rowCallbacksRef.current}
+                                        />
                                     ))
                                 )}
                             </Table.Body>
                         </Table.Root>
                     </Box>
+                )}
 
-                    {/* Pagination Controls */}
+                {/* Pagination Controls - show even when loading/error */}
+                {!loading && !error && !embeddedMode && (
                     <TablePagination
                         pagination={pagination}
-                        total={transactions.length}
+                        total={filterMetadata?.filtered_count ?? 0}
                     />
-
-                    <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                        <Flex justify="space-between" align="center">
-                            <Text fontSize="sm" color="gray.600">
-                                <strong>Total:</strong> {transactions.length} transactions
-                                {selectedIds.size > 0 && <Text as="span"> • <strong>{selectedIds.size}</strong> selected</Text>}
-                            </Text>
-                        </Flex>
-                    </Box>
-                </>
-            )}
-
-            {/* Create Bundle Dialog */}
-            <Dialog.Root open={showBundleDialog} onOpenChange={(e) => setShowBundleDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Create Transaction Bundle</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text mb={4}>
-                                    Create a bundle for {selectedIds.size} selected transaction(s):
-                                    <br />
-                                    <Text as="span" fontWeight="bold" color="purple.600">
-                                        IDs: {Array.from(selectedIds).join(', ')}
-                                    </Text>
-                                </Text>
-                                <Input
-                                    placeholder="Enter bundle label (e.g., 'ETH Transfer to Ledger')"
-                                    value={bundleLabel}
-                                    onChange={e => setBundleLabel(e.target.value)}
-                                />
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBundleDialog(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="purple" onClick={createBundle} disabled={!bundleLabel.trim()}>
-                                        Create Bundle
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
-
-            {/* Bulk Set Status Dialog */}
-            <Dialog.Root open={showBulkStatusDialog} onOpenChange={(e) => setShowBulkStatusDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Set Status for Selected Transactions</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Text mb={4}>
-                                    Set status for {selectedIds.size} transaction(s)
-                                </Text>
-                                <NativeSelect.Root>
-                                    <NativeSelect.Field
-                                        value={bulkStatus}
-                                        onChange={e => setBulkStatus(e.target.value as TransactionStatus)}
-                                    >
-                                        <option value="valid">Valid</option>
-                                        <option value="pending">Pending</option>
-                                        <option value="invalid">Invalid</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => setShowBulkStatusDialog(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="green" onClick={bulkUpdateStatus} disabled={bulkActionLoading}>
-                                        {bulkActionLoading ? 'Updating...' : 'Apply Status'}
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+                )}
+            </>
 
             {/* Bulk Set Type Dialog */}
             <Dialog.Root open={showBulkTypeDialog} onOpenChange={(e) => setShowBulkTypeDialog(e.open)}>
@@ -2313,16 +2224,6 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 </Portal>
             </Dialog.Root>
 
-            {/* Transaction Editor Dialog */}
-            <TransactionEditorDialog
-                transaction={transactionToEdit}
-                isOpen={showEditorDialog}
-                onClose={() => {
-                    setShowEditorDialog(false);
-                    setTransactionToEdit(null);
-                }}
-            />
-
             {/* CSV Import Dialog */}
             <Dialog.Root open={showImportDialog} onOpenChange={(e) => setShowImportDialog(e.open)} size="xl">
                 <Portal>
@@ -2455,7 +2356,7 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                                                     <Table.Body>
                                                         {importPreview.transactions.slice(0, 20).map((tx, i) => {
                                                             // Compute transformed values (what will actually be stored in DB)
-                                                            const dbType = tx.is_fee_transaction ? 'technical' : 'trade';
+                                                            const dbType = tx.is_fee_transaction ? 'cost' : 'trade';
                                                             const direction = tx.is_fee_transaction
                                                                 ? 'neutral'
                                                                 : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');
@@ -2677,12 +2578,21 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 onNotesChange={async (txId, notes) => {
                     try {
                         const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                            method: 'PUT',
+                            method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ review_notes: notes }),
                         });
                         if (response.ok) {
-                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            const updated = await response.json();
+                            // Update the transaction in-place in all cached query results
+                            // to avoid triggering a storm of refetches across every mounted table
+                            queryClient.setQueriesData(
+                                { queryKey: ['transactions'], type: 'active' },
+                                (old: any) => {
+                                    if (!old?.results) return old;
+                                    return { ...old, results: old.results.map((t: any) => t.id === txId ? updated : t) };
+                                }
+                            );
                             onDataChange?.();
                         }
                     } catch (err) {
@@ -2692,18 +2602,56 @@ export const TransactionsTable: React.FC<TransactionsTableProps> = ({
                 onTagsChange={async (txId, tags) => {
                     try {
                         const response = await fetch(`${API_URL}/transactions/${txId}`, {
-                            method: 'PUT',
+                            method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ tags }),
                         });
                         if (response.ok) {
-                            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+                            const updated = await response.json();
+                            // Update the transaction in-place in all cached query results
+                            // to avoid triggering a storm of refetches across every mounted table
+                            queryClient.setQueriesData(
+                                { queryKey: ['transactions'], type: 'active' },
+                                (old: any) => {
+                                    if (!old?.results) return old;
+                                    return { ...old, results: old.results.map((t: any) => t.id === txId ? updated : t) };
+                                }
+                            );
                             onDataChange?.();
                         }
                     } catch (err) {
                         console.error('Failed to update tags:', err);
                     }
                 }}
+                onTransactionUpdate={() => {
+                    invalidateTransactionData();
+                    onDataChange?.();
+                }}
+            />
+
+            {/* Quick-Create Account Dialog */}
+            <AccountFormDialog
+                isOpen={!!quickCreateAccount}
+                onClose={handleQuickAccountCreated}
+                prefill={quickCreateAccount?.prefill}
+            />
+
+            {/* Quick-Create Asset Dialog */}
+            <AssetFormDialog
+                isOpen={!!quickCreateAsset}
+                onClose={handleQuickAssetCreated}
+                prefill={quickCreateAsset?.prefill}
+                rawAssetSource={quickCreateAsset?.rawSource}
+                rawAssetSymbol={quickCreateAsset?.rawSymbol}
+            />
+
+            {/* Bundle Create Dialog */}
+            <BundleCreateDialog
+                isOpen={showBundleCreateDialog}
+                onClose={() => setShowBundleCreateDialog(false)}
+                onCreated={handleBundleCreated}
+                defaults={bundleCreateDefaults}
+                generateLabel={(pattern) => generateBundleLabel(pattern, selectedIds.size > 0 ? selectedIds : new Set(bundleCreateDefaults.transactionIds))}
             />
         </Box >
     );

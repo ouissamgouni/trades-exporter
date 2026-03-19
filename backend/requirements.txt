@@ -7,6 +7,7 @@ annotated-types==0.7.0
 anyio==4.12.0
 attrs==25.4.0
 autoflake==2.3.1
+base58==2.1.1
 beautifulsoup4==4.14.3
 cattrs==25.3.0
 ccxt==4.5.29
@@ -28,6 +29,7 @@ html5lib==1.1
 httpcore==1.0.9
 httptools==0.7.1
 httpx==0.28.1
+hyperliquid-python-sdk==0.22.0
 idna==3.11
 iniconfig==2.3.0
 lxml==6.0.2
@@ -48,6 +50,7 @@ pluggy==1.6.0
 propcache==0.4.1
 protobuf==6.33.2
 psycopg2-binary==2.9.10
+pycardano==0.11.1
 pycares==4.11.0
 pycparser==2.23
 pydantic==2.9.0
@@ -56,6 +59,8 @@ pyflakes==3.4.0
 Pygments==2.19.2
 pytest==9.0.2
 pytest-mock==3.15.1
+pytest-timeout==2.3.1
+pytest-xdist==3.5.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 python-multipart==0.0.21

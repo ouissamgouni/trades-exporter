@@ -18,7 +18,7 @@ import sys
 import argparse
 from pathlib import Path
 from sqlalchemy import text, create_engine
-from backend.config.loader import get_database_url, set_test_mode
+from backend.config.loader import get_database_url
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -90,26 +90,12 @@ def empty_database(engine) -> int:
 def main():
     parser = argparse.ArgumentParser(description="Reset and seed the database.")
     parser.add_argument(
-        "--test",
-        "-t",
-        action="store_true",
-        help="Use test database (default: production)",
-    )
-    parser.add_argument(
         "--force",
         "-f",
         action="store_true",
         help="Skip confirmation prompt",
     )
     args = parser.parse_args()
-
-    # Set mode (deprecated - use DATABASE_URL env var instead)
-    if args.test:
-        set_test_mode(True)
-        mode_label = "TEST"
-    else:
-        set_test_mode(False)
-        mode_label = "PRODUCTION"
 
     # Get database URL
     db_url = get_database_url()

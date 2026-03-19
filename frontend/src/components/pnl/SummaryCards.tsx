@@ -1,29 +1,380 @@
 /**
- * P&L Summary Cards
- * 
- * Principle 1: Results first - Always visible top-level metrics
- * Clickable cards open detail panels (fees, warnings)
+ * P&L Status Cards
+ *
+ * Three full-size cards displayed in a horizontal row:
+ * 1. RefreshPricesCard — shows fresh / stale / error counts + refresh button
+ * 2. WarningsCard — warning count + type breakdown badges
+ * 3. BalanceHealthCard — mismatch count + tolerance slider + issue tooltip
+ *
+ * Also re-exports SummaryBar for the detail view.
  */
 
 import React from 'react';
 import {
     Badge,
     Box,
-    Card,
+    Button,
     Flex,
-    SimpleGrid,
+    Slider,
     Text,
 } from '@chakra-ui/react';
-import { FiAlertTriangle, FiDollarSign, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
+import { FiAlertTriangle, FiActivity, FiRefreshCw } from 'react-icons/fi';
+import { Tooltip } from '../ui/tooltip';
 import { PnLSummary } from './types';
+
+export interface BalanceHealthIssue {
+    symbol: string;
+    delta: number;
+    pct: number;
+}
+
+export interface BalanceHealthData {
+    mismatchCount: number;
+    totalCompared: number;
+    issues: BalanceHealthIssue[];
+    assetsFetched?: number;
+    assetsTotal?: number;
+    failedAssets?: string[];
+    uncoveredAssets?: string[];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RefreshPricesCard
+// ═══════════════════════════════════════════════════════════════════
+
+interface RefreshPricesCardProps {
+    onRefreshPrices?: () => void;
+    isRefreshingPrices?: boolean;
+    priceSuccessCount?: number;
+    priceStaleCount?: number;
+    priceErrorCount?: number;
+    onPriceBadgeClick?: () => void;
+    refreshDisabled?: boolean;
+}
+
+export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
+    onRefreshPrices,
+    isRefreshingPrices,
+    priceSuccessCount = 0,
+    priceStaleCount = 0,
+    priceErrorCount = 0,
+    onPriceBadgeClick,
+    refreshDisabled,
+}) => {
+    return (
+        <Box
+            p={3}
+            bg="white"
+            borderRadius="lg"
+            border="1px solid"
+            borderColor="gray.200"
+            h="100%"
+        >
+            <Flex align="center" gap={2} mb={2}>
+                <FiRefreshCw size={14} color="#3182ce" />
+                <Text fontSize="xs" fontWeight="semibold" color="gray.700">Refresh Prices</Text>
+            </Flex>
+
+            <Flex align="center" gap={1.5} mb={2} wrap="wrap">
+                {priceSuccessCount > 0 && (
+                    <Badge
+                        colorPalette="green"
+                        variant="solid"
+                        size="xs"
+                        cursor="pointer"
+                        onClick={onPriceBadgeClick}
+                    >
+                        ✅ {priceSuccessCount} fresh
+                    </Badge>
+                )}
+                {priceStaleCount > 0 && (
+                    <Badge
+                        colorPalette="orange"
+                        variant="solid"
+                        size="xs"
+                        cursor="pointer"
+                        onClick={onPriceBadgeClick}
+                    >
+                        ⏳ {priceStaleCount} stale
+                    </Badge>
+                )}
+                {priceErrorCount > 0 && (
+                    <Badge
+                        colorPalette="red"
+                        variant="solid"
+                        size="xs"
+                        cursor="pointer"
+                        onClick={onPriceBadgeClick}
+                    >
+                        ⚠️ {priceErrorCount} error
+                    </Badge>
+                )}
+                {priceSuccessCount === 0 && priceStaleCount === 0 && priceErrorCount === 0 && (
+                    <Text fontSize="2xs" color="gray.400">No prices loaded</Text>
+                )}
+            </Flex>
+
+            <Button
+                onClick={onRefreshPrices}
+                loading={isRefreshingPrices}
+                colorPalette="blue"
+                variant="outline"
+                size="2xs"
+                width="100%"
+                disabled={refreshDisabled}
+            >
+                <FiRefreshCw size={12} />
+                <Text ml={1}>Refresh All</Text>
+            </Button>
+        </Box>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// WarningsCard
+// ═══════════════════════════════════════════════════════════════════
+
+interface WarningsCardProps {
+    summary: PnLSummary;
+    onWarningsClick?: () => void;
+    warningTypeCounts?: Record<string, number>;
+}
+
+export const WarningsCard: React.FC<WarningsCardProps> = ({
+    summary,
+    onWarningsClick,
+    warningTypeCounts,
+}) => {
+    const hasWarnings = summary.warning_count > 0;
+
+    return (
+        <Tooltip
+            showArrow
+            content={
+                warningTypeCounts && Object.keys(warningTypeCounts).length > 0 ? (
+                    <Box p={1}>
+                        {Object.entries(warningTypeCounts)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([type, count]) => (
+                                <Text key={type} fontSize="xs">{type.replace(/_/g, ' ')}: {count}</Text>
+                            ))}
+                    </Box>
+                ) : hasWarnings ? `${summary.warning_count} warnings detected` : 'No warnings'
+            }
+        >
+            <Box
+                p={3}
+                bg="white"
+                borderRadius="lg"
+                border="1px solid"
+                borderColor="gray.200"
+                h="100%"
+                cursor={hasWarnings && onWarningsClick ? 'pointer' : 'default'}
+                onClick={hasWarnings ? onWarningsClick : undefined}
+                _hover={hasWarnings && onWarningsClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
+                transition="all 0.15s"
+            >
+                <Flex align="center" gap={2} mb={2}>
+                    <FiAlertTriangle size={14} color={hasWarnings ? '#dd6b20' : '#38a169'} />
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.700">PnL Warnings</Text>
+                    <Badge
+                        colorPalette={summary.error_count > 0 ? 'red' : hasWarnings ? 'orange' : 'green'}
+                        size="xs"
+                        ml="auto"
+                    >
+                        {hasWarnings ? summary.warning_count : '✓'}
+                    </Badge>
+                </Flex>
+
+                {/* Type breakdown badges */}
+                {warningTypeCounts && Object.keys(warningTypeCounts).length > 0 ? (
+                    <Flex gap={1} wrap="wrap">
+                        {Object.entries(warningTypeCounts)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 4)
+                            .map(([type, count]) => (
+                                <Badge key={type} size="xs" variant="subtle" colorPalette="orange">
+                                    {type.replace(/_/g, ' ').substring(0, 18)}: {count}
+                                </Badge>
+                            ))}
+                        {Object.keys(warningTypeCounts).length > 4 && (
+                            <Badge size="xs" variant="subtle" colorPalette="gray">
+                                +{Object.keys(warningTypeCounts).length - 4} more
+                            </Badge>
+                        )}
+                    </Flex>
+                ) : !hasWarnings ? (
+                    <Text fontSize="2xs" color="green.600">All checks passed</Text>
+                ) : null}
+            </Box>
+        </Tooltip>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// BalanceHealthCard
+// ═══════════════════════════════════════════════════════════════════
+
+interface BalanceHealthCardProps {
+    balanceHealth?: BalanceHealthData;
+    onBalanceHealthClick?: () => void;
+    deltaThreshold?: number;
+    onDeltaThresholdChange?: (value: number) => void;
+}
+
+export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
+    balanceHealth,
+    onBalanceHealthClick,
+    deltaThreshold = 5,
+    onDeltaThresholdChange,
+}) => {
+    if (!balanceHealth) return null;
+
+    const hasMismatches = balanceHealth.mismatchCount > 0;
+    const hasFailed = (balanceHealth.failedAssets?.length ?? 0) > 0;
+    const covered = balanceHealth.assetsFetched ?? balanceHealth.totalCompared;
+    const total = balanceHealth.assetsTotal ?? 0;
+    const uncovered = balanceHealth.uncoveredAssets ?? [];
+
+    return (
+        <Tooltip
+            showArrow
+            content={
+                <Box p={1}>
+                    {/* Coverage */}
+                    <Text fontWeight="bold" mb={1} fontSize="xs">
+                        Coverage: {covered}/{total} assets
+                    </Text>
+                    {uncovered.length > 0 && (
+                        <Text fontSize="xs" color="gray.300" mb={1}>
+                            No live data: {uncovered.slice(0, 6).join(', ')}{uncovered.length > 6 ? ` +${uncovered.length - 6}` : ''}
+                        </Text>
+                    )}
+
+                    {/* Failed accounts */}
+                    {hasFailed && (
+                        <>
+                            <Text fontWeight="bold" mb={0.5} fontSize="xs" color="red.300">
+                                ⚠ Failed ({balanceHealth.failedAssets!.length}):
+                            </Text>
+                            {balanceHealth.failedAssets!.slice(0, 4).map((msg, i) => (
+                                <Text key={i} fontSize="xs" color="red.200">{msg}</Text>
+                            ))}
+                        </>
+                    )}
+
+                    {/* Mismatches */}
+                    {balanceHealth.issues.length > 0 ? (
+                        <>
+                            <Text fontWeight="bold" mb={0.5} mt={1} fontSize="xs">
+                                Δ &gt; {deltaThreshold}% ({balanceHealth.mismatchCount}):
+                            </Text>
+                            {balanceHealth.issues.slice(0, 8).map((issue, i) => (
+                                <Text key={i} fontSize="xs">
+                                    {issue.symbol}: {issue.pct >= 0 ? '+' : ''}{issue.pct.toFixed(1)}%
+                                </Text>
+                            ))}
+                            {balanceHealth.issues.length > 8 && (
+                                <Text fontSize="xs" color="gray.400" mt={0.5}>
+                                    …and {balanceHealth.issues.length - 8} more
+                                </Text>
+                            )}
+                        </>
+                    ) : (
+                        <Text fontSize="xs" color="gray.300" mt={1}>All deltas within {deltaThreshold}% tolerance</Text>
+                    )}
+                </Box>
+            }
+        >
+            <Box
+                p={3}
+                bg="white"
+                borderRadius="lg"
+                border="1px solid"
+                borderColor={hasFailed ? 'red.200' : 'gray.200'}
+                h="100%"
+                cursor={hasMismatches && onBalanceHealthClick ? 'pointer' : 'default'}
+                onClick={hasMismatches ? onBalanceHealthClick : undefined}
+                _hover={hasMismatches && onBalanceHealthClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
+                transition="all 0.15s"
+            >
+                <Flex align="center" gap={2} mb={2}>
+                    <FiActivity size={14} color={hasFailed ? '#e53e3e' : hasMismatches ? '#dd6b20' : '#38a169'} />
+                    <Text fontSize="xs" fontWeight="semibold" color="gray.700">Live Balance</Text>
+                    <Badge
+                        colorPalette={hasMismatches ? 'orange' : 'green'}
+                        size="xs"
+                        ml="auto"
+                    >
+                        {covered}/{total}
+                    </Badge>
+                </Flex>
+
+                {/* Status badges row */}
+                <Flex gap={1} mb={2} wrap="wrap">
+                    {hasMismatches && (
+                        <Badge size="xs" colorPalette="orange">{balanceHealth.mismatchCount} mismatch</Badge>
+                    )}
+                    {hasFailed && (
+                        <Badge size="xs" colorPalette="red">⚠ {balanceHealth.failedAssets!.length} failed</Badge>
+                    )}
+                    {!hasMismatches && !hasFailed && (
+                        <Badge size="xs" colorPalette="green">✓ all matched</Badge>
+                    )}
+                </Flex>
+
+                {/* Threshold slider */}
+                <Box onClick={(e) => e.stopPropagation()}>
+                    <Flex justify="space-between" mb={0}>
+                        <Text fontSize="2xs" color="gray.400">Tolerance</Text>
+                        <Text fontSize="2xs" color="gray.500" fontWeight="medium">{deltaThreshold}%</Text>
+                    </Flex>
+                    <Slider.Root
+                        size="sm"
+                        min={0}
+                        max={50}
+                        step={1}
+                        value={[deltaThreshold]}
+                        onValueChange={(details) => onDeltaThresholdChange?.(details.value[0])}
+                    >
+                        <Slider.Control>
+                            <Slider.Track>
+                                <Slider.Range />
+                            </Slider.Track>
+                            <Slider.Thumb index={0} />
+                        </Slider.Control>
+                    </Slider.Root>
+                </Box>
+            </Box>
+        </Tooltip>
+    );
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// Legacy exports (kept for compatibility)
+// ═══════════════════════════════════════════════════════════════════
+
+/** @deprecated Use RefreshPricesCard + WarningsCard + BalanceHealthCard instead */
+export const CompactStatusBar: React.FC<any> = () => null;
 
 interface SummaryCardsProps {
     summary: PnLSummary;
     baseCurrency: string;
     onFeesClick?: () => void;
     onWarningsClick?: () => void;
+    balanceHealth?: BalanceHealthData;
+    onBalanceHealthClick?: () => void;
+    deltaThreshold?: number;
+    onDeltaThresholdChange?: (value: number) => void;
+    warningTypeCounts?: Record<string, number>;
 }
 
+/** @deprecated Replaced by individual card exports */
+export const SummaryCards: React.FC<SummaryCardsProps> = () => null;
+
+/**
+ * Compact summary bar for when detail view is active
+ */
 const formatCurrency = (value: number, currency: string): string => {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
@@ -33,131 +384,6 @@ const formatCurrency = (value: number, currency: string): string => {
     }).format(value);
 };
 
-const formatPct = (value: number): string => {
-    const sign = value >= 0 ? '+' : '';
-    return `${sign}${(value * 100).toFixed(2)}%`;
-};
-
-interface MetricCardProps {
-    label: string;
-    value: string;
-    subValue?: string;
-    color?: string;
-    icon?: React.ReactNode;
-    onClick?: () => void;
-    clickable?: boolean;
-    badge?: { label: string; colorPalette: string };
-}
-
-const MetricCard: React.FC<MetricCardProps> = ({
-    label,
-    value,
-    subValue,
-    color = 'gray.800',
-    icon,
-    onClick,
-    clickable = false,
-    badge,
-}) => (
-    <Card.Root
-        cursor={clickable ? 'pointer' : 'default'}
-        onClick={onClick}
-        _hover={clickable ? { shadow: 'md', borderColor: 'blue.200' } : undefined}
-        transition="all 0.2s"
-    >
-        <Card.Body py={4}>
-            <Flex justify="space-between" align="flex-start" mb={2}>
-                <Text fontSize="sm" color="gray.500" fontWeight="medium">
-                    {label}
-                </Text>
-                {icon && <Box color="gray.400">{icon}</Box>}
-            </Flex>
-            <Text fontSize="2xl" fontWeight="bold" color={color}>
-                {value}
-            </Text>
-            {subValue && (
-                <Text fontSize="sm" color="gray.500" mt={1}>
-                    {subValue}
-                </Text>
-            )}
-            {badge && (
-                <Badge colorPalette={badge.colorPalette} mt={2} size="sm">
-                    {badge.label}
-                </Badge>
-            )}
-        </Card.Body>
-    </Card.Root>
-);
-
-export const SummaryCards: React.FC<SummaryCardsProps> = ({
-    summary,
-    baseCurrency,
-    onFeesClick,
-    onWarningsClick,
-}) => {
-    const realizedPnLColor = summary.total_realized_pnl >= 0 ? 'green.600' : 'red.600';
-    const unrealizedPnLColor = summary.total_unrealized_pnl >= 0 ? 'green.600' : 'red.600';
-
-    return (
-        <SimpleGrid columns={{ base: 2, md: 3, lg: 5 }} gap={4} mb={6}>
-            {/* Portfolio Value */}
-            <MetricCard
-                label="Portfolio Value"
-                value={formatCurrency(summary.total_portfolio_value, baseCurrency)}
-                icon={<FiDollarSign size={18} />}
-            />
-
-            {/* Unrealized P&L */}
-            <MetricCard
-                label="Unrealized P&L"
-                value={formatCurrency(summary.total_unrealized_pnl, baseCurrency)}
-                color={unrealizedPnLColor}
-                icon={summary.total_unrealized_pnl >= 0 ? <FiTrendingUp size={18} /> : <FiTrendingDown size={18} />}
-            />
-
-            {/* Realized P&L */}
-            <MetricCard
-                label="Realized P&L"
-                value={formatCurrency(summary.total_realized_pnl, baseCurrency)}
-                subValue={`Taxable: ${formatCurrency(summary.taxable_realized_pnl, baseCurrency)}`}
-                color={realizedPnLColor}
-                icon={summary.total_realized_pnl >= 0 ? <FiTrendingUp size={18} /> : <FiTrendingDown size={18} />}
-            />
-
-            {/* Total Fees */}
-            <MetricCard
-                label="Total Fees"
-                value={formatCurrency(summary.total_fees, baseCurrency)}
-                subValue={`${summary.fee_entry_count} fee events`}
-                onClick={onFeesClick}
-                clickable={!!onFeesClick}
-                badge={onFeesClick ? { label: 'Click for details', colorPalette: 'gray' } : undefined}
-            />
-
-            {/* Warnings */}
-            <MetricCard
-                label="Warnings"
-                value={`${summary.warning_count}`}
-                subValue={summary.error_count > 0 ? `${summary.error_count} errors` : undefined}
-                color={summary.warning_count > 0 ? 'orange.500' : 'green.500'}
-                icon={<FiAlertTriangle size={18} />}
-                onClick={onWarningsClick}
-                clickable={!!onWarningsClick && summary.warning_count > 0}
-                badge={
-                    summary.error_count > 0
-                        ? { label: 'Needs attention', colorPalette: 'red' }
-                        : summary.warning_count > 0
-                            ? { label: 'Review recommended', colorPalette: 'orange' }
-                            : { label: 'All clear', colorPalette: 'green' }
-                }
-            />
-        </SimpleGrid>
-    );
-};
-
-/**
- * Compact summary bar for when detail view is active
- */
 export const SummaryBar: React.FC<{
     summary: PnLSummary;
     baseCurrency: string;

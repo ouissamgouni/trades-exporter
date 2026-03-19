@@ -12,6 +12,7 @@ Changes:
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect
 
 
 # revision identifiers
@@ -21,9 +22,41 @@ branch_labels = None
 depends_on = None
 
 
+def table_exists(table_name: str) -> bool:
+    """Check if a table exists in the database."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    return table_name in inspector.get_table_names()
+
+
+def column_exists(table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    columns = [c['name'] for c in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
+def index_exists(table_name: str, index_name: str) -> bool:
+    """Check if an index exists on a table."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    indexes = [idx['name'] for idx in inspector.get_indexes(table_name)]
+    return index_name in indexes
+
+
+def fk_exists(table_name: str, fk_name: str) -> bool:
+    """Check if a foreign key constraint exists."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    fks = [fk['name'] for fk in inspector.get_foreign_keys(table_name)]
+    return fk_name in fks
+
+
 def upgrade() -> None:
-    # Create sync_jobs table
-    op.create_table(
+    # Create sync_jobs table (if not exists)
+    if not table_exists('sync_jobs'):
+        op.create_table(
         'sync_jobs',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('status', sa.String(), nullable=False, server_default='running'),
@@ -40,11 +73,14 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('ix_sync_jobs_status', 'sync_jobs', ['status'])
-    op.create_index('ix_sync_jobs_started_at', 'sync_jobs', ['started_at'])
+    if not index_exists('sync_jobs', 'ix_sync_jobs_status'):
+        op.create_index('ix_sync_jobs_status', 'sync_jobs', ['status'])
+    if not index_exists('sync_jobs', 'ix_sync_jobs_started_at'):
+        op.create_index('ix_sync_jobs_started_at', 'sync_jobs', ['started_at'])
 
-    # Create sync_job_connector_runs table
-    op.create_table(
+    # Create sync_job_connector_runs table (if not exists)
+    if not table_exists('sync_job_connector_runs'):
+        op.create_table(
         'sync_job_connector_runs',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('job_id', sa.Integer(), nullable=False),
@@ -71,28 +107,34 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['job_id'], ['sync_jobs.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['connector_id'], ['account_connectors.id'], ondelete='CASCADE'),
     )
-    op.create_index('ix_sync_job_connector_runs_job_id', 'sync_job_connector_runs', ['job_id'])
-    op.create_index('ix_sync_job_connector_runs_connector_id', 'sync_job_connector_runs', ['connector_id'])
-    op.create_index('ix_sync_job_connector_runs_status', 'sync_job_connector_runs', ['status'])
+    if not index_exists('sync_job_connector_runs', 'ix_sync_job_connector_runs_job_id'):
+        op.create_index('ix_sync_job_connector_runs_job_id', 'sync_job_connector_runs', ['job_id'])
+    if not index_exists('sync_job_connector_runs', 'ix_sync_job_connector_runs_connector_id'):
+        op.create_index('ix_sync_job_connector_runs_connector_id', 'sync_job_connector_runs', ['connector_id'])
+    if not index_exists('sync_job_connector_runs', 'ix_sync_job_connector_runs_status'):
+        op.create_index('ix_sync_job_connector_runs_status', 'sync_job_connector_runs', ['status'])
 
-    # Add sync_connector_run_id FK to normalized_transactions
-    op.add_column(
-        'normalized_transactions',
-        sa.Column('sync_connector_run_id', sa.Integer(), nullable=True)
-    )
-    op.create_foreign_key(
-        'fk_normalized_transactions_sync_connector_run_id',
-        'normalized_transactions',
-        'sync_job_connector_runs',
-        ['sync_connector_run_id'],
-        ['id'],
-        ondelete='SET NULL'
-    )
-    op.create_index(
-        'ix_normalized_transactions_sync_connector_run_id',
-        'normalized_transactions',
-        ['sync_connector_run_id']
-    )
+    # Add sync_connector_run_id FK to normalized_transactions (if not exists)
+    if not column_exists('normalized_transactions', 'sync_connector_run_id'):
+        op.add_column(
+            'normalized_transactions',
+            sa.Column('sync_connector_run_id', sa.Integer(), nullable=True)
+        )
+    if not fk_exists('normalized_transactions', 'fk_normalized_transactions_sync_connector_run_id'):
+        op.create_foreign_key(
+            'fk_normalized_transactions_sync_connector_run_id',
+            'normalized_transactions',
+            'sync_job_connector_runs',
+            ['sync_connector_run_id'],
+            ['id'],
+            ondelete='SET NULL'
+        )
+    if not index_exists('normalized_transactions', 'ix_normalized_transactions_sync_connector_run_id'):
+        op.create_index(
+            'ix_normalized_transactions_sync_connector_run_id',
+            'normalized_transactions',
+            ['sync_connector_run_id']
+        )
 
 
 def downgrade() -> None:

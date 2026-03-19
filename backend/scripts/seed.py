@@ -12,7 +12,7 @@ This script will seed:
 """
 
 import sys
-from backend.config.loader import get_database_url
+from ..config.loader import get_database_url
 
 
 def main():

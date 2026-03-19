@@ -18,7 +18,22 @@ from decimal import Decimal
 from unittest.mock import Mock, MagicMock, patch
 from uuid import uuid4
 
+from backend.services.pnl_calculation_service import PnLCalculationService
+
 from fastapi.testclient import TestClient
+
+from api.schemas import AppliedFilters
+from api.routes.pnl_filter_depends import PnLTransactionFilters
+
+
+@pytest.fixture
+def no_filters():
+    """PnLTransactionFilters with no active filters."""
+    return PnLTransactionFilters(
+        applied_filters=AppliedFilters(),
+        non_owned=False,
+        warnings=[],
+    )
 
 
 @pytest.fixture
@@ -66,6 +81,9 @@ def mock_version():
     version.lots_created = 3
     version.lots_consumed = 2
     version.warning_count = 1
+    version.trigger = None
+    version.allow_negative_balances = True
+    version.residual_tolerance_pct = Decimal("0.05")
     return version
 
 
@@ -95,8 +113,7 @@ def mock_cost_lot():
     lot.asset = MagicMock()
     lot.asset.asset_id = 2
     lot.asset.symbol = "BTC"
-    
-    # Mock account relationship
+    lot.asset.label = "Bitcoin"
     lot.account = MagicMock()
     lot.account.name = "Binance"
     
@@ -108,6 +125,13 @@ def mock_cost_lot():
     # Mock computed properties
     lot.qty_consumed = Decimal("2")
     lot.remaining_cost_in_base = Decimal("800")
+    
+    # Cost provenance fields
+    lot.cost_source = "fmv"
+    lot.cost_fmv_price = Decimal("50000.00")
+    lot.cost_fmv_source = "coingecko"
+    lot.cost_fmv_timestamp = datetime.utcnow()
+    lot.cost_fmv_stale = False
     
     return lot
 
@@ -129,6 +153,7 @@ def mock_balance():
     balance.asset = MagicMock()
     balance.asset.asset_id = 2
     balance.asset.symbol = "BTC"
+    balance.asset.label = "Bitcoin"
     
     # Mock account relationship
     balance.account = None
@@ -163,6 +188,7 @@ def mock_realized_pnl():
     entry.asset = MagicMock()
     entry.asset.asset_id = 2
     entry.asset.symbol = "BTC"
+    entry.asset.label = "Bitcoin"
     
     return entry
 
@@ -170,7 +196,7 @@ def mock_realized_pnl():
 class TestGetVersionLots:
     """Tests for GET /pnl/versions/{id}/lots endpoint."""
 
-    def test_get_lots_returns_empty_for_new_version(self, mock_session, mock_version):
+    def test_get_lots_returns_empty_for_new_version(self, mock_session, mock_version, no_filters):
         """Test getting lots for a version with no lots."""
         from backend.api.routes.pnl import get_version_lots
         
@@ -181,12 +207,12 @@ class TestGetVersionLots:
         mock_exec_result.one.return_value = 0  # total count
         mock_session.exec.return_value = mock_exec_result
         
-        result = get_version_lots(version_id=1, session=mock_session)
+        result = get_version_lots(version_id=1, tx_filters=no_filters, session=mock_session)
         
         assert result["items"] == []
         assert result["total"] == 0
 
-    def test_get_lots_returns_formatted_lots(self, mock_session, mock_version, mock_cost_lot):
+    def test_get_lots_returns_formatted_lots(self, mock_session, mock_version, mock_cost_lot, no_filters):
         """Test getting lots returns properly formatted response."""
         from backend.api.routes.pnl import get_version_lots
         
@@ -196,7 +222,7 @@ class TestGetVersionLots:
         mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
-        result = get_version_lots(version_id=1, session=mock_session)
+        result = get_version_lots(version_id=1, tx_filters=no_filters, session=mock_session)
         
         assert len(result["items"]) == 1
         lot = result["items"][0]
@@ -218,7 +244,7 @@ class TestGetVersionLots:
         
         assert exc_info.value.status_code == 404
 
-    def test_get_lots_filters_by_asset_id(self, mock_session, mock_version, mock_cost_lot):
+    def test_get_lots_filters_by_asset_id(self, mock_session, mock_version, mock_cost_lot, no_filters):
         """Test getting lots with asset_id filter."""
         from backend.api.routes.pnl import get_version_lots
         
@@ -228,7 +254,7 @@ class TestGetVersionLots:
         mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
-        result = get_version_lots(version_id=1, asset_id=2, session=mock_session)
+        result = get_version_lots(version_id=1, asset_id=2, tx_filters=no_filters, session=mock_session)
         
         # Verify the query was built with asset_id filter
         mock_session.exec.assert_called()
@@ -241,7 +267,7 @@ class TestGetVersionLots:
 class TestGetVersionBalances:
     """Tests for GET /pnl/versions/{id}/balances endpoint."""
 
-    def test_get_balances_returns_formatted_balances(self, mock_session, mock_version, mock_cost_lot):
+    def test_get_balances_returns_formatted_balances(self, mock_session, mock_version, mock_cost_lot, no_filters):
         """Test getting balances returns properly formatted response."""
         from backend.api.routes.pnl import get_version_balances
         
@@ -250,7 +276,7 @@ class TestGetVersionBalances:
         mock_exec_result.all.return_value = [mock_cost_lot]
         mock_session.exec.return_value = mock_exec_result
         
-        result = get_version_balances(version_id=1, session=mock_session)
+        result = get_version_balances(version_id=1, tx_filters=no_filters, session=mock_session)
         
         assert len(result) == 1
         balance = result[0]
@@ -266,7 +292,7 @@ class TestGetVersionBalances:
 class TestGetVersionRealizedPnl:
     """Tests for GET /pnl/versions/{id}/realized-pnl endpoint."""
 
-    def test_get_realized_pnl_returns_formatted_entries(self, mock_session, mock_version, mock_realized_pnl):
+    def test_get_realized_pnl_returns_formatted_entries(self, mock_session, mock_version, mock_realized_pnl, no_filters):
         """Test getting realized P&L returns properly formatted response."""
         from backend.api.routes.pnl import get_version_realized_pnl
         
@@ -276,7 +302,7 @@ class TestGetVersionRealizedPnl:
         mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
         
-        result = get_version_realized_pnl(version_id=1, session=mock_session)
+        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
         
         assert len(result["items"]) == 1
         entry = result["items"][0]
@@ -397,6 +423,112 @@ class TestDeleteVersion:
             delete_version(version_id=999, session=mock_session)
         
         assert exc_info.value.status_code == 404
+
+
+# =============================================================================
+# Background Calculation Status & Refresh Endpoints
+# =============================================================================
+
+
+# The endpoints do lazy imports:
+#   from backend.services.pnl_calculation_service import PnLCalculationService
+# So we must patch at the source module.
+_SVC_PATCH = "backend.services.pnl_calculation_service.PnLCalculationService"
+
+
+class TestGetCalculationStatus:
+    """Tests for GET /pnl/calculation-status endpoint."""
+
+    def test_returns_service_status(self):
+        """GET /calculation-status delegates to PnLCalculationService.get_status()."""
+        from backend.api.routes.pnl import get_calculation_status
+
+        mock_service = MagicMock()
+        mock_service.get_status.return_value = {
+            "status": "stale",
+            "is_stale": True,
+            "stale_since": "2026-03-06T12:00:00+00:00",
+            "stale_reasons": ["Asset updated"],
+            "current_version_id": 5,
+            "last_calculated_at": "2026-03-06T11:30:00+00:00",
+            "error": None,
+        }
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = get_calculation_status()
+
+        mock_cls.get_instance.assert_called_once()
+        mock_service.get_status.assert_called_once()
+        assert result["status"] == "stale"
+        assert result["is_stale"] is True
+        assert result["current_version_id"] == 5
+
+    def test_returns_idle_when_no_calculation(self):
+        """GET /calculation-status with fresh service returns idle."""
+        from backend.api.routes.pnl import get_calculation_status
+
+        mock_service = MagicMock()
+        mock_service.get_status.return_value = {
+            "status": "idle",
+            "is_stale": True,
+            "stale_since": "2026-03-06T12:00:00+00:00",
+            "stale_reasons": ["Server started"],
+            "current_version_id": None,
+            "last_calculated_at": None,
+            "error": None,
+        }
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = get_calculation_status()
+
+        assert result["status"] == "idle"
+        assert result["current_version_id"] is None
+
+
+class TestRefreshPnl:
+    """Tests for POST /pnl/refresh endpoint."""
+
+    def test_refresh_starts_calculation(self):
+        """POST /refresh starts calculation and returns started=True."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = True
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = refresh_pnl()
+
+        mock_service.start_calculation.assert_called_once_with(trigger="refresh")
+        assert result == {"started": True}
+
+    def test_refresh_returns_false_when_already_calculating(self):
+        """POST /refresh when calculation already running returns started=False."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = False
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            result = refresh_pnl()
+
+        assert result == {"started": False, "reason": "already_calculating"}
+
+    def test_refresh_passes_refresh_trigger(self):
+        """POST /refresh passes trigger='refresh' to the service."""
+        from backend.api.routes.pnl import refresh_pnl
+
+        mock_service = MagicMock()
+        mock_service.start_calculation.return_value = True
+
+        with patch(_SVC_PATCH) as mock_cls:
+            mock_cls.get_instance.return_value = mock_service
+            refresh_pnl()
+
+        mock_service.start_calculation.assert_called_once_with(trigger="refresh")
 
 
 # Note: TestPersistResultsSavesBalances was removed because AssetBalance is no longer

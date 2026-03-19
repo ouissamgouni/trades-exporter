@@ -39,10 +39,11 @@ class SimpleTestConnector(BaseConnector):
     def connector_name(self) -> str:
         return self._name
     
-    def get_raws(self) -> List[Dict[str, Any]]:
+    def yield_raws(self):
         if self._should_error:
             raise Exception(f"Simulated error in {self._name}")
-        return self._items
+        for item in self._items:
+            yield item
     
     def raw_to_normalized(self, raw_item: dict) -> NormalizedTransaction:
         return NormalizedTransaction(
@@ -67,11 +68,11 @@ class ConcreteHubConnector(BaseHubConnector):
 # ============================================================================
 
 
-class TestEndOfConnectorMarker:
-    """Tests for end-of-connector completion markers."""
+class TestYieldRawsStreaming:
+    """Tests for streaming behavior of yield_raws."""
 
-    def test_futures_strategy_sends_completion_marker(self):
-        """Test that futures strategy sends is_connector_complete marker after each connector."""
+    def test_futures_strategy_yields_all_items(self):
+        """Test that futures strategy yields all items from connectors."""
         # Create child connectors with some items
         connector1 = SimpleTestConnector(
             name="connector_a",
@@ -93,26 +94,21 @@ class TestEndOfConnectorMarker:
         )
         
         # Collect all yielded items
-        items = list(hub.get_raws())
+        items = list(hub.yield_raws())
         
-        # Should have: 2 items from A + 1 completion marker + 1 item from B + 1 completion marker
-        # Total: 5 items
-        completion_markers = [i for i in items if i.get("is_connector_complete")]
-        data_items = [i for i in items if not i.get("is_connector_complete")]
+        # Should have all 3 items with connector metadata
+        assert len(items) == 3, f"Expected 3 data items, got {len(items)}"
         
-        assert len(completion_markers) == 2, f"Expected 2 completion markers, got {len(completion_markers)}"
-        assert len(data_items) == 3, f"Expected 3 data items, got {len(data_items)}"
-        
-        # Check completion markers have required fields
-        for marker in completion_markers:
-            assert marker["is_connector_complete"] is True
-            assert "connector_name" in marker
-            assert "items_count" in marker
-            assert marker["raw_item"] is None
-            assert marker["normalized_item"] is None
+        # Check items have required wrapper fields
+        for item in items:
+            assert "connector_name" in item
+            assert "_connector_id" in item
+            assert "_master_source" in item
+            assert "raw_item" in item
+            assert "normalized_item" in item
 
-    def test_queue_strategy_sends_completion_marker(self):
-        """Test that queue strategy sends is_connector_complete marker after each connector."""
+    def test_queue_strategy_yields_all_items(self):
+        """Test that queue strategy yields all items from connectors."""
         connector1 = SimpleTestConnector(
             name="connector_a",
             connector_id=1,
@@ -124,17 +120,15 @@ class TestEndOfConnectorMarker:
             parallel_strategy="queue",
         )
         
-        items = list(hub.get_raws())
+        items = list(hub.yield_raws())
         
-        # Should have: 1 item + 1 completion marker
-        completion_markers = [i for i in items if i.get("is_connector_complete")]
-        
-        assert len(completion_markers) == 1
-        assert completion_markers[0]["connector_id"] == 1
-        assert completion_markers[0]["items_count"] == 1
+        # Should have 1 item with metadata
+        assert len(items) == 1
+        assert items[0]["_connector_id"] == 1
+        assert items[0]["connector_name"] == "connector_a"
 
-    def test_completion_marker_includes_items_count(self):
-        """Test that completion marker includes correct items_count."""
+    def test_yields_correct_item_count(self):
+        """Test that all items from connector are yielded."""
         connector = SimpleTestConnector(
             name="counter_test",
             connector_id=5,
@@ -146,14 +140,12 @@ class TestEndOfConnectorMarker:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
-        completion_markers = [i for i in items if i.get("is_connector_complete")]
+        items = list(hub.yield_raws())
         
-        assert len(completion_markers) == 1
-        assert completion_markers[0]["items_count"] == 10
+        assert len(items) == 10
 
-    def test_empty_connector_still_sends_completion_marker(self):
-        """Test that a connector with no items still sends completion marker."""
+    def test_empty_connector_yields_nothing(self):
+        """Test that a connector with no items yields no items."""
         connector = SimpleTestConnector(
             name="empty",
             connector_id=3,
@@ -165,12 +157,10 @@ class TestEndOfConnectorMarker:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
+        items = list(hub.yield_raws())
         
-        # Should have exactly 1 completion marker with items_count=0
-        assert len(items) == 1
-        assert items[0]["is_connector_complete"] is True
-        assert items[0]["items_count"] == 0
+        # Should have no items
+        assert len(items) == 0
 
 
 # ============================================================================
@@ -181,8 +171,8 @@ class TestEndOfConnectorMarker:
 class TestHubAbortFunctionality:
     """Tests for abort event handling in hub connector."""
 
-    def test_abort_event_propagates_to_children(self):
-        """Test that abort_event is propagated to child connectors."""
+    def test_abort_event_stored_on_hub(self):
+        """Test that abort_event is stored on hub connector."""
         abort_event = Event()
         
         connector1 = SimpleTestConnector(name="a", connector_id=1)
@@ -193,9 +183,8 @@ class TestHubAbortFunctionality:
             abort_event=abort_event,
         )
         
-        # Child connectors should have the same abort_event
-        assert connector1._abort_event is abort_event
-        assert connector2._abort_event is abort_event
+        # Hub should have the abort_event
+        assert hub._abort_event is abort_event
 
     def test_is_abort_requested_returns_false_initially(self):
         """Test that is_abort_requested returns False when event not set."""
@@ -244,7 +233,7 @@ class TestHubAbortFunctionality:
         
         # Start iterating and abort after a few items
         items_received = []
-        for i, item in enumerate(hub.get_raws()):
+        for i, item in enumerate(hub.yield_raws()):
             items_received.append(item)
             if i == 5:
                 abort_event.set()
@@ -264,7 +253,7 @@ class TestConnectorIdInWrapper:
     """Tests for connector_id field in wrapped items."""
 
     def test_wrapper_includes_connector_id(self):
-        """Test that wrapped items include connector_id at top level."""
+        """Test that wrapped items include _connector_id at top level."""
         connector = SimpleTestConnector(
             name="id_test",
             connector_id=42,
@@ -276,31 +265,29 @@ class TestConnectorIdInWrapper:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
-        data_items = [i for i in items if not i.get("is_connector_complete")]
+        items = list(hub.yield_raws())
         
-        assert len(data_items) == 1
-        assert data_items[0]["connector_id"] == 42
-        assert data_items[0]["connector_name"] == "id_test"
+        assert len(items) == 1
+        assert items[0]["_connector_id"] == 42
+        assert items[0]["connector_name"] == "id_test"
 
-    def test_completion_marker_includes_connector_id(self):
-        """Test that completion marker includes connector_id."""
+    def test_wrapper_includes_master_source(self):
+        """Test that wrapped items include _master_source."""
         connector = SimpleTestConnector(
-            name="id_marker_test",
+            name="source_test",
             connector_id=99,
             items=[{"id": "1"}],
         )
         
         hub = ConcreteHubConnector(
-            child_connectors=[("id_marker_test", connector)],
+            child_connectors=[("source_test", connector)],
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
-        completion_markers = [i for i in items if i.get("is_connector_complete")]
+        items = list(hub.yield_raws())
         
-        assert len(completion_markers) == 1
-        assert completion_markers[0]["connector_id"] == 99
+        assert len(items) == 1
+        assert items[0]["_master_source"] == "source_test"
 
 
 # ============================================================================
@@ -325,7 +312,7 @@ class TestHubErrorHandling:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
+        items = list(hub.yield_raws())
         
         # Should have an error item
         error_items = [i for i in items if i.get("error")]
@@ -353,7 +340,7 @@ class TestHubErrorHandling:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
+        items = list(hub.yield_raws())
         
         # Should have items from good connector
         good_items = [i for i in items if i.get("connector_name") == "good" and not i.get("is_connector_complete")]
@@ -381,10 +368,9 @@ class TestParallelStrategies:
             parallel_strategy="queue",
         )
         
-        items = list(hub.get_raws())
-        data_items = [i for i in items if not i.get("is_connector_complete")]
+        items = list(hub.yield_raws())
         
-        assert len(data_items) == 5
+        assert len(items) == 5
 
     def test_futures_strategy_processes_in_batches(self):
         """Test that futures strategy processes connectors."""
@@ -399,7 +385,6 @@ class TestParallelStrategies:
             parallel_strategy="futures",
         )
         
-        items = list(hub.get_raws())
-        data_items = [i for i in items if not i.get("is_connector_complete")]
+        items = list(hub.yield_raws())
         
-        assert len(data_items) == 5
+        assert len(items) == 5

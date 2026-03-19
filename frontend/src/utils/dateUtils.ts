@@ -37,7 +37,12 @@ export function parseApiDate(value: string | number | Date | null | undefined): 
 
     if (typeof value === 'string') {
         // ISO 8601 string (e.g., "2024-01-15T10:30:00Z" or "2024-01-15T10:30:00+00:00")
-        const date = new Date(value);
+        // If no timezone marker is present, treat as UTC (backend stores all datetimes in UTC)
+        let normalized = value;
+        if (!value.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(value)) {
+            normalized = value + 'Z';
+        }
+        const date = new Date(normalized);
         return isNaN(date.getTime()) ? null : date;
     }
 

@@ -7,7 +7,7 @@ Object-oriented design implementing BaseConnector interface.
 from typing import Optional, Dict, Any
 
 from backend.connectors.base.base_hub_connector import BaseHubConnector
-from backend.connectors.onchain.chain_config import get_chain_config, CHAIN_CONFIG
+from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging, load_settings
 
 log = configure_logging(__name__)
@@ -55,16 +55,19 @@ class ConnectorEtherscanHub(BaseHubConnector):
             raise ValueError("Missing wallet address")
 
         # Validate chain is supported
-        chain_config = get_chain_config(self.chain_name)
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("etherscan", self.chain_name)
         if not chain_config:
+            all_chains = list(registry.get_chain_configs("etherscan").keys())
             raise ValueError(
-                f"Unsupported chain: {self.chain_name}. Available: {list(CHAIN_CONFIG.keys())}"
+                f"Unsupported chain: {self.chain_name}. Available: {all_chains}"
             )
 
-        # Get test mode from config
-        test_mode = kwargs.get("config", {}).get("test_mode", False)
+        # Get test/renormalize mode from config
+        test_mode = (config or {}).get("test_mode", False)
+        renormalize_mode = (config or {}).get("renormalize_mode", False)
         
-        if not test_mode:
+        if not test_mode and not renormalize_mode:
             # Live mode: validate API key
             web3_config = load_settings().get("web3_wallets", {})
             api_key = web3_config.get("etherscan_api_key", "")
@@ -81,18 +84,26 @@ class ConnectorEtherscanHub(BaseHubConnector):
         )
 
         # Create specialized connectors with parent output path
-        # In test mode, each child connector will detect test mode and return test data
+        # In test/renormalize mode, each child connector will skip API config
         child_config = {"parent_output_path": self.output_path}
+        if test_mode:
+            child_config["test_mode"] = True
+        if renormalize_mode:
+            child_config["renormalize_mode"] = True
         
         normal_tx_connector = ConnectorEtherscanNormalTx(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            account_id=account_id,
+            connector_id=connector_id,
             config=child_config,
         )
 
         token_transfers_connector = ConnectorEtherscanTokenTransfers(
             wallet_address=self.wallet_address,
             chain_name=self.chain_name,
+            account_id=account_id,
+            connector_id=connector_id,
             config=child_config,
         )
 
@@ -104,6 +115,52 @@ class ConnectorEtherscanHub(BaseHubConnector):
         # Update child connectors after creation
         self.child_connectors = child_connectors
 
+    # ------------------------------------------------------------------
+    # Balance API
+    # ------------------------------------------------------------------
 
-# Tests available at:
-# pytest tests/unit/connectors/onchain/test_etherscan_connector.py -v
+    @property
+    def supports_balance(self) -> bool:
+        return bool(self.wallet_address)
+
+    def get_balance(self):
+        import requests
+        from decimal import Decimal
+        from backend.connectors.base.base_connector import BalanceEntry
+
+        web3_config = load_settings().get("web3_wallets", {})
+        api_key = web3_config.get("etherscan_api_key", "")
+        registry = get_connector_registry()
+        chain_config = registry.get_chain_config("etherscan", self.chain_name)
+        chain_id = chain_config.chain_id if chain_config else 1
+        entries = []
+
+        # Native balance
+        try:
+            resp = requests.get(
+                "https://api.etherscan.io/v2/api",
+                params={
+                    "module": "account",
+                    "action": "balance",
+                    "address": self.wallet_address,
+                    "chainid": chain_id,
+                    "apikey": api_key,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            result = data.get("result", "0")
+            if result and int(result) > 0:
+                total = Decimal(result) / Decimal(10 ** 18)
+                entries.append(BalanceEntry(
+                    asset_symbol="ETH",
+                    total=total,
+                    available=total,
+                    chain=self.chain_name,
+                    raw=data,
+                ))
+        except Exception as e:
+            log.warning(f"Failed to fetch native balance from Etherscan: {e}")
+
+        return entries

@@ -97,6 +97,7 @@ class SyncJobRepository:
         # Set finished_at for terminal states
         if status in (
             SyncJobStatus.COMPLETED,
+            SyncJobStatus.WARNING,
             SyncJobStatus.FAILED,
             SyncJobStatus.ABORTED,
         ):
@@ -201,11 +202,53 @@ class SyncJobRepository:
         )
         return list(self.session.exec(statement).all())
 
+    def get_latest_run_by_connector(self, connector_id: int) -> Optional[SyncJobConnectorRun]:
+        """Get the most recent connector run for a specific connector."""
+        statement = (
+            select(SyncJobConnectorRun)
+            .where(SyncJobConnectorRun.connector_id == connector_id)
+            .order_by(col(SyncJobConnectorRun.started_at).desc())
+            .limit(1)
+        )
+        result = self.session.exec(statement).first()
+        return result
+
+    def get_latest_transaction_for_run(self, run_id: int) -> Optional[NormalizedTransaction]:
+        """Get the most recent transaction from a connector run."""
+        statement = (
+            select(NormalizedTransaction)
+            .where(NormalizedTransaction.sync_connector_run_id == run_id)
+            .order_by(col(NormalizedTransaction.date_time).desc())
+            .limit(1)
+        )
+        return self.session.exec(statement).first()
+
+    def get_latest_synced_transaction_for_connector(self, connector_id: int) -> Optional[NormalizedTransaction]:
+        """Get the most recent successfully synced transaction for a connector across all completed runs."""
+        # Join with SyncJobConnectorRun to filter by connector and successful status
+        statement = (
+            select(NormalizedTransaction)
+            .join(
+                SyncJobConnectorRun,
+                NormalizedTransaction.sync_connector_run_id == SyncJobConnectorRun.id
+            )
+            .where(
+                SyncJobConnectorRun.connector_id == connector_id,
+                SyncJobConnectorRun.status == SyncJobConnectorStatus.COMPLETED,
+                NormalizedTransaction.date_time.is_not(None)
+            )
+            .order_by(col(NormalizedTransaction.date_time).desc())
+            .limit(1)
+        )
+        return self.session.exec(statement).first()
+
     def update_connector_run_status(
         self,
         run_id: int,
         status: SyncJobConnectorStatus,
         error_message: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None,
     ) -> Optional[SyncJobConnectorRun]:
         """Update connector run status."""
         run = self.get_connector_run(run_id)
@@ -214,13 +257,18 @@ class SyncJobRepository:
 
         run.status = status
 
-        # Set started_at when transitioning to running
-        if status == SyncJobConnectorStatus.RUNNING and not run.started_at:
+        # Set started_at if provided or when transitioning to running
+        if started_at:
+            run.started_at = started_at
+        elif status == SyncJobConnectorStatus.RUNNING and not run.started_at:
             run.started_at = datetime.now(timezone.utc)
 
-        # Set finished_at for terminal states
-        if status in (
+        # Set finished_at if provided or for terminal states
+        if finished_at:
+            run.finished_at = finished_at
+        elif status in (
             SyncJobConnectorStatus.COMPLETED,
+            SyncJobConnectorStatus.WARNING,
             SyncJobConnectorStatus.FAILED,
             SyncJobConnectorStatus.SKIPPED,
             SyncJobConnectorStatus.ABORTED,
@@ -239,8 +287,16 @@ class SyncJobRepository:
         updated_count: Optional[int] = None,
         skipped_count: Optional[int] = None,
         error_count: Optional[int] = None,
+        synced_ids: Optional[List[str]] = None,
+        updated_ids: Optional[List[str]] = None,
+        skipped_ids: Optional[List[str]] = None,
+        error_details: Optional[List[Dict[str, Any]]] = None,
+        logs: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[SyncJobConnectorRun]:
-        """Update connector run metrics."""
+        """
+        Update connector run metrics and optionally outcome tracking.
+        This is used for periodic updates during processing to enable live viewing.
+        """
         run = self.get_connector_run(run_id)
         if not run:
             return None
@@ -255,6 +311,18 @@ class SyncJobRepository:
             run.skipped_count = skipped_count
         if error_count is not None:
             run.error_count = error_count
+        
+        # Update outcome tracking if provided
+        if synced_ids is not None:
+            run.synced_ids = synced_ids
+        if updated_ids is not None:
+            run.updated_ids = updated_ids
+        if skipped_ids is not None:
+            run.skipped_ids = skipped_ids
+        if error_details is not None:
+            run.error_details = error_details
+        if logs is not None:
+            run.logs = logs
 
         self.session.add(run)
         self.session.flush()
@@ -267,6 +335,7 @@ class SyncJobRepository:
         updated_ids: Optional[List[str]] = None,
         skipped_ids: Optional[List[str]] = None,
         error_details: Optional[List[Dict[str, Any]]] = None,
+        logs: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[SyncJobConnectorRun]:
         """Update connector run outcome tracking (which transactions were affected)."""
         run = self.get_connector_run(run_id)
@@ -281,6 +350,8 @@ class SyncJobRepository:
             run.skipped_ids = skipped_ids
         if error_details is not None:
             run.error_details = error_details
+        if logs is not None:
+            run.logs = logs
 
         self.session.add(run)
         self.session.flush()

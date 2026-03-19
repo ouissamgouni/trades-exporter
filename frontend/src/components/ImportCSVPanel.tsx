@@ -60,7 +60,7 @@ interface ImportCSVPanelProps {
 export const ImportCSVPanel: React.FC<ImportCSVPanelProps> = ({ onDataChange }) => {
     const queryClient = useQueryClient();
     const fileInputRef = useRef<HTMLInputElement>(null);
-    
+
     // Import state
     const [importFile, setImportFile] = useState<File | null>(null);
     const [importPreview, setImportPreview] = useState<TradesImportPreview | null>(null);
@@ -298,7 +298,7 @@ export const ImportCSVPanel: React.FC<ImportCSVPanelProps> = ({ onDataChange }) 
                                 </Table.Header>
                                 <Table.Body>
                                     {importPreview.transactions.slice(0, 20).map((tx, i) => {
-                                        const dbType = tx.is_fee_transaction ? 'technical' : 'trade';
+                                        const dbType = tx.is_fee_transaction ? 'cost' : 'trade';
                                         const direction = tx.is_fee_transaction
                                             ? 'neutral'
                                             : (tx.transaction_type === 'Buy' ? 'inflow' : 'outflow');

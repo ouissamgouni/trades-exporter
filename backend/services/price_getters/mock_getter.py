@@ -1,27 +1,21 @@
-"""
-Mock Price Getter for Manual Testing.
+"""Mock Price Getter for Testing.
 
 Returns random prices within configurable ranges per asset type.
-Enable via PRICE_GETTER_OVERRIDE=mock environment variable.
+Enabled/disabled via the mock_mode_enabled DB setting (UI toggle).
 
 Features:
 - Per-asset-type price ranges (crypto, stock, fiat)
-- Deterministic seed support via MOCK_PRICES_SEED for reproducible tests
-- Prominent warning logging to indicate prices are fake
+- Per-asset range overrides via params: {"min_price": X, "max_price": Y}
 
 Usage:
-    # Enable mock prices for quick manual testing
-    PRICE_GETTER_OVERRIDE=mock python -m backend.api.run
-    
-    # With reproducible random prices
-    PRICE_GETTER_OVERRIDE=mock MOCK_PRICES_SEED=42 python -m backend.api.run
+    # Enable per-asset via the UI mock pricing toggle in Assets Editor
 """
 
 import random
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 
-from backend.config.loader import configure_logging, get_mock_prices_seed
+from backend.config.loader import configure_logging
 from backend.db.models import Asset
 from backend.services.price_getters.base import (
     BasePriceGetter,
@@ -64,45 +58,31 @@ class MockPriceGetter(BasePriceGetter):
     initial_delay = 0.0
 
     def __init__(self):
-        """Initialize mock price getter with seed and log warning."""
+        """Initialize mock price getter."""
         super().__init__()
-        
-        # Initialize random seed if configured
-        seed = get_mock_prices_seed()
-        if seed is not None:
-            random.seed(seed)
-            log.warning(
-                f"🎲 MockPriceGetter initialized with seed={seed} "
-                f"(prices will be deterministic)"
-            )
-        
-        # Log prominent warning
-        self._log_mock_warning()
-    
-    def _log_mock_warning(self) -> None:
-        """Log prominent warning that prices are fake."""
-        warning_banner = """
-╔══════════════════════════════════════════════════════════════════════╗
-║  ⚠️  MOCK PRICE SERVICE ACTIVE - ALL PRICES ARE FAKE!                 ║
-║                                                                      ║
-║  This mode is for testing only. Prices are randomly generated        ║
-║  and do not reflect real market values.                              ║
-║                                                                      ║
-║  Disable by removing PRICE_GETTER_OVERRIDE environment variable.     ║
-╚══════════════════════════════════════════════════════════════════════╝
-"""
-        log.warning(warning_banner)
-        # Also print to stdout for visibility in all contexts
-        print(warning_banner)
 
-    def _get_price_range(self, asset: Asset) -> Tuple[float, float]:
-        """Get the price range for an asset based on its type."""
+    def _get_price_range(
+        self, asset: Asset, config: Optional[PriceGetterConfig] = None
+    ) -> Tuple[float, float]:
+        """Get the price range, checking config.extra overrides first."""
+        if config and config.extra:
+            custom_min = config.extra.get("min_price")
+            custom_max = config.extra.get("max_price")
+            if custom_min is not None and custom_max is not None:
+                try:
+                    cmin, cmax = float(custom_min), float(custom_max)
+                    if cmin <= cmax:
+                        return (cmin, cmax)
+                except (ValueError, TypeError):
+                    pass  # Fall through to type-based defaults
         price_type = (asset.price_type or "crypto").lower()
         return PRICE_RANGES.get(price_type, DEFAULT_RANGE)
 
-    def _generate_price(self, asset: Asset) -> float:
-        """Generate a random price within the asset type's range."""
-        min_price, max_price = self._get_price_range(asset)
+    def _generate_price(
+        self, asset: Asset, config: Optional[PriceGetterConfig] = None
+    ) -> float:
+        """Generate a random price within the configured range."""
+        min_price, max_price = self._get_price_range(asset, config)
         return random.uniform(min_price, max_price)
 
     def get_current_price(
@@ -115,12 +95,12 @@ class MockPriceGetter(BasePriceGetter):
         
         Args:
             asset: Asset to get price for
-            config: Optional configuration (ignored in mock)
+            config: Optional configuration with min_price/max_price overrides
             
         Returns:
             PriceResult with random price
         """
-        price = self._generate_price(asset)
+        price = self._generate_price(asset, config)
         
         log.debug(
             f"[MockPriceGetter] Generated price for {asset.symbol}: "
@@ -147,12 +127,12 @@ class MockPriceGetter(BasePriceGetter):
         Args:
             asset: Asset to get price for
             dt: Historical datetime
-            config: Optional configuration (ignored in mock)
+            config: Optional configuration with min_price/max_price overrides
             
         Returns:
             PriceResult with random price
         """
-        price = self._generate_price(asset)
+        price = self._generate_price(asset, config)
         
         log.debug(
             f"[MockPriceGetter] Generated historical price for {asset.symbol} "

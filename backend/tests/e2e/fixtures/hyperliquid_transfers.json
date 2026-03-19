@@ -1,0 +1,58 @@
+[
+  {
+    "time": 1763602992077,
+    "hash": "0x61d4ba764700e5bc7a5826c575f3e04c1280544f1e75dff037e93e4372db07a8",
+    "delta": {
+      "type": "deposit",
+      "usdc": "57.85"
+    }
+  },
+  {
+    "time": 1763659780648,
+    "hash": "0xba4f6a1fba84afe2896de5aecc61a9db84c8907e73f3b236de542c8a2c7b6324",
+    "delta": {
+      "type": "deposit",
+      "usdc": "109.85"
+    }
+  },
+  {
+    "time": 1763724582614,
+    "hash": "0xc7bef45f3944976faebebe29e23e07e037a66574dcabdcbe04cdd032b9fb6f6d",
+    "delta": {
+      "type": "deposit",
+      "usdc": "156.47"
+    }
+  },
+  {
+    "time": 1763767026727,
+    "hash": "0xcf833db8d78317e44a98f16cb41c9a9ff9bea7b29734b3b4ecf9df7fdbdc47e2",
+    "delta": {
+      "type": "deposit",
+      "usdc": "131.77"
+    }
+  },
+  {
+    "time": 1763927713120,
+    "hash": "0xef4cf454ac4baa7203275bfea84b24d10e677bf999d6623eb3fe824a86814fc9",
+    "delta": {
+      "type": "deposit",
+      "usdc": "132.54"
+    }
+  },
+  {
+    "time": 1764161726695,
+    "hash": "0x15408e68873c2764a853de9b2a6a99e065ca82ba830c0f718e150346e6eefafa",
+    "delta": {
+      "type": "deposit",
+      "usdc": "578.2"
+    }
+  },
+  {
+    "time": 1764200000000,
+    "hash": "0xabc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a",
+    "delta": {
+      "type": "withdraw",
+      "usdc": "250.0"
+    }
+  }
+]

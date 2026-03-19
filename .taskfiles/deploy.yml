@@ -4,13 +4,13 @@ includes:
   build: build.yml
 
 tasks:
-  test:local:
+  test:
     desc: Build from develop and deploy to test environment
     dotenv: [.env, .env.test]
     cmds:
       - task: build:test
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
+      - ENV_NAME=test IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+      - ENV_NAME=test IMAGE_TAG=develop docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
       - sleep 5
       - |
         echo ""
@@ -26,8 +26,116 @@ tasks:
         echo "   task logs:test        → View logs"
         echo "═══════════════════════════════════════════════════════════════"
 
-  prod:local:
-    desc: Deploy tagged version to local prod (e.g., task deploy:prod:local v1.2.0)
+  test:ref:
+    desc: Build from any git ref and deploy to test (e.g., task deploy:test:ref -- feature/my-branch)
+    dotenv: [.env, .env.test]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task deploy:test:ref -- feature/my-branch"
+          echo "   task deploy:test:ref REF=feature/my-branch"
+          exit 1
+        fi
+      - task: build:ref
+        vars: { REF: "{{.REF}}" }
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        TAG="ref-$SHA"
+
+        echo "Deploying $TAG to test environment..."
+
+        # Set image tag and deploy
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to TEST (from $REF)"
+        echo ""
+        echo "   Git ref:  $REF"
+        echo "   SHA:      $SHA"
+        echo "   Tag:      :$TAG"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo ""
+        echo "Next steps:"
+        echo "   task test:int:test       → Run integration tests"
+        echo "   task logs:test           → View logs"
+        echo "   task worktree:clean:refs → Clean temp worktrees"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  test:current:
+    desc: Build from current working directory and deploy to test
+    dotenv: [.env, .env.test]
+    cmds:
+      - task: build:current
+      - |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        TAG="current-$TIMESTAMP"
+
+        echo "Deploying $TAG to test environment..."
+
+        # Set image tag and deploy
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to TEST (from working directory)"
+        echo ""
+        echo "   ⚠️  Built from uncommitted changes"
+        echo "   Tag: :$TAG"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  test:tag:
+    desc: Deploy pre-built image tag to test (e.g., task deploy:test:tag -- ref-abc1234)
+    dotenv: [.env, .env.test]
+    vars:
+      TAG: "{{if .TAG}}{{.TAG}}{{else}}{{.CLI_ARGS}}{{end}}"
+    cmds:
+      - |
+        TAG="{{.TAG}}"
+        if [ -z "$TAG" ]; then
+          echo "❌ Usage: task deploy:test:tag -- <image-tag>"
+          exit 1
+        fi
+
+        # Check if images exist
+        if ! docker image inspect trades-exporter-backend:$TAG > /dev/null 2>&1; then
+          echo "❌ Image trades-exporter-backend:$TAG not found"
+          echo ""
+          echo "Available images:"
+          docker images trades-exporter-backend --format "   {{.Tag}}"
+          exit 1
+        fi
+
+        echo "Deploying :$TAG to test environment..."
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+        ENV_NAME=test IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test up -d
+        sleep 5
+
+        echo ""
+        echo "✅ Deployed to TEST: :$TAG"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+
+  prod:
+    desc: Deploy tagged version to prod (e.g., task deploy:prod v1.2.0)
     dotenv: [.env, .env.prod]
     cmds:
       - |
@@ -48,12 +156,62 @@ tasks:
         fi
 
         echo "Deploying version: $VERSION"
-        VERSION=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
-        VERSION=$VERSION IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        ENV_NAME=prod VERSION=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+        ENV_NAME=prod VERSION=$VERSION IMAGE_TAG=$VERSION docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
         sleep 5
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Deployed to PROD: $VERSION"
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  prod:ref:
+    desc: Build from any git ref and deploy to prod (for testing)
+    dotenv: [.env, .env.prod]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    prompt: |
+      ⚠️  DEPLOY NON-MAIN BRANCH TO PROD ENVIRONMENT
+
+      This will build from: {{.REF}}
+      And deploy to: PRODUCTION environment (local)
+
+      This is intended for testing only.
+      Production deploys should normally use: task deploy:prod v1.2.0
+
+      Continue?
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task deploy:prod:ref -- feature/test-in-prod"
+          echo "   task deploy:prod:ref REF=hotfix/urgent"
+          exit 1
+        fi
+      - task: build:ref
+        vars: { REF: "{{.REF}}" }
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        TAG="ref-$SHA"
+
+        echo "Deploying $TAG to PROD environment..."
+
+        ENV_NAME=prod IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+        ENV_NAME=prod IMAGE_TAG=$TAG docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
+        sleep 5
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Deployed to PROD (from $REF)"
+        echo ""
+        echo "   ⚠️  This is NOT a production release"
+        echo "   Git ref: $REF"
+        echo "   SHA:     $SHA"
         echo ""
         echo "   Frontend: http://localhost:${FRONTEND_PORT}"
         echo "   Backend:  http://localhost:${BACKEND_PORT}"

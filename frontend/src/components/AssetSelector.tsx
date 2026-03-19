@@ -1,9 +1,10 @@
 import {
+    Badge,
     Box,
-    Button, Dialog, Flex, Input, NativeSelect, Portal, Text
+    Button, Dialog, Flex, Input, NativeSelect, Portal, Tabs, Text, VStack
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
-import { API_URL, Asset } from '../types';
+import { API_URL, Asset, DimensionWithCategories } from '../types';
 import { ASSET_TYPE_OPTIONS, ComboSelect } from './ComboSelect';
 import { toaster } from './ui/toaster';
 
@@ -14,10 +15,13 @@ interface AssetSelectorProps {
     onAssetCreated?: () => void;
     placeholder?: string;
     defaultSymbol?: string; // Pre-fill new asset symbol
-    size?: 'sm' | 'md';
+    size?: 'xs' | 'sm' | 'md';
+    disabled?: boolean;
     // For linking raw_asset when creating new asset from transaction context
     rawAssetSource?: string;
     rawAssetSymbol?: string;
+    // Optional: pass pre-fetched dimension data to avoid refetching
+    dimensionData?: DimensionWithCategories[];
 }
 
 export const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -28,8 +32,10 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     placeholder = 'Search or select asset...',
     defaultSymbol = '',
     size = 'sm',
+    disabled,
     rawAssetSource,
     rawAssetSymbol,
+    dimensionData: propsDimensionData,
 }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -44,6 +50,11 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     const [creating, setCreating] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
+    // Category management - fetch lazily when create dialog opens
+    const [dimensionData, setDimensionData] = useState<DimensionWithCategories[]>(propsDimensionData || []);
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<number>>(new Set());
+    const [isFetchingCategories, setIsFetchingCategories] = useState(false);
+
     // Get current asset symbol
     const selectedAsset = assets.find(a => a.asset_id === value);
 
@@ -52,6 +63,32 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
         a.symbol.toLowerCase().includes(search.toLowerCase()) ||
         (a.label && a.label.toLowerCase().includes(search.toLowerCase()))
     );
+
+    // Update dimension data when props change
+    useEffect(() => {
+        if (propsDimensionData && propsDimensionData.length > 0) {
+            setDimensionData(propsDimensionData);
+        }
+    }, [propsDimensionData]);
+
+    // Fetch categories only when create dialog opens (lazy loading)
+    const fetchCategoriesIfNeeded = async () => {
+        // Skip if already have data (from props or previous fetch)
+        if (dimensionData.length > 0 || isFetchingCategories) return;
+
+        setIsFetchingCategories(true);
+        try {
+            const response = await fetch(`${API_URL}/categories/by-dimension`);
+            if (response.ok) {
+                const data: DimensionWithCategories[] = await response.json();
+                setDimensionData(data);
+            }
+        } catch (err) {
+            console.warn('Failed to fetch categories:', err);
+        } finally {
+            setIsFetchingCategories(false);
+        }
+    };
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -132,6 +169,20 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             // Link the raw_asset to the new asset
             if (created.asset_id) {
                 await linkRawAsset(created.asset_id);
+
+                // Assign categories if any selected
+                if (selectedCategoryIds.size > 0) {
+                    try {
+                        await fetch(`${API_URL}/categories/asset/${created.asset_id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ category_ids: Array.from(selectedCategoryIds) })
+                        });
+                    } catch (catErr) {
+                        console.warn('Failed to assign categories:', catErr);
+                        // Don't fail the whole operation
+                    }
+                }
             }
 
             setShowCreateDialog(false);
@@ -155,13 +206,18 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
             tags: [],
             status: 0,
         });
+        setSelectedCategoryIds(new Set());
     };
 
     const openCreateDialog = () => {
+        const symbolValue = search || rawAssetSymbol || defaultSymbol;
         setNewAsset(prev => ({
             ...prev,
-            symbol: search || defaultSymbol,
+            symbol: symbolValue,
+            label: symbolValue, // Pre-fill label with the same value
         }));
+        // Fetch categories lazily when dialog opens
+        fetchCategoriesIfNeeded();
         setShowCreateDialog(true);
         setIsOpen(false);
     };
@@ -289,8 +345,12 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                                         <Text fontWeight="medium" mb={1}>Tags</Text>
                                         <Input
                                             placeholder="e.g., defi, layer1, stablecoin (comma-separated)"
-                                            value={(newAsset.tags || []).join(', ')}
-                                            onChange={e => setNewAsset({ ...newAsset, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
+                                            value={(newAsset.tags || []).map(t => Object.keys(t)[0]).filter(Boolean).join(', ')}
+                                            onChange={e => {
+                                                const tagStrings = e.target.value.split(',').map(t => t.trim()).filter(t => t);
+                                                const tags = tagStrings.map(tag => ({ [tag]: true }));
+                                                setNewAsset({ ...newAsset, tags });
+                                            }}
                                         />
                                     </Box>
                                     <Box>
@@ -305,6 +365,91 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                                             </NativeSelect.Field>
                                         </NativeSelect.Root>
                                     </Box>
+
+                                    {/* Category Selection */}
+                                    {dimensionData.length > 0 && (
+                                        <Box>
+                                            <Text fontWeight="medium" mb={1}>Categories</Text>
+                                            <Box borderWidth={1} borderColor="gray.200" borderRadius="md" p={2} maxH="300px" overflowY="auto">
+                                                <Tabs.Root defaultValue={dimensionData[0]?.label} size="sm">
+                                                    <Tabs.List>
+                                                        {dimensionData.map(dim => (
+                                                            <Tabs.Trigger key={dim.id} value={dim.label}>
+                                                                {dim.label}
+                                                            </Tabs.Trigger>
+                                                        ))}
+                                                    </Tabs.List>
+                                                    {dimensionData.map(dim => (
+                                                        <Tabs.Content key={dim.id} value={dim.label}>
+                                                            <VStack align="stretch" gap={1} mt={2}>
+                                                                {dim.categories.map(cat => (
+                                                                    <Flex
+                                                                        key={cat.id}
+                                                                        align="center"
+                                                                        gap={2}
+                                                                        p={1}
+                                                                        borderRadius="sm"
+                                                                        cursor="pointer"
+                                                                        _hover={{ bg: 'gray.50' }}
+                                                                        onClick={() => {
+                                                                            setSelectedCategoryIds(prev => {
+                                                                                const next = new Set(prev);
+                                                                                if (next.has(cat.id)) {
+                                                                                    next.delete(cat.id);
+                                                                                } else {
+                                                                                    next.add(cat.id);
+                                                                                }
+                                                                                return next;
+                                                                            });
+                                                                        }}
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={selectedCategoryIds.has(cat.id)}
+                                                                            onChange={() => { }}
+                                                                            style={{ cursor: 'pointer' }}
+                                                                        />
+                                                                        <Badge
+                                                                            colorPalette={cat.color || 'gray'}
+                                                                            size="sm"
+                                                                            variant="subtle"
+                                                                        >
+                                                                            {cat.label}
+                                                                        </Badge>
+                                                                    </Flex>
+                                                                ))}
+                                                            </VStack>
+                                                        </Tabs.Content>
+                                                    ))}
+                                                </Tabs.Root>
+                                                {selectedCategoryIds.size > 0 && (
+                                                    <Box mt={2} pt={2} borderTopWidth={1} borderColor="gray.100">
+                                                        <Text fontSize="xs" color="gray.500" mb={1}>
+                                                            Selected ({selectedCategoryIds.size}):
+                                                        </Text>
+                                                        <Flex gap={1} flexWrap="wrap">
+                                                            {Array.from(selectedCategoryIds).map(catId => {
+                                                                const cat = dimensionData
+                                                                    .flatMap(d => d.categories)
+                                                                    .find(c => c.id === catId);
+                                                                if (!cat) return null;
+                                                                return (
+                                                                    <Badge
+                                                                        key={catId}
+                                                                        colorPalette={cat.color || 'gray'}
+                                                                        size="xs"
+                                                                        variant="solid"
+                                                                    >
+                                                                        {cat.label}
+                                                                    </Badge>
+                                                                );
+                                                            })}
+                                                        </Flex>
+                                                    </Box>
+                                                )}
+                                            </Box>
+                                        </Box>
+                                    )}
                                 </Flex>
                             </Dialog.Body>
                             <Dialog.Footer>

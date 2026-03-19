@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 from backend.connectors.cex.connector_mexc_base import MEXCBaseConnector
 from backend.config.loader import configure_logging
 from backend.db.models import NormalizedTransaction
+from backend.core.network_normalizer import normalize_network
 
 log = configure_logging("mexc_withdrawals")
 
@@ -82,7 +83,7 @@ class MEXCWithdrawalsConnector(MEXCBaseConnector):
         from_address = raw_item.get("addressFrom")
 
         txid = str(raw_item.get("txid", ""))
-        network = str(raw_item.get("network", ""))
+        network = normalize_network(raw_item.get("network", ""))
 
         # Fee handling
         fee_raw = raw_item.get("fee", 0)
@@ -114,7 +115,9 @@ class MEXCWithdrawalsConnector(MEXCBaseConnector):
             source_fee_quote_asset_symbol=fee_quote,
             quantity=amount,
             fee=fee,
-            source_from_account=from_address,
+            include_fee=True,
+            source_from_account=self._get_account_identifier(),  # Connector's account identifier
+            from_account_id=self.account_id,  # Resolved account ID
             source_to_account=to_address,
             network=network,
             network_transaction_id=txid,

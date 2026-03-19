@@ -10,8 +10,10 @@
 
 import React from 'react';
 import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { FiHome, FiGlobe } from 'react-icons/fi';
 import { Tooltip } from './ui/tooltip';
 import { Account } from '../types';
+import { useEntityColors, hexToRgba } from '../hooks/useEntityColors';
 
 export interface AccountBadgeProps {
     /** Linked account object */
@@ -22,10 +24,14 @@ export interface AccountBadgeProps {
     accountName?: string | null;
     /** Fallback source account label when not linked (shows warning state) */
     sourceAccount?: string | null;
+    /** Original source label to display on hover when account is linked */
+    sourceLabel?: string | null;
     /** Badge size */
     size?: 'xs' | 'sm' | 'md';
-    /** Color palette for the badge */
+    /** Color palette for the badge (overrides entity color if provided) */
     colorPalette?: string;
+    /** Use auto-assigned entity color instead of static colorPalette (default: true) */
+    useEntityColor?: boolean;
     /** Maximum characters before truncating */
     maxLength?: number;
     /** Click handler for inline editing */
@@ -44,18 +50,30 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
     accountId,
     accountName,
     sourceAccount,
+    sourceLabel,
     size = 'xs',
-    colorPalette = 'purple',
+    colorPalette: colorPaletteProp,
+    useEntityColor = true,
     maxLength = 20,
     onClick,
     showWarning = true,
     fallback = '-',
 }) => {
+    const { getAccountColor } = useEntityColors();
+
     // Determine what to display
     const resolvedId = account?.id ?? accountId;
     const resolvedName = account?.name ?? accountName;
     const hasLinkedAccount = resolvedId != null && resolvedName;
     const hasSourceAccount = !!sourceAccount;
+
+    // Resolve color: prefer DB-stored color, then entity color hook, then prop fallback
+    const entityColor = (() => {
+        // useEntityColors already handles priority: dbColor > localStorage > hash
+        if (useEntityColor && hasLinkedAccount) return getAccountColor(resolvedId, resolvedName, account?.color);
+        // Explicit prop or default
+        return colorPaletteProp ?? '#9467BD';
+    })();
 
     // Unlinked state: no account but has source account label
     if (!hasLinkedAccount && hasSourceAccount && showWarning) {
@@ -102,6 +120,12 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
         );
     }
 
+    // Determine ownership state
+    const isOwned = account?.owned;
+    const ownershipKnown = account != null && typeof account.owned === 'boolean';
+    const OwnershipIcon = isOwned ? FiHome : FiGlobe;
+    const ownershipLabel = isOwned ? 'Owned' : 'External';
+
     // Format display string with truncation
     const displayName = resolvedName.length > maxLength
         ? resolvedName.slice(0, maxLength) + '…'
@@ -114,6 +138,23 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
                 <Text color="gray.400">Name</Text>
                 <Text color="white" fontWeight="medium">{resolvedName}</Text>
             </Flex>
+            {ownershipKnown && (
+                <Flex justify="space-between" mb={1} gap={4} align="center">
+                    <Text color="gray.400">Ownership</Text>
+                    <Flex align="center" gap={1}>
+                        <OwnershipIcon size={10} />
+                        <Text color={isOwned ? 'green.300' : 'orange.300'}>{ownershipLabel}</Text>
+                    </Flex>
+                </Flex>
+            )}
+            {sourceLabel && sourceLabel !== resolvedName && (
+                <Flex justify="space-between" mb={1} gap={4}>
+                    <Text color="gray.400">Source</Text>
+                    <Text color="gray.300" fontFamily="mono" fontSize="2xs" maxW="180px" truncate>
+                        {sourceLabel}
+                    </Text>
+                </Flex>
+            )}
             {account?.account_type && (
                 <Flex justify="space-between" mb={1} gap={4}>
                     <Text color="gray.400">Type</Text>
@@ -141,12 +182,17 @@ export const AccountBadge: React.FC<AccountBadgeProps> = ({
         <Tooltip content={tooltipContent} openDelay={200}>
             <Badge
                 size={size}
-                colorPalette={colorPalette}
+                bg={hexToRgba(entityColor, 0.18)}
+                color={entityColor}
                 variant="subtle"
                 cursor={onClick ? 'pointer' : 'default'}
                 onClick={onClick}
                 title={resolvedName.length > maxLength ? resolvedName : undefined}
+                display="inline-flex"
+                alignItems="center"
+                gap={0.5}
             >
+                {ownershipKnown && <OwnershipIcon size={size === 'xs' ? 9 : size === 'sm' ? 11 : 13} />}
                 {displayName}
             </Badge>
         </Tooltip>

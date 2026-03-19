@@ -2,7 +2,7 @@
 Transaction Enrichment Pipeline
 
 A modular pipeline for processing transactions through multiple stages:
-1. Transfer Detection - Detect internal transfers between owned accounts
+1. Account Resolution - Resolve source addresses to account IDs
 2. Asset Enrichment - Resolve asset symbols to asset IDs
 3. Persistence - Save transactions to database
 
@@ -22,7 +22,7 @@ from backend.services.pipeline.factory import (
     create_default_pipeline,
 )
 from backend.services.pipeline.stages import (
-    TransferDetectionStage,
+    AccountResolutionStage,
     AssetEnrichmentStage,
     PersistenceStage,
 )
@@ -34,7 +34,7 @@ __all__ = [
     "PipelineResult",
     "PipelineStage",
     # Stages
-    "TransferDetectionStage",
+    "AccountResolutionStage",
     "AssetEnrichmentStage",
     "PersistenceStage",
     # Factories

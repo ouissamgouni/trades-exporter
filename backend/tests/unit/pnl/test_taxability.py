@@ -77,29 +77,55 @@ class TestTaxabilityCalculator:
         assert calculator.compute(unit.outflow_legs[0]) is False
 
     def test_rule2_base_currency_overrides_explicit_flag(self, base_config):
-        """Rule 2: Base currency is NOT taxable even with explicit flag."""
-        tx = make_transaction(id=1, asset_id=1, quantity=Decimal("40000"), disposal_taxable=True)
+        """Rule 2: Base currency is NOT taxable even with explicit taxability_status."""
+        tx = make_transaction(id=1, asset_id=1, quantity=Decimal("40000"), taxability_status="taxable")
         legs = [
-            make_leg(asset_id=1, leg_type="outflow", quantity=Decimal("40000"), transaction=tx, tx_disposal_taxable=True),  # EUR with flag
+            make_leg(asset_id=1, leg_type="outflow", quantity=Decimal("40000"), transaction=tx),  # EUR with taxable status
             make_leg(asset_id=2, leg_type="inflow", quantity=Decimal("1")),
         ]
         unit = make_unit(legs=legs)
         
         calculator = TaxabilityCalculator(base_config)
-        # Base currency rule (2) takes precedence over explicit flag (3)
+        # Base currency rule (2) takes precedence over explicit taxability_status (3a)
         assert calculator.compute(unit.outflow_legs[0]) is False
 
-    def test_rule3_explicit_flag_taxable(self, base_config):
-        """Rule 3: Explicit tx_disposal_taxable=True → TAXABLE."""
-        tx = make_transaction(id=1, asset_id=2, quantity=Decimal("1"), disposal_taxable=True)
+    def test_rule3a_taxability_status_taxable(self, base_config):
+        """Rule 3a: taxability_status='taxable' → TAXABLE (overrides pattern)."""
+        tx = make_transaction(id=1, asset_id=2, quantity=Decimal("1"), taxability_status="taxable")
         legs = [
-            make_leg(asset_id=2, leg_type="outflow", quantity=Decimal("1"), transaction=tx, tx_disposal_taxable=True),
+            make_leg(asset_id=2, leg_type="outflow", quantity=Decimal("1"), transaction=tx),
             make_leg(asset_id=2, leg_type="inflow", quantity=Decimal("1")),
         ]
         unit = make_unit(legs=legs, pattern="transfer")  # Would normally be non-taxable
         
         calculator = TaxabilityCalculator(base_config)
-        # Explicit flag (3) takes precedence over transfer pattern (5)
+        # taxability_status="taxable" (3a) takes precedence over transfer pattern (6)
+        assert calculator.compute(unit.outflow_legs[0]) is True
+
+    def test_rule3b_taxability_status_non_taxable(self, base_config):
+        """Rule 3b: taxability_status='non_taxable' → NOT TAXABLE (overrides later rules)."""
+        tx = make_transaction(id=1, asset_id=2, quantity=Decimal("1"), taxability_status="non_taxable")
+        legs = [
+            make_leg(asset_id=2, leg_type="outflow", quantity=Decimal("1"), transaction=tx),
+            make_leg(asset_id=1, leg_type="inflow", quantity=Decimal("40000")),  # EUR in
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # taxability_status="non_taxable" (3b) blocks sell-to-base taxability (8)
+        assert calculator.compute(unit.outflow_legs[0]) is False
+
+    def test_rule3_unknown_status_falls_through(self, base_config):
+        """Rules 3a/3b: taxability_status='unknown' → falls through to later rules."""
+        tx = make_transaction(id=1, asset_id=2, quantity=Decimal("1"), taxability_status="unknown")
+        legs = [
+            make_leg(asset_id=2, leg_type="outflow", quantity=Decimal("1"), transaction=tx),
+            make_leg(asset_id=1, leg_type="inflow", quantity=Decimal("40000")),  # EUR in
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # Unknown falls through → selling to base (8) → TAXABLE
         assert calculator.compute(unit.outflow_legs[0]) is True
 
     def test_rule4_inflows_never_taxable(self, base_config):
@@ -235,3 +261,93 @@ class TestTaxabilityCalculator:
         assert unit.outflow_legs[0].disposal_taxable is True
         # Fee → taxable (config default)
         assert unit.fee_legs[0].disposal_taxable is True
+
+
+class TestTaxabilityDerivativeSettlement:
+    """Test Rule 6c: Derivative settlement types are non-taxable."""
+
+    @pytest.fixture
+    def base_config(self):
+        return PnLConfig(
+            lot_method=CostMethod.FIFO,
+            lot_mode=LotMode.LOT_TRAVEL,
+            base_currency_id=1,
+            base_currency_symbol="EUR",
+            crypto_swap_taxable_by_default=False,
+            fee_taxable_by_default=True,
+        )
+
+    def test_funding_outflow_non_taxable(self, base_config):
+        """Rule 6c: Funding payment outflow → non-taxable."""
+        tx = make_transaction(
+            id=1, asset_id=4, quantity=Decimal("10"),  # USDT (not base)
+            source_transaction_type="funding",
+        )
+        legs = [
+            make_leg(asset_id=4, leg_type="outflow", quantity=Decimal("10"), transaction=tx),
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # Rule 6c: funding → non-taxable (before Rule 7 outflow-only check)
+        assert calculator.compute(unit.outflow_legs[0]) is False
+
+    def test_perp_open_outflow_non_taxable(self, base_config):
+        """Rule 6c: Perp open outflow → non-taxable."""
+        tx = make_transaction(
+            id=1, asset_id=4, quantity=Decimal("3000"),  # USDT (not base but not USDC either)
+            source_transaction_type="perp_open",
+        )
+        legs = [
+            make_leg(asset_id=4, leg_type="outflow", quantity=Decimal("3000"), transaction=tx),
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        assert calculator.compute(unit.outflow_legs[0]) is False
+
+    def test_perp_close_inflow_non_taxable_via_rule4(self, base_config):
+        """Rule 4: Perp close inflow → non-taxable (inflows never taxable)."""
+        tx = make_transaction(
+            id=1, asset_id=4, quantity=Decimal("3500"),
+            source_transaction_type="perp_close",
+        )
+        legs = [
+            make_leg(asset_id=4, leg_type="inflow", quantity=Decimal("3500"), transaction=tx),
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # Inflows are caught by Rule 4 before we even reach 6c
+        assert calculator.compute(unit.inflow_legs[0]) is False
+
+    def test_non_derivative_outflow_still_taxable(self, base_config):
+        """Non-derivative outflows should still follow normal taxability rules."""
+        tx = make_transaction(
+            id=1, asset_id=2, quantity=Decimal("1"),  # BTC
+            source_transaction_type="withdraw",
+        )
+        legs = [
+            make_leg(asset_id=2, leg_type="outflow", quantity=Decimal("1"), transaction=tx),
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # Regular outflow → Rule 7 → taxable
+        assert calculator.compute(unit.outflow_legs[0]) is True
+
+    def test_taxability_status_overrides_derivative_rule(self, base_config):
+        """Rule 3a: Explicit taxable status overrides Rule 6c derivative check."""
+        tx = make_transaction(
+            id=1, asset_id=4, quantity=Decimal("10"),
+            source_transaction_type="funding",
+            taxability_status="taxable",  # Explicit taxable override
+        )
+        legs = [
+            make_leg(asset_id=4, leg_type="outflow", quantity=Decimal("10"), transaction=tx),
+        ]
+        unit = make_unit(legs=legs)
+        
+        calculator = TaxabilityCalculator(base_config)
+        # Rule 3a (taxable override) takes precedence over Rule 6c (derivative)
+        assert calculator.compute(unit.outflow_legs[0]) is True

@@ -27,8 +27,9 @@ class ConcreteConnector(BaseConnector):
     def test_data_filename(self) -> str:
         return "test_data.json"
     
-    def get_raws(self) -> List[Dict[str, Any]]:
-        return []
+    def yield_raws(self):
+        return
+        yield  # Makes this a generator
     
     def raw_to_normalized(self, raw_item: dict) -> NormalizedTransaction:
         return NormalizedTransaction(
@@ -194,7 +195,7 @@ class TestProgressCallback:
         )
         
         callback.assert_called_once_with(
-            42, "Fetching BTC/USDT", 10, 100, "Fetched 50 trades"
+            42, "Fetching BTC/USDT", 10, 100, "Fetched 50 trades", fetched_count=None
         )
 
     def test_update_progress_without_callback(self):
@@ -222,7 +223,7 @@ class TestProgressCallback:
             total=10,
         )
         
-        callback.assert_called_once_with(5, "Processing", 5, 10, None)
+        callback.assert_called_once_with(5, "Processing", 5, 10, None, fetched_count=None)
 
     def test_update_progress_with_all_parameters(self):
         """Test update_progress with all parameters."""

@@ -11,6 +11,8 @@ import { FiLoader } from 'react-icons/fi';
 import { Tooltip } from './ui/tooltip';
 import { API_URL } from '../types';
 import { formatDateTimeLocale } from '../utils/dateUtils';
+import { formatQuantity } from '../utils/numberUtils';
+import { ValueDisplay } from './ValueDisplay';
 
 // ============================================================================
 // Types
@@ -53,20 +55,6 @@ export interface TransactionTooltipProps {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-const formatQty = (value: number): string => {
-    if (value === 0) return '0';
-    return value.toFixed(8).replace(/\.?0+$/, '');
-};
-
-const formatCurrency = (value: number, currency: string): string => {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    }).format(value);
-};
 
 // ============================================================================
 // Component
@@ -163,15 +151,17 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Quantity</Text>
-                        <Text color="white" fontFamily="mono">{formatQty(txData.quantity || 0)}</Text>
+                        <Text color="white" fontFamily="mono"><ValueDisplay value={txData.quantity} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Unit Price</Text>
-                        <Text color="white">{txData.price ? formatCurrency(txData.price, baseCurrency) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.price} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Total</Text>
-                        <Text color="white">{txData.total ? formatCurrency(txData.total, baseCurrency) : '-'}</Text>
+                        <Text color="white">
+                            {txData.total ? <ValueDisplay value={txData.total} currency={baseCurrency} /> : '-'}
+                        </Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Quote Asset</Text>
@@ -179,7 +169,7 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Fee</Text>
-                        <Text color="white">{txData.fee ? formatQty(txData.fee) : '-'}</Text>
+                        <Text color="white"><ValueDisplay value={txData.fee} /></Text>
                     </Flex>
                     <Flex justify="space-between" mb={1}>
                         <Text color="gray.400">Fee Quote</Text>
@@ -189,8 +179,12 @@ export const TransactionTooltip: React.FC<TransactionTooltipProps> = ({
                         <Text color="gray.400">From/To Account</Text>
                         <Text color="white">
                             {txData.direction === 'inflow'
-                                ? (txData.from_account_name || txData.source_from_account || '-')
-                                : (txData.to_account_name || txData.source_to_account || '-')}
+                                ? (txData.from_account_name
+                                    ? `${txData.from_account_name}${txData.source_from_account && txData.source_from_account !== txData.from_account_name ? ` (${txData.source_from_account})` : ''}`
+                                    : (txData.source_from_account || '-'))
+                                : (txData.to_account_name
+                                    ? `${txData.to_account_name}${txData.source_to_account && txData.source_to_account !== txData.to_account_name ? ` (${txData.source_to_account})` : ''}`
+                                    : (txData.source_to_account || '-'))}
                         </Text>
                     </Flex>
                     {/* View full details link */}

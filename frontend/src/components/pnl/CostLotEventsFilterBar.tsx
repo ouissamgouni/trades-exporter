@@ -13,7 +13,7 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Box, Flex, Input, Button, Text, IconButton, Spinner } from '@chakra-ui/react';
-import { FiSearch, FiChevronDown, FiX, FiCalendar, FiRefreshCw } from 'react-icons/fi';
+import { FiSearch, FiChevronDown, FiChevronUp, FiX, FiCalendar, FiRefreshCw, FiFilter } from 'react-icons/fi';
 import { LotEventType } from './types';
 
 // ============================================================================
@@ -43,7 +43,7 @@ export interface CostLotEventsFilterBarProps {
     showAccountFilter?: boolean;
     showAssetFilter?: boolean;
     showSearch?: boolean;
-    defaultCollapsed?: boolean;  // Kept for API compatibility, but ignored
+    defaultCollapsed?: boolean;
 }
 
 // ============================================================================
@@ -64,8 +64,9 @@ const EVENT_PILLS: { key: LotEventType; label: string; defaultOn: boolean }[] = 
 // Unit pattern pills configuration
 const UNIT_PILLS: { key: string; label: string; defaultOn: boolean }[] = [
     { key: 'swap', label: 'Swap', defaultOn: true },
-    { key: 'transfer', label: 'Transfer', defaultOn: true },
-    { key: 'pending_transfer', label: 'Pending', defaultOn: true },
+    { key: 'internal_transfer', label: 'Transfer', defaultOn: true },
+    { key: 'unmatched_internal_transfer', label: 'Unmatched', defaultOn: true },
+    { key: 'flow', label: 'Flow', defaultOn: true },
 ];
 
 // Date presets
@@ -128,7 +129,7 @@ const TogglePill: React.FC<{
     disabled?: boolean;
 }> = ({ label, active, onClick, disabled }) => (
     <Button
-        size="xs"
+        size="2xs"
         variant={active ? 'solid' : 'outline'}
         bg={active ? 'gray.700' : 'white'}
         color={active ? 'white' : 'gray.600'}
@@ -140,8 +141,9 @@ const TogglePill: React.FC<{
         onClick={onClick}
         disabled={disabled}
         fontWeight="normal"
-        px={3}
-        h="28px"
+        fontSize="2xs"
+        px={2}
+        h="22px"
     >
         {label}
     </Button>
@@ -174,21 +176,21 @@ const FilterDropdown: React.FC<{
     return (
         <Box position="relative" ref={ref}>
             <Button
-                size="xs"
+                size="2xs"
                 variant="outline"
                 bg="white"
                 borderColor="gray.300"
                 color="gray.700"
                 onClick={() => !disabled && setIsOpen(!isOpen)}
-                minW="100px"
+                minW="80px"
                 justifyContent="space-between"
                 fontWeight="normal"
-                h="28px"
+                h="22px"
                 disabled={disabled}
                 _hover={{ borderColor: 'gray.400' }}
             >
-                <Text truncate maxW="80px" fontSize="xs">{value}</Text>
-                <FiChevronDown size={12} />
+                <Text truncate maxW="70px" fontSize="2xs">{value}</Text>
+                <FiChevronDown size={10} />
             </Button>
 
             {isOpen && (
@@ -479,7 +481,11 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
     showAccountFilter = true,
     showAssetFilter = true,
     showSearch = true,
+    defaultCollapsed = false,
 }) => {
+    // Collapsible state
+    const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+
     // Local search state (debounced)
     const [localSearch, setLocalSearch] = useState(filters.search);
     const debouncedSearch = useDebounce(localSearch, 300);
@@ -581,151 +587,176 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
 
     return (
         <Box
-            bg="white"
             borderBottom="1px solid"
             borderColor="gray.200"
-            py={2}
+            py={1.5}
             px={3}
             mb={2}
         >
-            {/* Row 1: Event Types & Unit Patterns */}
-            <Flex gap={4} align="center" wrap="wrap" mb={2}>
-                {/* Event type pills */}
-                {showEventTypes && (
-                    <Flex align="center" gap={2}>
-                        <Text fontSize="xs" color="gray.500" fontWeight="medium">Event:</Text>
-                        <Flex gap={1}>
-                            {EVENT_PILLS.map(pill => (
-                                <TogglePill
-                                    key={pill.key}
-                                    label={pill.label}
-                                    active={filters.eventTypes.includes(pill.key)}
-                                    onClick={() => toggleEventType(pill.key)}
-                                    disabled={isLoading}
-                                />
-                            ))}
-                        </Flex>
-                    </Flex>
-                )}
-
-                {/* Unit pattern pills */}
-                {showUnitPatterns && (
-                    <Flex align="center" gap={2}>
-                        <Text fontSize="xs" color="gray.500" fontWeight="medium">Unit:</Text>
-                        <Flex gap={1}>
-                            {UNIT_PILLS.map(pill => (
-                                <TogglePill
-                                    key={pill.key}
-                                    label={pill.label}
-                                    active={filters.unitPatterns.includes(pill.key)}
-                                    onClick={() => toggleUnitPattern(pill.key)}
-                                    disabled={isLoading}
-                                />
-                            ))}
-                        </Flex>
-                    </Flex>
-                )}
+            {/* Collapsible header */}
+            <Flex
+                align="center"
+                justify="space-between"
+                cursor="pointer"
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                py={0.5}
+            >
+                <Flex align="center" gap={1.5}>
+                    <FiFilter size={11} color="gray" />
+                    <Text fontSize="2xs" fontWeight="medium" color="gray.500">Filters</Text>
+                    {isModified && (
+                        <Text fontSize="2xs" color="blue.500" fontWeight="medium">• modified</Text>
+                    )}
+                    {isLoading && <Spinner size="xs" color="gray.400" />}
+                </Flex>
+                {isCollapsed ? <FiChevronDown size={12} color="gray" /> : <FiChevronUp size={12} color="gray" />}
             </Flex>
 
-            {/* Row 2: Dropdowns, Date, Search, Reset */}
-            <Flex gap={3} align="center" wrap="wrap">
-                {/* Account dropdown */}
-                {showAccountFilter && accounts.length > 0 && (
-                    <FilterDropdown
-                        label="Accounts"
-                        value={accountDisplay}
-                        options={accounts.map(a => ({ id: a.id, name: a.name }))}
-                        onSelect={selectAccount}
-                        searchPlaceholder="Search accounts..."
-                        disabled={isLoading}
-                    />
-                )}
+            {/* Collapsible content */}
+            {!isCollapsed && (
+                <Box mt={1.5}>
+                    {/* Row 1: Event Types & Unit Patterns */}
+                    <Flex gap={4} align="center" wrap="wrap" mb={2}>
+                        {/* Event type pills */}
+                        {showEventTypes && (
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500" fontWeight="medium">Event:</Text>
+                                <Flex gap={1}>
+                                    {EVENT_PILLS.map(pill => (
+                                        <TogglePill
+                                            key={pill.key}
+                                            label={pill.label}
+                                            active={filters.eventTypes.includes(pill.key)}
+                                            onClick={() => toggleEventType(pill.key)}
+                                            disabled={isLoading}
+                                        />
+                                    ))}
+                                </Flex>
+                            </Flex>
+                        )}
 
-                {/* Asset dropdown */}
-                {showAssetFilter && assets.length > 0 && (
-                    <FilterDropdown
-                        label="Assets"
-                        value={assetDisplay}
-                        options={assets.map(a => ({
-                            id: a.id,
-                            name: a.symbol,
-                            subtitle: a.label,
-                        }))}
-                        onSelect={selectAsset}
-                        searchPlaceholder="Search assets..."
-                        disabled={isLoading}
-                    />
-                )}
-
-                {/* Date range */}
-                {showDateRange && (
-                    <DateRangeFilter
-                        dateStart={filters.dateStart}
-                        dateEnd={filters.dateEnd}
-                        onApply={applyDateRange}
-                        disabled={isLoading}
-                    />
-                )}
-
-                {/* Search */}
-                {showSearch && (
-                    <Flex
-                        align="center"
-                        bg="white"
-                        border="1px solid"
-                        borderColor="gray.300"
-                        borderRadius="md"
-                        px={2}
-                        h="28px"
-                        flex="1"
-                        maxW="200px"
-                        _focusWithin={{ borderColor: 'blue.400' }}
-                    >
-                        <FiSearch color="gray" size={12} />
-                        <Input
-                            placeholder="Search..."
-                            size="xs"
-                            value={localSearch}
-                            onChange={(e) => setLocalSearch(e.target.value)}
-                            border="none"
-                            _focus={{ boxShadow: 'none' }}
-                            h="24px"
-                        />
-                        {localSearch && (
-                            <IconButton
-                                size="xs"
-                                variant="ghost"
-                                aria-label="Clear search"
-                                onClick={() => setLocalSearch('')}
-                                p={0}
-                                minW="16px"
-                                h="16px"
-                            >
-                                <FiX size={10} />
-                            </IconButton>
+                        {/* Unit pattern pills */}
+                        {showUnitPatterns && (
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500" fontWeight="medium">Unit:</Text>
+                                <Flex gap={1}>
+                                    {UNIT_PILLS.map(pill => (
+                                        <TogglePill
+                                            key={pill.key}
+                                            label={pill.label}
+                                            active={filters.unitPatterns.includes(pill.key)}
+                                            onClick={() => toggleUnitPattern(pill.key)}
+                                            disabled={isLoading}
+                                        />
+                                    ))}
+                                </Flex>
+                            </Flex>
                         )}
                     </Flex>
-                )}
 
-                {/* Loading indicator */}
-                {isLoading && <Spinner size="xs" color="gray.400" />}
+                    {/* Row 2: Dropdowns, Date, Search, Reset */}
+                    <Flex gap={3} align="center" wrap="wrap">
+                        {/* Account dropdown */}
+                        {showAccountFilter && accounts.length > 0 && (
+                            <FilterDropdown
+                                label="Accounts"
+                                value={accountDisplay}
+                                options={accounts.map(a => ({ id: a.id, name: a.name }))}
+                                onSelect={selectAccount}
+                                searchPlaceholder="Search accounts..."
+                                disabled={isLoading}
+                            />
+                        )}
 
-                {/* Reset button */}
-                {isModified && (
-                    <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={resetFilters}
-                        color="gray.500"
-                        fontWeight="normal"
-                        h="28px"
-                        _hover={{ color: 'gray.700', bg: 'gray.100' }}
-                    >
-                        <FiRefreshCw size={12} style={{ marginRight: 4 }} />
-                        Reset
-                    </Button>
-                )}
-            </Flex>
+                        {/* Asset dropdown */}
+                        {showAssetFilter && assets.length > 0 && (
+                            <FilterDropdown
+                                label="Assets"
+                                value={assetDisplay}
+                                options={assets.map(a => ({
+                                    id: a.id,
+                                    name: a.symbol,
+                                    subtitle: a.label,
+                                }))}
+                                onSelect={selectAsset}
+                                searchPlaceholder="Search assets..."
+                                disabled={isLoading}
+                            />
+                        )}
+
+                        {/* Date range */}
+                        {showDateRange && (
+                            <DateRangeFilter
+                                dateStart={filters.dateStart}
+                                dateEnd={filters.dateEnd}
+                                onApply={applyDateRange}
+                                disabled={isLoading}
+                            />
+                        )}
+
+                        {/* Search */}
+                        {showSearch && (
+                            <Flex
+                                align="center"
+                                bg="white"
+                                border="1px solid"
+                                borderColor="gray.300"
+                                borderRadius="md"
+                                px={1.5}
+                                h="22px"
+                                flex="1"
+                                maxW="160px"
+                                _focusWithin={{ borderColor: 'blue.400' }}
+                            >
+                                <FiSearch color="gray" size={10} />
+                                <Input
+                                    placeholder="Search..."
+                                    size="2xs"
+                                    fontSize="2xs"
+                                    value={localSearch}
+                                    onChange={(e) => setLocalSearch(e.target.value)}
+                                    border="none"
+                                    _focus={{ boxShadow: 'none' }}
+                                    h="18px"
+                                />
+                                {localSearch && (
+                                    <IconButton
+                                        size="xs"
+                                        variant="ghost"
+                                        aria-label="Clear search"
+                                        onClick={() => setLocalSearch('')}
+                                        p={0}
+                                        minW="16px"
+                                        h="16px"
+                                    >
+                                        <FiX size={10} />
+                                    </IconButton>
+                                )}
+                            </Flex>
+                        )}
+
+                        {/* Loading indicator */}
+                        {isLoading && <Spinner size="xs" color="gray.400" />}
+
+                        {/* Reset button */}
+                        {isModified && (
+                            <Button
+                                size="2xs"
+                                variant="ghost"
+                                onClick={resetFilters}
+                                color="gray.500"
+                                fontWeight="normal"
+                                fontSize="2xs"
+                                h="22px"
+                                _hover={{ color: 'gray.700', bg: 'gray.100' }}
+                            >
+                                <FiRefreshCw size={10} style={{ marginRight: 2 }} />
+                                Reset
+                            </Button>
+                        )}
+                    </Flex>
+                </Box>
+            )}
         </Box>
     );
 };

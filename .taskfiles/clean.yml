@@ -5,21 +5,21 @@ tasks:
     desc: Stop and remove dev containers
     dotenv: [.env, .env.dev]
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
       - echo "✅ Dev containers removed"
 
   test:
     desc: Stop and remove test containers
     dotenv: [.env, .env.test]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
+      - ENV_NAME=test docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
       - echo "✅ Test containers removed"
 
   prod:
     desc: Stop and remove prod containers
     dotenv: [.env, .env.prod]
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod containers removed"
 
   dev:volumes:
@@ -27,7 +27,7 @@ tasks:
     dotenv: [.env, .env.dev]
     prompt: This will DELETE dev database data. Continue?
     cmds:
-      - docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down -v
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down -v
       - echo "✅ Dev containers and volumes removed"
 
   test:volumes:
@@ -35,7 +35,7 @@ tasks:
     dotenv: [.env, .env.test]
     prompt: This will DELETE test database data. Continue?
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down -v
+      - ENV_NAME=test docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down -v
       - echo "✅ Test containers and volumes removed"
 
   prod:volumes:
@@ -43,5 +43,5 @@ tasks:
     dotenv: [.env, .env.prod]
     prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
     cmds:
-      - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down -v
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down -v
       - echo "⚠️ Prod containers and volumes removed"

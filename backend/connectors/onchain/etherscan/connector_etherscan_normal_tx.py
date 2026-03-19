@@ -8,15 +8,12 @@ import time
 import requests
 from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any, Generator, List
 
 from backend.connectors.base.base_connector import BaseConnector
-from backend.connectors.onchain.chain_config import (
-    get_chain_id,
-    get_native_token,
-    get_native_token_decimals,
-)
+from backend.connectors.connector_registry import get_connector_registry
 from backend.config.loader import configure_logging, load_settings
+from backend.core.network_normalizer import normalize_network
 from backend.db.models import NormalizedTransaction
 
 log = configure_logging("etherscan_normal_tx")
@@ -60,10 +57,13 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         self.chain_name = chain_name.lower()
         self.wallet_address = wallet_address
 
-        # Set native_token and decimals early (needed for both test and live mode)
-        self.native_token = get_native_token(self.chain_name)
-        self.native_token_decimals = get_native_token_decimals(self.chain_name)
-        self.chain_id = get_chain_id(self.chain_name)
+        # Get chain configuration from registry
+        registry = get_connector_registry()
+        self.native_token = registry.get_native_token("etherscan", self.chain_name)
+        self.native_token_decimals = registry.get_native_token_decimals("etherscan", self.chain_name)
+        self.chain_id = registry.get_chain_id("etherscan", self.chain_name)
+        if not self.native_token or self.native_token_decimals is None:
+            raise ValueError(f"Chain configuration not found for {chain_name}")
 
         # Initialize base (sets self.test_mode and logs)
         super().__init__(
@@ -77,8 +77,8 @@ class ConnectorEtherscanNormalTx(BaseConnector):
         if not self.wallet_address:
             raise ValueError("Missing wallet address")
 
-        # In test mode, skip API-related configuration only
-        if self.test_mode:
+        # In test/renormalize mode, skip API-related configuration only
+        if self.test_mode or self.renormalize_mode:
             return
 
         # Live mode: API configuration
@@ -152,8 +152,8 @@ class ConnectorEtherscanNormalTx(BaseConnector):
             f"Failed after {self.max_retries} retries - API rate limit exceeded"
         )
 
-    def get_raws(self) -> List[Dict[str, Any]]:
-        """Get raw normal transactions without mapping (for JSON logging)."""
+    def yield_raws(self) -> "Generator[Dict[str, Any], None, None]":
+        """Fetch and yield raw normal transactions."""
         try:
             self.update_progress(
                 operation="Fetching normal transactions",
@@ -174,23 +174,29 @@ class ConnectorEtherscanNormalTx(BaseConnector):
 
             transactions = result if isinstance(result, list) else []
             
+            # Yield transactions as they come
+            for tx in transactions:
+                yield tx
+            
+            log.info(
+                f"   ✅ Found {len(transactions)} normal transactions on {self.chain_name}"
+            )
+            
             self.update_progress(
                 operation="Completed",
                 current=1,
                 total=1,
                 log_message=f"✅ Found {len(transactions)} normal transactions on {self.chain_name}"
             )
-            
-            return transactions
         except Exception as e:
-            log.error(f"   ⚠️ Error fetching raw normal transactions: {e}")
+            log.error(f"   ⚠️ Error fetching normal transactions: {e}")
             self.update_progress(
                 operation="Failed",
                 current=1,
                 total=1,
                 log_message=f"❌ Error: {str(e)[:100]}"
             )
-            return []
+            raise
 
     def raw_to_normalized(self, tx: Dict) -> NormalizedTransaction:
         """
@@ -238,13 +244,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
                     f"Unexpected direction '{tx_from_lower}' to {tx_to_lower}"
                 )
 
-            tags = {
-                "chain_id": self.chain_id,
-                "token_symbol": token_symbol,
-                "token_name": f"{self.chain_name} Native Token",
-                "direction": direction,
-                "method_id": method_id,
-            }
+            tags = []
 
             return NormalizedTransaction(
                 source=f"etherscan_normal_tx_{self.chain_name.lower()}",
@@ -253,7 +253,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
                 source_transaction_id=tx_hash,
                 date_time=dt,
                 direction=direction,
-                transaction_type="technical" if value == 0 else "transfer",
+                transaction_type="cost" if value == 0 else "transfer",
                 source_transaction_type="normal-tx",
                 source_asset_symbol=self.native_token,
                 quantity=float(value),
@@ -262,7 +262,7 @@ class ConnectorEtherscanNormalTx(BaseConnector):
                 include_fee=True if direction == "outflow" else False,
                 source_from_account=tx_from,
                 source_to_account=to_addr,
-                network=self.chain_name.lower(),
+                network=normalize_network(self.chain_name),
                 tags=tags,
             )
         except Exception as e:

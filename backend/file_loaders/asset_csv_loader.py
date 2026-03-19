@@ -33,13 +33,13 @@ log = configure_logging("asset_csv_loader")
 # Mapping from CSV source names to internal price getter names
 SOURCE_TO_GETTER_MAP = {
     "coingecko": "coingecko",
-    "yahoo": "yahoo",
-    "yahoo to eur": "yahoo",  # Yahoo with EUR conversion
-    "alphavantage": "datareader",  # Use datareader as fallback
-    "marketstack": "datareader",  # Use datareader as fallback
-    "eodhd": "datareader",  # Use datareader as fallback
-    "google finance": "yahoo",  # Use yahoo as fallback
-    "manual": None,  # No automatic price fetching
+    "yahoo": "yahoo_direct",            # Yahoo Chart API v8 (direct HTTP, no yfinance)
+    "yahoo to eur": "yahoo_direct",      # Yahoo with EUR conversion
+    "alphavantage": "datareader",        # Use datareader as fallback
+    "marketstack": "datareader",         # Use datareader as fallback
+    "eodhd": "datareader",              # Use datareader as fallback
+    "google finance": "yahoo_direct",    # Use yahoo_direct as fallback
+    "manual": None,                      # No automatic price fetching
 }
 
 

@@ -10,20 +10,50 @@ vars:
     sh: pwd
   BACKEND_DIR: ./backend
   FRONTEND_DIR: ./frontend
-  ROOT_DIR: .
+  WORKTREE_DIR: .worktrees
+  WORKTREE_MAIN: .worktrees/main
+  WORKTREE_DEVELOP: .worktrees/develop
 
 includes:
-  branch: .taskfiles/branch.yml
-  build: .taskfiles/build.yml
-  clean: .taskfiles/clean.yml
-  db: .taskfiles/db.yml
-  deploy: .taskfiles/deploy.yml
-  logs: .taskfiles/logs.yml
-  pr: .taskfiles/pr.yml
-  release: .taskfiles/release.yml
-  start: .taskfiles/start.yml
-  stop: .taskfiles/stop.yml
-  test: .taskfiles/test.yml
+  branch:
+    taskfile: .taskfiles/branch.yml
+    dir: "{{.ROOT_DIR}}"
+  build:
+    taskfile: .taskfiles/build.yml
+    dir: "{{.ROOT_DIR}}"
+  clean:
+    taskfile: .taskfiles/clean.yml
+    dir: "{{.ROOT_DIR}}"
+  db:
+    taskfile: .taskfiles/db.yml
+    dir: "{{.ROOT_DIR}}"
+  deploy:
+    taskfile: .taskfiles/deploy.yml
+    dir: "{{.ROOT_DIR}}"
+  git:
+    taskfile: .taskfiles/git.yml
+    dir: "{{.ROOT_DIR}}"
+  logs:
+    taskfile: .taskfiles/logs.yml
+    dir: "{{.ROOT_DIR}}"
+  pr:
+    taskfile: .taskfiles/pr.yml
+    dir: "{{.ROOT_DIR}}"
+  release:
+    taskfile: .taskfiles/release.yml
+    dir: "{{.ROOT_DIR}}"
+  start:
+    taskfile: .taskfiles/start.yml
+    dir: "{{.ROOT_DIR}}"
+  stop:
+    taskfile: .taskfiles/stop.yml
+    dir: "{{.ROOT_DIR}}"
+  test:
+    taskfile: .taskfiles/test.yml
+    dir: "{{.ROOT_DIR}}"
+  worktree:
+    taskfile: .taskfiles/worktree.yml
+    dir: "{{.ROOT_DIR}}"
 
 tasks:
   install:
@@ -67,6 +97,7 @@ tasks:
         echo ""
         echo "TESTING"
         echo "  task test               Run unit tests"
+        echo "  task test:int:local     Integration tests (trades_db_integ)"
         echo "  task test:int:dev       Integration tests (dev)"
         echo "  task deploy:test:local  Deploy to test stack"
         echo ""

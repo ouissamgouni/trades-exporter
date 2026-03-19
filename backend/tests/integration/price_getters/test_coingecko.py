@@ -123,9 +123,9 @@ class TestCoinGeckoPriceGetterIntegration:
         self, coingecko_getter, mock_asset_btc, config_bitcoin_coingecko
     ):
         """Should fetch historical BTC price and return PriceResult."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        target_date = datetime.utcnow() - timedelta(days=7)
+        target_date = datetime.now(timezone.utc) - timedelta(days=7)
 
         result = coingecko_getter.get_historical_price(
             mock_asset_btc, target_date, config=config_bitcoin_coingecko

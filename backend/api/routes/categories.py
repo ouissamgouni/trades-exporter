@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select, func
 
 from backend.db.database import get_db
@@ -42,8 +42,7 @@ class DimensionResponse(BaseModel):
     category_count: int = 0
     asset_count: int = 0  # Total assets across all categories in this dimension
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CategoryCreate(BaseModel):
@@ -71,8 +70,7 @@ class CategoryResponse(BaseModel):
     ordinal: int
     asset_count: int = 0  # Number of assets linked to this category
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LinkedAssetResponse(BaseModel):

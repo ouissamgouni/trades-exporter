@@ -6,15 +6,18 @@ CalculationUnitLeg model as pure data and treating taxability rules
 as a policy that can vary by jurisdiction.
 
 The decision chain priority (first match wins):
-1. Bundle taxability override (explicit user decision)
-2. Disposing base currency → NEVER taxable (absolute rule)
-3. Explicit transaction flag (disposal_taxable on transaction)
-4. Inflows → never taxable (only outflows/fees can be disposals)
-5. Cost basis transfers → never taxable (transfers, splits)
-6. Fees → use config.fee_taxable_by_default
-7. Outflow-only → taxable (payment, gift, etc.)
-8. Disposal to base currency (selling) → taxable
-9. Default: crypto-to-crypto swap taxability from config
+1.  Bundle taxability override (explicit user decision)
+2.  Disposing base currency → NEVER taxable (absolute rule)
+3a. tx.taxability_status == "taxable" → taxable (user/connector override)
+3b. tx.taxability_status == "non_taxable" → non-taxable (user/connector override)
+4.  Inflows → never taxable (only outflows/fees can be disposals)
+5.  Fees → use config.fee_taxable_by_default
+6.  Cost basis transfers → never taxable (transfers, splits)
+6b. Unmatched internal transfers → non-taxable (P&L realization skipped)
+6c. Derivative settlement (funding, perp_open, perp_close) → non-taxable
+7.  Outflow-only → taxable (payment, gift, etc.)
+8.  Disposal to base currency (selling) → taxable
+9.  Default: crypto-to-crypto swap taxability from config
 
 This module also provides `suggest_bundle_taxability()` for suggestion-time
 taxability hints, using the same logic but adapted for bundle-level context
@@ -24,7 +27,7 @@ taxability hints, using the same logic but adapted for bundle-level context
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from backend.db.models import TaxabilityStatus, LegType
+from backend.db.models import TaxabilityStatus, LegType, UnitPattern
 
 if TYPE_CHECKING:
     from backend.db.models import CalculationUnitLeg, CalculationUnit
@@ -71,22 +74,22 @@ def suggest_bundle_taxability(
     Returns:
         BundleTaxabilitySuggestion with taxability status and explanation
     """
-    # Rule 5: Cost basis transfers (transfer/split) → never taxable
-    if pattern in ("transfer", "split"):
+    # Rule 5: Cost basis transfers (internal_transfer/split) → never taxable
+    if pattern in (UnitPattern.INTERNAL_TRANSFER.value, UnitPattern.SPLIT.value):
         return BundleTaxabilitySuggestion(
             taxability=TaxabilityStatus.NON_TAXABLE,
             reason=f"Pattern '{pattern}' is a cost basis transfer (non-taxable by default)",
         )
     
-    # Rule 5b: Pending transfers → non-taxable
-    if pattern == "pending_transfer":
+    # Rule 5b: Unmatched internal transfers → non-taxable
+    if pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value:
         return BundleTaxabilitySuggestion(
             taxability=TaxabilityStatus.NON_TAXABLE,
-            reason="Pending transfer awaiting counterpart (non-taxable)",
+            reason="Unmatched internal transfer awaiting counterpart (non-taxable)",
         )
     
     # Rule 9: Swaps → use config
-    if pattern == "swap":
+    if pattern == UnitPattern.SWAP.value:
         if crypto_swap_taxable:
             return BundleTaxabilitySuggestion(
                 taxability=TaxabilityStatus.TAXABLE,
@@ -110,11 +113,15 @@ def suggest_bundle_taxability(
 # ============================================================================
 
 
+# Source transaction types that represent derivative settlements (non-taxable)
+DERIVATIVE_SETTLEMENT_TYPES = frozenset({"funding", "perp_open", "perp_close"})
+
+
 class LegLike(Protocol):
     """Protocol for leg-like objects (CalculationUnitLeg)."""
     asset_id: int
     leg_type: LegType
-    tx_disposal_taxable: bool
+    tx_taxability_status: str
     unit: "CalculationUnit"
 
 
@@ -159,27 +166,39 @@ class TaxabilityCalculator:
         if self._is_base_currency(leg.asset_id):
             return False
         
-        # 3. Explicit transaction flag (user override on transaction)
-        if self._has_taxable_override(leg):
+        # 3a. Explicit taxability_status == "taxable" (user/connector override)
+        tx_status = self._get_tx_taxability_status(leg)
+        if tx_status == TaxabilityStatus.TAXABLE.value:
             return True
+        
+        # 3b. Explicit taxability_status == "non_taxable" (user/connector override)
+        if tx_status == TaxabilityStatus.NON_TAXABLE.value:
+            return False
+        
+        # (tx_status == "unknown" falls through to remaining rules)
         
         # 4. Inflows never taxable
         if self._is_inflow(leg):
             return False
         
-        # 5. Cost basis transfers never taxable
-        if self._is_cost_basis_transfer(unit):
-            return False
-        
-        # 5b. Pending transfers are non-taxable (P&L realization skipped anyway)
-        if self._is_pending_transfer(unit):
-            return False
-        
-        # 6. Fees use config
+        # 5. Fees use config (checked BEFORE transfer checks)
+        # Fees are separate disposal events even on non-taxable transfers
         if self._is_fee(leg):
             return self.config.fee_taxable_by_default
         
-        # 7. Outflow-only always taxable (but not pending transfers - handled above)
+        # 6. Cost basis transfers never taxable (but fees already handled above)
+        if self._is_cost_basis_transfer(unit):
+            return False
+        
+        # 6b. Unmatched internal transfers are non-taxable (P&L realization skipped anyway)
+        if self._is_unmatched_internal_transfer(unit):
+            return False
+        
+        # 6c. Derivative settlements are non-taxable (funding, perp open/close)
+        if self._is_derivative_settlement(leg):
+            return False
+        
+        # 7. Outflow-only always taxable (but not unmatched internal transfers - handled above)
         if self._is_outflow_only(unit):
             return True
         
@@ -215,9 +234,9 @@ class TaxabilityCalculator:
             and asset_id == self.config.base_currency_id
         )
     
-    def _has_taxable_override(self, leg: LegLike) -> bool:
-        """Check if leg has explicit taxable override from transaction."""
-        return getattr(leg, 'tx_disposal_taxable', False) is True
+    def _get_tx_taxability_status(self, leg: LegLike) -> str:
+        """Get the transaction-level taxability status (3-state: taxable/non_taxable/unknown)."""
+        return getattr(leg, 'tx_taxability_status', TaxabilityStatus.UNKNOWN.value)
     
     def _is_inflow(self, leg: LegLike) -> bool:
         """Check if leg is an inflow (never taxable)."""
@@ -231,13 +250,22 @@ class TaxabilityCalculator:
         return leg_type == "fee" or is_fee
     
     def _is_cost_basis_transfer(self, unit: Any) -> bool:
-        """Check if unit is a cost basis transfer (transfer/split)."""
+        """Check if unit is a cost basis transfer (internal_transfer/split)."""
         return getattr(unit, 'is_cost_basis_transfer', False)
     
-    def _is_pending_transfer(self, unit: Any) -> bool:
-        """Check if unit is a pending transfer (incomplete transfer awaiting counterpart)."""
+    def _is_unmatched_internal_transfer(self, unit: Any) -> bool:
+        """Check if unit is an unmatched internal transfer (incomplete internal transfer awaiting counterpart)."""
         pattern = getattr(unit, 'pattern', None)
-        return pattern == "pending_transfer"
+        return pattern == UnitPattern.UNMATCHED_INTERNAL_TRANSFER.value
+    
+    def _is_derivative_settlement(self, leg: LegLike) -> bool:
+        """Check if leg originates from a derivative settlement (funding, perp open/close)."""
+        tx = getattr(leg, 'transaction', None)
+        if tx:
+            source_type = getattr(tx, 'source_transaction_type', None)
+            if source_type and source_type in DERIVATIVE_SETTLEMENT_TYPES:
+                return True
+        return False
     
     def _is_outflow_only(self, unit: Any) -> bool:
         """Check if unit has only outflows (payment, gift, etc.)."""

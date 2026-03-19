@@ -32,8 +32,11 @@ from backend.services.price_getters.base import (
 # Concrete implementations
 from backend.services.price_getters.coingecko import CoinGeckoPriceGetter
 from backend.services.price_getters.yahoo import YahooPriceGetter
+from backend.services.price_getters.yahoo_direct import YahooDirectPriceGetter
 from backend.services.price_getters.datareader import DataReaderPriceGetter
 from backend.services.price_getters.forex import ForexPriceGetter
+from backend.services.price_getters.alphavantage import AlphaVantagePriceGetter
+from backend.services.price_getters.marketstack import MarketstackPriceGetter
 
 # Registry functions (the main API)
 from backend.services.price_getters.registry import (
@@ -58,6 +61,7 @@ __all__ = [
     "YahooPriceGetter",
     "DataReaderPriceGetter",
     "ForexPriceGetter",
+    "AlphaVantagePriceGetter",
     # Registry API
     "get_price_getter",
     "list_price_getters",

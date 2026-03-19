@@ -1,36 +1,40 @@
 import {
     Badge, Box,
-    Button, Card, Flex,
-    Heading, HStack, Progress, Spinner, Text, Grid, GridItem, Input, IconButton, Collapsible
+    Button, Card, Collapsible, Flex,
+    Heading, HStack, Progress, Spinner, Tabs, Text
 } from '@chakra-ui/react';
 import { useQueryClient } from '@tanstack/react-query';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LuChevronDown, LuChevronUp, LuEye, LuHistory, LuRotateCcw } from 'react-icons/lu';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LuEye, LuHistory } from 'react-icons/lu';
 import {
     API_URL,
+    AccountSummary,
     ConnectorOverride,
     ConnectorProgress,
     ConnectorsInfo,
     ConnectorSyncStatus,
+    EnabledConnector,
     JobHistoryResponse,
     SyncJobProgress,
     SyncJobStartRequest,
     SyncJobStartResponse,
     SyncJobSummary,
-    ConnectorDefaultInfo,
 } from '../types';
 import { ConnectorProgressCard } from './ConnectorProgressCard';
 import { JobDetailDrawer } from './JobDetailDrawer';
 import { JobHistoryTable } from './JobHistoryTable';
 import { SyncConfigPanel } from './SyncConfigPanel';
+import { SyncRecapDialog } from './SyncRecapDialog';
 import { toaster } from './ui/toaster';
 
 // Status badge color helper
 const getJobStatusColor = (status: string): string => {
     switch (status) {
         case 'idle': return 'gray';
+        case 'pending': return 'yellow';
         case 'running': return 'blue';
         case 'completed': return 'green';
+        case 'warning': return 'orange';
         case 'aborted': return 'orange';
         case 'failed': return 'red';
         default: return 'gray';
@@ -70,59 +74,7 @@ const formatRelativeTime = (dateStr?: string): string => {
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-// Inline recent job row component
-interface RecentJobRowProps {
-    job: SyncJobSummary;
-    onView: () => void;
-}
-
-const RecentJobRow: React.FC<RecentJobRowProps> = ({ job, onView }) => (
-    <Flex
-        align="center"
-        justify="space-between"
-        p={2}
-        borderRadius="md"
-        bg="gray.50"
-        _dark={{ bg: 'gray.800' }}
-        _hover={{ bg: 'gray.100', _dark: { bg: 'gray.700' } }}
-        cursor="pointer"
-        onClick={onView}
-    >
-        <HStack gap={3}>
-            <Badge colorPalette={getJobStatusColor(job.status)} size="sm">
-                {job.status}
-            </Badge>
-            <Text fontSize="sm" color="gray.500">
-                {formatRelativeTime(job.started_at)}
-            </Text>
-        </HStack>
-        <HStack gap={4}>
-            <HStack gap={1}>
-                <Text fontSize="sm" fontWeight="medium" color="green.600">
-                    +{job.total_new}
-                </Text>
-                <Text fontSize="sm" color="gray.400">/</Text>
-                <Text fontSize="sm" fontWeight="medium" color="blue.600">
-                    ↻{job.total_updated}
-                </Text>
-                {job.total_errors > 0 && (
-                    <>
-                        <Text fontSize="sm" color="gray.400">/</Text>
-                        <Text fontSize="sm" fontWeight="medium" color="red.600">
-                            ✗{job.total_errors}
-                        </Text>
-                    </>
-                )}
-            </HStack>
-            <Text fontSize="xs" color="gray.400">
-                {formatDuration(job.started_at, job.finished_at)}
-            </Text>
-            <LuEye size={14} color="gray" />
-        </HStack>
-    </Flex>
-);
-
-export const SyncJobPanel: React.FC = () => {
+export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
     const queryClient = useQueryClient();
     const [jobStatus, setJobStatus] = useState<SyncJobProgress | null>(null);
     const [connectors, setConnectors] = useState<ConnectorsInfo | null>(null);
@@ -133,20 +85,31 @@ export const SyncJobPanel: React.FC = () => {
     // Track previous status to detect completion
     const prevStatusRef = useRef<string | null>(null);
 
-    // Per-sync configuration overrides (enable/disable connectors, test mode)
+    // Per-sync configuration overrides (enable/disable connectors, test mode, since datetime)
     const [syncOverrides, setSyncOverrides] = useState<ConnectorOverride[]>([]);
 
-    // Incremental sync configuration state (since datetime)
-    const [connectorDefaults, setConnectorDefaults] = useState<ConnectorDefaultInfo[]>([]);
-    const [sinceOverrides, setSinceOverrides] = useState<Record<number, string | null>>({});
-    const [showIncrementalConfig, setShowIncrementalConfig] = useState(false);
+    // Accordion state for progress cards grouping
+    const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+    // Initialize both as "all expanded" on first render
+    const typesInitialized = useRef(false);
+
+    // Stable callback for config data from SyncConfigPanel (avoids re-render loop)
+    const handleConfigDataChange = useCallback((connectors: EnabledConnector[], accounts: AccountSummary[]) => {
+        setConfigConnectors(connectors);
+        setConfigAccounts(accounts);
+    }, []);
+
+    // Recap dialog state (replaces old renormalize confirm)
+    const [recapOpen, setRecapOpen] = useState(false);
+    const [recapRenormalize, setRecapRenormalize] = useState(false);
+    const [configConnectors, setConfigConnectors] = useState<EnabledConnector[]>([]);
+    const [configAccounts, setConfigAccounts] = useState<AccountSummary[]>([]);
 
     // Job history state
     const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
     const [jobDrawerOpen, setJobDrawerOpen] = useState(false);
     const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
-    const [recentJobs, setRecentJobs] = useState<SyncJobSummary[]>([]);
-    const [showFullHistory, setShowFullHistory] = useState(false);
 
     // Fetch job status
     const fetchJobStatus = useCallback(async () => {
@@ -176,54 +139,23 @@ export const SyncJobPanel: React.FC = () => {
         }
     }, []);
 
-    // Fetch connector defaults for incremental sync configuration
-    const fetchConnectorDefaults = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/sync-job/connector-defaults`);
-            if (response.ok) {
-                const data = await response.json();
-                const connectors: ConnectorDefaultInfo[] = data.connectors || [];
-                setConnectorDefaults(connectors);
-                // Initialize overrides from defaults
-                const initialOverrides: Record<number, string | null> = {};
-                connectors.forEach(c => {
-                    initialOverrides[c.connector_id] = c.default_since_datetime ?? null;
-                });
-                setSinceOverrides(initialOverrides);
-            }
-        } catch (err) {
-            console.error('Failed to fetch connector defaults:', err);
-        }
-    }, []);
-
-    // Fetch recent jobs for inline summary
-    const fetchRecentJobs = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/sync-job/history?limit=5&offset=0`);
-            if (response.ok) {
-                const data: JobHistoryResponse = await response.json();
-                setRecentJobs(data.jobs);
-            }
-        } catch (err) {
-            console.error('Failed to fetch recent jobs:', err);
-        }
-    }, []);
-
-    // Initial load and polling
+    // Initial load and refresh when tab becomes active
+    const hasLoadedRef = useRef(false);
     useEffect(() => {
+        if (!isActive) return;
+        // Always fetch on first mount; after that, refetch when tab becomes active again
         fetchJobStatus();
         fetchConnectors();
-        fetchConnectorDefaults();
-        fetchRecentJobs();
-    }, [fetchJobStatus, fetchConnectors, fetchConnectorDefaults, fetchRecentJobs]);
+        hasLoadedRef.current = true;
+    }, [isActive, fetchJobStatus, fetchConnectors]);
 
-    // Poll for status updates when job is running
+    // Poll for status updates when job is running — only while tab is active
     useEffect(() => {
-        if (jobStatus?.status === 'running') {
-            const interval = setInterval(fetchJobStatus, 500);
+        if (jobStatus?.status === 'running' && isActive) {
+            const interval = setInterval(fetchJobStatus, 2000);
             return () => clearInterval(interval);
         }
-    }, [jobStatus?.status, fetchJobStatus]);
+    }, [jobStatus?.status, isActive, fetchJobStatus]);
 
     // Trigger transaction refresh when sync job completes
     useEffect(() => {
@@ -236,34 +168,24 @@ export const SyncJobPanel: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             // Refresh job history when job finishes
             setHistoryRefreshTrigger(prev => prev + 1);
-            fetchRecentJobs();
         }
 
         prevStatusRef.current = currentStatus ?? null;
-    }, [jobStatus?.status, queryClient, fetchRecentJobs]);
+    }, [jobStatus?.status, queryClient]);
 
     // Start a new sync job
-    const startJob = async () => {
+    const startJob = async (renormalize: boolean = false) => {
         setActionLoading(true);
         try {
-            // Build request with both connector overrides (enable/disable, test mode) and since overrides
+            // Build request with connector overrides from SyncConfigPanel
+            // (includes enable/disable, test_mode, and since_datetime)
             const requestBody: SyncJobStartRequest = {};
 
-            // Add enable/disable and test mode overrides from SyncConfigPanel
             if (syncOverrides.length > 0) {
                 requestBody.connector_overrides = syncOverrides;
             }
-
-            // Add since datetime overrides for incremental sync
-            const incrementalConnectors = connectorDefaults.filter(c => c.supports_incremental_sync);
-            if (incrementalConnectors.length > 0) {
-                requestBody.since_overrides = {};
-                incrementalConnectors.forEach(c => {
-                    const overrideValue = sinceOverrides[c.connector_id];
-                    requestBody.since_overrides![c.connector_id] = {
-                        since_datetime: overrideValue ?? null
-                    };
-                });
+            if (renormalize) {
+                requestBody.renormalize = true;
             }
 
             const response = await fetch(`${API_URL}/sync-job/start`, {
@@ -348,7 +270,16 @@ export const SyncJobPanel: React.FC = () => {
     // Calculate progress percentage
     const getProgressPercent = (): number => {
         if (!jobStatus || jobStatus.total_connectors === 0) return 0;
-        return Math.round((jobStatus.connectors_completed.length / jobStatus.total_connectors) * 100);
+        const percentage = Math.round((jobStatus.connectors_completed.length / jobStatus.total_connectors) * 100);
+        // Clamp to 0-100 range to prevent invalid values
+        return Math.min(100, Math.max(0, percentage));
+    };
+
+    // Get progress bar color based on error state
+    const getJobProgressBarColor = (): string => {
+        if (!jobStatus) return 'blue';
+        if (jobStatus.error_count > 0) return 'orange';
+        return 'blue';
     };
 
     // Get status icon and color for connector status
@@ -357,6 +288,7 @@ export const SyncJobPanel: React.FC = () => {
             case 'pending': return '⏳';
             case 'running': return '🔄';
             case 'completed': return '✅';
+            case 'warning': return '⚠️';
             case 'failed': return '❌';
             case 'skipped': return '⏭️';
             default: return '•';
@@ -368,6 +300,7 @@ export const SyncJobPanel: React.FC = () => {
             case 'pending': return 'gray';
             case 'running': return 'blue';
             case 'completed': return 'green';
+            case 'warning': return 'orange';
             case 'failed': return 'red';
             case 'skipped': return 'orange';
             default: return 'gray';
@@ -375,68 +308,36 @@ export const SyncJobPanel: React.FC = () => {
     };
 
     // Handle since datetime override change
-    const handleSinceChange = (connectorId: number, value: string) => {
-        setSinceOverrides(prev => ({
-            ...prev,
-            [connectorId]: value || null
-        }));
-    };
-
-    // Reset a connector's since to its default
-    const resetToDefault = (connectorId: number) => {
-        const connector = connectorDefaults.find(c => c.connector_id === connectorId);
-        if (connector) {
-            setSinceOverrides(prev => ({
-                ...prev,
-                [connectorId]: connector.default_since_datetime ?? null
-            }));
-        }
-    };
-
-    // Clear since for full sync
-    const clearSince = (connectorId: number) => {
-        setSinceOverrides(prev => ({
-            ...prev,
-            [connectorId]: null
-        }));
-    };
-
-    // Format datetime for input
-    const formatForInput = (dateStr: string | null | undefined): string => {
-        if (!dateStr) return '';
-        try {
-            const date = new Date(dateStr);
-            // Format as local datetime-local input value (YYYY-MM-DDTHH:mm)
-            return date.toISOString().slice(0, 16);
-        } catch {
-            return '';
-        }
-    };
-
-    // Get connectors that support incremental sync
-    const incrementalConnectors = connectorDefaults.filter(c => c.supports_incremental_sync);
-
     // Get sorted connector statuses
     const getSortedConnectorStatuses = (): ConnectorProgress[] => {
         if (!jobStatus?.connector_statuses) return [];
         return Object.values(jobStatus.connector_statuses).sort((a, b) => {
-            // Sort by status priority: running first, then pending, then completed, then failed, then skipped
+            // Sort by status priority: running first, then pending, then completed, then warning, then failed, then skipped
             const statusOrder: Record<ConnectorSyncStatus, number> = {
                 running: 0,
                 pending: 1,
                 queued: 2,
                 completed: 3,
-                failed: 4,
-                skipped: 5
+                warning: 4,
+                failed: 5,
+                skipped: 6
             };
             return (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
         });
     };
 
     const isRunning = jobStatus?.status === 'running';
+    // Count how many connectors are actively queued or running.
+    // During a full job many connectors are active; during a single-connector
+    // retry only 1 is active.  The panel chrome (progress bar, abort, config
+    // disable) should only appear for a full job, not for a single retry.
+    const activeConnectorCount = getSortedConnectorStatuses().filter(
+        (c) => c.status === 'running' || c.status === 'queued'
+    ).length;
+    const isFullJobRunning = isRunning && activeConnectorCount > 1;
     const canStart = !isRunning && !actionLoading;
     const hasFailedConnectors = getSortedConnectorStatuses().some(
-        (c) => c.status === 'failed'
+        (c) => c.status === 'failed' || c.status === 'warning'
     );
 
     if (loading && !jobStatus) {
@@ -458,360 +359,452 @@ export const SyncJobPanel: React.FC = () => {
                 </Box>
             )}
 
-            {/* Sync Configuration Panel (enable/disable connectors, test mode) */}
-            <Box mb={4}>
-                <SyncConfigPanel
-                    onOverridesChange={setSyncOverrides}
-                    disabled={isRunning}
-                />
-            </Box>
+            <Tabs.Root defaultValue="control">
+                <Tabs.List mb={4}>
+                    <Tabs.Trigger value="control">
+                        🎛️ Control
+                    </Tabs.Trigger>
+                    <Tabs.Trigger value="history">
+                        📜 History
+                    </Tabs.Trigger>
+                </Tabs.List>
 
-            {/* Controls Card */}
-            <Card.Root mb={6}>
-                <Card.Body>
-                    <Flex justify="space-between" align="center" wrap="wrap" gap={4}>
-                        <Flex align="center" gap={3}>
-                            {jobStatus && (
-                                <Badge
-                                    colorPalette={getStatusColor(jobStatus.status)}
-                                    size="lg"
-                                >
-                                    {jobStatus.status.toUpperCase()}
-                                    {jobStatus.abort_requested && ' (Aborting...)'}
-                                </Badge>
-                            )}
-                            {syncOverrides.length > 0 && canStart && (
-                                <Text fontSize="sm" color="blue.400">
-                                    {syncOverrides.length} override{syncOverrides.length !== 1 ? 's' : ''} configured
-                                </Text>
-                            )}
-                        </Flex>
-                        <Flex gap={2}>
-                            {canStart && (
-                                <Button
-                                    colorPalette="blue"
-                                    onClick={startJob}
-                                    loading={actionLoading}
-                                    disabled={!canStart}
-                                >
-                                    Start Sync Job
-                                </Button>
-                            )}
-                            {isRunning && (
-                                <Button
-                                    colorPalette="red"
-                                    variant="outline"
-                                    onClick={abortJob}
-                                    loading={actionLoading}
-                                >
-                                    Abort Job
-                                </Button>
-                            )}
-                        </Flex>
-                    </Flex>
+                <Tabs.Content value="control">
 
-                    {connectors && (
-                        <Text fontSize="sm" color="gray.600" mt={2}>
-                            Available connectors: {connectors.available_connectors.join(', ')}
-                        </Text>
-                    )}
-
-                    {/* Incremental Sync Configuration */}
-                    {incrementalConnectors.length > 0 && !isRunning && (
-                        <Box mt={4}>
-                            <Collapsible.Root open={showIncrementalConfig} onOpenChange={(details) => setShowIncrementalConfig(details.open)}>
-                                <Collapsible.Trigger asChild>
-                                    <Button variant="ghost" size="sm" width="100%" justifyContent="space-between">
-                                        <Text fontSize="sm" fontWeight="medium">
-                                            Incremental Sync Settings ({incrementalConnectors.length} connectors)
-                                        </Text>
-                                        {showIncrementalConfig ? <LuChevronUp /> : <LuChevronDown />}
-                                    </Button>
-                                </Collapsible.Trigger>
-                                <Collapsible.Content>
-                                    <Box mt={3} p={3} bg="gray.50" borderRadius="md">
-                                        <Text fontSize="xs" color="gray.600" mb={3}>
-                                            Configure the "since" datetime for each connector. Transactions before this datetime will be skipped.
-                                            Clear the field for a full sync.
-                                        </Text>
-                                        <Grid templateColumns="repeat(auto-fill, minmax(300px, 1fr))" gap={3}>
-                                            {incrementalConnectors.map(connector => {
-                                                const currentValue = sinceOverrides[connector.connector_id];
-                                                const hasOverride = currentValue !== connector.default_since_datetime;
-
-                                                return (
-                                                    <GridItem key={connector.connector_id}>
-                                                        <Box p={3} bg="white" borderRadius="md" borderWidth="1px" borderColor={hasOverride ? 'blue.200' : 'gray.200'}>
-                                                            <Flex justify="space-between" align="center" mb={2}>
-                                                                <Box>
-                                                                    <Text fontWeight="medium" fontSize="sm">{connector.connector_type}</Text>
-                                                                    <Text fontSize="xs" color="gray.500">{connector.account_name}</Text>
-                                                                </Box>
-                                                                {hasOverride && (
-                                                                    <Badge colorPalette="blue" size="sm">Modified</Badge>
-                                                                )}
-                                                            </Flex>
-                                                            <Flex gap={2} align="center">
-                                                                <Input
-                                                                    type="datetime-local"
-                                                                    size="sm"
-                                                                    value={formatForInput(currentValue)}
-                                                                    onChange={(e) => handleSinceChange(connector.connector_id, e.target.value ? new Date(e.target.value).toISOString() : '')}
-                                                                    placeholder="Full sync (no filter)"
-                                                                />
-                                                                <IconButton
-                                                                    aria-label="Reset to default"
-                                                                    size="sm"
-                                                                    variant="ghost"
-                                                                    onClick={() => resetToDefault(connector.connector_id)}
-                                                                    title="Reset to default (last synced transaction)"
-                                                                >
-                                                                    <LuRotateCcw />
-                                                                </IconButton>
-                                                            </Flex>
-                                                            {connector.default_since_datetime && (
-                                                                <Text fontSize="xs" color="gray.500" mt={1}>
-                                                                    Default: {formatDateTime(connector.default_since_datetime)}
-                                                                </Text>
-                                                            )}
-                                                            {!currentValue && (
-                                                                <Text fontSize="xs" color="orange.600" mt={1}>
-                                                                    ⚠️ Full sync - will fetch all transactions
-                                                                </Text>
-                                                            )}
-                                                        </Box>
-                                                    </GridItem>
-                                                );
-                                            })}
-                                        </Grid>
-                                    </Box>
-                                </Collapsible.Content>
-                            </Collapsible.Root>
-                        </Box>
-                    )}
-                </Card.Body>
-            </Card.Root>
-
-            {/* Status Card */}
-            {jobStatus && jobStatus.status !== 'idle' && (
-                <Card.Root mb={6}>
-                    <Card.Header>
-                        <Flex justify="space-between" align="center">
-                            <Heading size="md">Job Progress</Heading>
-                            {hasFailedConnectors && !isRunning && (
-                                <Text fontSize="sm" color="red.400">
-                                    Some connectors failed. Expand cards to retry.
-                                </Text>
-                            )}
-                        </Flex>
-                    </Card.Header>
-                    <Card.Body>
-                        {/* Progress Bar (when running) */}
-                        {isRunning && (
-                            <Box mb={4}>
-                                <Flex justify="space-between" mb={1}>
-                                    <Text fontSize="sm">
-                                        Processing: {jobStatus.current_connector || 'Initializing...'}
-                                    </Text>
-                                    <Text fontSize="sm">
-                                        {jobStatus.connectors_completed.length} / {jobStatus.total_connectors} connectors
-                                    </Text>
-                                </Flex>
-                                <Progress.Root value={getProgressPercent()} max={100} size="sm">
-                                    <Progress.Track>
-                                        <Progress.Range />
-                                    </Progress.Track>
-                                </Progress.Root>
-                            </Box>
-                        )}
-
-                        {/* Statistics Grid */}
-                        <Flex gap={6} wrap="wrap" mb={4}>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Total Processed</Text>
-                                <Text fontSize="2xl" fontWeight="bold">{jobStatus.total_processed}</Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">New Entries Added</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color="green.600">
-                                    {jobStatus.new_entries_added}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Entries Updated</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color="blue.600">
-                                    {jobStatus.entries_updated ?? 0}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Duplicates Skipped</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color="gray.500">
-                                    {jobStatus.duplicates_skipped}
-                                </Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Errors</Text>
-                                <Text fontSize="2xl" fontWeight="bold" color={jobStatus.error_count > 0 ? 'red.600' : 'gray.500'}>
-                                    {jobStatus.error_count}
-                                </Text>
-                            </Box>
-                        </Flex>
-
-                        {/* Timing */}
-                        <Flex gap={6} wrap="wrap" mb={4}>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Started</Text>
-                                <Text>{formatDateTime(jobStatus.started_at)}</Text>
-                            </Box>
-                            <Box>
-                                <Text fontSize="sm" color="gray.500">Finished</Text>
-                                <Text>{formatDateTime(jobStatus.finished_at)}</Text>
-                            </Box>
-                        </Flex>
-
-                        {/* Per-Connector Progress - Using ConnectorProgressCard */}
-                        {jobStatus.connector_statuses &&
-                            Object.keys(jobStatus.connector_statuses).length > 0 && (
-                                <Box>
-                                    <Text fontSize="sm" color="gray.500" mb={3}>
-                                        Connector Progress
-                                    </Text>
-                                    <Box
-                                        css={{
-                                            display: 'grid',
-                                            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                                            gap: '12px',
-                                        }}
-                                    >
-                                        {getSortedConnectorStatuses().map((cp: ConnectorProgress) => (
-                                            <ConnectorProgressCard
-                                                key={cp.connector_id}
-                                                progress={cp}
-                                                isExpanded={cp.status === 'running' || cp.status === 'failed'}
-                                                onRetry={retryConnector}
-                                                retryLoading={retryLoading === cp.connector_id}
-                                            />
-                                        ))}
-                                    </Box>
-                                </Box>
-                            )}
-
-                        {/* Legacy: Completed Connectors (fallback for backward compatibility) */}
-                        {!jobStatus.connector_statuses && jobStatus.connectors_completed.length > 0 && (
-                            <Box mb={4}>
-                                <Text fontSize="sm" color="gray.500" mb={1}>Completed Connectors</Text>
-                                <Flex gap={2} wrap="wrap">
-                                    {jobStatus.connectors_completed.map((c: string) => (
-                                        <Badge key={c} colorPalette="green">{c}</Badge>
-                                    ))}
-                                </Flex>
-                            </Box>
-                        )}
-
-                        {/* Error Message */}
-                        {jobStatus.error_message && (
-                            <Box
-                                bg="red.50"
-                                borderColor="red.200"
-                                borderWidth={1}
-                                p={3}
-                                borderRadius="md"
-                                mt={4}
-                            >
-                                <Text fontWeight="bold" color="red.700">
-                                    Error:
-                                </Text>
-                                <Text color="red.600">{jobStatus.error_message}</Text>
-                            </Box>
-                        )}
-
-                        {/* Error List */}
-                        {jobStatus.errors.length > 0 && (
-                            <Box mt={4}>
-                                <Text fontSize="sm" color="gray.500" mb={2}>
-                                    Recent Errors ({jobStatus.error_count} total):
-                                </Text>
-                                <Box
-                                    maxH="200px"
-                                    overflowY="auto"
-                                    bg="gray.50"
-                                    p={3}
-                                    borderRadius="md"
-                                    fontSize="xs"
-                                    fontFamily="mono"
-                                >
-                                    {jobStatus.errors.map((err: string, idx: number) => (
-                                        <Text key={idx} color="red.600" mb={1}>{err}</Text>
-                                    ))}
-                                </Box>
-                            </Box>
-                        )}
-                    </Card.Body>
-                </Card.Root>
-            )}
-
-            {/* Job History Section */}
-            <Card.Root mt={6}>
-                <Card.Header>
-                    <Flex justify="space-between" align="center">
-                        <Flex align="center" gap={2}>
-                            <LuHistory />
-                            <Heading size="sm">Recent Sync Jobs</Heading>
-                        </Flex>
-                        <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setShowFullHistory(!showFullHistory)}
-                        >
-                            {showFullHistory ? (
-                                <>
-                                    <LuChevronUp />
-                                    <Text ml={1}>Show Less</Text>
-                                </>
-                            ) : (
-                                <>
-                                    <Text mr={1}>View All</Text>
-                                    <LuChevronDown />
-                                </>
-                            )}
-                        </Button>
-                    </Flex>
-                </Card.Header>
-                <Card.Body pt={0}>
-                    {!showFullHistory ? (
-                        /* Inline Recent Jobs Summary */
-                        <Box>
-                            {recentJobs.length === 0 ? (
-                                <Text color="gray.500" fontSize="sm" textAlign="center" py={4}>
-                                    No sync jobs yet. Start your first sync above.
-                                </Text>
-                            ) : (
-                                <Flex direction="column" gap={2}>
-                                    {recentJobs.slice(0, 5).map((job) => (
-                                        <RecentJobRow
-                                            key={job.id}
-                                            job={job}
-                                            onView={() => {
-                                                setSelectedJobId(job.id);
-                                                setJobDrawerOpen(true);
-                                            }}
-                                        />
-                                    ))}
-                                </Flex>
-                            )}
-                        </Box>
-                    ) : (
-                        /* Full Job History Table */
-                        <JobHistoryTable
-                            onViewJob={(jobId) => {
-                                setSelectedJobId(jobId);
-                                setJobDrawerOpen(true);
-                            }}
-                            refreshTrigger={historyRefreshTrigger}
+                    {/* Sync Configuration Panel (enable/disable connectors, test mode) */}
+                    <Box mb={4}>
+                        <SyncConfigPanel
+                            onOverridesChange={setSyncOverrides}
+                            onConfigDataChange={handleConfigDataChange}
+                            disabled={isFullJobRunning}
                         />
+                    </Box>
+
+                    {/* Controls Card */}
+                    <Card.Root mb={6}>
+                        <Card.Body>
+                            <Flex justify="space-between" align="center" wrap="wrap" gap={4}>
+                                <Flex align="center" gap={3}>
+                                    {jobStatus && (
+                                        <>
+                                            <Badge
+                                                colorPalette={getStatusColor(jobStatus.status)}
+                                                size="lg"
+                                            >
+                                                {jobStatus.status.toUpperCase()}
+                                                {jobStatus.abort_requested && ' (Aborting...)'}
+                                            </Badge>
+                                            {jobStatus.status === 'pending' && (
+                                                <Text fontSize="sm" color="gray.500">
+                                                    Initializing connectors...
+                                                </Text>
+                                            )}
+                                        </>
+                                    )}
+                                    {syncOverrides.length > 0 && canStart && (
+                                        <Text fontSize="sm" color="blue.400">
+                                            {syncOverrides.length} override{syncOverrides.length !== 1 ? 's' : ''} configured
+                                        </Text>
+                                    )}
+                                </Flex>
+                                <Flex gap={2}>
+                                    {canStart && (
+                                        <>
+                                            <Button
+                                                colorPalette="blue"
+                                                onClick={() => { setRecapRenormalize(false); setRecapOpen(true); }}
+                                                loading={actionLoading}
+                                                disabled={!canStart}
+                                            >
+                                                Start Sync Job
+                                            </Button>
+                                            <Button
+                                                colorPalette="purple"
+                                                variant="outline"
+                                                onClick={() => { setRecapRenormalize(true); setRecapOpen(true); }}
+                                                loading={actionLoading}
+                                                disabled={!canStart}
+                                            >
+                                                Re-Normalize
+                                            </Button>
+                                        </>
+                                    )}
+                                    {isFullJobRunning && (
+                                        <Button
+                                            colorPalette="red"
+                                            variant="outline"
+                                            onClick={abortJob}
+                                            loading={actionLoading}
+                                        >
+                                            Abort Job
+                                        </Button>
+                                    )}
+                                </Flex>
+                            </Flex>
+
+
+                        </Card.Body>
+                    </Card.Root>
+
+                    {/* Status Card */}
+                    {jobStatus && jobStatus.status !== 'idle' && jobStatus.status !== 'pending' && (
+                        <Card.Root mb={6}>
+                            <Card.Header>
+                                <Flex justify="space-between" align="center">
+                                    <Flex align="center" gap={2}>
+                                        <Heading size="md">
+                                            {jobStatus.renormalize ? 'Re-Normalization Progress' : 'Job Progress'}
+                                        </Heading>
+                                        {jobStatus.renormalize && (
+                                            <Badge colorPalette="purple" size="sm">Re-Normalize</Badge>
+                                        )}
+                                    </Flex>
+                                    {hasFailedConnectors && !isFullJobRunning && (
+                                        <Text fontSize="sm" color="red.400">
+                                            Some connectors failed. Expand cards to retry.
+                                        </Text>
+                                    )}
+                                </Flex>
+                            </Card.Header>
+                            <Card.Body>
+                                {/* Progress Bar (only during full job, not single-connector retry) */}
+                                {isFullJobRunning && (
+                                    <Box mb={4}>
+                                        <Flex justify="space-between" mb={1}>
+                                            <Text fontSize="sm">
+                                                Processing: {jobStatus.current_connector || 'Initializing...'}
+                                            </Text>
+                                            <Text fontSize="sm">
+                                                {jobStatus.connectors_completed.length} / {jobStatus.total_connectors} connectors
+                                            </Text>
+                                        </Flex>
+                                        <Progress.Root value={getProgressPercent()} max={100} size="sm" colorPalette={getJobProgressBarColor()}>
+                                            <Progress.Track>
+                                                <Progress.Range />
+                                            </Progress.Track>
+                                        </Progress.Root>
+                                        {jobStatus.error_count > 0 && (
+                                            <Text fontSize="xs" color="orange.600" mt={1}>
+                                                ⚠️ {jobStatus.error_count} error{jobStatus.error_count !== 1 ? 's' : ''} encountered so far
+                                            </Text>
+                                        )}
+                                    </Box>
+                                )}
+
+                                {/* Statistics Grid */}
+                                <Flex gap={6} wrap="wrap" mb={4}>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Total Processed</Text>
+                                        <Text fontSize="2xl" fontWeight="bold">{jobStatus.total_processed}</Text>
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">New Entries Added</Text>
+                                        <Text fontSize="2xl" fontWeight="bold" color="green.600">
+                                            {jobStatus.new_entries_added}
+                                        </Text>
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Entries Updated</Text>
+                                        <Text fontSize="2xl" fontWeight="bold" color="blue.600">
+                                            {jobStatus.entries_updated ?? 0}
+                                        </Text>
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Duplicates Skipped</Text>
+                                        <Text fontSize="2xl" fontWeight="bold" color="gray.500">
+                                            {jobStatus.duplicates_skipped}
+                                        </Text>
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Errors</Text>
+                                        <Text fontSize="2xl" fontWeight="bold" color={jobStatus.error_count > 0 ? 'red.600' : 'gray.500'}>
+                                            {jobStatus.error_count}
+                                        </Text>
+                                    </Box>
+                                </Flex>
+
+                                {/* Timing */}
+                                <Flex gap={6} wrap="wrap" mb={4}>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Started</Text>
+                                        <Text>{formatDateTime(jobStatus.started_at)}</Text>
+                                    </Box>
+                                    <Box>
+                                        <Text fontSize="sm" color="gray.500">Finished</Text>
+                                        <Text>{formatDateTime(jobStatus.finished_at)}</Text>
+                                    </Box>
+                                </Flex>
+
+                                {/* Per-Connector Progress - Grouped by Type → Group with Accordion */}
+                                {jobStatus.connector_statuses &&
+                                    Object.keys(jobStatus.connector_statuses).length > 0 && (
+                                        <Box>
+                                            <Text fontSize="sm" color="gray.500" mb={3}>
+                                                Connector Progress
+                                            </Text>
+                                            {(() => {
+                                                const sorted = getSortedConnectorStatuses();
+                                                // Build nested grouping: type → group → connectors (flat, no per-account grid)
+                                                const typeMap = new Map<string, Map<string, ConnectorProgress[]>>();
+                                                const typeLabels: Record<string, string> = {
+                                                    cex: '🏦 Exchanges',
+                                                    dex: '🔗 DEX',
+                                                    wallet: '💼 Wallets',
+                                                    broker: '📊 Brokers',
+                                                    bank: '🏛️ Banks',
+                                                    investment: '📈 Investments',
+                                                };
+                                                for (const cp of sorted) {
+                                                    const t = cp.account_type || 'other';
+                                                    const g = cp.account_group || 'Ungrouped';
+                                                    if (!typeMap.has(t)) typeMap.set(t, new Map());
+                                                    const groupMap = typeMap.get(t)!;
+                                                    if (!groupMap.has(g)) groupMap.set(g, []);
+                                                    groupMap.get(g)!.push(cp);
+                                                }
+                                                const typeOrder = ['cex', 'dex', 'wallet', 'broker', 'bank', 'investment', 'other'];
+                                                const sortedTypes = Array.from(typeMap.keys()).sort(
+                                                    (a, b) => (typeOrder.indexOf(a) === -1 ? 99 : typeOrder.indexOf(a)) - (typeOrder.indexOf(b) === -1 ? 99 : typeOrder.indexOf(b))
+                                                );
+                                                const hasManyTypes = sortedTypes.length > 1;
+
+                                                // Initialize accordion state on first data
+                                                if (!typesInitialized.current && sorted.length > 0) {
+                                                    typesInitialized.current = true;
+                                                    setExpandedTypes(new Set(sortedTypes));
+                                                    const allGroupKeys = new Set<string>();
+                                                    for (const [t, gm] of typeMap) {
+                                                        for (const g of gm.keys()) allGroupKeys.add(`${t}:${g}`);
+                                                    }
+                                                    setExpandedGroups(allGroupKeys);
+                                                }
+
+                                                // Helper to compute aggregate status for a set of connectors
+                                                const getAggregateInfo = (cps: ConnectorProgress[]) => {
+                                                    const total = cps.length;
+                                                    const completed = cps.filter(c => c.status === 'completed').length;
+                                                    const failed = cps.filter(c => c.status === 'failed').length;
+                                                    const running = cps.filter(c => c.status === 'running').length;
+                                                    const warning = cps.filter(c => c.status === 'warning').length;
+                                                    const pending = cps.filter(c => c.status === 'pending' || c.status === 'queued').length;
+                                                    const skipped = cps.filter(c => c.status === 'skipped').length;
+                                                    const totalNew = cps.reduce((s, c) => s + (c.new_count ?? c.new_entries ?? 0), 0);
+                                                    const totalErrors = cps.reduce((s, c) => s + (c.errors ?? 0), 0);
+
+                                                    let icon = '⏳';
+                                                    let color = 'gray';
+                                                    if (running > 0) { icon = '🔄'; color = 'blue'; }
+                                                    else if (failed > 0) { icon = '❌'; color = 'red'; }
+                                                    else if (warning > 0) { icon = '⚠️'; color = 'orange'; }
+                                                    else if (completed === total) { icon = '✅'; color = 'green'; }
+                                                    else if (skipped === total) { icon = '⏭️'; color = 'gray'; }
+
+                                                    return { total, completed, failed, running, warning, pending, skipped, totalNew, totalErrors, icon, color };
+                                                };
+
+                                                return sortedTypes.map(typeKey => {
+                                                    const groupMap = typeMap.get(typeKey)!;
+                                                    const groupEntries = Array.from(groupMap.entries());
+                                                    const hasManyGroups = groupEntries.length > 1 || (groupEntries.length === 1 && groupEntries[0][0] !== 'Ungrouped');
+                                                    const allTypeConnectors = groupEntries.flatMap(([, cps]) => cps);
+                                                    const typeInfo = getAggregateInfo(allTypeConnectors);
+                                                    const isTypeExpanded = expandedTypes.has(typeKey);
+
+                                                    return (
+                                                        <Box key={typeKey} mb={3}>
+                                                            {/* Type accordion header */}
+                                                            {hasManyTypes && (
+                                                                <Flex
+                                                                    align="center"
+                                                                    justify="space-between"
+                                                                    py={1.5}
+                                                                    px={2}
+                                                                    bg={`${typeInfo.color}.50`}
+                                                                    borderRadius="md"
+                                                                    mb={1}
+                                                                    cursor="pointer"
+                                                                    onClick={() => setExpandedTypes(prev => {
+                                                                        const next = new Set(prev);
+                                                                        if (next.has(typeKey)) next.delete(typeKey); else next.add(typeKey);
+                                                                        return next;
+                                                                    })}
+                                                                    _hover={{ opacity: 0.85 }}
+                                                                    transition="opacity 0.15s"
+                                                                >
+                                                                    <Flex align="center" gap={2}>
+                                                                        <Text color="gray.400" fontSize="xs">{isTypeExpanded ? '▼' : '▶'}</Text>
+                                                                        <Text fontWeight="semibold" fontSize="sm" color="gray.700">
+                                                                            {typeLabels[typeKey] || typeKey}
+                                                                        </Text>
+                                                                        <Text fontSize="xs" color="gray.500">
+                                                                            {typeInfo.icon} {typeInfo.completed}/{typeInfo.total}
+                                                                        </Text>
+                                                                    </Flex>
+                                                                    <Flex align="center" gap={2}>
+                                                                        {typeInfo.totalNew > 0 && (
+                                                                            <Text fontSize="xs" color="green.500">+{typeInfo.totalNew}</Text>
+                                                                        )}
+                                                                        {typeInfo.totalErrors > 0 && (
+                                                                            <Text fontSize="xs" color="red.500">{typeInfo.totalErrors} err</Text>
+                                                                        )}
+                                                                        {typeInfo.running > 0 && (
+                                                                            <Badge colorPalette="blue" size="xs">{typeInfo.running} running</Badge>
+                                                                        )}
+                                                                    </Flex>
+                                                                </Flex>
+                                                            )}
+
+                                                            <Collapsible.Root open={!hasManyTypes || isTypeExpanded}>
+                                                                <Collapsible.Content>
+                                                                    {groupEntries.map(([groupName, groupConnectors]) => {
+                                                                        const groupKey = `${typeKey}:${groupName}`;
+                                                                        const isGroupExpanded = expandedGroups.has(groupKey);
+                                                                        const groupInfo = getAggregateInfo(groupConnectors);
+
+                                                                        return (
+                                                                            <Box key={groupName} ml={hasManyTypes ? 2 : 0} mb={2}>
+                                                                                {/* Group accordion header */}
+                                                                                {hasManyGroups && (
+                                                                                    <Flex
+                                                                                        align="center"
+                                                                                        justify="space-between"
+                                                                                        py={1}
+                                                                                        px={2}
+                                                                                        borderRadius="sm"
+                                                                                        mb={1}
+                                                                                        cursor="pointer"
+                                                                                        onClick={() => setExpandedGroups(prev => {
+                                                                                            const next = new Set(prev);
+                                                                                            if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey);
+                                                                                            return next;
+                                                                                        })}
+                                                                                        _hover={{ bg: 'gray.50' }}
+                                                                                    >
+                                                                                        <Flex align="center" gap={2}>
+                                                                                            <Text color="gray.400" fontSize="xs">{isGroupExpanded ? '▼' : '▶'}</Text>
+                                                                                            <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                                                                                                {groupName}
+                                                                                            </Text>
+                                                                                            <Text fontSize="xs" color="gray.400">
+                                                                                                {groupInfo.icon} {groupInfo.completed}/{groupInfo.total}
+                                                                                            </Text>
+                                                                                        </Flex>
+                                                                                        <Flex align="center" gap={2}>
+                                                                                            {groupInfo.totalNew > 0 && (
+                                                                                                <Text fontSize="xs" color="green.500">+{groupInfo.totalNew}</Text>
+                                                                                            )}
+                                                                                            {groupInfo.totalErrors > 0 && (
+                                                                                                <Text fontSize="xs" color="red.500">{groupInfo.totalErrors} err</Text>
+                                                                                            )}
+                                                                                        </Flex>
+                                                                                    </Flex>
+                                                                                )}
+
+                                                                                <Collapsible.Root open={!hasManyGroups || isGroupExpanded}>
+                                                                                    <Collapsible.Content>
+                                                                                        {/* Grid at GROUP level - all cards from all accounts in this group */}
+                                                                                        <Box
+                                                                                            display="grid"
+                                                                                            gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' }}
+                                                                                            gap={2}
+                                                                                            ml={hasManyGroups ? 2 : 0}
+                                                                                        >
+                                                                                            {groupConnectors.map((cp) => (
+                                                                                                <ConnectorProgressCard
+                                                                                                    key={cp.connector_id}
+                                                                                                    progress={cp}
+                                                                                                    isExpanded={cp.status === 'failed' || cp.status === 'warning'}
+                                                                                                    showAccountName={hasManyGroups || groupConnectors.length > 1}
+                                                                                                    onRetry={retryConnector}
+                                                                                                    retryLoading={retryLoading === cp.connector_id}
+                                                                                                    renormalize={jobStatus.renormalize}
+                                                                                                />
+                                                                                            ))}
+                                                                                        </Box>
+                                                                                    </Collapsible.Content>
+                                                                                </Collapsible.Root>
+                                                                            </Box>
+                                                                        );
+                                                                    })}
+                                                                </Collapsible.Content>
+                                                            </Collapsible.Root>
+                                                        </Box>
+                                                    );
+                                                });
+                                            })()}
+                                        </Box>
+                                    )}
+
+                                {/* Legacy: Completed Connectors (fallback for backward compatibility) */}
+                                {!jobStatus.connector_statuses && jobStatus.connectors_completed.length > 0 && (
+                                    <Box mb={4}>
+                                        <Text fontSize="sm" color="gray.500" mb={1}>Completed Connectors</Text>
+                                        <Flex gap={2} wrap="wrap">
+                                            {jobStatus.connectors_completed.map((c: string) => (
+                                                <Badge key={c} colorPalette="green">{c}</Badge>
+                                            ))}
+                                        </Flex>
+                                    </Box>
+                                )}
+
+                                {/* Error Message */}
+                                {jobStatus.error_message && (
+                                    <Box
+                                        bg="red.50"
+                                        borderColor="red.200"
+                                        borderWidth={1}
+                                        p={3}
+                                        borderRadius="md"
+                                        mt={4}
+                                    >
+                                        <Text fontWeight="bold" color="red.700">
+                                            Error:
+                                        </Text>
+                                        <Text color="red.600">{jobStatus.error_message}</Text>
+                                    </Box>
+                                )}
+
+                                {/* Error List */}
+                                {jobStatus.errors.length > 0 && (
+                                    <Box mt={4}>
+                                        <Text fontSize="sm" color="gray.500" mb={2}>
+                                            Recent Errors ({jobStatus.error_count} total):
+                                        </Text>
+                                        <Box
+                                            maxH="200px"
+                                            overflowY="auto"
+                                            bg="gray.50"
+                                            p={3}
+                                            borderRadius="md"
+                                            fontSize="xs"
+                                            fontFamily="mono"
+                                        >
+                                            {jobStatus.errors.map((err: string, idx: number) => (
+                                                <Text key={idx} color="red.600" mb={1}>{err}</Text>
+                                            ))}
+                                        </Box>
+                                    </Box>
+                                )}
+                            </Card.Body>
+                        </Card.Root>
                     )}
-                </Card.Body>
-            </Card.Root>
+                </Tabs.Content>
+
+                {/* Job History Tab */}
+                <Tabs.Content value="history">
+                    <Card.Root>
+                        <Card.Body>
+                            <JobHistoryTable
+                                onViewJob={(jobId) => {
+                                    setSelectedJobId(jobId);
+                                    setJobDrawerOpen(true);
+                                }}
+                                refreshTrigger={historyRefreshTrigger}
+                            />
+                        </Card.Body>
+                    </Card.Root>
+                </Tabs.Content>
+            </Tabs.Root>
 
             {/* Job Detail Drawer */}
             <JobDetailDrawer
@@ -821,6 +814,21 @@ export const SyncJobPanel: React.FC = () => {
                     setJobDrawerOpen(false);
                     setSelectedJobId(null);
                 }}
+            />
+
+            {/* Sync Recap / Confirmation Dialog */}
+            <SyncRecapDialog
+                isOpen={recapOpen}
+                onClose={() => setRecapOpen(false)}
+                onConfirm={() => {
+                    setRecapOpen(false);
+                    startJob(recapRenormalize);
+                }}
+                connectors={configConnectors}
+                accounts={configAccounts}
+                overrides={syncOverrides}
+                renormalize={recapRenormalize}
+                loading={actionLoading}
             />
         </Box>
     );

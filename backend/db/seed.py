@@ -18,6 +18,7 @@ Examples:
 
 import argparse
 import os
+import shutil
 import yaml
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -29,7 +30,11 @@ from sqlmodel import Session, select
 from backend.db.models import (
     Account,
     AccountConnector,
+    AppSettings,
     Asset,
+    AssetPriceGetter,
+    FileImport,
+    FileImportStatus,
     NormalizedTransaction,
     UserCalculationBundle,
 )
@@ -41,6 +46,8 @@ log = configure_logging("db_seed")
 # Default config paths
 SEED_DATA_DIR = Path(__file__).parent / "seed_data"
 EXPORT_DATA_DIR = Path(__file__).parent / "seed_data" / "exports"
+BROKER_EXPORTS_DIR = Path(__file__).parent.parent / "data" / "input" / "brokers-exports"
+DEFAULT_FILES_DIR = Path(__file__).parent.parent / "data" / "input" / "defaults"
 DEFAULT_CONFIG_PATH = SEED_DATA_DIR / "accounts.yaml"
 DEFAULT_ASSETS_PATH = SEED_DATA_DIR / "assets.yaml"
 DEFAULT_BUNDLES_PATH = SEED_DATA_DIR / "bundles.yaml"
@@ -58,6 +65,42 @@ class DatabaseSeeder:
             session: Database session to use for operations
         """
         self.session = session
+
+    def _validate_tags(self, tags: Any, entity_name: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Validate tags format: must be array of dictionaries [{key: val}, ...].
+        Reject dictionary format {key: val} and string arrays ["tag1", "tag2"].
+
+        Args:
+            tags: Tags value from config (can be None, dict, list)
+            entity_name: Name of entity for error messages
+
+        Returns:
+            Validated tags list or None if invalid/empty
+        """
+        if tags is None:
+            return None
+
+        if not isinstance(tags, list):
+            log.error(
+                f"❌ {entity_name}: tags must be an array of dictionaries, not {type(tags).__name__}. "
+                f"Got: {tags}. Expected format: [{{'key': 'value'}}, ...]"
+            )
+            raise ValueError(f"Tags must be array format for {entity_name}")
+
+        if len(tags) == 0:
+            return None
+
+        # Validate each element is a dict
+        for i, tag in enumerate(tags):
+            if not isinstance(tag, dict):
+                log.error(
+                    f"❌ {entity_name}: tag at index {i} must be a dictionary, not {type(tag).__name__}. "
+                    f"Got: {tag}. Expected format: {{'key': 'value'}}"
+                )
+                raise ValueError(f"Each tag must be a dictionary for {entity_name}")
+
+        return tags
 
     def seed_from_yaml(self, config_path: Optional[Path] = None) -> Dict[str, int]:
         """
@@ -109,25 +152,32 @@ class DatabaseSeeder:
             log.info("ℹ️ No accounts to seed")
             return {"accounts": 0, "connectors": 0}
 
-        created_accounts = 0
+        processed_accounts = 0
         created_connectors = 0
+        updated_connectors = 0
 
         for account_data in accounts_config:
             account = self._upsert_account(account_data)
             if account:
-                created_accounts += 1
+                processed_accounts += 1
 
                 connectors = account_data.get("connectors", [])
                 for connector_data in connectors:
-                    if self._upsert_connector(account.id, connector_data):
+                    result = self._upsert_connector(account.id, connector_data)
+                    if result == "created":
                         created_connectors += 1
+                    elif result == "updated":
+                        updated_connectors += 1
 
         self.session.commit()
 
+        total_connectors = created_connectors + updated_connectors
         log.info(
-            f"✅ Seeded {created_accounts} accounts, {created_connectors} connectors"
+            f"✅ Seeded {processed_accounts} accounts, "
+            f"{total_connectors} connectors "
+            f"({created_connectors} new, {updated_connectors} updated)"
         )
-        return {"accounts": created_accounts, "connectors": created_connectors}
+        return {"accounts": processed_accounts, "connectors": total_connectors}
 
     def _upsert_account(self, data: Dict[str, Any]) -> Optional[Account]:
         """
@@ -144,6 +194,9 @@ class DatabaseSeeder:
             log.warning("⚠️ Account missing name, skipping")
             return None
 
+        # Validate tags format
+        tags = self._validate_tags(data.get("tags"), f"Account '{name}'")
+
         # Check if exists by name
         existing = self.session.exec(
             select(Account).where(Account.name == name)
@@ -156,8 +209,10 @@ class DatabaseSeeder:
             existing.address_or_identifier = data.get(
                 "address_or_identifier", existing.address_or_identifier
             )
-            existing.tags = data.get("tags", existing.tags)
+            existing.tags = tags if tags is not None else existing.tags
             existing.owned = data.get("owned", existing.owned)
+            existing.group = data.get("group", existing.group)
+            existing.color = data.get("color", existing.color)
             self.session.add(existing)
             return existing
 
@@ -167,52 +222,67 @@ class DatabaseSeeder:
             name=name,
             account_type=data.get("account_type", "unknown"),
             address_or_identifier=data.get("address_or_identifier"),
-            tags=data.get("tags"),
+            tags=tags,
             owned=data.get("owned", True),
+            group=data.get("group"),
+            color=data.get("color"),
         )
         self.session.add(account)
         self.session.flush()  # Get ID assigned
         return account
 
-    def _upsert_connector(self, account_id: int, data: Dict[str, Any]) -> bool:
+    def _upsert_connector(
+        self, account_id: int, data: Dict[str, Any]
+    ) -> Optional[str]:
         """
-        Create or update a connector.
+        Create or update a connector (idempotent).
+
+        Uses (account_id, connector_type, chain) as the composite identity.
+        For connector types that support multiple chains (e.g. blockscout,
+        moralis), the chain from config is included in the lookup query so
+        each chain is treated as a separate connector.
 
         Args:
             account_id: Parent account ID
             data: Connector data dictionary
 
         Returns:
-            True if connector was created/updated successfully
+            "created" if a new connector was inserted,
+            "updated" if an existing connector was modified,
+            None if the entry was invalid and skipped.
         """
         connector_type = data.get("connector_type")
         if not connector_type:
             log.warning("⚠️ Connector missing type, skipping")
-            return False
+            return None
 
-        # Get chain from config for uniqueness (important for blockscout multi-chain)
+        # Get chain from config for uniqueness (multi-chain connectors like
+        # blockscout and moralis can appear multiple times per account with
+        # different chains).
         config = data.get("config", {})
         chain = config.get("chain")
 
-        # Build query for existing connector
+        # Build query — always filter by (account_id, connector_type)
         query = select(AccountConnector).where(
             AccountConnector.account_id == account_id,
             AccountConnector.connector_type == connector_type,
         )
 
-        # For on-chain connectors, also match by chain
-        existing = self.session.exec(query).first()
+        if chain:
+            # For multi-chain connectors, also match by chain inside the
+            # JSON config column so each chain is a distinct row.
+            query = query.where(
+                AccountConnector.config["chain"].as_string() == chain
+            )
 
-        # If blockscout, need to check chain in config
-        if existing and connector_type == "blockscout":
-            existing_chain = (existing.config or {}).get("chain")
-            if existing_chain != chain:
-                existing = None  # Different chain, create new connector
+        existing = self.session.exec(query).first()
 
         if existing:
             # Update existing connector
             log.debug(
-                f"📝 Updating connector: {connector_type} for account {account_id}"
+                f"📝 Updating connector: {connector_type}"
+                f"{f' ({chain})' if chain else ''}"
+                f" for account {account_id}"
             )
             existing.enabled = data.get("enabled", existing.enabled)
             existing.config = data.get("config", existing.config)
@@ -220,11 +290,24 @@ class DatabaseSeeder:
                 "credentials_ref", existing.credentials_ref
             )
             existing.sync_priority = data.get("sync_priority", existing.sync_priority)
+            existing.color = data.get("color", existing.color)
             self.session.add(existing)
-            return True
+            self.session.flush()
+
+            # Seed default file if specified and not already set
+            default_file = data.get("default_file")
+            config = existing.config or {}
+            if default_file and not config.get("default_file_path"):
+                self._seed_default_file(existing, default_file)
+
+            return "updated"
 
         # Create new connector
-        log.debug(f"➕ Creating connector: {connector_type} for account {account_id}")
+        log.debug(
+            f"➕ Creating connector: {connector_type}"
+            f"{f' ({chain})' if chain else ''}"
+            f" for account {account_id}"
+        )
         connector = AccountConnector(
             account_id=account_id,
             connector_type=connector_type,
@@ -232,9 +315,100 @@ class DatabaseSeeder:
             config=data.get("config", {}),
             credentials_ref=data.get("credentials_ref"),
             sync_priority=data.get("sync_priority", 100),
+            color=data.get("color"),
         )
         self.session.add(connector)
-        return True
+        self.session.flush()  # Get ID assigned
+
+        # Seed default file if specified
+        default_file = data.get("default_file")
+        if default_file:
+            self._seed_default_file(connector, default_file)
+
+        return "created"
+
+    def _seed_default_file(
+        self, connector: AccountConnector, default_file_path: str
+    ) -> None:
+        """
+        Seed a default file for a file connector.
+
+        Copies the source file to data/input/defaults/{connector_id}/ and creates
+        a FileImport record with DEFAULT status. Updates the connector config
+        with default_file_path, default_file_import_id, default_file_name.
+
+        The default_file_path in YAML can be:
+        - Relative to broker-exports dir: "mexc/filename.xlsx"
+        - Relative to seed_data dir: "../seed_data/files/filename.csv"
+        - Absolute path
+
+        Args:
+            connector: AccountConnector instance (must have .id assigned)
+            default_file_path: Path to the source file
+        """
+        # Resolve the source file path
+        source = Path(default_file_path)
+        if not source.is_absolute():
+            # Try relative to broker-exports dir first
+            candidate = BROKER_EXPORTS_DIR / default_file_path
+            if candidate.exists():
+                source = candidate
+            else:
+                # Try relative to seed_data dir
+                candidate = SEED_DATA_DIR / default_file_path
+                if candidate.exists():
+                    source = candidate
+
+        if not source.exists():
+            log.warning(
+                f"⚠️ Default file not found for connector {connector.connector_type} "
+                f"(id={connector.id}): {default_file_path}"
+            )
+            return
+
+        # Prepare destination
+        dest_dir = DEFAULT_FILES_DIR / str(connector.id)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Sanitize filename (replace spaces with underscores)
+        safe_name = source.name.replace(" ", "_")
+        dest_filename = f"default_{timestamp}_{safe_name}"
+        dest_path = dest_dir / dest_filename
+
+        # Copy file
+        shutil.copy2(str(source), str(dest_path))
+        file_size = dest_path.stat().st_size
+
+        log.info(
+            f"📌 Seeding default file for {connector.connector_type} "
+            f"(id={connector.id}): {source.name}"
+        )
+
+        # Create FileImport record
+        file_import = FileImport(
+            connector_id=connector.id,
+            filename=dest_filename,
+            original_filename=source.name,
+            file_path=str(dest_path),
+            file_size=file_size,
+            status=FileImportStatus.DEFAULT,
+            uploaded_at=datetime.now(timezone.utc),
+            row_count=0,  # Unknown at seed time
+            new_count=0,
+            updated_count=0,
+            skipped_count=0,
+        )
+        self.session.add(file_import)
+        self.session.flush()
+
+        # Update connector config
+        config = dict(connector.config or {})
+        config["default_file_path"] = str(dest_path)
+        config["default_file_import_id"] = file_import.id
+        config["default_file_name"] = source.name
+        connector.config = config
+        self.session.add(connector)
 
     def seed_default_assets(self) -> int:
         """
@@ -256,10 +430,14 @@ class DatabaseSeeder:
             Number of assets created or updated
         """
         processed = 0
+        new_assets: List[Asset] = []
         for asset_data in assets_config:
             symbol = asset_data.get("symbol")
             if not symbol:
                 continue
+
+            # Validate tags format
+            tags = self._validate_tags(asset_data.get("tags"), f"Asset '{symbol}'")
 
             existing = self.session.exec(
                 select(Asset).where(Asset.symbol == symbol)
@@ -269,7 +447,7 @@ class DatabaseSeeder:
                 # Update existing asset
                 existing.label = asset_data.get("label", existing.label)
                 existing.price_type = asset_data.get("price_type", existing.price_type)
-                existing.tags = asset_data.get("tags", existing.tags)
+                existing.tags = tags if tags is not None else existing.tags
                 self.session.add(existing)
                 log.debug(f"📝 Updated asset: {symbol}")
             else:
@@ -278,16 +456,57 @@ class DatabaseSeeder:
                     symbol=symbol,
                     label=asset_data.get("label"),
                     price_type=asset_data.get("price_type"),
-                    tags=asset_data.get("tags"),
+                    tags=tags,
                 )
                 self.session.add(asset)
+                new_assets.append(asset)
                 log.debug(f"➕ Created asset: {symbol}")
             processed += 1
 
         self.session.commit()
+
+        # Auto-create mock price getters for newly created assets
+        if new_assets:
+            self._ensure_mock_getters(new_assets)
+            self.session.commit()
         if processed > 0:
             log.info(f"✅ Seeded {processed} assets")
         return processed
+
+    # ------------------------------------------------------------------
+    # Mock getter helpers
+    # ------------------------------------------------------------------
+    _MOCK_RANGES = {
+        "crypto": {"min_price": 100.0, "max_price": 50000.0},
+        "stock": {"min_price": 10.0, "max_price": 500.0},
+        "fiat": {"min_price": 0.5, "max_price": 2.0},
+    }
+    _MOCK_DEFAULT = {"min_price": 1.0, "max_price": 1000.0}
+
+    def _ensure_mock_getters(self, assets: List[Asset]) -> None:
+        """Create disabled mock price getter rows for a batch of assets (idempotent)."""
+        settings = self.session.get(AppSettings, 1)
+        mock_enabled = settings.mock_mode_enabled if settings else False
+        for asset in assets:
+            existing = self.session.exec(
+                select(AssetPriceGetter).where(
+                    AssetPriceGetter.asset_id == asset.asset_id,
+                    AssetPriceGetter.price_getter == "mock",
+                )
+            ).first()
+            if existing:
+                continue
+            pt = (asset.price_type or "crypto").lower()
+            params = dict(self._MOCK_RANGES.get(pt, self._MOCK_DEFAULT))
+            self.session.add(
+                AssetPriceGetter(
+                    asset_id=asset.asset_id,
+                    price_getter="mock",
+                    priority=0,
+                    enabled=mock_enabled,
+                    params=params,
+                )
+            )
 
     def seed_assets_from_yaml(
         self, assets_path: Optional[Path] = None
@@ -457,8 +676,8 @@ class DatabaseSeeder:
             fee_quote_asset_id = self._resolve_asset_id(
                 tx_data.get("fee_quote_asset_symbol")
             )
-            from_account_id = self._resolve_account_id(tx_data.get("from_account_name"))
-            to_account_id = self._resolve_account_id(tx_data.get("to_account_name"))
+            from_account_id = self._resolve_account_id(tx_data.get("source_from_account"))
+            to_account_id = self._resolve_account_id(tx_data.get("source_to_account"))
 
             # Parse datetime
             date_time_str = tx_data.get("date_time")
@@ -482,6 +701,10 @@ class DatabaseSeeder:
             total = None
             if tx_data.get("total") is not None:
                 total = Decimal(str(tx_data["total"]))
+
+            # Validate tags format
+            tx_identifier = f"id={explicit_id}" if explicit_id else f"{source}/{source_tx_id}"
+            tags = self._validate_tags(tx_data.get("tags"), f"Transaction {tx_identifier}")
 
             # Check for existing transaction - first by explicit id, then by source + source_tx_id
             existing = None
@@ -533,16 +756,13 @@ class DatabaseSeeder:
                 existing.taxability_status = tx_data.get(
                     "taxability_status", existing.taxability_status
                 )
-                existing.disposal_taxable = tx_data.get(
-                    "disposal_taxable", existing.disposal_taxable
-                )
                 existing.from_account_id = from_account_id or existing.from_account_id
                 existing.to_account_id = to_account_id or existing.to_account_id
                 existing.user_calculation_unit_id = tx_data.get(
                     "bundle_id", existing.user_calculation_unit_id
                 )
                 existing.total = total if total is not None else existing.total
-                existing.tags = tx_data.get("tags", existing.tags)
+                existing.tags = tags if tags is not None else existing.tags
                 existing.review_notes = tx_data.get(
                     "review_notes", existing.review_notes
                 )
@@ -579,12 +799,11 @@ class DatabaseSeeder:
                     ),
                     review_status=tx_data.get("review_status", "pending"),
                     taxability_status=tx_data.get("taxability_status", "unknown"),
-                    disposal_taxable=tx_data.get("disposal_taxable", False),
                     from_account_id=from_account_id,
                     to_account_id=to_account_id,
                     user_calculation_unit_id=tx_data.get("bundle_id"),
                     total=total,
-                    tags=tx_data.get("tags"),
+                    tags=tags,
                     review_notes=tx_data.get("review_notes"),
                     # raw_transaction_id is intentionally left null for seeded data
                 )
@@ -872,13 +1091,10 @@ class DatabaseSeeder:
             # Status fields
             data["review_status"] = tx.review_status
             data["taxability_status"] = tx.taxability_status
-            data["disposal_taxable"] = tx.disposal_taxable
 
             # Transfer accounts
-            if tx.from_account_id and tx.from_account_id in account_map:
-                data["from_account_name"] = account_map[tx.from_account_id]
-            if tx.to_account_id and tx.to_account_id in account_map:
-                data["to_account_name"] = account_map[tx.to_account_id]
+            data["source_from_account"] = tx.source_from_account
+            data["source_to_account"] = tx.source_to_account
 
             # Bundle
             if tx.user_calculation_unit_id:

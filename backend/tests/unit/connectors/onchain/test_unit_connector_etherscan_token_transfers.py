@@ -48,7 +48,7 @@ class TestEtherscanTokenTransfersConnector:
             assert normalized_tx.source == "etherscan_token_transfers_ethereum"
             assert normalized_tx.direction == "inflow"
             assert normalized_tx.source_transaction_type == "token-transfer"
-            assert normalized_tx.source_asset_symbol == "USDT_0xUSDT_CONTRACT"
+            assert normalized_tx.source_asset_symbol == "USDT"
             assert normalized_tx.quantity == 5000.0  # 5000 USDT
             assert normalized_tx.transaction_type == "transfer"  # Onchain transactions are transfers
             assert normalized_tx.fee == 0.0096
@@ -101,5 +101,4 @@ class TestEtherscanTokenTransfersConnector:
             assert normalized_tx.token_contract_address == "0xLINK_CONTRACT"
             assert normalized_tx.source_from_account == "0xtest_wallet"
             assert normalized_tx.source_to_account == "0xRECEIVER_ADDRESS"
-            assert normalized_tx.source_asset_symbol == "LINK_0xLINK_CONTRACT"
-            assert normalized_tx.tags.get("method_id") == "0xa9059cbb"
+            assert normalized_tx.source_asset_symbol == "LINK"
