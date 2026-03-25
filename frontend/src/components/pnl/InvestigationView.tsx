@@ -87,6 +87,10 @@ export interface InvestigationViewProps {
     assetBalanceMap?: Map<string, number>;
     quoteAssetId?: number;
     onPriceAdded?: (assetId: number, warningId: string) => void;
+    /** Pre-applied filters from drill-down context (merged into local state) */
+    initialFilters?: Partial<TransactionFilterState>;
+    /** Descriptive label for the current scope (shown above filters) */
+    scopeLabel?: string;
 }
 
 // ─── Quick Stats Bar ────────────────────────────────────────────────────────
@@ -143,6 +147,8 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
     assetBalanceMap,
     quoteAssetId,
     onPriceAdded,
+    initialFilters,
+    scopeLabel,
 }) => {
     // ── Context filters (unit-mediated scoping) ─────────────────────────────
     const pnlDefaultFilters = useMemo<TransactionFilterState>(() => ({
@@ -150,9 +156,15 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
         reviewStatus: [],      // not relevant in PnL audit context
         taxability: [],
         connectorRunIds: [],
-    }), []);
+        ...initialFilters,
+    }), [initialFilters]);
     const [txFilters, setTxFilters] = useState<TransactionFilterState>(pnlDefaultFilters);
     const txFilterParams = useMemo(() => buildPnLFilterParams(txFilters), [txFilters]);
+
+    // Re-apply initial filters when scope changes (e.g. drill into different asset)
+    useEffect(() => {
+        setTxFilters(pnlDefaultFilters);
+    }, [pnlDefaultFilters]);
 
     // ── Filter panel collapse state ─────────────────────────────────────────
     const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -211,6 +223,15 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
 
     return (
         <Box>
+            {/* ── Scope Label ────────────────────────────────────── */}
+            {scopeLabel && (
+                <Flex align="center" gap={2} mb={2} px={1}>
+                    <Badge colorPalette="blue" variant="subtle" size="sm">
+                        {scopeLabel}
+                    </Badge>
+                </Flex>
+            )}
+
             {/* ── Context Filter Bar ─────────────────────────────────── */}
             <Box
                 bg="white"

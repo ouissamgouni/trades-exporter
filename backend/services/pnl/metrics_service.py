@@ -68,6 +68,10 @@ class PerformerItem:
     total_return: float
     roi_pct: float
     unrealized_pnl: float = 0.0
+    market_value: float = 0.0
+    cost_basis: float = 0.0
+    total_fees: float = 0.0
+    efficiency: float = 0.0  # total_return / max(cost_basis, 1)
 
 
 @dataclass
@@ -106,6 +110,70 @@ class VersionMetrics:
     version_id: int
     summary: SummaryMetrics
     ranges: Dict[str, RangeMetrics] = field(default_factory=dict)
+
+
+@dataclass
+class SettledSummary:
+    """All-time settled summary (no market prices needed)."""
+    cost_basis: float
+    realized_pnl: float
+    taxable_realized_pnl: float
+    total_fees: float
+    fee_entry_count: int
+
+
+@dataclass
+class SettledRangeMetrics:
+    """Per-period settled metrics (no market prices needed)."""
+    cost_basis: float
+    realized_pnl: float
+    taxable_realized_pnl: float
+    realized_in_period: float
+    cost_basis_in_period: float
+    fees_in_period: float
+
+
+@dataclass
+class SettledVersionMetrics:
+    """Settled metrics result (fast, no price lookup)."""
+    version_id: int
+    summary: SettledSummary
+    ranges: Dict[str, SettledRangeMetrics] = field(default_factory=dict)
+
+
+@dataclass
+class PerformersResult:
+    """Standalone performer ranking result."""
+    version_id: int
+    period: str
+    group_type: str
+    top_performers: List[PerformerItem] = field(default_factory=list)
+    flop_performers: List[PerformerItem] = field(default_factory=list)
+
+
+@dataclass
+class MarketSummary:
+    """All-time market summary (price-dependent)."""
+    current_value: float
+    unrealized_pnl: float
+
+
+@dataclass
+class MarketRangeMetrics:
+    """Per-period market metrics (price-dependent)."""
+    current_value: float
+    unrealized_pnl: float
+    unrealized_in_period: float
+    total_return: float
+    roi_pct: float
+
+
+@dataclass
+class MarketVersionMetrics:
+    """Market metrics result (requires prices from PriceSnapshot)."""
+    version_id: int
+    summary: MarketSummary
+    ranges: Dict[str, MarketRangeMetrics] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -701,6 +769,25 @@ def _compute_fees_in_period(
     return float(result or 0)
 
 
+def _get_fees_by_asset(
+    session: Session,
+    version_id: int,
+) -> Dict[int, float]:
+    """Aggregate total fees per asset (by related_asset_id)."""
+    rows = session.exec(
+        select(
+            FeeEntry.related_asset_id,
+            func.coalesce(func.sum(FeeEntry.fee_value_in_base), 0),
+        )
+        .where(
+            FeeEntry.version_id == version_id,
+            FeeEntry.related_asset_id.isnot(None),
+        )
+        .group_by(FeeEntry.related_asset_id)
+    ).all()
+    return {int(r[0]): float(r[1]) for r in rows}
+
+
 # ---------------------------------------------------------------------------
 # Performer ranking
 # ---------------------------------------------------------------------------
@@ -719,8 +806,11 @@ def _rank_performers_by_asset(
     asset_labels: Dict[int, Optional[str]],
     range_key: str,
     top_n: int,
+    fees_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem]]:
     """Rank performers at asset level."""
+    if fees_by_asset is None:
+        fees_by_asset = {}
     performances: List[PerformerItem] = []
 
     for aid in all_asset_ids:
@@ -749,6 +839,8 @@ def _rank_performers_by_asset(
             continue
 
         asset_roi = (asset_total_return / asset_roi_base * 100) if asset_roi_base != 0 else 0.0
+        asset_fees = fees_by_asset.get(aid, 0.0)
+        asset_efficiency = (asset_total_return / max(cost_now, 1.0))
 
         performances.append(PerformerItem(
             id=aid,
@@ -758,6 +850,10 @@ def _rank_performers_by_asset(
             total_return=round(asset_total_return, 2),
             roi_pct=round(asset_roi, 2),
             unrealized_pnl=round(asset_unrealized, 2),
+            market_value=round(asset_value, 2),
+            cost_basis=round(cost_now, 2),
+            total_fees=round(asset_fees, 2),
+            efficiency=round(asset_efficiency, 4),
         ))
 
     return _sort_top_flop(performances, top_n)
@@ -776,6 +872,7 @@ def _rank_performers_by_account(
     asset_ids: Optional[List[int]],
     account_ids: Optional[List[int]],
     include_unsettled_negative: bool,
+    fees_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem]]:
     """Rank performers at account level with proper server-side aggregation."""
     # Get current balances/costs per account
@@ -833,6 +930,13 @@ def _rank_performers_by_account(
 
         roi_pct = (total_return / roi_base * 100) if roi_base != 0 else 0.0
 
+        # Aggregate fees for assets in this account
+        acct_fees = 0.0
+        if fees_by_asset:
+            for aid in balances:
+                acct_fees += fees_by_asset.get(aid, 0.0)
+        eff = total_return / max(cost_basis, 1.0)
+
         performances.append(PerformerItem(
             id=acct_id,
             name=acct_names.get(acct_id, f"Account #{acct_id}"),
@@ -841,6 +945,10 @@ def _rank_performers_by_account(
             total_return=round(total_return, 2),
             roi_pct=round(roi_pct, 2),
             unrealized_pnl=round(unrealized, 2),
+            market_value=round(current_val, 2),
+            cost_basis=round(cost_basis, 2),
+            total_fees=round(acct_fees, 2),
+            efficiency=round(eff, 4),
         ))
 
     return _sort_top_flop(performances, top_n)
@@ -860,6 +968,7 @@ def _rank_performers_by_category(
     range_key: str,
     top_n: int,
     dimension_id: Optional[int] = None,
+    fees_by_asset: Optional[Dict[int, float]] = None,
 ) -> Tuple[List[PerformerItem], List[PerformerItem]]:
     """Rank performers at category level using proper cost basis aggregation."""
     # Load asset → category mapping (optionally filtered by dimension)
@@ -888,8 +997,10 @@ def _rank_performers_by_category(
 
     # Aggregate per-asset metrics into categories
     # When an asset belongs to N categories, split proportionally (1/N)
+    if fees_by_asset is None:
+        fees_by_asset = {}
     cat_data: Dict[int, Dict[str, float]] = defaultdict(
-        lambda: {"total_return": 0.0, "cost_basis": 0.0, "unrealized_pnl": 0.0}
+        lambda: {"total_return": 0.0, "cost_basis": 0.0, "unrealized_pnl": 0.0, "market_value": 0.0, "total_fees": 0.0}
     )
 
     for aid in all_asset_ids:
@@ -923,15 +1034,20 @@ def _rank_performers_by_category(
             cat_data[cat_id]["total_return"] += asset_total_return * share
             cat_data[cat_id]["cost_basis"] += asset_cost * share
             cat_data[cat_id]["unrealized_pnl"] += asset_unrealized * share
+            cat_data[cat_id]["market_value"] += asset_value * share
+            cat_data[cat_id]["total_fees"] += fees_by_asset.get(aid, 0.0) * share
 
     performances: List[PerformerItem] = []
     for cat_id, data in cat_data.items():
         tr = data["total_return"]
         cb = data["cost_basis"]
         upnl = data["unrealized_pnl"]
+        mv = data["market_value"]
+        fees = data["total_fees"]
         if abs(cb) < 1e-12 and abs(tr) < 0.01:
             continue
         roi = (tr / cb * 100) if cb != 0 else 0.0
+        eff = tr / max(cb, 1.0)
         performances.append(PerformerItem(
             id=cat_id,
             name=cat_labels.get(cat_id, f"Category #{cat_id}"),
@@ -940,6 +1056,10 @@ def _rank_performers_by_category(
             total_return=round(tr, 2),
             roi_pct=round(roi, 2),
             unrealized_pnl=round(upnl, 2),
+            market_value=round(mv, 2),
+            cost_basis=round(cb, 2),
+            total_fees=round(fees, 2),
+            efficiency=round(eff, 4),
         ))
 
     return _sort_top_flop(performances, top_n)
@@ -950,9 +1070,13 @@ def _sort_top_flop(
     top_n: int,
 ) -> Tuple[List[PerformerItem], List[PerformerItem]]:
     """Sort performers and extract top + flop lists."""
-    sorted_by_return = sorted(performances, key=lambda a: a.total_return, reverse=True)
-    top = sorted_by_return[:top_n]
-    # Flop: all negative-return items, sorted worst-first, capped at top_n
+    # Top: only non-negative returns, sorted best-first
+    top = sorted(
+        [p for p in performances if p.total_return >= 0],
+        key=lambda a: a.total_return,
+        reverse=True,
+    )[:top_n]
+    # Flop: only negative-return items, sorted worst-first, capped at top_n
     flop = sorted(
         [p for p in performances if p.total_return < 0],
         key=lambda a: a.total_return,
@@ -1101,6 +1225,7 @@ def compute_version_metrics(
 
     asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
     asset_labels = _get_asset_labels(session, all_asset_ids_list)
+    fees_by_asset = _get_fees_by_asset(session, version_id)
 
     # Helper: get snapshot at a specific date
     def _snapshot_at(dt: datetime):
@@ -1181,7 +1306,7 @@ def compute_version_metrics(
                 session, all_asset_ids,
                 now_balances, now_costs, now_prices, now_rpnl_by_asset,
                 start_balances, start_costs, start_prices, start_rpnl_by_asset,
-                range_key, top_n, dimension_id,
+                range_key, top_n, dimension_id, fees_by_asset,
             )
         else:  # "asset"
             top, flop = _rank_performers_by_asset(
@@ -1189,7 +1314,7 @@ def compute_version_metrics(
                 now_balances, now_costs, now_prices, now_rpnl_by_asset,
                 start_balances, start_costs, start_prices, start_rpnl_by_asset,
                 asset_symbols, asset_labels,
-                range_key, top_n,
+                range_key, top_n, fees_by_asset,
             )
 
         ranges[range_key] = RangeMetrics(
@@ -1216,6 +1341,457 @@ def compute_version_metrics(
     )
 
     return VersionMetrics(
+        version_id=version_id,
+        summary=summary,
+        ranges=ranges,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settled metrics (no market prices needed)
+# ---------------------------------------------------------------------------
+
+def compute_settled_metrics(
+    session: Session,
+    version_id: int,
+    periods: Optional[List[str]] = None,
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    include_unsettled_negative: bool = False,
+) -> Optional[SettledVersionMetrics]:
+    """
+    Compute cost-lot-based metrics that don't require market prices.
+    Returns immediately without any price lookup — ideal for instant display.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        return None
+
+    if periods is None:
+        periods = list(PERIOD_RANGES.keys())
+
+    if category_ids:
+        resolved = _resolve_category_to_asset_ids(session, category_ids, asset_ids)
+        if resolved is None:
+            return SettledVersionMetrics(
+                version_id=version_id,
+                summary=SettledSummary(0, 0, 0, 0, 0),
+            )
+        asset_ids = resolved
+
+    range_query = (
+        select(
+            func.min(CostLotEvent.timestamp),
+            func.max(CostLotEvent.timestamp),
+        )
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    date_range = session.exec(range_query).one()
+    min_date, max_date = date_range
+
+    total_fees, fee_count = _compute_fee_summary(session, version_id)
+
+    if not min_date or not max_date:
+        return SettledVersionMetrics(
+            version_id=version_id,
+            summary=SettledSummary(0, 0, 0, total_fees, fee_count),
+        )
+
+    now = datetime.now(timezone.utc)
+    if min_date.tzinfo is None:
+        min_date = min_date.replace(tzinfo=timezone.utc)
+
+    # Current cost basis from CostLot (no prices needed)
+    _, now_lot_costs = _get_current_from_cost_lots(
+        session, version_id, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    all_asset_ids = set(now_lot_costs.keys())
+    cost_basis = sum(now_lot_costs.values())
+
+    # Build boundary dates
+    boundary_dates = [now]
+    range_starts: Dict[str, datetime] = {}
+    for key in periods:
+        days = PERIOD_RANGES.get(key)
+        if days is None:
+            range_starts[key] = min_date
+        else:
+            cutoff = now - timedelta(days=days)
+            range_starts[key] = max(cutoff, min_date)
+        boundary_dates.append(range_starts[key])
+
+    unique_dates = sorted(set(boundary_dates))
+
+    # Historical cost snapshots (no prices, no balance needed)
+    cost_basis_snapshots = _get_cost_basis_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    now_ds = now.strftime("%Y-%m-%d")
+    cost_basis_snapshots[now_ds] = now_lot_costs
+
+    # Realized PnL
+    cumulative_rpnl = _get_cumulative_realized_pnl(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        taxable_only=False,
+    )
+    cumulative_rpnl_taxable = _get_cumulative_realized_pnl(
+        session, version_id, [now], asset_ids, account_ids,
+        taxable_only=True,
+    )
+
+    now_rpnl_total = cumulative_rpnl.get(now_ds, (0.0, {}))[0]
+    taxable_rpnl_total = cumulative_rpnl_taxable.get(now_ds, (0.0, {}))[0]
+
+    summary = SettledSummary(
+        cost_basis=round(cost_basis, 2),
+        realized_pnl=round(now_rpnl_total, 2),
+        taxable_realized_pnl=round(taxable_rpnl_total, 2),
+        total_fees=round(total_fees, 2),
+        fee_entry_count=fee_count,
+    )
+
+    ranges: Dict[str, SettledRangeMetrics] = {}
+    for range_key, start_dt in range_starts.items():
+        start_ds = start_dt.strftime("%Y-%m-%d")
+        start_costs = cost_basis_snapshots.get(start_ds, {})
+        start_rpnl_total = cumulative_rpnl.get(start_ds, (0.0, {}))[0]
+
+        realized_in_period = now_rpnl_total - start_rpnl_total
+
+        if range_key == "all":
+            cost_basis_in_period = cost_basis
+            fees_in_period = total_fees
+        else:
+            start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
+            cost_basis_in_period = cost_basis - start_cost
+            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, now)
+
+        ranges[range_key] = SettledRangeMetrics(
+            cost_basis=round(cost_basis, 2),
+            realized_pnl=round(now_rpnl_total, 2),
+            taxable_realized_pnl=round(taxable_rpnl_total, 2),
+            realized_in_period=round(realized_in_period, 2),
+            cost_basis_in_period=round(cost_basis_in_period, 2),
+            fees_in_period=round(fees_in_period, 2),
+        )
+
+    log.info("settled_metrics_computed", version_id=version_id, ranges=list(ranges.keys()))
+
+    return SettledVersionMetrics(
+        version_id=version_id,
+        summary=summary,
+        ranges=ranges,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Standalone performer ranking
+# ---------------------------------------------------------------------------
+
+def compute_performers(
+    session: Session,
+    version_id: int,
+    period: str = "all",
+    group_by: str = "asset",
+    top_n: int = 5,
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    dimension_id: Optional[int] = None,
+    include_unsettled_negative: bool = False,
+) -> Optional[PerformersResult]:
+    """
+    Compute top/flop performers for a single period and group_by dimension.
+    Reads prices from PriceSnapshot (no refresh). Designed for isolated
+    re-fetching when the user changes group_by without re-computing all metrics.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        return None
+
+    if category_ids:
+        resolved = _resolve_category_to_asset_ids(session, category_ids, asset_ids)
+        if resolved is None:
+            return PerformersResult(version_id=version_id, period=period, group_type=group_by)
+        asset_ids = resolved
+
+    range_query = (
+        select(
+            func.min(CostLotEvent.timestamp),
+            func.max(CostLotEvent.timestamp),
+        )
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    date_range = session.exec(range_query).one()
+    min_date, max_date = date_range
+    if not min_date or not max_date:
+        return PerformersResult(version_id=version_id, period=period, group_type=group_by)
+
+    now = datetime.now(timezone.utc)
+    if min_date.tzinfo is None:
+        min_date = min_date.replace(tzinfo=timezone.utc)
+
+    # Current balances/costs
+    now_lot_balances, now_lot_costs = _get_current_from_cost_lots(
+        session, version_id, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    all_asset_ids = set(now_lot_balances.keys()) | set(now_lot_costs.keys())
+
+    # Compute start date for this period
+    days = PERIOD_RANGES.get(period)
+    if days is None:
+        start_dt = min_date
+    else:
+        cutoff = now - timedelta(days=days)
+        start_dt = max(cutoff, min_date)
+
+    unique_dates = sorted(set([now, start_dt]))
+
+    # Snapshots
+    balance_snapshots = _get_balance_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    cost_basis_snapshots = _get_cost_basis_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    now_ds = now.strftime("%Y-%m-%d")
+    balance_snapshots[now_ds] = now_lot_balances
+    cost_basis_snapshots[now_ds] = now_lot_costs
+
+    for balances in balance_snapshots.values():
+        all_asset_ids.update(balances.keys())
+    all_asset_ids_list = list(all_asset_ids)
+
+    price_snapshots = _get_price_at_dates(
+        session, version.base_currency_id, all_asset_ids_list, unique_dates
+    )
+
+    cumulative_rpnl = _get_cumulative_realized_pnl(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        taxable_only=False,
+    )
+
+    asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
+    asset_labels = _get_asset_labels(session, all_asset_ids_list)
+    fees_by_asset = _get_fees_by_asset(session, version_id)
+
+    now_balances = balance_snapshots.get(now_ds, {})
+    now_costs = cost_basis_snapshots.get(now_ds, {})
+    now_prices = price_snapshots.get(now_ds, {})
+    _, now_rpnl_by_asset = cumulative_rpnl.get(now_ds, (0.0, {}))
+
+    start_ds = start_dt.strftime("%Y-%m-%d")
+    start_balances = balance_snapshots.get(start_ds, {})
+    start_costs = cost_basis_snapshots.get(start_ds, {})
+    start_prices = price_snapshots.get(start_ds, {})
+    _, start_rpnl_by_asset = cumulative_rpnl.get(start_ds, (0.0, {}))
+
+    if group_by == "account":
+        top, flop = _rank_performers_by_account(
+            session, version_id, all_asset_ids, now_prices, start_prices,
+            now_ds, start_ds, period, top_n,
+            asset_ids, account_ids, include_unsettled_negative,
+            fees_by_asset,
+        )
+    elif group_by == "category":
+        top, flop = _rank_performers_by_category(
+            session, all_asset_ids,
+            now_balances, now_costs, now_prices, now_rpnl_by_asset,
+            start_balances, start_costs, start_prices, start_rpnl_by_asset,
+            period, top_n, dimension_id, fees_by_asset,
+        )
+    else:
+        top, flop = _rank_performers_by_asset(
+            all_asset_ids,
+            now_balances, now_costs, now_prices, now_rpnl_by_asset,
+            start_balances, start_costs, start_prices, start_rpnl_by_asset,
+            asset_symbols, asset_labels,
+            period, top_n, fees_by_asset,
+        )
+
+    log.info("performers_computed", version_id=version_id, period=period, group_by=group_by)
+
+    return PerformersResult(
+        version_id=version_id,
+        period=period,
+        group_type=group_by,
+        top_performers=top,
+        flop_performers=flop,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Market metrics (price-dependent, reads from PriceSnapshot)
+# ---------------------------------------------------------------------------
+
+def compute_market_metrics(
+    session: Session,
+    version_id: int,
+    periods: Optional[List[str]] = None,
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+    category_ids: Optional[List[int]] = None,
+    include_unsettled_negative: bool = False,
+) -> Optional[MarketVersionMetrics]:
+    """
+    Compute price-dependent metrics using prices already in PriceSnapshot.
+    Does NOT refresh prices — trusts that frontend already updated them.
+    Returns current_value, unrealized_pnl, and per-period total_return/roi_pct.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        return None
+
+    if periods is None:
+        periods = list(PERIOD_RANGES.keys())
+
+    if category_ids:
+        resolved = _resolve_category_to_asset_ids(session, category_ids, asset_ids)
+        if resolved is None:
+            return MarketVersionMetrics(
+                version_id=version_id,
+                summary=MarketSummary(0, 0),
+            )
+        asset_ids = resolved
+
+    range_query = (
+        select(
+            func.min(CostLotEvent.timestamp),
+            func.max(CostLotEvent.timestamp),
+        )
+        .join(CostLot, CostLotEvent.lot_id == CostLot.cost_lot_id)
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+    )
+    date_range = session.exec(range_query).one()
+    min_date, max_date = date_range
+
+    if not min_date or not max_date:
+        return MarketVersionMetrics(
+            version_id=version_id,
+            summary=MarketSummary(0, 0),
+        )
+
+    now = datetime.now(timezone.utc)
+    if min_date.tzinfo is None:
+        min_date = min_date.replace(tzinfo=timezone.utc)
+
+    # Current balances and costs from CostLot
+    now_lot_balances, now_lot_costs = _get_current_from_cost_lots(
+        session, version_id, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    all_asset_ids = set(now_lot_balances.keys()) | set(now_lot_costs.keys())
+
+    # Build boundary dates
+    boundary_dates = [now]
+    range_starts: Dict[str, datetime] = {}
+    for key in periods:
+        days = PERIOD_RANGES.get(key)
+        if days is None:
+            range_starts[key] = min_date
+        else:
+            cutoff = now - timedelta(days=days)
+            range_starts[key] = max(cutoff, min_date)
+        boundary_dates.append(range_starts[key])
+
+    unique_dates = sorted(set(boundary_dates))
+
+    # Snapshots
+    balance_snapshots = _get_balance_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    cost_basis_snapshots = _get_cost_basis_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+    now_ds = now.strftime("%Y-%m-%d")
+    balance_snapshots[now_ds] = now_lot_balances
+    cost_basis_snapshots[now_ds] = now_lot_costs
+
+    for balances in balance_snapshots.values():
+        all_asset_ids.update(balances.keys())
+    all_asset_ids_list = list(all_asset_ids)
+
+    # Prices from PriceSnapshot (no refresh)
+    price_snapshots = _get_price_at_dates(
+        session, version.base_currency_id, all_asset_ids_list, unique_dates
+    )
+
+    # Realized PnL (needed for total_return = unrealized_change + realized_in_period)
+    cumulative_rpnl = _get_cumulative_realized_pnl(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        taxable_only=False,
+    )
+
+    now_balances = balance_snapshots.get(now_ds, {})
+    now_costs = cost_basis_snapshots.get(now_ds, {})
+    now_prices = price_snapshots.get(now_ds, {})
+    now_rpnl_total = cumulative_rpnl.get(now_ds, (0.0, {}))[0]
+
+    # Portfolio-level current values
+    current_value = sum(
+        now_balances.get(aid, 0.0) * now_prices.get(aid, 0.0)
+        for aid in all_asset_ids
+    )
+    cost_basis = sum(now_costs.get(aid, 0.0) for aid in all_asset_ids)
+    unrealized_pnl = current_value - cost_basis
+
+    summary = MarketSummary(
+        current_value=round(current_value, 2),
+        unrealized_pnl=round(unrealized_pnl, 2),
+    )
+
+    # Per-period market metrics
+    ranges: Dict[str, MarketRangeMetrics] = {}
+    for range_key, start_dt in range_starts.items():
+        start_ds = start_dt.strftime("%Y-%m-%d")
+        start_balances = balance_snapshots.get(start_ds, {})
+        start_costs = cost_basis_snapshots.get(start_ds, {})
+        start_prices = price_snapshots.get(start_ds, {})
+        start_rpnl_total = cumulative_rpnl.get(start_ds, (0.0, {}))[0]
+
+        realized_in_period = now_rpnl_total - start_rpnl_total
+
+        if range_key == "all":
+            unrealized_in_period = unrealized_pnl
+            total_return = unrealized_pnl + now_rpnl_total
+            roi_base = cost_basis
+        else:
+            start_value = sum(
+                start_balances.get(aid, 0.0) * start_prices.get(aid, 0.0)
+                for aid in all_asset_ids
+            )
+            start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
+            start_unrealized = start_value - start_cost
+            unrealized_in_period = unrealized_pnl - start_unrealized
+            total_return = unrealized_in_period + realized_in_period
+            roi_base = start_cost if start_cost != 0 else cost_basis
+
+        roi_pct = (total_return / roi_base * 100) if roi_base != 0 else 0.0
+
+        ranges[range_key] = MarketRangeMetrics(
+            current_value=round(current_value, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),
+            unrealized_in_period=round(unrealized_in_period, 2),
+            total_return=round(total_return, 2),
+            roi_pct=round(roi_pct, 2),
+        )
+
+    log.info("market_metrics_computed", version_id=version_id, ranges=list(ranges.keys()))
+
+    return MarketVersionMetrics(
         version_id=version_id,
         summary=summary,
         ranges=ranges,

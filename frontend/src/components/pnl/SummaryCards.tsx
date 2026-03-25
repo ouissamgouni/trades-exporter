@@ -50,6 +50,12 @@ interface RefreshPricesCardProps {
     priceErrorCount?: number;
     onPriceBadgeClick?: () => void;
     refreshDisabled?: boolean;
+    /** Number of assets not tracked in P&L (no cost lots — consistent with PriceStatusList) */
+    naCount?: number;
+    /** Number of P&L assets whose price fetch hasn't completed yet */
+    pendingCount?: number;
+    /** Total number of P&L assets (with cost lots) */
+    pnlAssetCount?: number;
 }
 
 export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
@@ -60,7 +66,13 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
     priceErrorCount = 0,
     onPriceBadgeClick,
     refreshDisabled,
+    naCount = 0,
+    pendingCount = 0,
+    pnlAssetCount,
 }) => {
+    const priceableCount = priceSuccessCount + priceStaleCount + priceErrorCount;
+    const highErrorRate = priceableCount > 0 && priceErrorCount / priceableCount > 0.2;
+
     return (
         <Box
             p={3}
@@ -73,6 +85,9 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
             <Flex align="center" gap={2} mb={2}>
                 <FiRefreshCw size={14} color="#3182ce" />
                 <Text fontSize="xs" fontWeight="semibold" color="gray.700">Refresh Prices</Text>
+                {pnlAssetCount != null && (
+                    <Text fontSize="2xs" color="gray.400" ml="auto">{pnlAssetCount} assets</Text>
+                )}
             </Flex>
 
             <Flex align="center" gap={1.5} mb={2} wrap="wrap">
@@ -111,6 +126,33 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
                 )}
                 {priceSuccessCount === 0 && priceStaleCount === 0 && priceErrorCount === 0 && (
                     <Text fontSize="2xs" color="gray.400">No prices loaded</Text>
+                )}
+                {naCount > 0 && (
+                    <Tooltip content="Only assets with cost lots need live pricing">
+                        <Badge
+                            colorPalette="gray"
+                            variant="outline"
+                            size="xs"
+                        >
+                            {naCount} N/A
+                        </Badge>
+                    </Tooltip>
+                )}
+                {pendingCount > 0 && (
+                    <Badge
+                        colorPalette="gray"
+                        variant="outline"
+                        size="xs"
+                        cursor="pointer"
+                        onClick={onPriceBadgeClick}
+                    >
+                        ⏳ {pendingCount} pending
+                    </Badge>
+                )}
+                {highErrorRate && (
+                    <Badge colorPalette="orange" variant="subtle" size="xs">
+                        ⚠️ High error rate
+                    </Badge>
                 )}
             </Flex>
 

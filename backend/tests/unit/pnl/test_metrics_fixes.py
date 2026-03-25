@@ -59,11 +59,13 @@ class TestSortTopFlop:
         ]
         top, flop = _sort_top_flop(performers, top_n=25)
 
-        assert len(top) == 4
+        # Top only includes non-negative returns
+        assert len(top) == 2
         assert top[0].name == "A"
         assert top[0].total_return == 100.0
+        assert top[1].name == "B"
 
-        # Flop must contain the negative items even though 4 <= 25
+        # Flop must contain the negative items
         assert len(flop) == 2
         assert flop[0].name == "D"  # worst first
         assert flop[0].total_return == -50.0
@@ -86,13 +88,14 @@ class TestSortTopFlop:
         performers = [_make_performer(i, f"X{i}", -i * 10.0) for i in range(1, 20)]
         top, flop = _sort_top_flop(performers, top_n=5)
 
-        assert len(top) == 5
+        # All performers are negative, so top is empty
+        assert len(top) == 0
         assert len(flop) == 5
         # Worst first
         assert flop[0].total_return == -190.0
 
     def test_top_sorted_descending(self):
-        """Top performers sorted by total_return descending."""
+        """Top performers sorted by total_return descending, only non-negative."""
         performers = [
             _make_performer(1, "A", -10.0),
             _make_performer(2, "B", 500.0),
@@ -100,18 +103,21 @@ class TestSortTopFlop:
         ]
         top, flop = _sort_top_flop(performers, top_n=3)
 
+        # Only non-negative in top
+        assert len(top) == 2
         assert top[0].name == "B"
         assert top[1].name == "C"
-        assert top[2].name == "A"
+        # Negative goes to flop
+        assert len(flop) == 1
+        assert flop[0].name == "A"
 
     def test_single_negative_performer(self):
-        """Single performer with negative return should appear in both top and flop."""
+        """Single performer with negative return should only appear in flop, not top."""
         performers = [_make_performer(1, "A", -100.0)]
         top, flop = _sort_top_flop(performers, top_n=5)
 
-        assert len(top) == 1
+        assert len(top) == 0
         assert len(flop) == 1
-        assert top[0].total_return == -100.0
         assert flop[0].total_return == -100.0
 
     def test_empty_performers(self):
@@ -289,6 +295,7 @@ class TestMetricsPerformerUnrealized:
     """Tests that compute_version_metrics populates unrealized_pnl in performers."""
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -300,7 +307,7 @@ class TestMetricsPerformerUnrealized:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_performer_has_unrealized_pnl(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Performers should include unrealized_pnl field."""
         version = Mock()
@@ -311,6 +318,7 @@ class TestMetricsPerformerUnrealized:
         mock_result = Mock()
         mock_result.one.return_value = (_utc(2024, 1, 1), _utc(2024, 6, 1))
         session.exec.return_value = mock_result
+        mock_fees_asset.return_value = {}
 
         # Asset 10: qty=2, cost=20000, price=30000 → unrealized = 60000 - 20000 = 40000
         mock_lot_current.return_value = ({10: 2.0}, {10: 20000.0})
@@ -347,6 +355,7 @@ class TestMetricsPerformerUnrealized:
         assert p.total_return == 45000.0  # unrealized + realized
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -358,7 +367,7 @@ class TestMetricsPerformerUnrealized:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_flop_includes_negatives_in_full_metrics(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Flop performers should include negatives even when count <= top_n."""
         version = Mock()
@@ -369,6 +378,7 @@ class TestMetricsPerformerUnrealized:
         mock_result = Mock()
         mock_result.one.return_value = (_utc(2024, 1, 1), _utc(2024, 6, 1))
         session.exec.return_value = mock_result
+        mock_fees_asset.return_value = {}
 
         # Asset 10: profitable, Asset 20: loss
         mock_lot_current.return_value = (
@@ -402,9 +412,10 @@ class TestMetricsPerformerUnrealized:
 
         assert result is not None
         m = result.ranges["all"]
-        # Both in top
-        assert len(m.top_performers) == 2
-        # LOSER should be in flop (negative return, even though only 2 performers and top_n=25)
+        # Only WINNER (positive return) in top
+        assert len(m.top_performers) == 1
+        assert m.top_performers[0].name == "WINNER"
+        # LOSER should be in flop (negative return)
         assert len(m.flop_performers) == 1
         assert m.flop_performers[0].name == "LOSER"
         assert m.flop_performers[0].total_return == -500.0

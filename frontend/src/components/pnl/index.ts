@@ -10,7 +10,7 @@ export { default } from './PnLPanel';
 export { CalculationContext } from './CalculationContext';
 export { SummaryCards, SummaryBar } from './SummaryCards';
 export { AssetPnLTable } from './AssetPnLTable';
-export { default as AssetDetailView } from './AssetDetailView';
+export { PnLDetailPanel } from './PnLDetailPanel';
 export { PnLImpactPanel } from './PnLImpactPanel';
 export { FeesPanel } from './FeesPanel';
 export { WarningsPanel } from './WarningsPanel';

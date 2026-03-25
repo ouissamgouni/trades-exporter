@@ -16,6 +16,7 @@ Architecture:
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, List, Tuple, Dict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from sqlmodel import Session, select
 from sqlalchemy import func
@@ -32,6 +33,7 @@ from backend.services.price_getters.base import (
     PriceResult,
     PriceGetterError,
     PriceGetterAggregateError,
+    PriceErrorReason,
 )
 
 log = configure_logging("price_service")
@@ -827,6 +829,7 @@ class PriceService:
         price_quote: Optional[str] = None,
         use_fallback: bool = True,
         staleness_window_days: int = 7,
+        max_timeout_seconds: Optional[int] = None,
     ) -> PriceResult:
         """
         Get asset price with fallback to latest known price if fetch fails.
@@ -841,6 +844,8 @@ class PriceService:
             price_quote: Quote currency (defaults to base_currency)
             use_fallback: If True, fall back to latest cached price on failure
             staleness_window_days: Max days to look back for fallback price
+            max_timeout_seconds: Max seconds to wait for live fetch before falling
+                back to cached price. None means no timeout (old behavior).
             
         Returns:
             PriceResult with price and staleness metadata:
@@ -883,36 +888,20 @@ class PriceService:
             # Get price getters for this asset
             price_getters = self.resolver.resolve(session, asset)
             
-            # Try to fetch price normally
+            # Try to fetch price normally (with optional timeout)
             original_error: Optional[str] = None
             try:
-                result = self._fetch_price(session, asset, dt, price_getters)
-                price = result.price
-                native_quote = result.quote_currency.upper()
-                source = result.source
-                
-                # Convert if needed
-                if native_quote != requested_quote:
-                    price = self.converter.convert(
-                        session, price, native_quote, requested_quote, dt
-                    )
-                
-                # Cache the result
-                self.cache.store(
-                    session, asset_id, quote_asset_id, price, dt, source
+                result = self._fetch_price_with_timeout(
+                    session, asset, dt, price_getters,
+                    requested_quote, quote_asset_id,
+                    max_timeout_seconds=max_timeout_seconds,
                 )
+                return result
                 
-                return PriceResult(
-                    price=price,
-                    quote_currency=requested_quote,
-                    source=source,
-                    timestamp=dt,
-                    ticker_used=result.ticker_used,
-                    actual_price_date=dt,
-                )
-                
-            except (PriceGetterAggregateError, Exception) as e:
+            except (PriceGetterAggregateError, FuturesTimeoutError, Exception) as e:
                 original_error = str(e)
+                if isinstance(e, FuturesTimeoutError):
+                    original_error = f"Live price fetch timed out after {max_timeout_seconds}s"
                 log.warning(
                     f"Price fetch failed for {asset.symbol} at {dt.date()}: {original_error}"
                 )
@@ -944,7 +933,9 @@ class PriceService:
                     errors=[PriceGetterError(
                         message=f"Price fetch failed and no fallback available: {original_error}",
                         getter_name="fallback",
+                        reason=PriceErrorReason.NO_DATA_RETURNED,
                         asset_symbol=asset.symbol,
+                        details=f"No cached price found in DB. Original error: {original_error}",
                     )],
                 )
             
@@ -973,6 +964,65 @@ class PriceService:
             
         finally:
             self._close_session(session)
+
+    def _fetch_price_with_timeout(
+        self,
+        session: Session,
+        asset: "Asset",
+        dt: datetime,
+        price_getters: list,
+        requested_quote: str,
+        quote_asset_id: Optional[int],
+        max_timeout_seconds: Optional[int] = None,
+    ) -> PriceResult:
+        """
+        Fetch price, convert currency, and cache — with an optional timeout.
+        
+        If max_timeout_seconds is set, the live fetch + conversion runs inside a
+        thread pool with the given timeout.  On timeout a FuturesTimeoutError is
+        raised so the caller can fall back to cached data.
+        """
+
+        def _do_fetch() -> PriceResult:
+            result = self._fetch_price(session, asset, dt, price_getters)
+            price = result.price
+            native_quote = result.quote_currency.upper()
+            source = result.source
+
+            # Convert if needed
+            if native_quote != requested_quote:
+                price = self.converter.convert(
+                    session, price, native_quote, requested_quote, dt
+                )
+
+            # Cache the result
+            self.cache.store(
+                session, asset.asset_id, quote_asset_id, price, dt, source
+            )
+
+            return PriceResult(
+                price=price,
+                quote_currency=requested_quote,
+                source=source,
+                timestamp=dt,
+                ticker_used=result.ticker_used,
+                actual_price_date=dt,
+            )
+
+        if max_timeout_seconds is None:
+            return _do_fetch()
+
+        # Run with timeout — the thread continues in the background but we
+        # stop waiting and let the caller fall back to cached data.
+        # NOTE: We avoid using `with` (context manager) because its __exit__
+        # calls shutdown(wait=True), which blocks until the background thread
+        # finishes — defeating the purpose of the timeout.
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(_do_fetch)
+            return future.result(timeout=max_timeout_seconds)
+        finally:
+            executor.shutdown(wait=False)
 
     def get_staleness_window_for_asset(
         self,

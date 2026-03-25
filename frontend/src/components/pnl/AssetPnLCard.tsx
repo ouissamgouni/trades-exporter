@@ -363,16 +363,25 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                         <Box
                             flex="1"
                             minW={0}
-                            bg={unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined}
+                            bg={hasPrice && unrealizedPnlRange ? unrealizedHeatmapBg(row.unrealized_pnl, unrealizedPnlRange) : undefined}
                             borderRadius="md"
                             px={1}
                             py={0.5}
                         >
                             <Text fontSize="2xs" color="gray.500" mb={0.5} lineClamp={1}>Unrealized</Text>
-                            <Text fontSize="xs" fontWeight="medium" color={row.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
-                                <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
-                            </Text>
-                            <Text fontSize="2xs" color="gray.500">{formatPct(row.unrealized_pnl_pct)}</Text>
+                            {hasPrice ? (
+                                <>
+                                    <Text fontSize="xs" fontWeight="medium" color={row.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
+                                        <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
+                                    </Text>
+                                    <Text fontSize="2xs" color="gray.500">{formatPct(row.unrealized_pnl_pct)}</Text>
+                                </>
+                            ) : (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="xs" color="gray.400">—</Text>
+                                    {hasError && <FiAlertCircle size={10} color="#E53E3E" />}
+                                </Flex>
+                            )}
                         </Box>
 
                         <Metric label="Realized" flex="1">

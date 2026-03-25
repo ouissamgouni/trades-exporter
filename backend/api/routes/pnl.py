@@ -1312,6 +1312,7 @@ def get_asset_price(
     base_currency: str = Query("EUR", description="Quote currency for price"),
     use_fallback: bool = Query(True, description="Fall back to latest known price if fetch fails"),
     staleness_window_days: int = Query(7, description="Max days to consider price fresh (for fallback)"),
+    max_timeout_seconds: int = Query(10, description="Max seconds before giving up live fetch and returning fallback"),
     session: Session = Depends(get_session_dependency),
 ):
     """
@@ -1341,6 +1342,7 @@ def get_asset_price(
             price_quote=base_currency,
             use_fallback=use_fallback,
             staleness_window_days=staleness_window_days,
+            max_timeout_seconds=max_timeout_seconds,
         )
         
         warning_msg = None
@@ -1377,6 +1379,7 @@ class PriceRequest(BaseModel):
     base_currency: str = Field(default="EUR", description="Quote currency for prices")
     use_fallback: bool = Field(default=True, description="Fall back to latest known price if fetch fails")
     staleness_window_days: int = Field(default=7, description="Max days to consider price fresh (for fallback)")
+    max_timeout_seconds: int = Field(default=10, description="Max seconds before giving up live fetch and returning fallback")
 
 
 @router.post("/prices", response_model=PricesResponse)
@@ -1432,6 +1435,7 @@ def get_current_prices(
                 price_quote=request.base_currency,
                 use_fallback=request.use_fallback,
                 staleness_window_days=request.staleness_window_days,
+                max_timeout_seconds=request.max_timeout_seconds,
             )
             
             warning_msg = None
@@ -3977,7 +3981,7 @@ def get_audit_summary(
         taxable=rpnl_row.taxable or 0,
         non_taxable=rpnl_row.non_taxable or 0,
         total_gain=float(rpnl_row.total_gain_val or 0),
-        total_loss=float(rpnl_row.total_loss_val or 0),
+        total_loss=abs(float(rpnl_row.total_loss_val or 0)),
         short_term=rpnl_row.short_term or 0,
         long_term=rpnl_row.long_term or 0,
     )
@@ -4595,6 +4599,186 @@ def get_portfolio_timeline(
 
 
 # =============================================================================
+# Settled Metrics (cost-lot-based, no price lookup)
+# =============================================================================
+
+@router.get("/versions/{version_id}/metrics/settled")
+def get_settled_metrics(
+    version_id: int,
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Compute cost-lot-based metrics that don't require market prices.
+    Returns instantly: cost_basis, realized_pnl, fees, and per-period settled fields.
+    """
+    from backend.services.pnl.metrics_service import compute_settled_metrics
+
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    metrics = compute_settled_metrics(
+        session=session,
+        version_id=version_id,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+
+    if metrics is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    return {
+        "version_id": metrics.version_id,
+        "summary": {
+            "cost_basis": metrics.summary.cost_basis,
+            "realized_pnl": metrics.summary.realized_pnl,
+            "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
+            "total_fees": metrics.summary.total_fees,
+            "fee_entry_count": metrics.summary.fee_entry_count,
+        },
+        "ranges": {
+            key: {
+                "cost_basis": m.cost_basis,
+                "realized_pnl": m.realized_pnl,
+                "taxable_realized_pnl": m.taxable_realized_pnl,
+                "realized_in_period": m.realized_in_period,
+                "cost_basis_in_period": m.cost_basis_in_period,
+                "fees_in_period": m.fees_in_period,
+            }
+            for key, m in metrics.ranges.items()
+        },
+    }
+
+
+# =============================================================================
+# Market Metrics (price-dependent, reads PriceSnapshot)
+# =============================================================================
+
+@router.get("/versions/{version_id}/metrics/market")
+def get_market_metrics(
+    version_id: int,
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Compute price-dependent metrics using prices already in PriceSnapshot.
+    Does NOT refresh prices — trusts frontend already updated them.
+    Call after frontend price fetch completes for accurate values.
+    """
+    from backend.services.pnl.metrics_service import compute_market_metrics
+
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    metrics = compute_market_metrics(
+        session=session,
+        version_id=version_id,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+
+    if metrics is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    return {
+        "version_id": metrics.version_id,
+        "summary": {
+            "current_value": metrics.summary.current_value,
+            "unrealized_pnl": metrics.summary.unrealized_pnl,
+        },
+        "ranges": {
+            key: {
+                "current_value": m.current_value,
+                "unrealized_pnl": m.unrealized_pnl,
+                "unrealized_in_period": m.unrealized_in_period,
+                "total_return": m.total_return,
+                "roi_pct": m.roi_pct,
+            }
+            for key, m in metrics.ranges.items()
+        },
+    }
+
+
+# =============================================================================
+# Performers (standalone performer ranking)
+# =============================================================================
+
+@router.get("/versions/{version_id}/performers")
+def get_performers(
+    version_id: int,
+    period: str = Query("all"),
+    group_by: str = Query("asset", regex="^(asset|account|category)$"),
+    top_n: int = Query(5, ge=1, le=25),
+    asset_ids: Optional[str] = Query(None),
+    account_ids: Optional[str] = Query(None),
+    category_ids: Optional[str] = Query(None),
+    dimension_id: Optional[int] = Query(None),
+    include_unsettled_negative: bool = Query(False),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Compute top/flop performers for a single period and group_by dimension.
+    Isolated from period metrics — changing group_by only re-fetches this.
+    """
+    from backend.services.pnl.metrics_service import compute_performers
+
+    parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
+    parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
+    parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
+
+    result = compute_performers(
+        session=session,
+        version_id=version_id,
+        period=period,
+        group_by=group_by,
+        top_n=top_n,
+        asset_ids=parsed_asset_ids,
+        account_ids=parsed_account_ids,
+        category_ids=parsed_category_ids,
+        dimension_id=dimension_id,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    def _serialize_performer(p):
+        return {
+            "id": p.id,
+            "name": p.name,
+            "label": p.label,
+            "group_type": p.group_type,
+            "total_return": p.total_return,
+            "roi_pct": p.roi_pct,
+            "unrealized_pnl": p.unrealized_pnl,
+            "market_value": p.market_value,
+            "cost_basis": p.cost_basis,
+            "total_fees": p.total_fees,
+            "efficiency": p.efficiency,
+        }
+
+    return {
+        "version_id": result.version_id,
+        "period": result.period,
+        "group_type": result.group_type,
+        "top_performers": [_serialize_performer(p) for p in result.top_performers],
+        "flop_performers": [_serialize_performer(p) for p in result.flop_performers],
+    }
+
+
+# =============================================================================
 # Version Metrics (replaces period-summary)
 # =============================================================================
 
@@ -4652,6 +4836,10 @@ def get_version_metrics(
             "total_return": p.total_return,
             "roi_pct": p.roi_pct,
             "unrealized_pnl": p.unrealized_pnl,
+            "market_value": p.market_value,
+            "cost_basis": p.cost_basis,
+            "total_fees": p.total_fees,
+            "efficiency": p.efficiency,
         }
 
     return {

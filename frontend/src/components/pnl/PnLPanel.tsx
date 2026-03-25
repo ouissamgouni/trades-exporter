@@ -1,1374 +1,244 @@
 /**
- * P&L Panel (Redesigned)
- * 
- * Main P&L view following design principles:
- * - Principle 1: Results first, details on demand
- * - Principle 2: Groups are primary, legs are secondary
- * - Principle 3: Everything must be traceable
- * 
- * Flow:
- * 1. User opens P&L
- * 2. Reviews global numbers (Summary Cards)
- * 3. Notices warning or surprising P&L
- * 4. Clicks asset → realized P&L row
- * 5. Opens P&L Impact Panel
- * 6. Sees: Which lots, Which fees, Why taxable
- * 7. Goes to Group or Transaction view
- * 8. Fixes data or overrides taxability
- * 9. Returns to P&L
- * 10. Recomputes → preview
- * 11. Saves new version
+ * P&L Panel — Thin Orchestrator
+ *
+ * State lives in PnLContext (useReducer).
+ * Data operations live in usePnLData and usePnLPrices hooks.
+ * This file is the render layer + navigation handlers only.
  */
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Switch, Text } from '@chakra-ui/react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Text } from '@chakra-ui/react';
 import { FiRefreshCw, FiClock, FiSliders } from 'react-icons/fi';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { useBaseCurrency } from '../BaseCurrencySelector';
-import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
-import type { BalanceEntry } from '../../types';
 import { toaster } from '../ui/toaster';
-import { useDataHealth } from '../../contexts/DataHealthContext';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
-import { useBalance } from '../../hooks/useBalance';
-import { useAssets } from '../../hooks/useAssets';
-import { usePnLCalculationStatus } from '../../hooks/usePnLCalculationStatus';
-import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { PnLVersionResponse, VersionListItem, AggregatedBalanceItem } from './types';
 import { PnLStatusBadge } from './PnLStatusBadge';
-import { computeDelta } from './deltaUtils';
 
 // P&L Components
-import { CalculationContext, CalculationMode } from './CalculationContext';
-import { SummaryCards, SummaryBar, CompactStatusBar, RefreshPricesCard, WarningsCard, BalanceHealthCard, BalanceHealthData } from './SummaryCards';
-import { AssetPnLTable } from './AssetPnLTable';
-import AssetDetailView from './AssetDetailView';
+import { CalculationContext } from './CalculationContext';
+import { RefreshPricesCard, WarningsCard, BalanceHealthCard } from './SummaryCards';
+import { PortfolioContent } from './PortfolioContent';
 import { PnLImpactPanel } from './PnLImpactPanel';
-import { InvestigationView } from './InvestigationView';
-
 import { PriceStatusList } from './PriceStatusList';
-import { ChartsDashboard } from './ChartsDashboard';
-import { TotalReturnScorecard, AllTimeIndicators, TimeframeIndicators } from './TotalReturnScorecard';
-import type { Range } from './TotalReturnScorecard';
-import { usePortfolioTimeline, useVersionMetrics } from '../../hooks/useChartData';
-import type { RangeKey, GroupBy } from '../../hooks/useChartData';
+import { TimeframeIndicators } from './TotalReturnScorecard';
 import { SlidePanel } from './SlidePanel';
 import { TransactionDetailDrawer } from '../TransactionDetailDrawer';
 
+// Context + hooks
+import { PnLProvider, usePnL } from './PnLContext';
+import { usePnLData } from '../../hooks/usePnLData';
+import { usePnLPrices } from '../../hooks/usePnLPrices';
+
 // Types
-import {
-    CalculationConfig,
-    CalculationStatus,
-    PnLSummary,
-    AssetPnLRow,
-    CostLot,
-    RealizedPnLRow,
-    PnLImpactEvent,
-    FeeEntry,
-    PnLWarningItem,
-    PnLView,
-    CalculationUnit,
-    PerAccountBalanceItem,
-    AccountBalanceBreakdown,
-    UnmappedLiveAsset,
-} from './types';
+import type { PnLImpactEvent, RealizedPnLRow } from './types';
+import type { DrillMetric, DrillEntityType } from './pnlState';
+import { computeDateRange } from './pnlState';
+import type { Range } from './TotalReturnScorecard';
+import { useVersionMetrics, useSettledMetrics, useMarketMetrics, useVersionPerformers } from '../../hooks/useChartData';
+import type { GroupBy } from '../../hooks/useChartData';
+import { useCategoryMaps } from '../../hooks/useCategoryMaps';
 
 interface PnLPanelProps {
     isActive?: boolean;
     onOpenHealthCheck?: () => void;
 }
 
-export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => {
+/**
+ * Outer shell: wraps PnLContent with PnLProvider so context is available.
+ */
+export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => (
+    <PnLProvider isActive={isActive}>
+        <PnLContent isActive={isActive} onOpenHealthCheck={onOpenHealthCheck} />
+    </PnLProvider>
+);
 
-    // Base currency from settings
-    const { baseCurrency, baseCurrencyId } = useBaseCurrency();
+/**
+ * Inner content: consumes PnLContext, usePnLData, usePnLPrices.
+ * Navigation handlers + render JSX.
+ */
+const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthCheck }) => {
+    const {
+        state,
+        dispatch,
+        assets,
+        displayAssets,
+        scorecardSummary,
+        balanceHealth,
+        assetBalanceMap,
+        unmappedLiveAssets,
+        availableAccountIds,
+        availableCategoryIds,
+        versionsQuery,
+        heroTimeline,
+        versionMetrics,
+        settledMetrics,
+        marketMetrics,
+        performers,
+        pricesReady,
+        liveBalanceMap,
+        liveAccountBalanceMap,
+        liveFetchedAccountIds,
+        liveAccountErrors,
+        liveBalanceLoading,
+        hasAutoLoaded,
+        baseCurrency,
+        baseCurrencyId,
+    } = usePnL();
 
-    // Data health context for UI display only (not used for calculation gating)
-    // Calculation flow uses direct API calls to avoid race conditions with polling
-    const { refreshHealthData } = useDataHealth();
+    // Destructure heavily-used state fields
+    const {
+        status, config, isCalculating, isPersisting, isDeleting, error,
+        calculationMode, currentVersionId, currentVersionStatus, loadedVersionCreatedAt,
+        accounts, isLoadingAccounts, dimensions,
+        accountBalances, isLoadingAccountBalances, isLoadingBalances,
+        summary, pnlAssets, fees, warnings, warningTypeCounts, idCounts,
+        prices, isRefreshingPrices, showPriceDrawer, loadingPriceAssetIds,
+        currentView, selectedAsset, assetRealizedEntries, initialAccountFilter,
+        showHealthConfirm, healthCheckIssueCount, showCustomCalcDrawer, showHistoryPanel,
+        showImpactPanel, impactEvent, selectedTransactionId, isTransactionDrawerOpen,
+        performerGroupBy, performerDimensionId, deltaThreshold, timeframeRange, showMismatchedOnly,
+    } = state;
 
-    // Confirmation dialog state for data health issues
-    const [showHealthConfirm, setShowHealthConfirm] = useState(false);
-    const [healthCheckIssueCount, setHealthCheckIssueCount] = useState(0);
-
-    // Refs to track state without causing closure issues
-    const isCalculatingRef = useRef(false);
-    const skipHealthCheckRef = useRef(false);  // Flag to skip health check after user confirms
-    const balancesJustLoadedRef = useRef(false);  // Skip duplicate balance re-fetch after version load
-
-    // --- Custom Calculation Drawer & History Panel state ---
-    const [showCustomCalcDrawer, setShowCustomCalcDrawer] = useState(false);
-    const [showHistoryPanel, setShowHistoryPanel] = useState(false);
-
-    // --- P&L Calculation Service polling ---
-    // loadVersionByIdRef prevents stale closure in onNewVersion callback
-    const loadVersionByIdRef = useRef<(versionId: number) => Promise<void>>();
-
-    // Read account_ids from URL on init (for shareable links)
-    const getInitialAccountIds = (): number[] => {
-        const params = new URLSearchParams(window.location.search);
-        const urlAccounts = params.get('accounts');
-        if (urlAccounts) {
-            const ids = urlAccounts.split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n));
-            if (ids.length > 0) return ids;
-        }
-        return [];
-    };
-
-    // Calculation state
-    const [status, setStatus] = useState<CalculationStatus>('idle');
-    const [config, setConfig] = useState<CalculationConfig>({
-        lot_method: 'FIFO',
-        lot_mode: 'LOT_TRAVEL',
-        base_currency_symbol: baseCurrency,
-        base_currency_id: baseCurrencyId,
-        residual_tolerance_pct: 0.05,
-        allow_negative_balances: true,
-        account_ids: getInitialAccountIds(),
-        // Advanced settings
-        compute_residuals: false,
-        crypto_swap_taxable_by_default: false,
-        fee_taxable_by_default: false,
-        // Price fallback settings
-        use_price_fallback: true,
-        price_staleness_window_days: 7,
-    });
-    const [isCalculating, setIsCalculating] = useState(false);
-    const [isPersisting, setIsPersisting] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    // Version management (Option D: CQRS-Lite)
-    const [currentVersionId, setCurrentVersionId] = useState<number | null>(null);
-    const [currentVersionStatus, setCurrentVersionStatus] = useState<'draft' | 'committed' | null>(null);
-    const [loadedVersionCreatedAt, setLoadedVersionCreatedAt] = useState<string | null>(null);
-
-    // React Query for versions list — single source of truth, auto-dedup
-    const queryClient = useQueryClient();
-    const versionsQuery = useQuery<VersionListItem[]>({
-        queryKey: ['pnl-versions'],
-        queryFn: async () => {
-            const response = await fetch(`${API_URL}/pnl/versions?limit=50`);
-            if (!response.ok) throw new Error('Failed to fetch versions');
-            return response.json();
-        },
-        enabled: isActive,
-        staleTime: 30_000,
-    });
     const availableVersions = versionsQuery.data ?? [];
     const isLoadingVersions = versionsQuery.isLoading;
 
-    // Calculation mode: 'load' existing version OR 'new' calculation
-    const [calculationMode, setCalculationMode] = useState<CalculationMode>('new');
+    // ── Price operations ──
+    const { fetchPrices, handlePriceAdded, handleRefreshPrices } = usePnLPrices();
 
-    // Update config when base currency changes
-    useEffect(() => {
-        setConfig(prev => ({ ...prev, base_currency_symbol: baseCurrency, base_currency_id: baseCurrencyId }));
-    }, [baseCurrency, baseCurrencyId]);
-
-    // Fetch all assets for showing non-P&L assets in table
-    const { assets: allDbAssets } = useAssets();
-
-    // Display filter: show/hide unsettled negative lots (e.g., base currency debt)
-    const [showUnsettledNegative, setShowUnsettledNegative] = useState(false);
-    const [totalUnsettledNegativeCount, setTotalUnsettledNegativeCount] = useState(0);
-
-    // Category dimensions for filter
-    const [dimensions, setDimensions] = useState<DimensionWithCategories[]>([]);
-    const [isLoadingCategories, setIsLoadingCategories] = useState(false);
-
-    // Account data for filter
-    const [accounts, setAccounts] = useState<Account[]>([]);
-    const [isLoadingAccounts, setIsLoadingAccounts] = useState(false);
-
-    // Per-account balances for expandable rows (prefetched)
-    const [accountBalances, setAccountBalances] = useState<Map<number, AccountBalanceBreakdown[]>>(new Map());
-    const [isLoadingAccountBalances, setIsLoadingAccountBalances] = useState(false);
-
-    // --- Live balance comparison ---
+    // ── Data operations ──
     const {
-        accountBalances: liveAccountBalancesRaw,
-        isLoading: liveBalanceLoading,
-        pendingCount: livePendingCount,
-        fetchGlobalBalance: fetchLiveBalances,
-        clear: clearLiveBalances,
-    } = useBalance();
-
-    // Build aggregated live balance map: symbol (uppercase) → total qty
-    const liveBalanceMap = useMemo(() => {
-        if (liveAccountBalancesRaw.length === 0) return new Map<string, number>();
-        const map = new Map<string, number>();
-        for (const ab of liveAccountBalancesRaw) {
-            for (const cb of ab.connector_balances) {
-                for (const entry of cb.entries) {
-                    const sym = entry.asset_symbol.toUpperCase();
-                    map.set(sym, (map.get(sym) ?? 0) + (parseFloat(entry.total) || 0));
-                }
-            }
-        }
-        return map;
-    }, [liveAccountBalancesRaw]);
-
-    // Build per-account live balance map: symbol → (accountId → qty)
-    const liveAccountBalanceMap = useMemo(() => {
-        if (liveAccountBalancesRaw.length === 0) return new Map<string, Map<number, number>>();
-        const map = new Map<string, Map<number, number>>();
-        for (const ab of liveAccountBalancesRaw) {
-            for (const cb of ab.connector_balances) {
-                for (const entry of cb.entries) {
-                    const sym = entry.asset_symbol.toUpperCase();
-                    if (!map.has(sym)) map.set(sym, new Map());
-                    const acctMap = map.get(sym)!;
-                    acctMap.set(ab.account_id, (acctMap.get(ab.account_id) ?? 0) + (parseFloat(entry.total) || 0));
-                }
-            }
-        }
-        return map;
-    }, [liveAccountBalancesRaw]);
-
-    // Set of account IDs whose live-balance HTTP fetch completed (regardless of entries)
-    const liveFetchedAccountIds = useMemo(() => {
-        return new Set(liveAccountBalancesRaw.map(ab => ab.account_id));
-    }, [liveAccountBalancesRaw]);
-
-    // Map of accountId → connector error messages (non-null errors only)
-    const liveAccountErrors = useMemo(() => {
-        const map = new Map<number, string[]>();
-        for (const ab of liveAccountBalancesRaw) {
-            const errors = ab.connector_balances
-                .filter(cb => cb.error != null)
-                .map(cb => cb.error!);
-            if (errors.length > 0) map.set(ab.account_id, errors);
-        }
-        return map;
-    }, [liveAccountBalancesRaw]);
-
-    // Main view mode: 'portfolio' (filtered view), 'charts' (dashboard), or 'audit' (full unfiltered audit)
-    const [viewMode, setViewMode] = useState<'portfolio' | 'charts' | 'audit'>('portfolio');
-
-    // Performer group-by mode (asset / account / category) — triggers server-side re-fetch
-    const [performerGroupBy, setPerformerGroupBy] = useState<GroupBy>('asset');
-
-    // Selected dimension ID for performer category grouping
-    const [performerDimensionId, setPerformerDimensionId] = useState<number | null>(null);
-
-    // Portfolio timeline data — always enabled so React Query caches across tab switches
-    const heroTimeline = usePortfolioTimeline(currentVersionId, { granularity: 'daily' }, !!currentVersionId);
-
-    // Version metrics data (all ranges + performers) — always enabled, cached across tabs
-    const versionMetrics = useVersionMetrics(currentVersionId, {
-        groupBy: performerGroupBy,
-        topN: 25,
-        dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
-    }, !!currentVersionId);
-
-    // Update URL when account filter changes (for shareable links)
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        if (config.account_ids && config.account_ids.length > 0) {
-            params.set('accounts', config.account_ids.join(','));
-        } else {
-            params.delete('accounts');
-        }
-        const newUrl = params.toString()
-            ? `${window.location.pathname}?${params.toString()}`
-            : window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
-    }, [config.account_ids]);
-
-    // Fetch accounts on mount and when tab becomes active
-    useEffect(() => {
-        if (!isActive) return;
-        const fetchAccounts = async () => {
-            setIsLoadingAccounts(true);
-            try {
-                const response = await fetch(`${API_URL}/accounts/`);
-                if (response.ok) {
-                    const data: Account[] = await response.json();
-                    setAccounts(data);
-                }
-            } catch (err) {
-                console.error('Failed to fetch accounts:', err);
-            } finally {
-                setIsLoadingAccounts(false);
-            }
-        };
-        fetchAccounts();
-    }, [isActive]);
-
-    // Fetch categories when tab becomes active (for filter bar)
-    useEffect(() => {
-        if (!isActive) return;
-        const fetchCategories = async () => {
-            setIsLoadingCategories(true);
-            try {
-                const response = await fetch(`${API_URL}/categories/by-dimension`);
-                if (response.ok) {
-                    const data: DimensionWithCategories[] = await response.json();
-                    setDimensions(data);
-                }
-            } catch (err) {
-                console.error('Failed to fetch categories:', err);
-            } finally {
-                setIsLoadingCategories(false);
-            }
-        };
-        fetchCategories();
-    }, [isActive]);
-
-    // Default performerDimensionId to first dimension when dimensions arrive
-    useEffect(() => {
-        if (performerDimensionId === null && dimensions.length > 0) {
-            setPerformerDimensionId(dimensions[0].id);
-        }
-    }, [dimensions, performerDimensionId]);
-
-    // Result data
-    const [summary, setSummary] = useState<PnLSummary | null>(null);
-    const [pnlAssets, setPnlAssets] = useState<AssetPnLRow[]>([]);
-
-    // Merge P&L assets with all DB assets (non-P&L get placeholder rows)
-    const assets = useMemo((): AssetPnLRow[] => {
-        if (pnlAssets.length === 0) return [];
-        const pnlAssetIds = new Set(pnlAssets.map(a => a.asset.id).filter(Boolean));
-        const pnlSymbols = new Set(pnlAssets.map(a => a.asset.symbol?.toUpperCase()).filter(Boolean));
-
-        const nonPnlRows: AssetPnLRow[] = allDbAssets
-            .filter(dbAsset => {
-                // Skip if already in P&L results (by ID or symbol)
-                if (dbAsset.asset_id != null && pnlAssetIds.has(dbAsset.asset_id)) return false;
-                if (dbAsset.symbol && pnlSymbols.has(dbAsset.symbol.toUpperCase())) return false;
-                return true;
-            })
-            .map(dbAsset => ({
-                asset: { id: dbAsset.asset_id ?? null, symbol: dbAsset.symbol, label: dbAsset.label ?? null },
-                account_ids: [],
-                category_ids: [],
-                quantity: 0,
-                market_value: 0,
-                cost_basis: 0,
-                unrealized_pnl: 0,
-                unrealized_pnl_pct: 0,
-                realized_pnl: 0,
-                total_fees: 0,
-                lot_count: 0,
-                realized_event_count: 0,
-                warning_count: 0,
-                has_lots: false,
-            }));
-
-        return [...pnlAssets, ...nonPnlRows];
-    }, [pnlAssets, allDbAssets]);
-
-    // Backend-authoritative scorecard summary — single source of truth for AllTimeIndicators + TimeframeIndicators.
-    // Falls back to client-side computation when backend metrics haven't loaded yet.
-    const scorecardSummary = useMemo(() => {
-        const ms = versionMetrics.data?.summary;
-        if (ms) {
-            return {
-                portfolioValue: ms.current_value,
-                costBasis: ms.cost_basis,
-                unrealizedPnl: ms.unrealized_pnl,
-                realizedPnl: ms.realized_pnl,
-                totalFees: ms.total_fees,
-                feeEntryCount: ms.fee_entry_count,
-            };
-        }
-        // Fallback: reconstruct from client-side asset data while backend is loading
-        if (summary && assets.length > 0) {
-            return {
-                portfolioValue: assets.reduce((s, a) => s + (a.market_value || 0), 0),
-                costBasis: assets.reduce((s, a) => s + a.cost_basis, 0),
-                unrealizedPnl: summary.total_unrealized_pnl,
-                realizedPnl: summary.total_realized_pnl,
-                totalFees: summary.total_fees,
-                feeEntryCount: summary.fee_entry_count,
-            };
-        }
-        return null;
-    }, [versionMetrics.data, summary, assets]);
-
-    // Delta threshold percentage for balance health (configurable via card slider)
-    const [deltaThreshold, setDeltaThreshold] = useState(5);
-
-    // Timeframe range for the period section (default: last 7 days)
-    const [timeframeRange, setTimeframeRange] = useState<Range>('1w');
-
-    // Compute balance health data from live deltas (P&L qty vs exchange qty)
-    // Only report discrepancies where |pct| > deltaThreshold
-    const balanceHealth: BalanceHealthData | undefined = useMemo(() => {
-        if (pnlAssets.length === 0 || liveBalanceMap.size === 0) return undefined;
-        const issues: { symbol: string; delta: number; pct: number }[] = [];
-        let totalCompared = 0;
-        for (const row of pnlAssets) {
-            const sym = row.asset.symbol?.toUpperCase() ?? '';
-            const liveQty = liveBalanceMap.get(sym);
-            const d = computeDelta(row.quantity, liveQty);
-            if (!d) continue;
-            totalCompared++;
-            if (!d.matched && Math.abs(d.pct) > deltaThreshold) {
-                issues.push({ symbol: sym, delta: d.delta, pct: d.pct });
-            }
-        }
-        issues.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
-
-        // Asset-level counts: how many P&L assets have corresponding live balance data
-        const assetsTotal = pnlAssets.length;
-        const assetsFetched = totalCompared; // assets where both P&L and live exist
-
-        // Assets with no live balance data at all (symbol not in any exchange response)
-        const uncoveredAssets: string[] = [];
-        for (const row of pnlAssets) {
-            const sym = row.asset.symbol?.toUpperCase() ?? '';
-            if (sym && !liveBalanceMap.has(sym)) {
-                uncoveredAssets.push(sym);
-            }
-        }
-        uncoveredAssets.sort();
-
-        // Failed accounts (non-empty connector errors)
-        const failedAssets: string[] = [];
-        for (const [acctId, errors] of liveAccountErrors.entries()) {
-            const acct = accounts.find(a => a.id === acctId);
-            failedAssets.push(acct ? `${acct.name}: ${errors[0]}` : `Account #${acctId}: ${errors[0]}`);
-        }
-
-        return { mismatchCount: issues.length, totalCompared, issues, assetsFetched, assetsTotal, failedAssets, uncoveredAssets };
-    }, [pnlAssets, liveBalanceMap, deltaThreshold, accounts, liveFetchedAccountIds, liveAccountErrors]);
-
-    // Asset balance map for Activity Feed: symbol (uppercase) → total P&L quantity
-    const assetBalanceMap = useMemo(() => {
-        const map = new Map<string, number>();
-        for (const row of pnlAssets) {
-            const sym = row.asset.symbol?.toUpperCase() ?? '';
-            if (sym) map.set(sym, row.quantity);
-        }
-        return map;
-    }, [pnlAssets]);
-
-    // State: filter asset table to only mismatched (set by Balance Health card click)
-    const [showMismatchedOnly, setShowMismatchedOnly] = useState(false);
-
-    // Apply mismatch filter when Balance Health card is clicked
-    const displayAssets = useMemo(() => {
-        if (!showMismatchedOnly) return assets;
-        return assets.filter(row => {
-            const sym = row.asset.symbol?.toUpperCase() ?? '';
-            const liveQty = liveBalanceMap.get(sym);
-            if (liveQty === undefined) return false;
-            const d = computeDelta(row.quantity, liveQty);
-            return d !== null && !d.matched && Math.abs(d.pct) > deltaThreshold;
-        });
-    }, [assets, showMismatchedOnly, liveBalanceMap, deltaThreshold]);
-
-    // Build unmapped live assets list (symbols in live balance but not in P&L assets)
-    const unmappedLiveAssets = useMemo<UnmappedLiveAsset[]>(() => {
-        if (liveBalanceMap.size === 0 || assets.length === 0) return [];
-        const pnlSymbols = new Set(assets.map(a => a.asset.symbol?.toUpperCase()).filter(Boolean));
-        const unmapped: UnmappedLiveAsset[] = [];
-        for (const [sym, qty] of liveBalanceMap) {
-            if (!pnlSymbols.has(sym)) {
-                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null });
-            }
-        }
-        return unmapped.sort((a, b) => b.totalQty - a.totalQty);
-    }, [liveBalanceMap, assets]);
-
-    // Auto-fetch live balances when assets are loaded (after calculation or version load)
-    useEffect(() => {
-        if (assets.length > 0 && status !== 'idle' && status !== 'calculating') {
-            fetchLiveBalances();
-        }
-    }, [assets.length > 0 && status !== 'idle' && status !== 'calculating']);
-
-    // Compute available account IDs (accounts that have assets in current results)
-    const availableAccountIds = useMemo(() => {
-        const ids = new Set<number>();
-        assets.forEach(asset => {
-            asset.account_ids.forEach(accId => ids.add(accId));
-        });
-        return ids;
-    }, [assets]);
-
-    // Compute available category IDs (categories that have assets in current results)
-    const availableCategoryIds = useMemo(() => {
-        const ids = new Set<number>();
-        assets.forEach(asset => {
-            asset.category_ids.forEach(catId => ids.add(catId));
-        });
-        return ids;
-    }, [assets]);
-
-    // View state
-    const [currentView, setCurrentView] = useState<PnLView>('summary');
-    const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
-    const [selectedAsset, setSelectedAsset] = useState<AssetPnLRow | null>(null);
-    const [assetRealizedEntries, setAssetRealizedEntries] = useState<RealizedPnLRow[]>([]);
-    // Account filter for asset detail transactions tab (set when clicking account name in expanded PnL row)
-    const [initialAccountFilter, setInitialAccountFilter] = useState<number | undefined>(undefined);
-
-    // Panel state
-    const [showImpactPanel, setShowImpactPanel] = useState(false);
-    const [impactEvent, setImpactEvent] = useState<PnLImpactEvent | null>(null);
-
-    // Transaction detail drawer state
-    const [selectedTransactionId, setSelectedTransactionId] = useState<number | null>(null);
-    const [isTransactionDrawerOpen, setIsTransactionDrawerOpen] = useState(false);
-
-    // Slide panel to auto-open in InvestigationView when navigating from portfolio
-    const [auditDefaultPanel, setAuditDefaultPanel] = useState<'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | null>(null);
-
-    // Fees and warnings data
-    const [fees, setFees] = useState<FeeEntry[]>([]);
-    const [warnings, setWarnings] = useState<PnLWarningItem[]>([]);
-    // Per-type warning counts (fetched from backend)
-    const [warningTypeCounts, setWarningTypeCounts] = useState<Record<string, number>>({});
-    // ID arrays for tab title counts (from calculation result, before data loads)
-    const [idCounts, setIdCounts] = useState<{
-        unitCount: number;
-        lotCount: number;
-        consumedCount: number;
-        realizedCount: number;
-        feeCount: number;
-        warningCount: number;
-        settlementCount: number;
-        eventCount: number;
-    }>({ unitCount: 0, lotCount: 0, consumedCount: 0, realizedCount: 0, feeCount: 0, warningCount: 0, settlementCount: 0, eventCount: 0 });
-
-    // --- Price Refresh State ---
-    const [prices, setPrices] = useState<PriceResponse[]>([]);
-    const [isRefreshingPrices, setIsRefreshingPrices] = useState(false);
-    const [lastPriceRefresh, setLastPriceRefresh] = useState<Date | null>(null);
-    const [loadingPriceAssetIds, setLoadingPriceAssetIds] = useState<Set<number>>(new Set());
-    const [showPriceDrawer, setShowPriceDrawer] = useState(false);
-    const [isLoadingBalances, setIsLoadingBalances] = useState(false);
-
-    // Config change handler
-    const handleConfigChange = useCallback((partial: Partial<CalculationConfig>) => {
-        setConfig(prev => ({ ...prev, ...partial }));
-    }, []);
-
-    // Mode change handler - switching between 'load' and 'new' modes
-    const handleModeChange = useCallback((newMode: CalculationMode) => {
-        setCalculationMode(newMode);
-        // When switching to 'new', clear selected version
-        if (newMode === 'new' && currentVersionId) {
-            // Don't clear the loaded data, just switch modes
-        }
-    }, [currentVersionId]);
-
-    // Load aggregated balances from dedicated endpoint (group_by_asset=true)
-    // Returns balance data with realized P&L per asset
-    // includeUnsettledNegative controls whether unsettled negative lots are included
-    const loadBalances = useCallback(async (versionId: number, includeUnsettledNegative: boolean = false): Promise<AggregatedBalanceItem[]> => {
-        setIsLoadingBalances(true);
-        try {
-            const params = new URLSearchParams({
-                group_by_asset: 'true',
-                include_unsettled_negative: includeUnsettledNegative.toString(),
-            });
-            const response = await fetch(`${API_URL}/pnl/versions/${versionId}/balances?${params}`);
-            if (!response.ok) {
-                throw new Error('Failed to load balances');
-            }
-            const balances: AggregatedBalanceItem[] = await response.json();
-            console.log('Loaded aggregated balances:', balances.length, 'includeUnsettledNegative:', includeUnsettledNegative);
-
-            // Track total unsettled negative count across all assets
-            const totalUnsettled = balances.reduce((sum, b) => sum + (b.unsettled_negative_count || 0), 0);
-            setTotalUnsettledNegativeCount(totalUnsettled);
-
-            return balances;
-        } catch (err) {
-            console.error('Failed to load balances:', err);
-            toaster.error({
-                title: 'Balance Load Failed',
-                description: err instanceof Error ? err.message : 'Failed to load balances',
-            });
-            return [];
-        } finally {
-            setIsLoadingBalances(false);
-        }
-    }, []);
-
-    // Transform aggregated balances to AssetPnLRow array
-    const transformBalances = useCallback((balances: AggregatedBalanceItem[]): AssetPnLRow[] => {
-        return balances.map((balance) => ({
-            asset: balance.asset,
-            account_ids: balance.account_ids || [],  // All accounts holding this asset
-            category_ids: balance.category_ids || [],  // All categories assigned to this asset
-            quantity: balance.qty,
-            market_value: 0, // Updated by prices
-            cost_basis: balance.cost_basis_in_base,
-            unit_cost: balance.avg_unit_cost_in_base,  // Average cost per unit from lots
-            unrealized_pnl: 0, // Updated by prices
-            unrealized_pnl_pct: 0, // Updated by prices
-            realized_pnl: balance.realized_pnl_in_base,
-            total_fees: balance.total_fees_in_base ?? 0,  // Use API-provided fee cost
-            lot_count: balance.lot_count,
-            realized_event_count: balance.realized_event_count,
-            warning_count: balance.warning_count,
-            has_lots: true,
-        }));
-    }, []);
-
-    // Load per-account balances for expandable rows (group_by_asset=false)
-    // Prefetches all account breakdowns and organizes by asset ID
-    const loadAccountBalances = useCallback(async (versionId: number): Promise<Map<number, AccountBalanceBreakdown[]>> => {
-        setIsLoadingAccountBalances(true);
-        try {
-            const params = new URLSearchParams({
-                group_by_asset: 'false',
-                include_unsettled_negative: 'true',
-            });
-            const response = await fetch(`${API_URL}/pnl/versions/${versionId}/balances?${params}`);
-            if (!response.ok) {
-                throw new Error('Failed to load account balances');
-            }
-            const balances: PerAccountBalanceItem[] = await response.json();
-            console.log('Loaded per-account balances:', balances.length);
-
-            // Group by asset ID
-            const balanceMap = new Map<number, AccountBalanceBreakdown[]>();
-            for (const balance of balances) {
-                const assetId = balance.asset.id;
-                if (assetId == null) continue;
-
-                const breakdown: AccountBalanceBreakdown = {
-                    account_id: balance.account_id,
-                    account_name: balance.account_name,
-                    qty: balance.qty,
-                    cost_basis_in_base: balance.cost_basis_in_base,
-                    avg_unit_cost_in_base: balance.avg_unit_cost_in_base,
-                    lot_count: balance.lot_count,
-                };
-
-                if (!balanceMap.has(assetId)) {
-                    balanceMap.set(assetId, []);
-                }
-                balanceMap.get(assetId)!.push(breakdown);
-            }
-
-            setAccountBalances(balanceMap);
-            return balanceMap;
-        } catch (err) {
-            console.error('Failed to load account balances:', err);
-            return new Map();
-        } finally {
-            setIsLoadingAccountBalances(false);
-        }
-    }, []);
-
-    // Reload balances when unsettled negative filter changes
-    // Preserves price data and recalculates metrics
-    useEffect(() => {
-        // Skip if calculation is in progress to prevent duplicate API calls
-        if (isCalculatingRef.current) return;
-
-        // Skip if balances were just loaded by loadVersionById/runCalculation
-        if (balancesJustLoadedRef.current) {
-            balancesJustLoadedRef.current = false;
-            return;
-        }
-
-        if (currentVersionId) {
-            // Re-fetch balances with new filter setting
-            loadBalances(currentVersionId, showUnsettledNegative).then(balances => {
-                const assetRows = transformBalances(balances);
-
-                // Build full price map with metadata
-                const fullPriceMap = new Map<number, PriceResponse>();
-                for (const p of prices) {
-                    const assetId = p.asset.id;
-                    if (assetId != null) fullPriceMap.set(assetId, p);
-                }
-
-                // Apply prices to new asset rows
-                const assetsWithPrices = assetRows.map(assetpnlrow => {
-                    const assetId = assetpnlrow.asset.id;
-                    const priceObj = assetId != null ? fullPriceMap.get(assetId) : undefined;
-                    const isPriceLoading = assetId != null && loadingPriceAssetIds.has(assetId);
-
-                    if (!priceObj || priceObj.price == null) {
-                        return {
-                            ...assetpnlrow,
-                            unit_value: null,
-                            price_source: priceObj?.source,
-                            price_fetched_at: priceObj?.fetched_at,
-                            price_error: priceObj?.error,
-                            price_loading: isPriceLoading,
-                        };
-                    }
-                    const marketValue = assetpnlrow.quantity * priceObj.price;
-                    const unrealizedPnl = marketValue - assetpnlrow.cost_basis;
-                    const unrealizedPnlPct = assetpnlrow.cost_basis > 0 ? unrealizedPnl / assetpnlrow.cost_basis : 0;
-                    return {
-                        ...assetpnlrow,
-                        market_value: marketValue,
-                        unrealized_pnl: unrealizedPnl,
-                        unrealized_pnl_pct: unrealizedPnlPct,
-                        unit_value: priceObj.price,
-                        price_source: priceObj.source,
-                        price_fetched_at: priceObj.fetched_at,
-                        price_error: priceObj.error,
-                        price_loading: isPriceLoading,
-                    };
-                });
-
-                setPnlAssets(assetsWithPrices);
-
-                // Recalculate summary metrics
-                const totalUnrealized = assetsWithPrices.reduce((sum, a) => sum + (a.unrealized_pnl || 0), 0);
-                const totalMarketValue = assetsWithPrices.reduce((sum, a) => sum + (a.market_value || 0), 0);
-                const totalCostBasis = assetsWithPrices.reduce((sum, a) => sum + a.cost_basis, 0);
-
-                setSummary(prev => {
-                    if (!prev) return prev;
-                    return {
-                        ...prev,
-                        total_unrealized_pnl: totalUnrealized,
-                        total_portfolio_value: totalMarketValue > 0 ? totalMarketValue : totalCostBasis,
-                    };
-                });
-            });
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [showUnsettledNegative, currentVersionId]);
-
-    // Fetch prices for all assets in balances (Individually with concurrency control)
-    const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string) => {
-        if (!balances || balances.length === 0) return;
-
-        // Extract asset IDs from AssetRef
-        const assetIds = balances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
-        if (assetIds.length === 0) return;
-
-        setIsRefreshingPrices(true);
-        setLoadingPriceAssetIds(new Set(assetIds));
-        setLastPriceRefresh(new Date());
-
-        // Helper to fetch single price
-        const fetchSinglePrice = async (assetId: number) => {
-            try {
-                // Include fallback params from config
-                const response = await fetch(
-                    `${API_URL}/pnl/prices/${assetId}?base_currency=${baseCurrency}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}`
-                );
-
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch price`);
-                }
-
-                const data: PriceResponse = await response.json();
-
-                // Update specific price in state
-                setPrices(prev => {
-                    const idx = prev.findIndex(p => p.asset.id === assetId);
-                    if (idx >= 0) {
-                        const next = [...prev];
-                        next[idx] = data;
-                        return next;
-                    }
-                    return [...prev, data];
-                });
-            } catch (err) {
-                console.error(`Fetch failed for asset ${assetId}`, err);
-
-                // Create error entry
-                const errorItem: PriceResponse = {
-                    asset: { id: assetId, symbol: 'Unknown' },
-                    price: null,
-                    price_quote: baseCurrency,
-                    error: err instanceof Error ? err.message : 'Unknown error',
-                    fetched_at: new Date().toISOString()
-                };
-
-                // Try to find name from balances
-                const balance = balances.find(b => b.asset.id === assetId);
-                if (balance) {
-                    errorItem.asset.symbol = balance.asset.symbol;
-                }
-
-                setPrices(prev => {
-                    const idx = prev.findIndex(p => p.asset.id === assetId);
-                    if (idx >= 0) {
-                        const next = [...prev];
-                        next[idx] = errorItem;
-                        return next;
-                    }
-                    return [...prev, errorItem];
-                });
-            } finally {
-                setLoadingPriceAssetIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(assetId);
-                    return next;
-                });
-            }
-        };
-
-        // Concurrency control (5 parallel requests)
-        const CONCURRENCY = 5;
-        const queue = [...assetIds];
-        const active: Promise<void>[] = [];
-
-        try {
-            while (queue.length > 0 || active.length > 0) {
-                while (queue.length > 0 && active.length < CONCURRENCY) {
-                    const id = queue.shift();
-                    if (id !== undefined) {
-                        const promise = fetchSinglePrice(id).then(() => {
-                            active.splice(active.indexOf(promise), 1);
-                        });
-                        active.push(promise);
-                    }
-                }
-                if (active.length > 0) {
-                    await Promise.race(active);
-                }
-            }
-        } finally {
-            setIsRefreshingPrices(false);
-        }
-    }, [config.use_price_fallback, config.price_staleness_window_days]);
-
-    // Refresh a single asset price (used after manual price entry)
-    const refreshSinglePrice = useCallback(async (assetId: number) => {
-        try {
-            setLoadingPriceAssetIds(prev => new Set(prev).add(assetId));
-
-            const response = await fetch(
-                `${API_URL}/pnl/prices/${assetId}?base_currency=${config.base_currency_symbol}&use_fallback=${config.use_price_fallback}&staleness_window_days=${config.price_staleness_window_days}`
-            );
-
-            if (!response.ok) {
-                throw new Error(`Failed to fetch price`);
-            }
-
-            const data: PriceResponse = await response.json();
-
-            // Update specific price in state
-            setPrices(prev => {
-                const idx = prev.findIndex(p => p.asset.id === assetId);
-                if (idx >= 0) {
-                    const next = [...prev];
-                    next[idx] = data;
-                    return next;
-                }
-                return [...prev, data];
-            });
-        } catch (err) {
-            console.error(`Refresh failed for asset ${assetId}`, err);
-        } finally {
-            setLoadingPriceAssetIds(prev => {
-                const next = new Set(prev);
-                next.delete(assetId);
-                return next;
-            });
-        }
-    }, [config.base_currency_symbol, config.use_price_fallback, config.price_staleness_window_days]);
-
-    // Remove a warning by ID (used after manual price fixes the issue)
-    const removeWarning = useCallback((warningId: string) => {
-        setWarnings(prev => prev.filter(w => w.id !== warningId));
-        // Also update summary warning count
-        setSummary(prev => prev ? {
-            ...prev,
-            warning_count: Math.max(0, (prev.warning_count ?? 0) - 1),
-        } : prev);
-    }, []);
-
-    // Callback for manual price added from PriceStatusList or WarningsPanel
-    const handlePriceAdded = useCallback((assetId: number, warningId?: string) => {
-        // Refresh the single price to show updated status
-        refreshSinglePrice(assetId);
-        // Remove the warning if provided
-        if (warningId) {
-            removeWarning(warningId);
-        }
-    }, [refreshSinglePrice, removeWarning]);
-
-    // Transform API response to our types (non-balance data only)
-    // Assets are now built separately from loadBalances + transformBalances
-    // Transform summary data to build summary and set assets
-    // Note: Full data (units, lots, realized, warnings, settlements) are loaded on-demand via lazy loaders
-    type SummaryData = {
-        total_realized_pnl: number;
-        total_fees_in_base?: number;
-        fee_entry_count?: number;
-        unit_ids?: number[];
-        cost_lot_ids?: number[];
-        warning_ids?: number[];
-        realized_pnl_ids?: number[];
-        fee_ids?: number[];
-        cost_lot_event_ids?: number[];
-    };
-
-    // Helper function to map PnLVersionResponse to SummaryData
-    const mapToSummaryData = useCallback((calcResult: PnLVersionResponse): SummaryData => {
-        return {
-            total_realized_pnl: calcResult.total_realized_pnl,
-            total_fees_in_base: calcResult.total_fees_in_base ?? 0,
-            fee_entry_count: calcResult.fee_entry_count ?? 0,
-            unit_ids: calcResult.calculation_unit_ids,
-            cost_lot_ids: calcResult.cost_lot_ids,
-            warning_ids: calcResult.warning_ids,
-            realized_pnl_ids: calcResult.realized_pnl_ids,
-            fee_ids: calcResult.fee_ids,
-            cost_lot_event_ids: calcResult.cost_lot_event_ids,
-        };
-    }, []);
-
-    const transformResult = useCallback((result: SummaryData, assetRows: AssetPnLRow[]) => {
-        // Compute portfolio value from asset rows
-        const totalPortfolioValue = assetRows.reduce((sum, a) => sum + a.cost_basis, 0);
-        const totalUnrealizedPnL = assetRows.reduce((sum, a) => sum + a.unrealized_pnl, 0);
-
-        // Use server-provided fee summary (from calculation preview) for immediate display
-        // Fall back to summing from assets if not available (for older API responses)
-        const totalFees = result.total_fees_in_base ?? assetRows.reduce((sum, a) => sum + a.total_fees, 0);
-        const feeEntryCount = result.fee_entry_count ?? 0;
-
-        // Derive counts from ID arrays (provided by runCalculation/loadVersionById)
-        const newSummary: PnLSummary = {
-            total_portfolio_value: totalPortfolioValue,
-            total_unrealized_pnl: totalUnrealizedPnL,
-            total_realized_pnl: result.total_realized_pnl,
-            total_fees: totalFees,
-            fee_entry_count: feeEntryCount,
-            // Counts from ID arrays - lazy loaders fetch full data on-demand
-            warning_count: result.warning_ids?.length ?? 0,
-            error_count: 0,  // Updated when warnings are loaded
-            taxable_realized_pnl: 0,  // Updated when realized P&L is loaded
-            non_taxable_realized_pnl: 0,  // Updated when realized P&L is loaded
-            units_count: result.unit_ids?.length ?? 0,
-            lots_created_count: result.cost_lot_ids?.length ?? 0,
-            consumed_slices_count: 0,  // Computed later from asset-level data
-        };
-        setSummary(newSummary);
-
-        // Set assets from pre-built rows (built from balances endpoint)
-        setPnlAssets(assetRows);
-    }, []);
-
-    // Calculate P&L using Option D workflow with lazy loading:
-    // 1. POST /calculate → get version_id + summary
-    // 2. Fetch only summary + balances initially
-    // 3. Load other data on-demand when user navigates to views
-    const runCalculation = useCallback(async () => {
-        // Pre-calculation health check (direct API call to avoid race conditions with context polling)
-        // Skip if user already confirmed to continue despite issues
-        if (!skipHealthCheckRef.current) {
-            try {
-                // Direct health check API call (not using context state)
-                let healthUrl = `${API_URL}/transactions/data-health-check/status`;
-                if (config.account_ids && config.account_ids.length > 0) {
-                    healthUrl += `?account_ids=${config.account_ids.join(',')}`;
-                }
-                const healthResponse = await fetch(healthUrl);
-
-                if (!healthResponse.ok) {
-                    // Health check API failed - show modal to let user decide
-                    toaster.create({
-                        title: 'Health Check Failed',
-                        description: 'Unable to verify data health. You can try calculating anyway.',
-                        type: 'warning',
-                        duration: 5000,
-                    });
-                    setHealthCheckIssueCount(0); // Unknown
-                    setShowHealthConfirm(true);
-                    return;
-                }
-
-                const healthData = await healthResponse.json();
-
-                // Check if there are data health issues
-                if (healthData && healthData.has_issues) {
-                    const issueCount = healthData.total_issues;
-
-                    // Store issue count for dialog display
-                    setHealthCheckIssueCount(issueCount);
-
-                    // Show warning toast
-                    toaster.create({
-                        title: 'Data Health Issues Detected',
-                        description: `Found ${issueCount} data issue${issueCount !== 1 ? 's' : ''}. P&L calculation may be incomplete or inaccurate.`,
-                        type: 'warning',
-                        duration: 5000,
-                    });
-
-                    // Show confirmation dialog
-                    setShowHealthConfirm(true);
-                    return; // Don't proceed yet
-                }
-            } catch (err) {
-                console.error('Health check failed:', err);
-                // Show modal to let user decide
-                toaster.create({
-                    title: 'Health Check Error',
-                    description: 'Error checking data health. You can try calculating anyway.',
-                    type: 'warning',
-                    duration: 5000,
-                });
-                setHealthCheckIssueCount(0); // Unknown
-                setShowHealthConfirm(true);
-                return;
-            }
-        }
-
-        // Reset skip flag for next calculation
-        skipHealthCheckRef.current = false;
-
-        // Mark calculation as in progress
-        isCalculatingRef.current = true;
-
-        setIsCalculating(true);
-        setError(null);
-        setStatus('calculating');
-
-        try {
-            // Step 1: Calculate and persist as draft
-            // Pass all config including account_ids filter
-            // Note: Only send base_currency_symbol (not ID) to avoid stale ID issues after DB reset
-            const requestBody: Record<string, unknown> = {
-                lot_method: config.lot_method,
-                lot_mode: config.lot_mode,
-                base_currency_symbol: config.base_currency_symbol,
-                residual_tolerance_pct: config.residual_tolerance_pct,
-                allow_negative_balances: config.allow_negative_balances,
-                // Advanced settings
-                compute_residuals: config.compute_residuals,
-                crypto_swap_taxable_by_default: config.crypto_swap_taxable_by_default,
-                fee_taxable_by_default: config.fee_taxable_by_default,
-            };
-
-            // Only pass account_ids if filter is active (non-empty selection)
-            if (config.account_ids && config.account_ids.length > 0) {
-                requestBody.account_ids = config.account_ids;
-            }
-
-            const calcResponse = await fetch(`${API_URL}/pnl/calculate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
-            });
-
-            if (!calcResponse.ok) {
-                const errorData = await calcResponse.json();
-                throw new Error(errorData.detail || 'Failed to calculate P&L');
-            }
-
-            const calcResult: PnLVersionResponse = await calcResponse.json();
-            const versionId = calcResult.version_id;
-
-            console.log('P&L Calculation Result:', {
-                version_id: versionId,
-                status: calcResult.status,
-                total_realized_pnl: calcResult.total_realized_pnl,
-            });
-
-            // Store version info
-            balancesJustLoadedRef.current = true;  // Prevent useEffect duplicate fetch
-            setCurrentVersionId(versionId);
-            setCurrentVersionStatus(calcResult.status === 'draft' ? 'draft' : 'committed');
-            setLoadedVersionCreatedAt(calcResult.created_at ?? new Date().toISOString());
-
-            // Initialize ID counts from calculation response ID lists
-            setIdCounts({
-                unitCount: calcResult.calculation_unit_ids?.length ?? 0,
-                lotCount: calcResult.cost_lot_ids?.length ?? 0,
-                consumedCount: 0,  // Will be set from consumed slices pagination
-                realizedCount: calcResult.realized_pnl_ids?.length ?? 0,
-                feeCount: calcResult.fee_ids?.length ?? 0,
-                warningCount: calcResult.warning_ids?.length ?? 0,
-                settlementCount: 0,  // Will be set from settlements pagination
-                eventCount: calcResult.cost_lot_event_ids?.length ?? 0,
-            });
-
-            // Fetch warning type counts (fire-and-forget, non-blocking)
-            fetch(`${API_URL}/pnl/versions/${versionId}/warnings/type-counts`)
-                .then(r => r.ok ? r.json() : {})
-                .then(data => setWarningTypeCounts(data))
-                .catch(() => setWarningTypeCounts({}));
-
-            // Step 2: Load balances from dedicated endpoint (group_by_asset=true)
-            const balances = await loadBalances(versionId, showUnsettledNegative);
-            const assetRows = transformBalances(balances);
-
-            // Note: Per-account balances are loaded on-demand when user expands asset rows
-
-            // Map response to summary data for transformResult
-            const summaryData = mapToSummaryData(calcResult);
-
-            // Debug log
-            console.log('Initial P&L Data Loaded:', {
-                api_total_realized_pnl: summaryData.total_realized_pnl,
-                asset_count: assetRows.length,
-            });
-
-            transformResult(summaryData, assetRows);
-            setStatus('preview');
-            setCurrentView('assets');
-
-            // Prefetch per-account balances for expandable rows
-            loadAccountBalances(versionId);
-
-            // Step 3: Refresh prices for the loaded assets
-            if (assetRows.length > 0) {
-                const balanceEntries: BalanceEntry[] = balances.map(b => ({
-                    asset: b.asset,
-                    qty: b.qty,
-                    cost_basis_in_base: b.cost_basis_in_base,
-                    avg_unit_cost_in_base: b.avg_unit_cost_in_base,
-                    lot_count: b.lot_count,
-                }));
-                fetchPrices(balanceEntries, config.base_currency_symbol);
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
-            setStatus('error');
-        } finally {
-            setIsCalculating(false);
-            // Mark calculation as complete
-            isCalculatingRef.current = false;
-        }
-    }, [config, transformResult, loadBalances, transformBalances, fetchPrices, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
-
-    // Independent loader: Load calculation units with pagination
-
-    // Invalidate versions query to trigger a refetch (replaces fetchAvailableVersions)
-    const refreshVersionsList = useCallback(() => {
-        queryClient.invalidateQueries({ queryKey: ['pnl-versions'] });
-    }, [queryClient]);
-
-    // Handle continuing calculation despite health issues
-    const handleContinueAnyway = useCallback(() => {
-        skipHealthCheckRef.current = true;  // Skip health check on next call
-        setShowHealthConfirm(false);
-        // Call runCalculation directly (no setTimeout needed)
-        runCalculation();
-    }, [runCalculation]);
-
-    // Handle opening health check drawer to fix issues
-    const handleFixIssues = useCallback(() => {
-        setShowHealthConfirm(false);
-        onOpenHealthCheck?.();
-    }, [onOpenHealthCheck]);
-
-    // Load a specific version by ID - resets all state and fetches fresh data
-    const loadVersionById = useCallback(async (versionId: number) => {
-        setIsCalculating(true);
-        setError(null);
-
-        try {
-            // Reset relevant state for version reload
-            setWarnings([]);
-            setPrices([]);
-            setLastPriceRefresh(null);
-
-            // Fetch version metadata
-            const versionResponse = await fetch(`${API_URL}/pnl/versions/${versionId}`);
-            if (!versionResponse.ok) throw new Error('Failed to fetch version');
-            const versionData: PnLVersionResponse = await versionResponse.json();
-
-            // Store version info
-            balancesJustLoadedRef.current = true;  // Prevent useEffect duplicate fetch
-            setCurrentVersionId(versionId);
-            setCurrentVersionStatus(versionData.status === 'draft' ? 'draft' : 'committed');
-            setLoadedVersionCreatedAt(versionData.created_at ?? null);
-
-            // Update config from version
-            setConfig(prev => ({
-                ...prev,
-                lot_method: versionData.lot_method as any,
-                lot_mode: versionData.lot_mode as any,
-                base_currency_id: versionData.base_currency_id ?? prev.base_currency_id,
-                base_currency_symbol: versionData.base_currency_symbol ?? prev.base_currency_symbol,
-                compute_residuals: versionData.compute_residuals ?? prev.compute_residuals,
-            }));
-
-            // Store ID counts from version response ID lists
-            setIdCounts({
-                unitCount: versionData.calculation_unit_ids?.length ?? 0,
-                lotCount: versionData.cost_lot_ids?.length ?? 0,
-                consumedCount: 0,  // Will be set from consumed slices pagination
-                realizedCount: versionData.realized_pnl_ids?.length ?? 0,
-                feeCount: versionData.fee_ids?.length ?? 0,
-                warningCount: versionData.warning_ids?.length ?? 0,
-                settlementCount: 0,  // Will be set from settlements pagination
-                eventCount: versionData.cost_lot_event_ids?.length ?? 0,
-            });
-
-            // Fetch warning type counts (fire-and-forget, non-blocking)
-            fetch(`${API_URL}/pnl/versions/${versionId}/warnings/type-counts`)
-                .then(r => r.ok ? r.json() : {})
-                .then(data => setWarningTypeCounts(data))
-                .catch(() => setWarningTypeCounts({}));
-
-            // Fetch balances from dedicated endpoint (group_by_asset=true)
-            const balances = await loadBalances(versionId, showUnsettledNegative);
-            const assetRows = transformBalances(balances);
-
-            // Prefetch per-account balances for expandable rows
-            loadAccountBalances(versionId);
-
-            // Map response to summary data for transformResult
-            const summaryData = mapToSummaryData(versionData);
-
-            transformResult(summaryData, assetRows);
-            setStatus(versionData.status === 'committed' ? 'persisted' : 'preview');
-            setCurrentView('assets');
-
-            // Refresh prices for the loaded assets
-            if (assetRows.length > 0) {
-                const balanceEntries: BalanceEntry[] = balances.map(b => ({
-                    asset: b.asset,
-                    qty: b.qty,
-                    cost_basis_in_base: b.cost_basis_in_base,
-                    avg_unit_cost_in_base: b.avg_unit_cost_in_base,
-                    lot_count: b.lot_count,
-                }));
-                fetchPrices(balanceEntries, versionData.base_currency_symbol ?? config.base_currency_symbol);
-            }
-
-            toaster.success({
-                title: 'Version Loaded',
-                description: `Loaded version ${versionId} (${versionData.status})`,
-            });
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to load version');
-            toaster.error({
-                title: 'Load Failed',
-                description: err instanceof Error ? err.message : 'Failed to load version',
-            });
-        } finally {
-            setIsCalculating(false);
-        }
-    }, [transformResult, loadBalances, transformBalances, fetchPrices, config.base_currency_symbol, mapToSummaryData, loadAccountBalances, showUnsettledNegative]);
-
-    // Keep loadVersionByIdRef in sync for the polling hook's onNewVersion callback
-    useEffect(() => {
-        loadVersionByIdRef.current = loadVersionById;
-    }, [loadVersionById]);
-
-    // --- P&L Calculation Service Polling Hook ---
-    const {
-        status: calcServiceStatus,
-        isStale: isCalcStale,
-        isCalculating: isCalcServiceCalculating,
-        staleSince,
+        runCalculation,
+        loadVersionById,
+        commitVersion,
+        handleDeleteVersion,
+        refreshVersionsList,
+        handleConfigChange,
+        handleModeChange,
+        handleContinueAnyway,
+        handleFixIssues,
+        loadAccountBalances,
+        calcServiceStatus,
+        isCalcStale,
+        isCalcServiceCalculating,
         staleReasons,
-        currentVersionId: serviceVersionId,
+        serviceVersionId,
         lastCalculatedAt,
-        error: calcServiceError,
-        triggerRefresh: triggerPnLRefresh,
-        refetchStatus,
-    } = usePnLCalculationStatus({
-        isActive,
-        onNewVersion: (versionId) => {
-            // Auto-load the new version when background calculation completes
-            loadVersionByIdRef.current?.(versionId);
-            // Also refresh the versions list
-            refreshVersionsList();
+        triggerPnLRefresh,
+    } = usePnLData({ isActive, onOpenHealthCheck, fetchPrices });
+
+    const { drill } = state;
+
+    // ── Compute period date range for downstream scoping ──
+    const { dateFrom: periodDateFrom, dateTo: periodDateTo } = useMemo(
+        () => computeDateRange(timeframeRange),
+        [timeframeRange],
+    );
+
+    // ── Shared filter state (lifted from PortfolioContent so metrics can be scoped) ──
+    const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+
+    const hasActiveScope = selectedAccountIds.length > 0 || selectedCategoryIds.length > 0;
+
+    // ── Scoped version metrics (backend-filtered when account/category filters are active) ──
+    const scopedVersionMetrics = useVersionMetrics(
+        currentVersionId,
+        {
+            groupBy: performerGroupBy,
+            topN: 25,
+            dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
+            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
         },
-    });
+        !!currentVersionId && hasActiveScope,
+    );
 
-    // Auto-load latest version on first mount when in idle state
-    // Uses the service's current_version_id if available, otherwise loads first available version
-    const hasAutoLoaded = useRef(false);
-    useEffect(() => {
-        if (hasAutoLoaded.current) return;
-        if (!isActive) return;
+    // ── Scoped split metrics (same filter logic) ──
+    const scopedSettled = useSettledMetrics(
+        currentVersionId,
+        {
+            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+        },
+        !!currentVersionId && hasActiveScope,
+    );
 
-        // Wait for versions to be loaded
-        if (isLoadingVersions) return;
+    const scopedMarket = useMarketMetrics(
+        currentVersionId,
+        {
+            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+            pricesReady,
+        },
+        !!currentVersionId && hasActiveScope,
+    );
 
-        // If service reports a version, load it
-        if (serviceVersionId && status === 'idle') {
-            hasAutoLoaded.current = true;
-            loadVersionById(serviceVersionId);
-            return;
+    const scopedPerformers = useVersionPerformers(
+        currentVersionId,
+        {
+            period: timeframeRange,
+            groupBy: performerGroupBy,
+            topN: 25,
+            dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
+            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+            pricesReady,
+        },
+        !!currentVersionId && hasActiveScope,
+    );
+
+    // ── Effective metrics: scoped when filters active, otherwise global ──
+    const effectiveMetrics = hasActiveScope ? scopedVersionMetrics : versionMetrics;
+    const effectiveSettled = hasActiveScope ? scopedSettled : settledMetrics;
+    const effectiveMarket = hasActiveScope ? scopedMarket : marketMetrics;
+    const effectivePerformers = hasActiveScope ? scopedPerformers : performers;
+    const effectiveSummary = useMemo(() => {
+        const s = effectiveSettled.data?.summary;
+        const m = effectiveMarket.data?.summary;
+        if (s) {
+            return {
+                costBasis: s.cost_basis,
+                realizedPnl: s.realized_pnl,
+                totalFees: s.total_fees,
+                feeEntryCount: s.fee_entry_count,
+                portfolioValue: m?.current_value ?? 0,
+                unrealizedPnl: m?.unrealized_pnl ?? 0,
+            };
         }
+        return scorecardSummary;
+    }, [effectiveSettled.data, effectiveMarket.data, scorecardSummary]);
 
-        // Fallback: load the first available version
-        if (availableVersions.length > 0 && status === 'idle') {
-            hasAutoLoaded.current = true;
-            loadVersionById(availableVersions[0].version_id);
-        }
-    }, [isActive, serviceVersionId, availableVersions, isLoadingVersions, status, loadVersionById]);
+    // ── Asset category maps for treemap (Level 0) ──
+    const assetCategoryMaps = useCategoryMaps(dimensions, assets);
 
-    // Commit (save) the current draft version
-    const commitVersion = useCallback(async () => {
-        if (!currentVersionId) return;
+    // ══════════════════════════════════════════════════════════
+    // Navigation handlers (UI-specific, stay in render layer)
+    // ══════════════════════════════════════════════════════════
 
-        setIsPersisting(true);
-        try {
-            const response = await fetch(`${API_URL}/pnl/versions/${currentVersionId}/commit`, {
-                method: 'POST',
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to save P&L');
-            }
-
-            setCurrentVersionStatus('committed');
-            setStatus('persisted');
-            toaster.success({
-                title: 'P&L Saved',
-                description: `Version ${currentVersionId} has been saved.`,
-            });
-
-            // Refresh available versions list
-            refreshVersionsList();
-        } catch (err) {
-            toaster.error({
-                title: 'Save Failed',
-                description: err instanceof Error ? err.message : 'Unknown error',
-            });
-        } finally {
-            setIsPersisting(false);
-        }
-    }, [currentVersionId, refreshVersionsList]);
-
-    // Asset click handler - TEMPORARILY DISABLED during refactoring
-    const handleAssetClick = useCallback(async (assetId: number | null | undefined) => {
-        const asset = assets.find(apnl => apnl.asset.id === assetId);
+    /** Asset click from L0 table or L1 detail — enters drill L2 */
+    const handleAssetClick = useCallback((assetId: number | null | undefined) => {
+        if (assetId == null) return;
+        const asset = assets.find(a => a.asset.id === assetId);
         if (!asset) return;
-        setSelectedAssetId(assetId ?? null);
-        setSelectedAsset(asset);
-        setInitialAccountFilter(undefined);
-        setCurrentView('asset-detail');
-    }, [assets]);
+        const sym = asset.asset.symbol ?? `#${assetId}`;
+        const lbl = asset.asset.label ?? undefined;
+        if (drill.level === 0) {
+            dispatch({ type: 'DRILL_INTO', assetId, assetSymbol: sym, assetLabel: lbl });
+        } else {
+            dispatch({ type: 'DRILL_TO_ASSET', assetId, assetSymbol: sym, assetLabel: lbl });
+        }
+    }, [assets, dispatch, drill.level]);
 
-    // Account click handler - navigate to asset detail with transactions filtered by account
+    /** Account click within an asset card → drill to asset with account filter */
     const handleAccountClick = useCallback((assetId: number, accountId: number) => {
-        const asset = assets.find(apnl => apnl.asset.id === assetId);
+        const asset = assets.find(a => a.asset.id === assetId);
         if (!asset) return;
-        setSelectedAssetId(assetId);
-        setSelectedAsset(asset);
-        setInitialAccountFilter(accountId);
-        setCurrentView('asset-detail');
-    }, [assets]);
+        dispatch({ type: 'DRILL_INTO', assetId, assetSymbol: asset.asset.symbol ?? `#${assetId}`, assetLabel: asset.asset.label ?? undefined, accountFilter: accountId });
+    }, [assets, dispatch]);
 
-    // Back to assets view
-    const handleBackToAssets = useCallback(() => {
-        setSelectedAssetId(null);
-        setSelectedAsset(null);
-        setInitialAccountFilter(undefined);
-        setCurrentView('assets');
-    }, []);
-
-    // Realized entry click handler
     const handleRealizedClick = useCallback((entryId: string) => {
-        const entry = assetRealizedEntries.find(e => e.id === entryId);
+        const entry = assetRealizedEntries.find((e: RealizedPnLRow) => e.id === entryId);
         if (!entry) return;
-
-        // Check if this entry is a fee-related entry
-        // Fee entries would have event_type 'fee' and specific indicators
         const isFeeEntry = entry.event_type === 'fee';
-
-        // Build impact event
         const event: PnLImpactEvent = {
             id: entryId,
             event_type: isFeeEntry ? 'fee' : entry.event_type,
@@ -1377,138 +247,93 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             total_pnl: entry.pnl_in_base,
             total_proceeds: entry.proceeds_in_base,
             total_cost_basis: entry.cost_basis_in_base,
-            total_fees: isFeeEntry ? entry.proceeds_in_base : 0,  // Fee amount is the proceeds if it's a fee entry
+            total_fees: isFeeEntry ? entry.proceeds_in_base : 0,
             consumed_lots: [],
             transactions: [],
             unit_id: entry.unit_id,
         };
-        setImpactEvent(event);
-        setShowImpactPanel(true);
-    }, [assetRealizedEntries]);
+        dispatch({ type: 'SET_SHOW_IMPACT_PANEL', value: true, event });
+    }, [assetRealizedEntries, dispatch]);
 
-    // External navigation handlers
     const handleTransactionClick = useCallback((txId: number) => {
-        setSelectedTransactionId(txId);
-        setIsTransactionDrawerOpen(true);
-    }, []);
+        dispatch({ type: 'SET_TRANSACTION_DRAWER', transactionId: txId, isOpen: true });
+    }, [dispatch]);
 
     const handleCloseTransactionDrawer = useCallback(() => {
-        setIsTransactionDrawerOpen(false);
-        setSelectedTransactionId(null);
-    }, []);
+        dispatch({ type: 'SET_TRANSACTION_DRAWER', transactionId: null, isOpen: false });
+    }, [dispatch]);
 
     const handleUnitClick = useCallback((unitId: number) => {
-        // Switch to audit view if not already there
-        if (viewMode !== 'audit') {
-            setViewMode('audit');
-        }
-        // Clear any open slide panel so the feed is visible
-        setAuditDefaultPanel(null);
         console.log('Navigate to calculation unit:', unitId);
-    }, [viewMode]);
+    }, []);
 
-    // Version management handlers
     const handleLoadVersion = useCallback(async (versionId: number) => {
         await loadVersionById(versionId);
     }, [loadVersionById]);
 
-    // Option D: handlePersistVersion now commits the draft version
     const handlePersistVersion = useCallback(async () => {
-        // Use the new Option D commitVersion
         await commitVersion();
     }, [commitVersion]);
 
-    const handleDeleteVersion = useCallback(async (versionId: number) => {
-        setIsDeleting(true);
-        try {
-            // Delete version via API
-            await fetch(`${API_URL}/pnl/versions/${versionId}`, {
-                method: 'DELETE',
-            });
-            // Refresh versions list
-            refreshVersionsList();
-            if (currentVersionId === versionId) {
-                setCurrentVersionId(null);
-                setLoadedVersionCreatedAt(null);
-                setStatus('idle');
-            }
-        } finally {
-            setIsDeleting(false);
+    // ── Toolbar handlers (extracted from inline JSX) ──
+
+    const handleTriggerRefresh = useCallback(async () => {
+        const started = await triggerPnLRefresh();
+        if (started) {
+            toaster.success({ title: 'P&L recalculation started' });
+        } else {
+            toaster.info({ title: 'Calculation already in progress' });
         }
-    }, [currentVersionId, refreshVersionsList]);
+    }, [triggerPnLRefresh]);
 
-    // --- Manual Refresh Button ---
-    const handleRefreshPrices = useCallback(async () => {
-        // Build balance entries from current assets
-        if (assets && assets.length > 0) {
-            const balanceEntries: BalanceEntry[] = assets.map(a => ({
-                asset: a.asset,
-                qty: a.quantity,
-                cost_basis_in_base: a.cost_basis,
-                avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
-                lot_count: a.lot_count,
-            }));
-            await fetchPrices(balanceEntries, config.base_currency_symbol);
-            // Re-fetch server metrics so scorecards & performers use the updated DB prices
-            versionMetrics.refetch();
+    const handleOpenHistory = useCallback(() => {
+        dispatch({ type: 'SET_SHOW_HISTORY_PANEL', value: true });
+        refreshVersionsList();
+    }, [dispatch, refreshVersionsList]);
+
+    const handleFeesClick = useCallback(() => {
+        // Fees are visible in the PnL Audit section (inline in Portfolio)
+    }, []);
+
+    const handleWarningsClick = useCallback(() => {
+        // Warnings are visible in the PnL Audit section (inline in Portfolio)
+    }, []);
+
+    const handleToggleMismatchFilter = useCallback(() => {
+        dispatch({ type: 'SET_SHOW_MISMATCHED_ONLY', value: !showMismatchedOnly });
+    }, [dispatch, showMismatchedOnly]);
+
+    // ══════════════════════════════════════════════════════════
+    // Drill-down handlers — progressive disclosure navigation
+    // ══════════════════════════════════════════════════════════
+
+    /** Metric click from TimeframeIndicators */
+    const handleMetricDrill = useCallback((metric: DrillMetric, period?: Range) => {
+        dispatch({ type: 'DRILL_INTO', metric, period });
+    }, [dispatch]);
+
+    /** Unified performer click (asset/category/account) from TimeframeIndicators */
+    const handlePerformerDrill = useCallback((id: number, groupType: string, name: string) => {
+        if (groupType === 'asset') {
+            const asset = assets.find(a => a.asset.id === id);
+            dispatch({ type: 'DRILL_INTO', assetId: id, assetSymbol: asset?.asset.symbol ?? name, assetLabel: asset?.asset.label ?? undefined, period: timeframeRange });
+        } else if (groupType === 'category') {
+            dispatch({ type: 'DRILL_INTO', entityType: 'category' as DrillEntityType, entityId: id, entityLabel: name, period: timeframeRange });
+        } else if (groupType === 'account') {
+            dispatch({ type: 'DRILL_INTO', entityType: 'account' as DrillEntityType, entityId: id, entityLabel: name, period: timeframeRange });
         }
-    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
+    }, [assets, dispatch, timeframeRange]);
 
-    // --- Recompute unrealized P&L using live prices ---
-    useEffect(() => {
-        if (!assets || !prices || prices.length === 0) return;
-        const priceMap = new Map<number, PriceResponse>();
-        for (const p of prices) {
-            const assetId = p.asset.id;
-            if (assetId != null) priceMap.set(assetId, p);
+    /** Asset navigate from treemap (double-click) */
+    const handleAssetNavigate = useCallback((assetId: number, assetSymbol: string) => {
+        const asset = assets.find(a => a.asset.id === assetId);
+        const lbl = asset?.asset.label ?? undefined;
+        if (drill.level === 0) {
+            dispatch({ type: 'DRILL_INTO', assetId, assetSymbol, assetLabel: lbl });
+        } else {
+            dispatch({ type: 'DRILL_TO_ASSET', assetId, assetSymbol, assetLabel: lbl });
         }
-        setPnlAssets(prevAssets => prevAssets.map(assetpnlrow => {
-            const assetId = assetpnlrow.asset.id;
-            const priceObj = assetId != null ? priceMap.get(assetId) : undefined;
-            if (!priceObj || priceObj.price == null) {
-                return {
-                    ...assetpnlrow,
-                    market_value: 0,
-                    unrealized_pnl: 0,
-                    unrealized_pnl_pct: 0,
-                    unit_value: null,
-                    price_source: priceObj?.source,
-                    price_fetched_at: priceObj?.fetched_at,
-                    price_error: priceObj?.error,
-                };
-            }
-            const marketValue = assetpnlrow.quantity * priceObj.price;
-            const unrealizedPnl = marketValue - assetpnlrow.cost_basis;
-            const unrealizedPnlPct = assetpnlrow.cost_basis > 0 ? unrealizedPnl / assetpnlrow.cost_basis : 0;
-            return {
-                ...assetpnlrow,
-                market_value: marketValue,
-                unrealized_pnl: unrealizedPnl,
-                unrealized_pnl_pct: unrealizedPnlPct,
-                unit_value: priceObj.price,
-                price_source: priceObj.source,
-                price_fetched_at: priceObj.fetched_at,
-                price_error: priceObj.error,
-            };
-        }));
-    }, [prices]);
-
-    // --- Lazy load audit data removed - tabs now fetch their own data when opened ---
-
-    // --- Recalculate summary unrealized P&L when assets change (from live prices) ---
-    useEffect(() => {
-        if (!assets || assets.length === 0) return;
-        const totalUnrealized = assets.reduce((sum, a) => sum + (a.unrealized_pnl || 0), 0);
-        const totalMarketValue = assets.reduce((sum, a) => sum + (a.market_value || 0), 0);
-        setSummary(prev => {
-            if (!prev) return prev;
-            return {
-                ...prev,
-                total_unrealized_pnl: totalUnrealized,
-                total_portfolio_value: totalMarketValue > 0 ? totalMarketValue : prev.total_portfolio_value,
-            };
-        });
-    }, [assets]);
+    }, [assets, dispatch, drill.level]);
 
     return (
         <Box p={4}>
@@ -1534,14 +359,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                         size="sm"
                         colorPalette={isCalcStale ? 'orange' : 'blue'}
                         variant={isCalcStale ? 'solid' : 'outline'}
-                        onClick={async () => {
-                            const started = await triggerPnLRefresh();
-                            if (started) {
-                                toaster.success({ title: 'P&L recalculation started' });
-                            } else {
-                                toaster.info({ title: 'Calculation already in progress' });
-                            }
-                        }}
+                        onClick={handleTriggerRefresh}
                         disabled={isCalcServiceCalculating}
                         loading={isCalcServiceCalculating}
                     >
@@ -1553,7 +371,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setShowCustomCalcDrawer(true)}
+                        onClick={() => dispatch({ type: 'SET_SHOW_CUSTOM_CALC_DRAWER', value: true })}
                     >
                         <FiSliders />
                         <Text ml={1}>Custom Calculation</Text>
@@ -1563,10 +381,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => {
-                            setShowHistoryPanel(true);
-                            refreshVersionsList();
-                        }}
+                        onClick={handleOpenHistory}
                     >
                         <FiClock />
                         <Text ml={1}>History</Text>
@@ -1593,12 +408,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     </Text>
                     <Button
                         colorPalette="blue"
-                        onClick={async () => {
-                            const started = await triggerPnLRefresh();
-                            if (started) {
-                                toaster.success({ title: 'P&L calculation started' });
-                            }
-                        }}
+                        onClick={handleTriggerRefresh}
                     >
                         Calculate P&L
                     </Button>
@@ -1607,249 +417,127 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
             {(status === 'preview' || status === 'persisted') && summary && (
                 <>
-                    {/* Toolbar: View toggle only */}
-                    {currentView !== 'asset-detail' && (
-                        <Flex
-                            align="center"
-                            justify="space-between"
-                            gap={3}
-                            mb={4}
-                            p={2}
-                            bg="gray.50"
-                            borderRadius="md"
-                            border="1px solid"
-                            borderColor="gray.200"
-                        >
-                            {/* View toggle */}
-                            <Flex gap={2} align="center">
-                                <Button
-                                    size="sm"
-                                    variant={viewMode === 'portfolio' ? 'solid' : 'outline'}
-                                    colorPalette={viewMode === 'portfolio' ? 'blue' : 'gray'}
-                                    onClick={() => setViewMode('portfolio')}
-                                >
-                                    📊 Portfolio
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant={viewMode === 'charts' ? 'solid' : 'outline'}
-                                    colorPalette={viewMode === 'charts' ? 'blue' : 'gray'}
-                                    onClick={() => setViewMode('charts')}
-                                >
-                                    📉 Charts
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant={viewMode === 'audit' ? 'solid' : 'outline'}
-                                    colorPalette={viewMode === 'audit' ? 'blue' : 'gray'}
-                                    onClick={() => setViewMode('audit')}
-                                >
-                                    📋 Full Audit
-                                </Button>
-                            </Flex>
+                    {/* Toolbar: View toggle */}
+                    <Flex
+                        align="center"
+                        justify="space-between"
+                        gap={3}
+                        mb={4}
+                        p={2}
+                        bg="gray.50"
+                        borderRadius="md"
+                        border="1px solid"
+                        borderColor="gray.200"
+                    >
+                        {/* View toggle — single Portfolio mode */}
+                        <Flex gap={2} align="center">
+                            <Heading size="sm" color="gray.700">📊 Portfolio</Heading>
                         </Flex>
-                    )}
+                    </Flex>
 
-                    {/* ═══════ ROW 1: All-Time Indicators + Status Cards ═══════ */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && summary && assets.length > 0 && (
-                        <Box
-                            display="grid"
-                            gridTemplateColumns={{ base: '1fr', md: '1fr 1fr' }}
-                            gap={4}
-                            mb={4}
-                        >
-                            {/* Left: All-time indicators */}
-                            <AllTimeIndicators
-                                summary={scorecardSummary}
-                                baseCurrency={config.base_currency_symbol}
-                                isLoading={heroTimeline.isLoading}
-                                onFeesClick={() => {
-                                    setViewMode('audit');
-                                    setAuditDefaultPanel('fees');
-                                }}
-                            />
-
-                            {/* Right: 3 full-size status cards */}
-                            <Box
-                                display="grid"
-                                gridTemplateColumns="1fr 1fr 1fr"
-                                gap={2}
-                            >
+                    {/* ═══════ Unified Timeframe Overview — always visible ═══════ */}
+                    {summary && assets.length > 0 && (
+                        <Flex gap={4} mb={4} align="flex-start">
+                            <Box flex="1" minW={0}>
+                                <TimeframeIndicators
+                                    points={heroTimeline.data?.points || []}
+                                    baseCurrency={config.base_currency_symbol}
+                                    isLoading={heroTimeline.isLoading || effectiveSettled.isLoading}
+                                    summary={effectiveSummary}
+                                    periodSummaryData={effectiveMetrics.data ?? undefined}
+                                    settledData={effectiveSettled.data ?? undefined}
+                                    marketData={effectiveMarket.data ?? undefined}
+                                    isMarketLoading={effectiveMarket.isLoading}
+                                    performersData={effectivePerformers.data ?? undefined}
+                                    isPerformersLoading={effectivePerformers.isLoading}
+                                    range={timeframeRange}
+                                    onRangeChange={(r: Range) => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r })}
+                                    groupBy={performerGroupBy}
+                                    onGroupByChange={(g: GroupBy) => dispatch({ type: 'SET_PERFORMER_GROUP_BY', groupBy: g })}
+                                    onPerformerClick={handlePerformerDrill}
+                                    onMetricClick={(metric) => handleMetricDrill(metric, timeframeRange)}
+                                    onFeesClick={handleFeesClick}
+                                    dimensions={dimensions}
+                                    selectedDimensionId={performerDimensionId}
+                                    onDimensionChange={(id: number | null) => dispatch({ type: 'SET_PERFORMER_DIMENSION_ID', id })}
+                                />
+                            </Box>
+                            <Flex direction="column" gap={2} w="220px" flexShrink={0}>
                                 <RefreshPricesCard
                                     onRefreshPrices={handleRefreshPrices}
                                     isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
                                     priceSuccessCount={prices.filter(p => !p.error && p.price != null && !p.is_stale).length}
                                     priceStaleCount={prices.filter(p => !p.error && p.price != null && p.is_stale).length}
                                     priceErrorCount={prices.filter(p => !!p.error || p.price == null).length}
-                                    onPriceBadgeClick={() => setShowPriceDrawer(true)}
+                                    onPriceBadgeClick={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: true })}
                                     refreshDisabled={!currentVersionId}
+                                    naCount={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id)).length}
+                                    pendingCount={loadingPriceAssetIds.size}
+                                    pnlAssetCount={pnlAssets.length}
                                 />
                                 <WarningsCard
                                     summary={summary}
-                                    onWarningsClick={() => {
-                                        setViewMode('audit');
-                                        setAuditDefaultPanel('warnings');
-                                    }}
+                                    onWarningsClick={handleWarningsClick}
                                     warningTypeCounts={warningTypeCounts}
                                 />
                                 <BalanceHealthCard
                                     balanceHealth={balanceHealth}
-                                    onBalanceHealthClick={() => {
-                                        setShowMismatchedOnly(prev => !prev);
-                                    }}
+                                    onBalanceHealthClick={handleToggleMismatchFilter}
                                     deltaThreshold={deltaThreshold}
-                                    onDeltaThresholdChange={setDeltaThreshold}
+                                    onDeltaThresholdChange={(v: number) => dispatch({ type: 'SET_DELTA_THRESHOLD', threshold: v })}
                                 />
-                            </Box>
-                        </Box>
+                            </Flex>
+                        </Flex>
                     )}
 
-                    {/* ═══════ ROW 2: Timeframe Indicators (includes Best & Worst) ═══════ */}
-                    {currentView !== 'asset-detail' && viewMode === 'portfolio' && assets.length > 0 && (
-                        <Box mb={4}>
-                            <TimeframeIndicators
-                                points={heroTimeline.data?.points || []}
-                                baseCurrency={config.base_currency_symbol}
-                                isLoading={heroTimeline.isLoading || versionMetrics.isLoading}
-                                summary={scorecardSummary}
-                                periodSummaryData={versionMetrics.data ?? undefined}
-                                range={timeframeRange}
-                                onRangeChange={setTimeframeRange}
-                                groupBy={performerGroupBy}
-                                onGroupByChange={setPerformerGroupBy}
-                                onAssetClick={handleAssetClick}
-                                dimensions={dimensions}
-                                selectedDimensionId={performerDimensionId}
-                                onDimensionChange={setPerformerDimensionId}
-                            />
-                        </Box>
-                    )}
-
-                    {/* Compact summary bar when in detail view */}
-                    {currentView === 'asset-detail' && summary && (
-                        <SummaryBar
-                            summary={summary}
-                            baseCurrency={config.base_currency_symbol}
-                        />
-                    )}
-
-                    {/* Charts Dashboard View — full analytics when Charts tab is active */}
-                    {currentView === 'assets' && viewMode === 'charts' && currentVersionId && (
-                        <ChartsDashboard
-                            versionId={currentVersionId}
-                            baseCurrency={config.base_currency_symbol}
-                            dimensions={dimensions}
-                            accounts={accounts}
+                    {/* Main content — Portfolio View */}
+                    {currentView === 'assets' && (
+                        <PortfolioContent
+                            drill={drill}
+                            dispatch={dispatch}
+                            displayAssets={displayAssets}
                             assets={assets}
-                            onItemClick={(itemId: number, type: 'asset' | 'category') => {
-                                if (type === 'asset') {
-                                    handleAssetClick(itemId);
-                                }
-                            }}
-                            /* Shared data from PnLPanel — avoids duplicate fetches */
-                            sharedTimeline={heroTimeline}
-                            periodSummaryData={versionMetrics.data ?? undefined}
-                            groupBy={performerGroupBy}
-                            onGroupByChange={setPerformerGroupBy}
-                            summary={scorecardSummary ?? undefined}
-                            timeframeRange={timeframeRange}
-                            onTimeframeRangeChange={setTimeframeRange}
-                            onAssetClick={handleAssetClick}
+                            config={config}
+                            showMismatchedOnly={showMismatchedOnly}
                             accountBalances={accountBalances}
-                            performerDimensionId={performerDimensionId}
-                            onPerformerDimensionChange={setPerformerDimensionId}
-                        />
-                    )}
-
-                    {/* Main content based on view - Portfolio View (assets table) */}
-                    {currentView === 'assets' && viewMode === 'portfolio' && (
-                        <>
-                            {showMismatchedOnly && (
-                                <Flex align="center" gap={2} mb={3} px={1}>
-                                    <Badge colorPalette="orange" size="sm">
-                                        Showing {displayAssets.length} mismatched asset{displayAssets.length !== 1 ? 's' : ''} only
-                                    </Badge>
-                                    <Text
-                                        as="span"
-                                        fontSize="xs"
-                                        color="blue.500"
-                                        cursor="pointer"
-                                        _hover={{ textDecoration: 'underline' }}
-                                        onClick={() => setShowMismatchedOnly(false)}
-                                    >
-                                        Clear filter
-                                    </Text>
-                                </Flex>
-                            )}
-                            <AssetPnLTable
-                                assets={displayAssets}
-                                baseCurrency={config.base_currency_symbol}
-                                onAssetClick={handleAssetClick}
-                                onAccountClick={handleAccountClick}
-                                accountBalances={accountBalances}
-                                accounts={accounts}
-                                dimensions={dimensions}
-                                availableAccountIds={availableAccountIds}
-                                availableCategoryIds={availableCategoryIds}
-                                onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
-                                liveBalances={liveBalanceMap}
-                                liveAccountBalances={liveAccountBalanceMap}
-                                liveBalanceLoading={liveBalanceLoading}
-                                unmappedLiveAssets={unmappedLiveAssets}
-                                liveAccountErrors={liveAccountErrors}
-                                liveFetchedAccountIds={liveFetchedAccountIds}
-                            />
-                        </>
-                    )}
-
-                    {/* Full Audit View — Investigation workflow */}
-                    {currentView === 'assets' && viewMode === 'audit' && currentVersionId && (
-                        <InvestigationView
-                            versionId={currentVersionId}
-                            baseCurrency={config.base_currency_symbol}
-                            onTransactionClick={handleTransactionClick}
-                            onAssetClick={handleAssetClick}
-                            onUnitClick={handleUnitClick}
-                            defaultPanel={auditDefaultPanel}
-                            onPanelChange={(panel) => setAuditDefaultPanel(panel as any)}
-                            quoteAssetId={config.base_currency_id ?? undefined}
-                            onPriceAdded={(assetId, warningId) => handlePriceAdded(assetId, warningId)}
-                            assets={assets.map(a => ({ id: a.asset.id ?? 0, symbol: a.asset.symbol ?? '', label: a.asset.label ?? undefined }))}
-                            assetBalanceMap={assetBalanceMap}
-                        />
-                    )}
-
-                    {currentView === 'asset-detail' && selectedAsset && currentVersionId && (
-                        <AssetDetailView
-                            asset={selectedAsset}
-                            versionId={currentVersionId}
-                            baseCurrency={config.base_currency_symbol}
-                            onBack={handleBackToAssets}
-                            onTransactionClick={handleTransactionClick}
-                            accountBreakdown={selectedAsset.asset.id != null ? accountBalances.get(selectedAsset.asset.id) : undefined}
-                            liveBalance={liveBalanceMap.get(selectedAsset.asset.symbol?.toUpperCase() ?? '')}
-                            liveAccountBalances={liveAccountBalanceMap.get(selectedAsset.asset.symbol?.toUpperCase() ?? '')}
+                            accounts={accounts}
+                            dimensions={dimensions}
+                            availableAccountIds={availableAccountIds}
+                            availableCategoryIds={availableCategoryIds}
+                            currentVersionId={currentVersionId}
+                            heroTimeline={heroTimeline}
+                            assetCategoryMaps={assetCategoryMaps}
+                            liveBalanceMap={liveBalanceMap}
+                            liveAccountBalanceMap={liveAccountBalanceMap}
                             liveBalanceLoading={liveBalanceLoading}
-                            liveFetchedAccountIds={liveFetchedAccountIds}
+                            unmappedLiveAssets={unmappedLiveAssets}
                             liveAccountErrors={liveAccountErrors}
-                            initialAccountFilter={initialAccountFilter}
+                            liveFetchedAccountIds={liveFetchedAccountIds}
+                            onAssetClick={handleAssetClick}
+                            onAccountClick={handleAccountClick}
+                            onAssetNavigate={handleAssetNavigate}
+                            onTransactionClick={handleTransactionClick}
+                            onUnitClick={handleUnitClick}
+
+                            onLoadAccountBalances={() => currentVersionId && loadAccountBalances(currentVersionId)}
+                            selectedAccountIds={selectedAccountIds}
+                            onSelectedAccountIdsChange={setSelectedAccountIds}
+                            selectedCategoryIds={selectedCategoryIds}
+                            onSelectedCategoryIdsChange={setSelectedCategoryIds}
+                            timeframeRange={timeframeRange}
+                            periodDateFrom={periodDateFrom}
+                            periodDateTo={periodDateTo}
                         />
                     )}
+
                 </>
             )}
-
-            {/* FeesPanel removed: fees now only shown in audit tab */}
-
-            {/* WarningsPanel removed: warnings now only shown in audit tab */}
 
             {showImpactPanel && impactEvent && (
                 <PnLImpactPanel
                     event={impactEvent}
                     baseCurrency={config.base_currency_symbol}
-                    onClose={() => {
-                        setShowImpactPanel(false);
-                        setImpactEvent(null);
-                    }}
+                    onClose={() => dispatch({ type: 'SET_SHOW_IMPACT_PANEL', value: false })}
                     onTransactionClick={handleTransactionClick}
                     onUnitClick={handleUnitClick}
                 />
@@ -1857,7 +545,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
 
             <SlidePanel
                 isOpen={showPriceDrawer}
-                onClose={() => setShowPriceDrawer(false)}
+                onClose={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: false })}
                 title="Price Fetch Results"
                 width="600px"
             >
@@ -1866,6 +554,13 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     baseCurrency={config.base_currency_symbol}
                     quoteAssetId={config.base_currency_id ?? undefined}
                     onPriceAdded={(assetId) => handlePriceAdded(assetId)}
+                    loadingAssetIds={loadingPriceAssetIds}
+                    assetNameMap={new Map(pnlAssets.map(a => [a.asset.id!, a.asset.symbol ?? `#${a.asset.id}`]))}
+                    totalAssetCount={displayAssets.length}
+                    naAssets={displayAssets
+                        .filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id))
+                        .map(da => ({ id: da.asset.id!, symbol: da.asset.symbol ?? `#${da.asset.id}` }))
+                    }
                 />
             </SlidePanel>
 
@@ -1880,7 +575,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             {/* Data Health Confirmation Dialog */}
             <Dialog.Root
                 open={showHealthConfirm}
-                onOpenChange={(e) => { if (!e.open) setShowHealthConfirm(false); }}
+                onOpenChange={(e) => { if (!e.open) dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false }); }}
             >
                 <Dialog.Backdrop />
                 <Dialog.Positioner>
@@ -1902,7 +597,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                             <Flex gap={2} width="100%">
                                 <Button
                                     variant="outline"
-                                    onClick={() => setShowHealthConfirm(false)}
+                                    onClick={() => dispatch({ type: 'SET_SHOW_HEALTH_CONFIRM', value: false })}
                                     flex={1}
                                 >
                                     Cancel
@@ -1931,7 +626,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             {/* Custom Calculation Drawer */}
             <SlidePanel
                 isOpen={showCustomCalcDrawer}
-                onClose={() => setShowCustomCalcDrawer(false)}
+                onClose={() => dispatch({ type: 'SET_SHOW_CUSTOM_CALC_DRAWER', value: false })}
                 title="Custom P&L Calculation"
                 width="480px"
             >
@@ -1940,7 +635,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     config={config}
                     onConfigChange={handleConfigChange}
                     onCalculate={() => {
-                        setShowCustomCalcDrawer(false);
+                        dispatch({ type: 'SET_SHOW_CUSTOM_CALC_DRAWER', value: false });
                         runCalculation();
                     }}
                     mode={calculationMode}
@@ -1951,7 +646,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                     isLoadingVersions={isLoadingVersions}
                     selectedVersionId={currentVersionId ?? undefined}
                     onLoadVersion={(versionId) => {
-                        setShowCustomCalcDrawer(false);
+                        dispatch({ type: 'SET_SHOW_CUSTOM_CALC_DRAWER', value: false });
                         handleLoadVersion(versionId);
                     }}
                     onPersist={handlePersistVersion}
@@ -1966,7 +661,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
             {/* History Panel Drawer */}
             <SlidePanel
                 isOpen={showHistoryPanel}
-                onClose={() => setShowHistoryPanel(false)}
+                onClose={() => dispatch({ type: 'SET_SHOW_HISTORY_PANEL', value: false })}
                 title="P&L Calculation History"
                 width="600px"
             >
@@ -1992,7 +687,7 @@ export const PnLPanel: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealt
                                     cursor="pointer"
                                     _hover={{ borderColor: 'blue.300', bg: currentVersionId === version.version_id ? 'blue.50' : 'gray.50' }}
                                     onClick={() => {
-                                        setShowHistoryPanel(false);
+                                        dispatch({ type: 'SET_SHOW_HISTORY_PANEL', value: false });
                                         handleLoadVersion(version.version_id);
                                     }}
                                 >

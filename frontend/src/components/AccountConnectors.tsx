@@ -3,8 +3,8 @@ import {
     Badge,
     Box,
     Button,
+    Flex,
     HStack,
-    Heading,
     IconButton,
     Switch,
     Table,
@@ -179,30 +179,7 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
 
     return (
         <Box>
-            <VStack align="stretch" gap={4}>
-                {/* Header */}
-                <HStack justify="space-between">
-                    <Heading size="sm">Connectors for {account.name}</Heading>
-                    <HStack>
-                        <IconButton
-                            aria-label="Refresh"
-                            size="xs"
-                            variant="ghost"
-                            onClick={fetchConnectors}
-                        >
-                            <FiRefreshCw size={12} />
-                        </IconButton>
-                        <Button
-                            size="xs"
-                            colorScheme="blue"
-                            onClick={handleCreate}
-                            disabled={availableTypes.length === 0}
-                        >
-                            <FiPlus size={10} /> Add
-                        </Button>
-                    </HStack>
-                </HStack>
-
+            <VStack align="stretch" gap={2}>
                 {/* Connectors Table */}
                 {connectors.length === 0 ? (
                     <Box p={4} textAlign="center" borderWidth="1px" borderRadius="md" bg="gray.50">
@@ -212,125 +189,146 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                         </Button>
                     </Box>
                 ) : (
-                    <Box borderWidth="1px" borderRadius="lg" overflow="hidden">
-                        <Table.Root size="sm">
-                            <Table.Header>
-                                <Table.Row>
-                                    <Table.ColumnHeader fontSize="2xs">Connector</Table.ColumnHeader>
-                                    <Table.ColumnHeader fontSize="2xs">Config</Table.ColumnHeader>
-                                    <Table.ColumnHeader fontSize="2xs">Status</Table.ColumnHeader>
-                                    <Table.ColumnHeader fontSize="2xs">Enabled</Table.ColumnHeader>
-                                    <Table.ColumnHeader fontSize="2xs" textAlign="right">Actions</Table.ColumnHeader>
-                                </Table.Row>
-                            </Table.Header>
-                            <Table.Body>
-                                {connectors.map((connector) => (
-                                    <Table.Row key={connector.id}>
-                                        <Table.Cell>
-                                            <VStack align="start" gap={0.5}>
-                                                <Text fontWeight="medium" fontSize="xs">
-                                                    {getConnectorDisplayName(connector.connector_type)}
-                                                </Text>
-                                                {getCategoryBadge(connector.connector_type)}
-                                            </VStack>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <VStack align="start" gap={0}>
-                                                {connector.config?.chain && (
-                                                    <Text fontSize="2xs">{connector.config.chain}</Text>
-                                                )}
-                                                {connector.config?.address && (
-                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate>
-                                                        {connector.config.address}
-                                                    </Text>
-                                                )}
-                                                {connector.config?.wallet_address && (
-                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.wallet_address}>
-                                                        {connector.config.wallet_address}
-                                                    </Text>
-                                                )}
-                                                {connector.config?.symbols && (
-                                                    <Text fontSize="2xs">
-                                                        {connector.config.symbols.slice(0, 3).join(', ')}
-                                                        {connector.config.symbols.length > 3 && '...'}
-                                                    </Text>
-                                                )}
-                                                {connector.config?.start_datetime && (
-                                                    <Text fontSize="2xs" color="gray.500">
-                                                        Since: {connector.config.start_datetime}
-                                                    </Text>
-                                                )}
-                                                {connector.config?.default_file_name && (
-                                                    <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.default_file_name}>
-                                                        📁 {connector.config.default_file_name}
-                                                    </Text>
-                                                )}
-                                            </VStack>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <VStack align="start" gap={0.5}>
-                                                <HStack gap={1}>
-                                                    {getStatusBadge(connector.last_sync_status)}
-                                                    <Text fontSize="2xs" color="gray.500">
-                                                        {connector.last_sync_at
-                                                            ? formatRelativeTime(connector.last_sync_at)
-                                                            : 'Never'}
-                                                    </Text>
-                                                </HStack>
-                                                {connector.last_error && (
-                                                    <Text fontSize="2xs" color="red.500" maxW="150px" truncate title={connector.last_error}>
-                                                        {connector.last_error}
-                                                    </Text>
-                                                )}
-                                            </VStack>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Switch.Root
-                                                checked={connector.enabled}
-                                                onCheckedChange={() => handleToggle(connector)}
-                                                colorPalette="green"
-                                            >
-                                                <Switch.HiddenInput />
-                                                <Switch.Control>
-                                                    <Switch.Thumb />
-                                                </Switch.Control>
-                                            </Switch.Root>
-                                        </Table.Cell>
-                                        <Table.Cell textAlign="right">
-                                            <HStack justify="flex-end" gap={0.5}>
-                                                <IconButton
-                                                    aria-label="Purge data"
-                                                    size="2xs"
-                                                    variant="ghost"
-                                                    title="Purge connector data (keep config)"
-                                                    onClick={() => handlePurge(connector)}
-                                                >
-                                                    <LuEraser size={10} />
-                                                </IconButton>
-                                                <IconButton
-                                                    aria-label="Edit"
-                                                    size="2xs"
-                                                    variant="ghost"
-                                                    onClick={() => handleEdit(connector)}
-                                                >
-                                                    <FiEdit2 size={10} />
-                                                </IconButton>
-                                                <IconButton
-                                                    aria-label="Delete"
-                                                    size="2xs"
-                                                    variant="ghost"
-                                                    colorScheme="red"
-                                                    onClick={() => handleDelete(connector)}
-                                                >
-                                                    <FiTrash2 size={10} />
-                                                </IconButton>
-                                            </HStack>
-                                        </Table.Cell>
+                    <>
+                        <Flex justify="flex-end" gap={1}>
+                            <IconButton
+                                aria-label="Refresh"
+                                size="2xs"
+                                variant="ghost"
+                                onClick={fetchConnectors}
+                            >
+                                <FiRefreshCw size={10} />
+                            </IconButton>
+                            <Button
+                                size="2xs"
+                                colorScheme="blue"
+                                onClick={handleCreate}
+                                disabled={availableTypes.length === 0}
+                            >
+                                <FiPlus size={10} /> Add
+                            </Button>
+                        </Flex>
+                        <Box borderWidth="1px" borderRadius="lg" overflowX="auto">
+                            <Table.Root size="sm" fontSize="xs" minW="480px">
+                                <Table.Header>
+                                    <Table.Row>
+                                        <Table.ColumnHeader fontSize="2xs">Connector</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="2xs">Config</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="2xs">Status</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="2xs">Enabled</Table.ColumnHeader>
+                                        <Table.ColumnHeader fontSize="2xs" textAlign="right">Actions</Table.ColumnHeader>
                                     </Table.Row>
-                                ))}
-                            </Table.Body>
-                        </Table.Root>
-                    </Box>
+                                </Table.Header>
+                                <Table.Body>
+                                    {connectors.map((connector) => (
+                                        <Table.Row key={connector.id}>
+                                            <Table.Cell whiteSpace="nowrap">
+                                                <VStack align="start" gap={0.5}>
+                                                    <Text fontWeight="medium" fontSize="xs">
+                                                        {getConnectorDisplayName(connector.connector_type)}
+                                                    </Text>
+                                                    {getCategoryBadge(connector.connector_type)}
+                                                </VStack>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <VStack align="start" gap={0}>
+                                                    {connector.config?.chain && (
+                                                        <Text fontSize="2xs">{connector.config.chain}</Text>
+                                                    )}
+                                                    {connector.config?.address && (
+                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate>
+                                                            {connector.config.address}
+                                                        </Text>
+                                                    )}
+                                                    {connector.config?.wallet_address && (
+                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.wallet_address}>
+                                                            {connector.config.wallet_address}
+                                                        </Text>
+                                                    )}
+                                                    {connector.config?.symbols && (
+                                                        <Text fontSize="2xs">
+                                                            {connector.config.symbols.slice(0, 3).join(', ')}
+                                                            {connector.config.symbols.length > 3 && '...'}
+                                                        </Text>
+                                                    )}
+                                                    {connector.config?.start_datetime && (
+                                                        <Text fontSize="2xs" color="gray.500">
+                                                            Since: {new Date(connector.config.start_datetime).toLocaleDateString(undefined, { year: '2-digit', month: 'short', day: 'numeric' })}
+                                                        </Text>
+                                                    )}
+                                                    {connector.config?.default_file_name && (
+                                                        <Text fontSize="2xs" color="gray.500" maxW="100px" truncate title={connector.config.default_file_name}>
+                                                            📁 {connector.config.default_file_name}
+                                                        </Text>
+                                                    )}
+                                                </VStack>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <VStack align="start" gap={0.5}>
+                                                    <HStack gap={1}>
+                                                        {getStatusBadge(connector.last_sync_status)}
+                                                        <Text fontSize="2xs" color="gray.500">
+                                                            {connector.last_sync_at
+                                                                ? formatRelativeTime(connector.last_sync_at)
+                                                                : 'Never'}
+                                                        </Text>
+                                                    </HStack>
+                                                    {connector.last_error && (
+                                                        <Text fontSize="2xs" color="red.500" maxW="150px" truncate title={connector.last_error}>
+                                                            {connector.last_error}
+                                                        </Text>
+                                                    )}
+                                                </VStack>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <Switch.Root
+                                                    size="sm"
+                                                    checked={connector.enabled}
+                                                    onCheckedChange={() => handleToggle(connector)}
+                                                    colorPalette="green"
+                                                >
+                                                    <Switch.HiddenInput />
+                                                    <Switch.Control w="22px" h="12px">
+                                                        <Switch.Thumb w="10px" h="10px" />
+                                                    </Switch.Control>
+                                                </Switch.Root>
+                                            </Table.Cell>
+                                            <Table.Cell whiteSpace="nowrap">
+                                                <HStack justify="flex-end" gap={0.5}>
+                                                    <IconButton
+                                                        aria-label="Purge data"
+                                                        size="2xs"
+                                                        variant="ghost"
+                                                        title="Purge connector data (keep config)"
+                                                        onClick={() => handlePurge(connector)}
+                                                    >
+                                                        <LuEraser size={10} />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        aria-label="Edit"
+                                                        size="2xs"
+                                                        variant="ghost"
+                                                        onClick={() => handleEdit(connector)}
+                                                    >
+                                                        <FiEdit2 size={10} />
+                                                    </IconButton>
+                                                    <IconButton
+                                                        aria-label="Delete"
+                                                        size="2xs"
+                                                        variant="ghost"
+                                                        colorScheme="red"
+                                                        onClick={() => handleDelete(connector)}
+                                                    >
+                                                        <FiTrash2 size={10} />
+                                                    </IconButton>
+                                                </HStack>
+                                            </Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Root>
+                        </Box>
+                    </>
                 )}
 
                 {/* Priority Note */}
