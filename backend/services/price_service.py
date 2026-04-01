@@ -24,7 +24,7 @@ from sqlalchemy import case, func
 
 from backend.config.loader import configure_logging
 from backend.db.database import get_engine
-from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter, AppSettings
+from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter, AppSettings, NormalizedTransaction
 from backend.services.price_getters import (
     get_price_getter,
     BasePriceGetter,
@@ -1093,6 +1093,7 @@ class GapDetectionResult:
     total_covered: int
     coverage_pct: float
     gaps: List[GapRange] = field(default_factory=list)
+    has_transactions: bool = True
 
 
 def _is_business_day(d: date) -> bool:
@@ -1117,6 +1118,7 @@ def detect_gaps(
     asset_id: int,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    quote_asset_id: Optional[int] = None,
 ) -> GapDetectionResult:
     """
     Detect price gaps for a single asset.
@@ -1129,6 +1131,7 @@ def detect_gaps(
         asset_id: Asset to analyse
         date_from: Override start date (default: first snapshot date)
         date_to: Override end date (default: today)
+        quote_asset_id: Filter snapshots by quote currency (default: all)
 
     Returns:
         GapDetectionResult with coverage stats and gap ranges.
@@ -1141,12 +1144,14 @@ def detect_gaps(
 
     # Determine date range
     if date_from is None:
-        first_stmt = (
-            select(func.min(PriceSnapshot.snapshot_time))
-            .where(PriceSnapshot.asset_id == asset_id)
+        # Use first transaction date for this asset (PnL-relevant start)
+        first_tx_stmt = (
+            select(func.min(NormalizedTransaction.date_time))
+            .where(NormalizedTransaction.asset_id == asset_id)
         )
-        first_dt = session.exec(first_stmt).one()
-        if first_dt is None:
+        first_tx_dt = session.exec(first_tx_stmt).one()
+        if first_tx_dt is None:
+            # No transactions → gaps are irrelevant
             return GapDetectionResult(
                 asset_id=asset_id,
                 symbol=asset.symbol,
@@ -1154,8 +1159,9 @@ def detect_gaps(
                 total_expected=0,
                 total_covered=0,
                 coverage_pct=0.0,
+                has_transactions=False,
             )
-        date_from = first_dt.date() if hasattr(first_dt, "date") else first_dt
+        date_from = first_tx_dt.date() if hasattr(first_tx_dt, "date") else first_tx_dt
 
     if date_to is None:
         date_to = date.today()
@@ -1170,6 +1176,8 @@ def detect_gaps(
         )
         .distinct()
     )
+    if quote_asset_id is not None:
+        snap_stmt = snap_stmt.where(PriceSnapshot.quote_asset_id == quote_asset_id)
     existing_dates: set[date] = set()
     for row in session.exec(snap_stmt).all():
         d = row[0] if isinstance(row, tuple) else row
@@ -1223,6 +1231,8 @@ def detect_gaps(
             .order_by(PriceSnapshot.snapshot_time.desc())
             .limit(1)
         )
+        if quote_asset_id is not None:
+            last_snap_stmt = last_snap_stmt.where(PriceSnapshot.quote_asset_id == quote_asset_id)
         last_snap = session.exec(last_snap_stmt).first()
 
         gaps.append(GapRange(

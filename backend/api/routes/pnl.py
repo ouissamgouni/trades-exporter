@@ -335,7 +335,9 @@ class CostLotResponse(BaseModel):
     total_cost_in_base: float
     remaining_cost_in_base: float
     acquired_at: datetime
+    created_at: Optional[datetime] = None  # When the lot record was created in the PnL engine
     origin_transaction_id: Optional[int] = None  # Transaction that created this lot
+    last_updated_by_tx_id: Optional[int] = None  # Transaction that last modified this lot (consumption/settlement)
     origin_unit_id: Optional[int] = None  # CalculationUnit that created this lot
     origin_unit_label: Optional[str] = None  # Human-readable label of origin unit
     is_zero_cost: bool = False
@@ -1781,12 +1783,35 @@ def get_version_lots(
             selectinload(CostLot.account),
             selectinload(CostLot.unit),  # Eager load unit for origin_unit_label
         )
-        .order_by(CostLot.acquired_at)
+        .order_by(CostLot.cost_lot_id.desc())
         .offset(offset)
         .limit(limit)
     )
     
     lots = session.exec(query).all()
+    
+    # Batch-fetch "last updated by" transaction IDs for all lots on this page.
+    # For each lot, find the most recent non-CREATED event's triggered_by_transaction_id.
+    last_updated_map: dict[int, int] = {}
+    lot_ids = [lot.cost_lot_id for lot in lots if lot.cost_lot_id]
+    if lot_ids:
+        # Use a subquery to get the max event_id per lot (excluding CREATED events)
+        latest_event_sq = (
+            select(
+                CostLotEvent.lot_id,
+                func.max(CostLotEvent.event_id).label("max_event_id"),
+            )
+            .where(CostLotEvent.lot_id.in_(lot_ids))
+            .where(CostLotEvent.event_type != "CREATED")
+            .where(CostLotEvent.event_type != "NEGATIVE_CREATED")
+            .group_by(CostLotEvent.lot_id)
+            .subquery()
+        )
+        rows = session.exec(
+            select(latest_event_sq.c.lot_id, CostLotEvent.triggered_by_transaction_id)
+            .join(CostLotEvent, CostLotEvent.event_id == latest_event_sq.c.max_event_id)
+        ).all()
+        last_updated_map = {row[0]: row[1] for row in rows if row[1] is not None}
     
     items = [
         CostLotResponse(
@@ -1805,7 +1830,9 @@ def get_version_lots(
             total_cost_in_base=float(lot.total_cost),
             remaining_cost_in_base=float(lot.remaining_cost_in_base),
             acquired_at=lot.acquired_at,
+            created_at=lot.created_at,
             origin_transaction_id=lot.origin_transaction_id,
+            last_updated_by_tx_id=last_updated_map.get(lot.cost_lot_id),
             origin_unit_id=lot.unit_id,  # DB field is now unit_id, API keeps origin_unit_id for compat
             origin_unit_label=lot.unit.label if lot.unit else None,
             is_zero_cost=lot.is_zero_cost,

@@ -43,6 +43,9 @@ export interface LotsSlidePanelProps {
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 const TH: React.CSSProperties = { padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600 };
 const TD: React.CSSProperties = { padding: '3px 6px', fontSize: 11 };
+const HL_BG = 'rgba(66, 153, 225, 0.06)';  // Subtle blue tint for highlighted columns
+const TH_HL: React.CSSProperties = { ...TH, backgroundColor: HL_BG };
+const TD_HL: React.CSSProperties = { ...TD, backgroundColor: HL_BG };
 
 /* ─── FilterChip ─── */
 const FilterChip: React.FC<{ label: string; color: string; onClear: () => void }> = ({ label, color, onClear }) => (
@@ -196,20 +199,22 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
             <Box mb={3}>
                 <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={hasAnyFilter ? 'blue.300' : 'gray.200'} overflow="visible">
                     {/* Clickable header */}
-                    <Flex align="center" justify="space-between" p={3} pb={hasAnyFilter ? 2 : 3}
+                    <Flex align="center" justify="space-between" p={3}
                         cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
                         onClick={() => setFiltersExpanded(p => !p)} borderRadius="md">
-                        <Flex align="center" gap={1.5}>
-                            <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
+                        <Flex align="center" gap={1.5} flex={1} minW={0}>
+                            <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'} flexShrink={0}>
                                 <LuChevronDown size={14} />
                             </Box>
                             <LuFilter size={12} />
-                            <Text fontWeight="semibold" fontSize="xs">Filters</Text>
+                            <Text fontWeight="semibold" fontSize="xs" flexShrink={0}>Filters</Text>
                             {activeChips.length > 0 && (
-                                <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
+                                <Flex flexWrap="wrap" gap={1} align="center" ml={1} onClick={e => e.stopPropagation()}>
+                                    {activeChips.map(chip => <FilterChip key={chip.id} label={chip.label} color={chip.color} onClear={chip.onClear} />)}
+                                </Flex>
                             )}
                         </Flex>
-                        <Flex gap={1.5} onClick={e => e.stopPropagation()}>
+                        <Flex gap={1.5} onClick={e => e.stopPropagation()} flexShrink={0}>
                             {hasAnyFilter && (
                                 <Button size="xs" variant="ghost" onClick={clearFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
                                     <LuRotateCcw size={10} />
@@ -219,24 +224,9 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                         </Flex>
                     </Flex>
 
-                    {/* Active filter chips row */}
-                    {hasAnyFilter && (
-                        <Box px={3} pb={filtersExpanded ? 2 : 3} pt={0}>
-                            <Flex flexWrap="wrap" gap={1.5} align="center">
-                                {activeChips.map(chip => <FilterChip key={chip.id} label={chip.label} color={chip.color} onClear={chip.onClear} />)}
-                            </Flex>
-                        </Box>
-                    )}
-
-                    {!hasAnyFilter && !filtersExpanded && (
-                        <Box px={3} pb={3} pt={0}>
-                            <Text fontSize="xs" color="gray.500" fontStyle="italic">No filters applied</Text>
-                        </Box>
-                    )}
-
                     {/* Expanded filter controls */}
                     {filtersExpanded && (
-                        <Box p={3} pt={hasAnyFilter ? 1 : 2}>
+                        <Box p={3} pt={1}>
                             <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} gap={3}>
                                 {/* Search */}
                                 <Box>
@@ -314,19 +304,19 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
                                             <th style={{ ...TH, textAlign: 'left' }}>ID</th>
+                                            <th style={{ ...TH, textAlign: 'left' }}>Created</th>
+                                            <th style={{ ...TH, textAlign: 'left' }}>Acquired</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>Asset</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>Account</th>
                                             <th style={{ ...TH, textAlign: 'center' }}>Status</th>
                                             <th style={{ ...TH, textAlign: 'right' }}>Initial Qty</th>
-                                            <th style={{ ...TH, textAlign: 'right' }}>Remaining</th>
-                                            <th style={{ ...TH, textAlign: 'right' }}>Unit Cost</th>
+                                            <th style={{ ...TH_HL, textAlign: 'right' }}>Rem Qty</th>
+                                            <th style={{ ...TH_HL, textAlign: 'right' }}>Unit Cost</th>
+                                            <th style={{ ...TH_HL, textAlign: 'right' }}>Rem Cost</th>
                                             <th style={{ ...TH, textAlign: 'right' }}>Initial Cost</th>
-                                            <th style={{ ...TH, textAlign: 'right' }}>Remaining Cost</th>
+                                            <th style={{ ...TH, textAlign: 'left' }}>Created By</th>
+                                            <th style={{ ...TH, textAlign: 'left' }}>Updated By</th>
                                             <th style={{ ...TH, textAlign: 'left' }}>Source</th>
-                                            <th style={{ ...TH, textAlign: 'center' }}>Chain</th>
-                                            <th style={{ ...TH, textAlign: 'left' }}>Date</th>
-                                            <th style={{ ...TH, textAlign: 'left' }}>Unit</th>
-                                            <th style={{ ...TH, textAlign: 'left' }}>Origin TX</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -335,6 +325,7 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                             const statusColor = status === 'open' ? 'green' : status === 'exhausted' ? 'gray' : 'red';
                                             return (
                                                 <tr key={lot.cost_lot_id} style={{ borderBottom: '1px solid #f1f3f5' }}>
+                                                    {/* ID */}
                                                     <td style={{ padding: '3px 6px' }}>
                                                         <CostLotLineageTooltip
                                                             lotId={lot.cost_lot_id}
@@ -345,22 +336,40 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                                             <Text fontSize="2xs" color="blue.500" fontFamily="mono" cursor="help" _hover={{ textDecoration: 'underline' }}>#{lot.cost_lot_id}</Text>
                                                         </CostLotLineageTooltip>
                                                     </td>
+                                                    {/* Created */}
+                                                    <td style={TD}>
+                                                        <Text fontSize="2xs" color="gray.500">
+                                                            {lot.created_at ? new Date(lot.created_at).toLocaleDateString() : '-'}
+                                                        </Text>
+                                                    </td>
+                                                    {/* Acquired */}
+                                                    <td style={TD}>
+                                                        <Text fontSize="2xs" color="gray.500">
+                                                            {lot.acquired_at ? new Date(lot.acquired_at).toLocaleDateString() : '-'}
+                                                        </Text>
+                                                    </td>
+                                                    {/* Asset */}
                                                     <td style={TD}>
                                                         <AssetBadge asset={lot.asset} size="xs" />
                                                     </td>
+                                                    {/* Account */}
                                                     <td style={TD}>
                                                         <Text fontSize="2xs" color="gray.500">{lot.account_name || '-'}</Text>
                                                     </td>
+                                                    {/* Status */}
                                                     <td style={{ ...TD, textAlign: 'center' }}>
                                                         <Badge size="xs" colorPalette={statusColor}>{status}</Badge>
                                                     </td>
+                                                    {/* Initial Qty */}
                                                     <td style={{ ...TD, textAlign: 'right' }}>
                                                         <ValueDisplay value={lot.qty_original} />
                                                     </td>
-                                                    <td style={{ ...TD, textAlign: 'right' }}>
+                                                    {/* Rem Qty (highlighted) */}
+                                                    <td style={{ ...TD_HL, textAlign: 'right' }}>
                                                         <ValueDisplay value={lot.qty_remaining} />
                                                     </td>
-                                                    <td style={{ ...TD, textAlign: 'right' }}>
+                                                    {/* Unit Cost (highlighted) */}
+                                                    <td style={{ ...TD_HL, textAlign: 'right' }}>
                                                         {lot.is_zero_cost ? (
                                                             <Badge size="xs" colorPalette="red">Zero</Badge>
                                                         ) : lot.cost_source === 'provisional' ? (
@@ -399,85 +408,15 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                                             <ValueDisplay value={lot.unit_cost_in_base} currency={baseCurrency} />
                                                         )}
                                                     </td>
+                                                    {/* Rem Cost (highlighted) */}
+                                                    <td style={{ ...TD_HL, textAlign: 'right' }}>
+                                                        <ValueDisplay value={lot.remaining_cost_in_base} currency={baseCurrency} />
+                                                    </td>
+                                                    {/* Initial Cost */}
                                                     <td style={{ ...TD, textAlign: 'right' }}>
                                                         <ValueDisplay value={lot.total_cost_in_base} currency={baseCurrency} />
                                                     </td>
-                                                    <td style={{ ...TD, textAlign: 'right' }}>
-                                                        <ValueDisplay value={lot.remaining_cost_in_base} currency={baseCurrency} />
-                                                    </td>
-                                                    <td style={TD}>
-                                                        {lot.cost_source ? (
-                                                            (lot.cost_fmv_price || lot.cost_fmv_source || lot.cost_fmv_timestamp) ? (
-                                                                <Tooltip
-                                                                    content={
-                                                                        <Box fontSize="xs" lineHeight="tall">
-                                                                            <Text fontWeight="semibold">FMV Details</Text>
-                                                                            {lot.cost_fmv_price != null && <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
-                                                                            {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
-                                                                            {lot.cost_fmv_timestamp && <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>}
-                                                                            {lot.cost_fmv_stale && <Text color="orange.300">⚠ Stale price</Text>}
-                                                                        </Box>
-                                                                    }
-                                                                    openDelay={200}
-                                                                >
-                                                                    <Badge size="xs" cursor="help" colorPalette={
-                                                                        lot.cost_source === 'base_currency' ? 'gray' :
-                                                                            lot.cost_source === 'proceeds' ? 'green' :
-                                                                                lot.cost_source === 'inherited' ? 'blue' :
-                                                                                    lot.cost_source === 'fmv' ? 'cyan' :
-                                                                                        lot.cost_source === 'provisional' ? 'orange' : 'gray'
-                                                                    }>
-                                                                        {lot.cost_source}
-                                                                    </Badge>
-                                                                </Tooltip>
-                                                            ) : (
-                                                                <Badge size="xs" colorPalette={
-                                                                    lot.cost_source === 'base_currency' ? 'gray' :
-                                                                        lot.cost_source === 'proceeds' ? 'green' :
-                                                                            lot.cost_source === 'inherited' ? 'blue' :
-                                                                                lot.cost_source === 'fmv' ? 'cyan' :
-                                                                                    lot.cost_source === 'provisional' ? 'orange' : 'gray'
-                                                                }>
-                                                                    {lot.cost_source}
-                                                                </Badge>
-                                                            )
-                                                        ) : <Text fontSize="2xs" color="gray.400">-</Text>}
-                                                    </td>
-                                                    <td style={{ ...TD, textAlign: 'center' }}>
-                                                        {(lot.cost_source === 'inherited' || lot.cost_source === 'proceeds' || lot.source_lot_id) ? (
-                                                            <CostBasisChainTooltip
-                                                                lotId={lot.cost_lot_id}
-                                                                versionId={versionId}
-                                                                baseCurrency={baseCurrency}
-                                                                onTransactionClick={onTransactionClick}
-                                                            >
-                                                                <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
-                                                            </CostBasisChainTooltip>
-                                                        ) : (
-                                                            <Text fontSize="2xs" color="gray.300">—</Text>
-                                                        )}
-                                                    </td>
-                                                    <td style={TD}>
-                                                        <Text fontSize="2xs" color="gray.500">
-                                                            {lot.acquired_at ? new Date(lot.acquired_at).toLocaleDateString() : '-'}
-                                                        </Text>
-                                                    </td>
-                                                    <td style={TD}>
-                                                        {lot.origin_unit_id ? (
-                                                            <Text
-                                                                fontSize="2xs"
-                                                                color="blue.500"
-                                                                fontFamily="mono"
-                                                                cursor={onUnitClick ? 'pointer' : undefined}
-                                                                _hover={onUnitClick ? { textDecoration: 'underline' } : undefined}
-                                                                onClick={() => onUnitClick?.(lot.origin_unit_id!)}
-                                                            >
-                                                                #{lot.origin_unit_id}
-                                                            </Text>
-                                                        ) : (
-                                                            <Text fontSize="2xs" color="gray.400">-</Text>
-                                                        )}
-                                                    </td>
+                                                    {/* Created By (origin TX) */}
                                                     <td style={TD}>
                                                         {lot.origin_transaction_id ? (
                                                             <Text
@@ -488,11 +427,79 @@ export const LotsSlidePanel: React.FC<LotsSlidePanelProps> = ({
                                                                 _hover={onTransactionClick ? { textDecoration: 'underline' } : undefined}
                                                                 onClick={() => onTransactionClick?.(lot.origin_transaction_id!)}
                                                             >
-                                                                #{lot.origin_transaction_id}
+                                                                TX#{lot.origin_transaction_id}
                                                             </Text>
                                                         ) : (
-                                                            <Text fontSize="2xs" color="gray.400">-</Text>
+                                                            <Text fontSize="2xs" color="gray.400">—</Text>
                                                         )}
+                                                    </td>
+                                                    {/* Updated By (last non-CREATED event TX) */}
+                                                    <td style={TD}>
+                                                        {lot.last_updated_by_tx_id ? (
+                                                            <Text
+                                                                fontSize="2xs"
+                                                                color="blue.500"
+                                                                fontFamily="mono"
+                                                                cursor={onTransactionClick ? 'pointer' : undefined}
+                                                                _hover={onTransactionClick ? { textDecoration: 'underline' } : undefined}
+                                                                onClick={() => onTransactionClick?.(lot.last_updated_by_tx_id!)}
+                                                            >
+                                                                TX#{lot.last_updated_by_tx_id}
+                                                            </Text>
+                                                        ) : (
+                                                            <Text fontSize="2xs" color="gray.400">—</Text>
+                                                        )}
+                                                    </td>
+                                                    {/* Source / Chain (merged) */}
+                                                    <td style={TD}>
+                                                        <Flex align="center" gap={1}>
+                                                            {lot.cost_source ? (
+                                                                (lot.cost_fmv_price || lot.cost_fmv_source || lot.cost_fmv_timestamp) ? (
+                                                                    <Tooltip
+                                                                        content={
+                                                                            <Box fontSize="xs" lineHeight="tall">
+                                                                                <Text fontWeight="semibold">FMV Details</Text>
+                                                                                {lot.cost_fmv_price != null && <Text>Price: {Number(lot.cost_fmv_price).toFixed(6)} {baseCurrency}</Text>}
+                                                                                {lot.cost_fmv_source && <Text>Source: {lot.cost_fmv_source}</Text>}
+                                                                                {lot.cost_fmv_timestamp && <Text>Snapped: {new Date(lot.cost_fmv_timestamp).toLocaleString()}</Text>}
+                                                                                {lot.cost_fmv_stale && <Text color="orange.300">⚠ Stale price</Text>}
+                                                                            </Box>
+                                                                        }
+                                                                        openDelay={200}
+                                                                    >
+                                                                        <Badge size="xs" cursor="help" colorPalette={
+                                                                            lot.cost_source === 'base_currency' ? 'gray' :
+                                                                                lot.cost_source === 'proceeds' ? 'green' :
+                                                                                    lot.cost_source === 'inherited' ? 'blue' :
+                                                                                        lot.cost_source === 'fmv' ? 'cyan' :
+                                                                                            lot.cost_source === 'provisional' ? 'orange' : 'gray'
+                                                                        }>
+                                                                            {lot.cost_source}
+                                                                        </Badge>
+                                                                    </Tooltip>
+                                                                ) : (
+                                                                    <Badge size="xs" colorPalette={
+                                                                        lot.cost_source === 'base_currency' ? 'gray' :
+                                                                            lot.cost_source === 'proceeds' ? 'green' :
+                                                                                lot.cost_source === 'inherited' ? 'blue' :
+                                                                                    lot.cost_source === 'fmv' ? 'cyan' :
+                                                                                        lot.cost_source === 'provisional' ? 'orange' : 'gray'
+                                                                    }>
+                                                                        {lot.cost_source}
+                                                                    </Badge>
+                                                                )
+                                                            ) : <Text fontSize="2xs" color="gray.400">—</Text>}
+                                                            {(lot.cost_source === 'inherited' || lot.cost_source === 'proceeds' || lot.source_lot_id) && (
+                                                                <CostBasisChainTooltip
+                                                                    lotId={lot.cost_lot_id}
+                                                                    versionId={versionId}
+                                                                    baseCurrency={baseCurrency}
+                                                                    onTransactionClick={onTransactionClick}
+                                                                >
+                                                                    <Text fontSize="2xs" color="blue.400" cursor="help" _hover={{ textDecoration: 'underline' }}>🔗</Text>
+                                                                </CostBasisChainTooltip>
+                                                            )}
+                                                        </Flex>
                                                     </td>
                                                 </tr>
                                             );

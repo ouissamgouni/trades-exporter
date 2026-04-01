@@ -6,7 +6,7 @@
  * AssetDetailPanelContext.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiChevronDown, FiChevronRight } from 'react-icons/fi';
 import { SlidePanel } from './pnl/SlidePanel';
@@ -17,8 +17,11 @@ import { AssetDetailsForm } from './AssetDetailsForm';
 import { AssetPriceGettersEditor } from './AssetPriceGettersEditor';
 import { AssetCategoriesEditor } from './AssetCategoriesEditor';
 import { GapFixPanel } from './GapFixPanel';
+import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { AssetPnLOverviewSection } from './AssetPnLOverviewSection';
 import { AssetPnLAuditSection } from './AssetPnLAuditSection';
+import { TransactionsTable } from './TransactionsTable';
+import { defaultFilterState, type TransactionFilterState } from './TransactionFilters';
 
 /* ── Collapsible section (same pattern as TransactionSidePanel) ── */
 
@@ -159,6 +162,10 @@ export const AssetDetailSlidePanel: React.FC = () => {
                         </Box>
                     </Flex>
 
+                    <Section title="Related Transactions" icon="📝" colorScheme="cyan" defaultOpen={false}>
+                        <RelatedTransactions assetId={asset.asset_id!} />
+                    </Section>
+
                     <PnLSections assetId={asset.asset_id!} assetSymbol={asset.symbol} assetLabel={asset.label} pnlVersionId={panelState.pnlVersionId} />
                 </Flex>
             )}
@@ -168,9 +175,48 @@ export const AssetDetailSlidePanel: React.FC = () => {
 
 /* ── Price chart + gap alerts (co-located for hook reuse) ── */
 
-const PriceChartWithGaps: React.FC<{ assetId: number; symbol: string }> = ({ assetId, symbol }) => (
-    <GapFixPanel assetId={assetId} symbol={symbol} />
-);
+const PriceChartWithGaps: React.FC<{ assetId: number; symbol: string }> = ({ assetId, symbol }) => {
+    const [showPriceSetter, setShowPriceSetter] = useState(false);
+    return (
+        <>
+            <GapFixPanel assetId={assetId} symbol={symbol} onOpenPriceSetter={() => setShowPriceSetter(true)} />
+            {showPriceSetter && (
+                <PriceSetterDialog
+                    isOpen={true}
+                    onClose={() => setShowPriceSetter(false)}
+                    onSave={() => setShowPriceSetter(false)}
+                    assetId={assetId}
+                    assetName={symbol}
+                    defaultDate={new Date().toISOString()}
+                />
+            )}
+        </>
+    );
+};
+
+/* ── Related transactions (filtered by asset) ── */
+
+const RelatedTransactions: React.FC<{ assetId: number }> = ({ assetId }) => {
+    const baseFilters = useMemo<TransactionFilterState>(
+        () => ({ ...defaultFilterState, relatedAssetIds: [String(assetId)] }),
+        [assetId],
+    );
+    const [filters, setFilters] = useState<TransactionFilterState>(baseFilters);
+
+    return (
+        <TransactionsTable
+            filters={filters}
+            onFiltersChange={setFilters}
+            resetFilters={baseFilters}
+            compact
+            embeddedMode
+            showFilters={false}
+            showBundles={false}
+            hideLegend
+            tableId={`asset-detail-txns-${assetId}`}
+        />
+    );
+};
 
 /* ── PnL sections (lazy-rendered, hidden if no PnL version exists) ── */
 

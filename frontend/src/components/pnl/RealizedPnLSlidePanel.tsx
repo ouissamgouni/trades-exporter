@@ -587,10 +587,10 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
             <Box mb={3}>
                 <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={hasAnyFilter ? 'blue.300' : 'gray.200'} overflow="visible">
                     {/* Clickable header */}
-                    <Flex align="center" justify="space-between" p={3} pb={hasAnyFilter ? 2 : 3}
+                    <Flex align="center" justify="space-between" p={3}
                         cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
                         onClick={() => setFiltersExpanded(p => !p)} borderRadius="md">
-                        <Flex align="center" gap={1.5}>
+                        <Flex align="center" gap={1.5} flexWrap="wrap">
                             <Box transition="transform 0.2s" transform={filtersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
                                 <LuChevronDown size={14} />
                             </Box>
@@ -599,6 +599,7 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                             {activeChips.length > 0 && (
                                 <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
                             )}
+                            {activeChips.map(chip => <FilterChip key={chip.id} chip={chip} />)}
                         </Flex>
                         <Flex gap={1.5} onClick={e => e.stopPropagation()}>
                             {hasAnyFilter && (
@@ -610,24 +611,9 @@ export const RealizedPnLSlidePanel: React.FC<RealizedPnLSlidePanelProps> = ({
                         </Flex>
                     </Flex>
 
-                    {/* Active filter chips row */}
-                    {hasAnyFilter && (
-                        <Box px={3} pb={filtersExpanded ? 2 : 3} pt={0}>
-                            <Flex flexWrap="wrap" gap={1.5} align="center">
-                                {activeChips.map(chip => <FilterChip key={chip.id} chip={chip} />)}
-                            </Flex>
-                        </Box>
-                    )}
-
-                    {!hasAnyFilter && !filtersExpanded && (
-                        <Box px={3} pb={3} pt={0}>
-                            <Text fontSize="xs" color="gray.500" fontStyle="italic">No filters applied</Text>
-                        </Box>
-                    )}
-
                     {/* Expanded filter cards */}
                     {filtersExpanded && (
-                        <Box p={3} pt={hasAnyFilter ? 1 : 2} overflow="visible">
+                        <Box p={3} pt={1} overflow="visible">
                             <SimpleGrid columns={{ base: 2, md: 4, lg: 6 }} gap={2}>
                                 {/* Taxability card */}
                                 {filterOpts?.taxable_options && filterOpts.taxable_options.length > 0 && (

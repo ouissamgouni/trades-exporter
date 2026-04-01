@@ -3,20 +3,28 @@
  *
  * Layout: price chart on the left, scrollable gap list on the right.
  * Used by both expanded HealthCard and AssetDetailSlidePanel.
+ *
+ * - "Fetch" buttons are hidden when the asset has no price getters.
+ * - Default quote currency is the app's base currency asset.
  */
 
 import React, { useState } from 'react';
 import { Box, Button, Flex, Spinner, Text } from '@chakra-ui/react';
 import { FiDownload, FiEdit3, FiZap } from 'react-icons/fi';
 import { AssetPriceChart } from './AssetPriceChart';
-import { AddManualPriceDialog } from './pnl/AddManualPriceDialog';
+import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { usePriceGaps, useBackfillPrices } from '../hooks/usePriceGaps';
+import { useAsset } from '../hooks/useAsset';
+import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import { GapRange } from '../types';
 import { toaster } from './ui/toaster';
+import { Tooltip } from './ui/tooltip';
 
 export interface GapFixPanelProps {
     assetId: number;
     symbol: string;
+    /** Optional external handler to open PriceSetterDialog (e.g. from parent card) */
+    onOpenPriceSetter?: () => void;
 }
 
 const fmtShort = (d: string) => {
@@ -27,13 +35,20 @@ const fmtShort = (d: string) => {
     }
 };
 
-export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => {
+export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol, onOpenPriceSetter }) => {
     const { data: gapData, refetch } = usePriceGaps(assetId);
     const gaps = gapData?.gaps ?? [];
     const backfill = useBackfillPrices();
     const [fixingAll, setFixingAll] = useState(false);
     const [fetchingIdx, setFetchingIdx] = useState<number | null>(null);
     const [manualGap, setManualGap] = useState<GapRange | null>(null);
+
+    // Check if asset has price getters → if not, disable auto-fetch
+    const { asset } = useAsset(assetId);
+    const hasGetters = (asset?.price_getters?.length ?? 0) > 0;
+
+    // Resolve base currency from app settings
+    const baseCurrency = useBaseCurrency();
 
     const handleFixAll = async () => {
         setFixingAll(true);
@@ -45,6 +60,7 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
                     asset_id: assetId,
                     date_from: gap.start_date,
                     date_to: gap.end_date,
+                    quote_asset_id: baseCurrency.assetId ?? null,
                 });
                 totalFetched += result.fetched.length;
                 totalFailed += result.failed.length;
@@ -69,6 +85,7 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
                 asset_id: assetId,
                 date_from: gap.start_date,
                 date_to: gap.end_date,
+                quote_asset_id: baseCurrency.assetId ?? null,
             });
             if (result.failed.length === 0) {
                 toaster.success({ title: 'Fetched', description: `${result.fetched.length} price(s)` });
@@ -91,6 +108,24 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
                 {/* Left: chart */}
                 <Box flex={2} minW={0}>
                     <AssetPriceChart assetId={assetId} symbol={symbol} gaps={gaps} />
+                    {/* Price Setter CTA */}
+                    <Flex mt={1.5} gap={1}>
+                        <Button
+                            size="2xs"
+                            variant="outline"
+                            colorPalette="blue"
+                            fontSize="2xs"
+                            onClick={() => {
+                                if (onOpenPriceSetter) {
+                                    onOpenPriceSetter();
+                                } else {
+                                    setManualGap({ start_date: new Date().toISOString().split('T')[0], end_date: new Date().toISOString().split('T')[0], missing_days_count: 1, last_known_price: null, last_known_price_date: null, last_known_source: null });
+                                }
+                            }}
+                        >
+                            <FiEdit3 size={10} /> Price Setter
+                        </Button>
+                    </Flex>
                 </Box>
 
                 {/* Right: gap list */}
@@ -101,16 +136,22 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
                             <Text fontSize="2xs" color="orange.700" fontWeight="medium">
                                 {gaps.length} range{gaps.length !== 1 ? 's' : ''} · {totalMissing}d
                             </Text>
-                            <Button
-                                size="2xs"
-                                colorPalette="orange"
-                                variant="solid"
-                                onClick={handleFixAll}
-                                disabled={fixingAll}
-                                fontSize="2xs"
-                            >
-                                {fixingAll ? <Spinner size="xs" /> : <><FiZap size={10} /> Fix all</>}
-                            </Button>
+                            {hasGetters ? (
+                                <Button
+                                    size="2xs"
+                                    colorPalette="orange"
+                                    variant="solid"
+                                    onClick={handleFixAll}
+                                    disabled={fixingAll}
+                                    fontSize="2xs"
+                                >
+                                    {fixingAll ? <Spinner size="xs" /> : <><FiZap size={10} /> Fix all</>}
+                                </Button>
+                            ) : (
+                                <Tooltip content="No price getters configured — only manual fill available">
+                                    <Text fontSize="2xs" color="gray.400">auto N/A</Text>
+                                </Tooltip>
+                            )}
                         </Flex>
 
                         {/* Scrollable gap list */}
@@ -129,16 +170,18 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
                                         {fmtShort(gap.start_date)} — {fmtShort(gap.end_date)} ({gap.missing_days_count}d)
                                     </Text>
                                     <Flex gap={1}>
-                                        <Button
-                                            size="2xs"
-                                            variant="outline"
-                                            colorPalette="orange"
-                                            fontSize="2xs"
-                                            onClick={() => handleFetchOne(gap, i)}
-                                            disabled={fetchingIdx === i}
-                                        >
-                                            {fetchingIdx === i ? <Spinner size="xs" /> : <><FiDownload size={10} /> Fetch</>}
-                                        </Button>
+                                        {hasGetters && (
+                                            <Button
+                                                size="2xs"
+                                                variant="outline"
+                                                colorPalette="orange"
+                                                fontSize="2xs"
+                                                onClick={() => handleFetchOne(gap, i)}
+                                                disabled={fetchingIdx === i}
+                                            >
+                                                {fetchingIdx === i ? <Spinner size="xs" /> : <><FiDownload size={10} /> Fetch</>}
+                                            </Button>
+                                        )}
                                         <Button
                                             size="2xs"
                                             variant="outline"
@@ -156,17 +199,19 @@ export const GapFixPanel: React.FC<GapFixPanelProps> = ({ assetId, symbol }) => 
             </Flex>
 
             {manualGap && (
-                <AddManualPriceDialog
+                <PriceSetterDialog
                     isOpen={true}
                     onClose={() => setManualGap(null)}
                     onSave={() => { setManualGap(null); refetch(); }}
                     assetId={assetId}
                     assetName={symbol}
                     defaultDate={manualGap.start_date}
-                    quoteAssetName="USD"
+                    quoteAssetId={baseCurrency.assetId}
+                    quoteAssetName={baseCurrency.symbol}
                     defaultDateFrom={manualGap.start_date}
                     defaultDateTo={manualGap.end_date}
                     defaultPrice={manualGap.last_known_price}
+                    hasGetters={hasGetters}
                 />
             )}
         </>

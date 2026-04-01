@@ -13,16 +13,46 @@ import {
     Badge, Box, Button, Flex, Input, NativeSelect, Spinner, Text,
 } from '@chakra-ui/react';
 import {
-    FiInfo, FiSearch, FiRefreshCw,
+    FiInfo, FiSearch, FiRefreshCw, FiX,
     FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight,
+    FiChevronDown, FiEdit3,
 } from 'react-icons/fi';
 import { usePriceHealth } from '../hooks/usePriceHealth';
-import { usePriceGapsSummary } from '../hooks/usePriceGaps';
+import { usePriceGapsSummary, PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY } from '../hooks/usePriceGaps';
+import { PRICE_TIMESERIES_QUERY_KEY, PRICE_HEALTH_QUERY_KEY } from '../hooks/usePriceHealth';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAssetDetailPanel } from '../contexts/AssetDetailPanelContext';
-import { AssetPriceChart } from './AssetPriceChart';
 import { GapFixPanel } from './GapFixPanel';
+import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { Tooltip } from './ui/tooltip';
+import { formatRelativeTime } from '../utils/dateUtils';
 import type { PriceHealthRow } from '../types';
+
+// ---------------------------------------------------------------------------
+// Lightweight sparkline — pure SVG, no deps, no HTTP fetch
+// ---------------------------------------------------------------------------
+
+const Sparkline: React.FC<{ prices: number[]; width?: number; height?: number; color?: string }> = ({
+    prices, width = 180, height = 28, color = '#6366f1',
+}) => {
+    if (prices.length < 2) return null;
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = max - min || 1;
+    const pad = 1;
+    const points = prices
+        .map((p, i) => {
+            const x = (i / (prices.length - 1)) * (width - pad * 2) + pad;
+            const y = height - pad - ((p - min) / range) * (height - pad * 2);
+            return `${x},${y}`;
+        })
+        .join(' ');
+    return (
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+            <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+    );
+};
 
 // ---------------------------------------------------------------------------
 // Status config
@@ -32,26 +62,12 @@ const STATUS_CONFIG: Record<string, { color: string; label: string; emoji: strin
     healthy: { color: 'green', label: 'Healthy', emoji: '✅' },
     warning: { color: 'yellow', label: 'Warning', emoji: '⚠️' },
     stale: { color: 'red', label: 'Stale', emoji: '🔴' },
+    no_transactions: { color: 'gray', label: 'No txns', emoji: 'ℹ️' },
 };
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatRelativeTime(isoString: string): string {
-    if (!isoString) return 'Never';
-    const d = new Date(isoString);
-    const diffMs = Date.now() - d.getTime();
-    const mins = Math.floor(diffMs / 60_000);
-    const hrs = Math.floor(diffMs / 3_600_000);
-    const days = Math.floor(diffMs / 86_400_000);
-    if (mins < 1) return 'Just now';
-    if (mins < 60) return `${mins}m`;
-    if (hrs < 24) return `${hrs}h`;
-    if (days < 30) return `${days}d`;
-    if (days < 365) return `${Math.floor(days / 30)}mo`;
-    return `${Math.floor(days / 365)}y`;
-}
 
 function formatPrice(price: number): string {
     if (price >= 1) return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -65,7 +81,7 @@ function formatPrice(price: number): string {
 // ---------------------------------------------------------------------------
 
 type SortKey = 'status' | 'gaps' | 'days_stale' | 'symbol';
-const STATUS_ORDER: Record<string, number> = { stale: 0, warning: 1, healthy: 2 };
+const STATUS_ORDER: Record<string, number> = { stale: 0, warning: 1, healthy: 2, no_transactions: 3 };
 
 function sortRows(rows: PriceHealthRow[], key: SortKey, gapMap: Map<number, number>): PriceHealthRow[] {
     return [...rows].sort((a, b) => {
@@ -105,6 +121,14 @@ export const PriceHealthCards: React.FC = () => {
     const [expandedId, setExpandedId] = useState<number | null>(null);
 
     const { openAssetPanel } = useAssetDetailPanel();
+    const qc = useQueryClient();
+
+    const handleCardRefresh = () => {
+        qc.invalidateQueries({ queryKey: PRICE_HEALTH_QUERY_KEY });
+        qc.invalidateQueries({ queryKey: PRICE_GAPS_QUERY_KEY });
+        qc.invalidateQueries({ queryKey: PRICE_GAPS_SUMMARY_QUERY_KEY });
+        qc.invalidateQueries({ queryKey: PRICE_TIMESERIES_QUERY_KEY });
+    };
 
     // Gap summary
     const allAssetIds = useMemo(() => (data?.items ?? []).map(r => r.asset_id), [data?.items]);
@@ -296,6 +320,7 @@ export const PriceHealthCards: React.FC = () => {
                             expanded={expandedId === row.asset_id}
                             onToggleExpand={() => setExpandedId(prev => prev === row.asset_id ? null : row.asset_id)}
                             onOpenPanel={() => openAssetPanel(row.asset_id)}
+                            onRefresh={handleCardRefresh}
                         />
                     ))}
                 </Flex>
@@ -321,17 +346,20 @@ interface HealthCardProps {
     expanded: boolean;
     onToggleExpand: () => void;
     onOpenPanel: () => void;
+    onRefresh: () => void;
 }
 
-const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel }) => {
-    const cfg = STATUS_CONFIG[row.status];
+const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel, onRefresh }) => {
+    const cfg = STATUS_CONFIG[row.status] ?? STATUS_CONFIG.healthy;
     const hasGaps = gapDays != null && gapDays > 0;
+    const noTx = row.status === 'no_transactions';
+    const [showPriceSetter, setShowPriceSetter] = useState(false);
 
     return (
         <Box
             bg="white"
             border="1px solid"
-            borderColor={expanded ? 'orange.300' : 'gray.200'}
+            borderColor={expanded ? 'orange.300' : noTx ? 'gray.100' : 'gray.200'}
             borderRadius="md"
             px={2.5}
             py={1.5}
@@ -340,8 +368,10 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
             flex={expanded ? '1 0 570px' : '1 0 185px'}
             _hover={{ borderColor: expanded ? 'orange.400' : 'blue.300', boxShadow: 'xs' }}
             transition="all 0.15s"
+            opacity={noTx ? 0.6 : 1}
+            position="relative"
         >
-            {/* Row 1: name + info icon + tiny chart */}
+            {/* Row 1: name + icons + tiny chart */}
             <Flex align="center" gap={1.5} mb={1}>
                 <Text fontSize="xs" fontWeight="bold" truncate flex={1}>
                     {row.symbol}
@@ -358,14 +388,65 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                         <FiInfo size={12} />
                     </Box>
                 </Tooltip>
-                {!expanded && (
-                    <Box w="60px" h="24px" flexShrink={0} overflow="hidden" position="relative">
-                        <Box position="absolute" inset={0}>
-                            <AssetPriceChart assetId={row.asset_id} symbol={row.symbol} mini />
-                        </Box>
+                <Tooltip content="Set prices">
+                    <Box
+                        as="button"
+                        color="gray.400"
+                        _hover={{ color: 'blue.500' }}
+                        cursor="pointer"
+                        onClick={e => { e.stopPropagation(); setShowPriceSetter(true); }}
+                        flexShrink={0}
+                    >
+                        <FiEdit3 size={11} />
                     </Box>
+                </Tooltip>
+                <Tooltip content="Refresh">
+                    <Box
+                        as="button"
+                        color="gray.300"
+                        _hover={{ color: 'blue.500' }}
+                        cursor="pointer"
+                        onClick={e => { e.stopPropagation(); onRefresh(); }}
+                        flexShrink={0}
+                    >
+                        <FiRefreshCw size={10} />
+                    </Box>
+                </Tooltip>
+                {expanded ? (
+                    <Tooltip content="Collapse">
+                        <Box
+                            as="button"
+                            color="gray.400"
+                            _hover={{ color: 'red.500' }}
+                            cursor="pointer"
+                            onClick={e => { e.stopPropagation(); onToggleExpand(); }}
+                            flexShrink={0}
+                        >
+                            <FiX size={14} />
+                        </Box>
+                    </Tooltip>
+                ) : (
+                    <Tooltip content="Expand">
+                        <Box
+                            as="button"
+                            color="gray.300"
+                            _hover={{ color: 'blue.500' }}
+                            cursor="pointer"
+                            onClick={e => { e.stopPropagation(); onToggleExpand(); }}
+                            flexShrink={0}
+                        >
+                            <FiChevronDown size={14} />
+                        </Box>
+                    </Tooltip>
                 )}
             </Flex>
+
+            {/* Sparkline row */}
+            {!expanded && row.sparkline && row.sparkline.length >= 2 && (
+                <Box h="28px" mt={0.5} mb={0.5}>
+                    <Sparkline prices={row.sparkline} width={180} height={28} />
+                </Box>
+            )}
 
             {/* Row 2: badges */}
             <Flex gap={1} flexWrap="wrap" mb={0.5}>
@@ -407,9 +488,21 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 </Text>
             </Flex>
 
-            {/* Expanded section: bigger chart + gap CTAs */}
-            {expanded && hasGaps && (
-                <ExpandedGapSection assetId={row.asset_id} symbol={row.symbol} />
+            {/* Expanded section: chart + gap CTAs */}
+            {expanded && (
+                <ExpandedSection assetId={row.asset_id} symbol={row.symbol} onOpenPriceSetter={() => setShowPriceSetter(true)} />
+            )}
+
+            {/* Price Setter Dialog */}
+            {showPriceSetter && (
+                <PriceSetterDialog
+                    isOpen={true}
+                    onClose={() => setShowPriceSetter(false)}
+                    onSave={() => { setShowPriceSetter(false); onRefresh(); }}
+                    assetId={row.asset_id}
+                    assetName={row.symbol}
+                    defaultDate={new Date().toISOString()}
+                />
             )}
         </Box>
     );
@@ -419,9 +512,9 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
 // Expanded gap section — loaded only when card is expanded
 // ---------------------------------------------------------------------------
 
-const ExpandedGapSection: React.FC<{ assetId: number; symbol: string }> = ({ assetId, symbol }) => (
+const ExpandedSection: React.FC<{ assetId: number; symbol: string; onOpenPriceSetter: () => void }> = ({ assetId, symbol, onOpenPriceSetter }) => (
     <Box mt={2} pt={2} borderTop="1px solid" borderColor="orange.100">
-        <GapFixPanel assetId={assetId} symbol={symbol} />
+        <GapFixPanel assetId={assetId} symbol={symbol} onOpenPriceSetter={onOpenPriceSetter} />
     </Box>
 );
 

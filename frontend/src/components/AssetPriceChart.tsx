@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
 import { ResponsiveLine, CustomLayerProps } from '@nivo/line';
 import { API_URL, GapRange } from '../types';
+import { useBaseCurrency } from '../hooks/useBaseCurrency';
 
 interface PriceTimeseriesPoint {
     date: string;
@@ -40,13 +41,17 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [zoom, setZoom] = useState<ZoomKey>('ALL');
+    const baseCurrency = useBaseCurrency();
 
     useEffect(() => {
         let cancelled = false;
         setIsLoading(true);
         setError(null);
 
-        fetch(`${API_URL}/price-snapshots/timeseries?asset_ids=${assetId}`)
+        const params = new URLSearchParams({ asset_ids: String(assetId) });
+        if (baseCurrency.assetId) params.set('quote_asset_id', String(baseCurrency.assetId));
+
+        fetch(`${API_URL}/price-snapshots/timeseries?${params}`)
             .then(r => {
                 if (!r.ok) throw new Error('Failed to fetch');
                 return r.json();
@@ -65,7 +70,7 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
             });
 
         return () => { cancelled = true; };
-    }, [assetId]);
+    }, [assetId, baseCurrency.assetId]);
 
     const filteredPoints = useMemo(() => {
         if (zoom === 'ALL' || points.length === 0) return points;

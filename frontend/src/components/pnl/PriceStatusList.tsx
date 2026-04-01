@@ -11,13 +11,13 @@ import {
     Icon,
     Spinner,
 } from '@chakra-ui/react';
-import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiClock, FiDatabase, FiPlus, FiLoader, FiRefreshCw } from 'react-icons/fi';
+import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiDatabase, FiLoader, FiRefreshCw, FiChevronDown } from 'react-icons/fi';
 import { AssetRef, PriceResponse } from '../../types';
-import { formatTimeLocale } from '../../utils/dateUtils';
+import { formatRelativeTime } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/tooltip';
-import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { PriceSetterDialog } from './PriceSetterDialog';
+import { GapFixPanel } from '../GapFixPanel';
 import { usePriceGapsSummary } from '../../hooks/usePriceGaps';
-import { PriceGapAlert } from '../PriceGapAlert';
 
 interface PriceStatusListProps {
     prices: PriceResponse[];
@@ -58,6 +58,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
 }) => {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [expandedAssetId, setExpandedAssetId] = useState<number | null>(null);
 
     // Fetch gap summary for all assets in the list
     const assetIds = useMemo(
@@ -75,14 +76,12 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
         return m;
     }, [gapSummary]);
 
-    // State for manual price dialog
+    // State for manual price dialog (triggered from expanded GapFixPanel or direct CTA)
     const [dialogOpen, setDialogOpen] = useState(false);
     const [selectedAsset, setSelectedAsset] = useState<{ id: number; symbol: string } | null>(null);
 
-    const handleAddPriceClick = (asset: AssetRef) => {
-        if (asset.id == null || asset.symbol == null) {
-            return; // Early return if id or symbol is null/undefined
-        }
+    const handleOpenPriceSetter = (asset: AssetRef) => {
+        if (asset.id == null || asset.symbol == null) return;
         setSelectedAsset({ id: asset.id, symbol: asset.symbol });
         setDialogOpen(true);
     };
@@ -254,8 +253,8 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                 <Table.ColumnHeader width="40px"></Table.ColumnHeader>
                                 <Table.ColumnHeader>Asset</Table.ColumnHeader>
                                 <Table.ColumnHeader>Price</Table.ColumnHeader>
-                                <Table.ColumnHeader>Details</Table.ColumnHeader>
-                                <Table.ColumnHeader width="80px"></Table.ColumnHeader>
+                                <Table.ColumnHeader>Source</Table.ColumnHeader>
+                                <Table.ColumnHeader width="40px"></Table.ColumnHeader>
                             </Table.Row>
                         </Table.Header>
                         <Table.Body>
@@ -267,103 +266,106 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                 const rowBg = isLoading ? 'blue.50' : isNa ? 'gray.50' : isError ? 'red.50' : isStale ? 'orange.50' : undefined;
                                 const iconColor = isLoading ? 'blue.500' : isNa ? 'gray.400' : isError ? 'red.500' : isStale ? 'orange.500' : 'green.500';
                                 const StatusIcon = isLoading ? FiLoader : isNa ? FiDatabase : isError ? FiAlertCircle : isStale ? FiAlertTriangle : FiCheckCircle;
+                                const isExpanded = expandedAssetId === item.asset.id;
+
+                                // Determine source text and date for this row
+                                const sourceText = isLoading ? 'Fetching…'
+                                    : isNa ? 'No active lots'
+                                        : isError ? (item.last_known_source || item.error || 'Error')
+                                            : isStale ? (item.source || 'Unknown')
+                                                : (item.source || 'Unknown');
+                                const sourceDate = isError ? item.last_known_price_date
+                                    : item.fetched_at;
 
                                 return (
-                                    <Table.Row key={item.asset.id} bg={rowBg}>
-                                        <Table.Cell>
-                                            {isLoading ? (
-                                                <Spinner size="xs" color="blue.500" />
-                                            ) : (
-                                                <Icon color={iconColor}>
-                                                    <StatusIcon />
-                                                </Icon>
-                                            )}
-                                        </Table.Cell>
-                                        <Table.Cell fontWeight="medium">
-                                            <Flex align="center" gap={1}>
-                                                <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
-                                                    <Text>{item.asset.symbol}</Text>
-                                                </Tooltip>
-                                                {gapMap.has(item.asset.id!) && (
-                                                    <Badge size="xs" colorPalette="orange" variant="subtle">
-                                                        {gapMap.get(item.asset.id!)} gap{gapMap.get(item.asset.id!)! !== 1 ? 's' : ''}
-                                                    </Badge>
-                                                )}
-                                            </Flex>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Text fontWeight={isError ? 'normal' : 'bold'}>
-                                                {isError && item.last_known_price != null
-                                                    ? formatCurrency(item.last_known_price, baseCurrency)
-                                                    : formatCurrency(item.price, baseCurrency)}
-                                            </Text>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            <Flex direction="column" gap={1}>
+                                    <React.Fragment key={item.asset.id}>
+                                        <Table.Row
+                                            bg={rowBg}
+                                            cursor="pointer"
+                                            onClick={() => setExpandedAssetId(isExpanded ? null : item.asset.id!)}
+                                            _hover={{ bg: isLoading ? 'blue.100' : isNa ? 'gray.100' : isError ? 'red.100' : isStale ? 'orange.100' : 'gray.50' }}
+                                        >
+                                            <Table.Cell>
                                                 {isLoading ? (
-                                                    <Text color="blue.600" fontSize="xs" fontWeight="medium">
-                                                        Fetching...
-                                                    </Text>
+                                                    <Spinner size="xs" color="blue.500" />
+                                                ) : (
+                                                    <Icon color={iconColor}>
+                                                        <StatusIcon />
+                                                    </Icon>
+                                                )}
+                                            </Table.Cell>
+                                            <Table.Cell fontWeight="medium">
+                                                <Flex align="center" gap={1}>
+                                                    <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
+                                                        <Text>{item.asset.symbol}</Text>
+                                                    </Tooltip>
+                                                    {gapMap.has(item.asset.id!) && (
+                                                        <Badge size="xs" colorPalette="orange" variant="subtle">
+                                                            {gapMap.get(item.asset.id!)} gap{gapMap.get(item.asset.id!)! !== 1 ? 's' : ''}
+                                                        </Badge>
+                                                    )}
+                                                </Flex>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <Text fontWeight={isError ? 'normal' : 'bold'}>
+                                                    {isError && item.last_known_price != null
+                                                        ? formatCurrency(item.last_known_price, baseCurrency)
+                                                        : formatCurrency(item.price, baseCurrency)}
+                                                </Text>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {isLoading ? (
+                                                    <Text color="blue.600" fontSize="xs" fontWeight="medium">Fetching…</Text>
+                                                ) : isNa ? (
+                                                    <Text color="gray.500" fontSize="xs">No active lots</Text>
                                                 ) : isError ? (
-                                                    <>
+                                                    <Flex align="center" gap={1}>
                                                         <Tooltip content={item.error || ''} openDelay={200}>
-                                                            <Text color="red.600" fontSize="xs" fontWeight="medium" truncate maxW="200px">
+                                                            <Text color="red.600" fontSize="xs" fontWeight="medium" truncate maxW="120px">
                                                                 {item.error}
                                                             </Text>
                                                         </Tooltip>
-                                                        {item.last_known_price != null && (
-                                                            <Flex align="center" gap={1} color="gray.500" fontSize="xs">
-                                                                <FiClock size={10} />
-                                                                <Text>
-                                                                    Last: {formatTimeLocale(item.last_known_price_date)}
-                                                                    {item.last_known_source ? ` (${item.last_known_source})` : ''}
-                                                                </Text>
-                                                            </Flex>
+                                                        {sourceDate && (
+                                                            <Text color="gray.400" fontSize="xs" whiteSpace="nowrap">
+                                                                {formatRelativeTime(sourceDate)}
+                                                            </Text>
                                                         )}
-                                                    </>
-                                                ) : isNa ? (
-                                                    <Text color="gray.500" fontSize="xs" fontWeight="medium">
-                                                        No active lots
-                                                    </Text>
-                                                ) : isStale ? (
-                                                    <>
-                                                        <Text color="orange.600" fontSize="xs" fontWeight="medium">
-                                                            {item.warning || `Stale: ${item.staleness_days} days old`}
-                                                        </Text>
-                                                        <Flex align="center" gap={1} color="gray.500" fontSize="xs">
-                                                            <FiDatabase size={10} />
-                                                            <Text>{item.source || 'Unknown'}</Text>
-                                                        </Flex>
-                                                    </>
+                                                    </Flex>
                                                 ) : (
-                                                    <>
-                                                        <Flex align="center" gap={1} color="gray.500" fontSize="xs">
-                                                            <FiDatabase size={10} />
-                                                            <Text>{item.source || 'Unknown'}</Text>
-                                                        </Flex>
-                                                        <Flex align="center" gap={1} color="gray.400" fontSize="xs">
-                                                            <FiClock size={10} />
-                                                            <Text>{formatTimeLocale(item.fetched_at)}</Text>
-                                                        </Flex>
-                                                    </>
+                                                    <Flex align="center" gap={1}>
+                                                        <Text color="gray.600" fontSize="xs" truncate maxW="100px">
+                                                            {sourceText}
+                                                        </Text>
+                                                        {sourceDate && (
+                                                            <Text color="gray.400" fontSize="xs" whiteSpace="nowrap">
+                                                                {formatRelativeTime(sourceDate)}
+                                                            </Text>
+                                                        )}
+                                                    </Flex>
                                                 )}
-                                            </Flex>
-                                        </Table.Cell>
-                                        <Table.Cell>
-                                            {(isError || isStale) && quoteAssetId && (
-                                                <Button
-                                                    size="xs"
-                                                    variant="outline"
-                                                    colorPalette={isError ? 'red' : 'orange'}
-                                                    onClick={() => handleAddPriceClick(item.asset)}
-                                                    title="Add manual price"
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <Icon
+                                                    color="gray.500"
+                                                    transition="transform 0.15s"
+                                                    transform={isExpanded ? 'rotate(180deg)' : undefined}
                                                 >
-                                                    <FiPlus size={12} />
-                                                    <Text ml={1} fontSize="xs">Add</Text>
-                                                </Button>
-                                            )}
-                                        </Table.Cell>
-                                    </Table.Row>
+                                                    <FiChevronDown />
+                                                </Icon>
+                                            </Table.Cell>
+                                        </Table.Row>
+                                        {isExpanded && (
+                                            <Table.Row>
+                                                <Table.Cell colSpan={5} p={3} bg="gray.50">
+                                                    <GapFixPanel
+                                                        assetId={item.asset.id!}
+                                                        symbol={item.asset.symbol || ''}
+                                                        onOpenPriceSetter={() => handleOpenPriceSetter(item.asset)}
+                                                    />
+                                                </Table.Cell>
+                                            </Table.Row>
+                                        )}
+                                    </React.Fragment>
                                 );
                             })}
                         </Table.Body>
@@ -373,7 +375,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
 
             {/* Manual Price Dialog */}
             {selectedAsset && quoteAssetId && (
-                <AddManualPriceDialog
+                <PriceSetterDialog
                     isOpen={dialogOpen}
                     onClose={() => {
                         setDialogOpen(false);

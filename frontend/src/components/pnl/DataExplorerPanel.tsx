@@ -33,7 +33,7 @@ import { TransactionRow } from '../TransactionRow';
 import { TransactionsTable } from '../TransactionsTable';
 import { defaultFilterState, TransactionFilterState, TransactionFilters } from '../TransactionFilters';
 import { buildPnLFilterParams } from '../../utils/pnlFilterParams';
-import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { PriceSetterDialog } from './PriceSetterDialog';
 import { formatDateLocale, formatDateTimeLocale } from '../../utils/dateUtils';
 import { formatQuantity } from '../../utils/numberUtils';
 const formatQty = formatQuantity;
@@ -1923,7 +1923,7 @@ const WarningsTab: React.FC<{
 
             {/* Manual Price Dialog */}
             {selectedWarning && selectedWarning.asset_id && quoteAssetId && (
-                <AddManualPriceDialog
+                <PriceSetterDialog
                     isOpen={dialogOpen}
                     onClose={() => {
                         setDialogOpen(false);

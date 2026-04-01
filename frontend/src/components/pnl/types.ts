@@ -270,7 +270,9 @@ export interface CostLot {
 
     // Origin traceability (Principle 3)
     acquired_at: string;
+    created_at?: string;  // When the lot record was created in the PnL engine
     origin_transaction_id?: number;
+    last_updated_by_tx_id?: number;  // Transaction that last modified this lot (consumption/settlement)
     origin_unit_id?: number;  // CalculationUnit that created this lot
     origin_unit_label?: string;  // Human-readable label of origin unit
     origin_label?: string;

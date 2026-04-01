@@ -6,7 +6,7 @@
  *
  * CTAs per gap range:
  *   1. "Fetch Missing Prices" → useBackfillPrices mutation for that range
- *   2. "Fill Manually" → opens AddManualPriceDialog in range mode with last_known_price
+ *   2. "Fill Manually" → opens PriceSetterDialog in range mode with last_known_price
  *
  * A "Fix All Gaps" button at the top triggers sequential backfill for all ranges.
  */
@@ -25,7 +25,7 @@ import { GapRange, BackfillResponse } from '../types';
 import { useBackfillPrices } from '../hooks/usePriceGaps';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
-import { AddManualPriceDialog } from './pnl/AddManualPriceDialog';
+import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 
 export interface PriceGapAlertProps {
     assetId: number;
@@ -169,7 +169,7 @@ const GapRangeAlert: React.FC<GapRangeAlertProps> = ({
                 </Flex>
             </Box>
 
-            <AddManualPriceDialog
+            <PriceSetterDialog
                 isOpen={showManual}
                 onClose={() => setShowManual(false)}
                 onSave={handleManualSaved}

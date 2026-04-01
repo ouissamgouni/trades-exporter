@@ -15,6 +15,7 @@ import { toaster } from './ui/toaster';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
 import { TablePagination } from './TablePagination';
 import { PriceHealthCards } from './PriceHealthCards';
+import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 
 type PriceViewMode = 'health' | 'table';
 
@@ -28,7 +29,7 @@ export const PricesViewer: React.FC = () => {
     const [editingKey, setEditingKey] = useState<string | null>(null);
     const [editValues, setEditValues] = useState<Partial<PriceSnapshot>>({});
     const [showCreateDialog, setShowCreateDialog] = useState(false);
-    const [newPrice, setNewPrice] = useState<Partial<PriceSnapshot>>({});
+    const [createAssetId, setCreateAssetId] = useState<number | null>(null);
     const [assetIdFilter, setAssetIdFilter] = useState<number | null>(null);
     const [quoteAssetIdFilter, setQuoteAssetIdFilter] = useState<number | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('');
@@ -143,27 +144,13 @@ export const PricesViewer: React.FC = () => {
         }
     };
 
-    const createPrice = async () => {
-        if (!newPrice.asset_id || !newPrice.snapshot_time || newPrice.price === undefined) {
-            toaster.error({ title: 'Validation error', description: 'Asset ID, Snapshot Time, and Price are required' });
-            return;
+    const handleAddPrice = () => {
+        if (assetIdFilter) {
+            setCreateAssetId(assetIdFilter);
+        } else {
+            setCreateAssetId(null);
         }
-        try {
-            const response = await fetch(`${API_URL}/price-snapshots`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newPrice)
-            });
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detail || 'Failed to create price');
-            }
-            await fetchPrices();
-            setNewPrice({});
-            setShowCreateDialog(false);
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create price' });
-        }
+        setShowCreateDialog(true);
     };
 
     const deletePrice = (price: PriceSnapshot) => {
@@ -264,7 +251,7 @@ export const PricesViewer: React.FC = () => {
                     </Flex>
                     {viewMode === 'table' && (
                         <>
-                            <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                            <Button colorPalette="blue" onClick={handleAddPrice}>
                                 ➕ Add Price
                             </Button>
                             <Button onClick={fetchPrices} variant="outline">
@@ -582,91 +569,49 @@ export const PricesViewer: React.FC = () => {
                     </Portal>
                 </Dialog.Root>
 
-                {/* Create Price Dialog */}
-                <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>
-                    <Portal>
-                        <Dialog.Backdrop />
-                        <Dialog.Positioner>
-                            <Dialog.Content>
-                                <Dialog.Header>
-                                    <Dialog.Title>Add New Price Snapshot</Dialog.Title>
-                                </Dialog.Header>
-                                <Dialog.Body>
-                                    <Flex direction="column" gap={4}>
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Asset *</Text>
-                                            <NativeSelect.Root>
-                                                <NativeSelect.Field
-                                                    value={newPrice.asset_id ?? ''}
-                                                    onChange={e => setNewPrice({ ...newPrice, asset_id: parseInt(e.target.value) })}
-                                                >
-                                                    <option value="">Select asset...</option>
-                                                    {assets.map(asset => (
-                                                        <option key={asset.asset_id} value={asset.asset_id}>
-                                                            {asset.symbol} (ID: {asset.asset_id})
-                                                        </option>
-                                                    ))}
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                        </Box>
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Quote Asset</Text>
-                                            <NativeSelect.Root>
-                                                <NativeSelect.Field
-                                                    value={newPrice.quote_asset_id ?? ''}
-                                                    onChange={e => setNewPrice({ ...newPrice, quote_asset_id: e.target.value ? parseInt(e.target.value) : undefined })}
-                                                >
-                                                    <option value="">Select quote asset...</option>
-                                                    {assets.map(asset => (
-                                                        <option key={asset.asset_id} value={asset.asset_id}>
-                                                            {asset.symbol} (ID: {asset.asset_id})
-                                                        </option>
-                                                    ))}
-                                                </NativeSelect.Field>
-                                            </NativeSelect.Root>
-                                        </Box>
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Snapshot Time (ISO format) *</Text>
-                                            <Input
-                                                placeholder="e.g., 2025-01-15T10:30:00"
-                                                value={newPrice.snapshot_time || ''}
-                                                onChange={e => setNewPrice({ ...newPrice, snapshot_time: e.target.value })}
-                                            />
-                                        </Box>
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Price *</Text>
-                                            <Input
-                                                type="number"
-                                                step="any"
-                                                placeholder="e.g., 42000.50"
-                                                value={newPrice.price ?? ''}
-                                                onChange={e => setNewPrice({ ...newPrice, price: parseFloat(e.target.value) })}
-                                            />
-                                        </Box>
-                                        <Box>
-                                            <Text fontWeight="medium" mb={1}>Source</Text>
-                                            <Input
-                                                placeholder="e.g., coingecko, manual"
-                                                value={newPrice.source || ''}
-                                                onChange={e => setNewPrice({ ...newPrice, source: e.target.value })}
-                                            />
-                                        </Box>
-                                    </Flex>
-                                </Dialog.Body>
-                                <Dialog.Footer>
-                                    <Flex gap={2}>
-                                        <Button variant="outline" onClick={() => { setShowCreateDialog(false); setNewPrice({}); }}>
+                {/* Price Setter Dialog (replaces old inline create dialog) */}
+                {showCreateDialog && !createAssetId && (
+                    <Dialog.Root open={true} onOpenChange={(e) => !e.open && setShowCreateDialog(false)}>
+                        <Portal>
+                            <Dialog.Backdrop css={{ zIndex: 2000 }} />
+                            <Dialog.Positioner css={{ zIndex: 2000 }}>
+                                <Dialog.Content maxW="360px">
+                                    <Dialog.Header>
+                                        <Dialog.Title>Select Asset</Dialog.Title>
+                                    </Dialog.Header>
+                                    <Dialog.Body>
+                                        <Text fontSize="sm" mb={2} color="gray.600">Choose an asset to add prices for:</Text>
+                                        <AssetSelector
+                                            value={null}
+                                            onChange={(id) => {
+                                                if (id) setCreateAssetId(id);
+                                            }}
+                                            assets={assets}
+                                            placeholder="Select asset..."
+                                            size="md"
+                                        />
+                                    </Dialog.Body>
+                                    <Dialog.Footer>
+                                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
                                             Cancel
                                         </Button>
-                                        <Button colorPalette="blue" onClick={createPrice}>
-                                            Create Price Snapshot
-                                        </Button>
-                                    </Flex>
-                                </Dialog.Footer>
-                            </Dialog.Content>
-                        </Dialog.Positioner>
-                    </Portal>
-                </Dialog.Root>
+                                    </Dialog.Footer>
+                                </Dialog.Content>
+                            </Dialog.Positioner>
+                        </Portal>
+                    </Dialog.Root>
+                )}
+
+                {showCreateDialog && createAssetId && (
+                    <PriceSetterDialog
+                        isOpen={true}
+                        onClose={() => { setShowCreateDialog(false); setCreateAssetId(null); }}
+                        onSave={() => { setShowCreateDialog(false); setCreateAssetId(null); fetchPrices(); }}
+                        assetId={createAssetId}
+                        assetName={getAssetSymbol(createAssetId)}
+                        defaultDate={new Date().toISOString()}
+                    />
+                )}
 
             </>}
 

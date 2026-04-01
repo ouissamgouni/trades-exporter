@@ -398,7 +398,9 @@ export interface PriceHealthRow {
     total_snapshots: number;
     days_stale: number;
     is_flatline: boolean;
-    status: 'healthy' | 'warning' | 'stale';
+    status: 'healthy' | 'warning' | 'stale' | 'no_transactions';
+    has_transactions: boolean;
+    sparkline: number[];
 }
 
 export interface PriceHealthResponse {
@@ -459,6 +461,7 @@ export interface BackfillRequest {
     asset_id: number;
     date_from: string;
     date_to: string;
+    quote_asset_id?: number | null;
 }
 
 export interface BackfillFetchedItem {
@@ -485,12 +488,37 @@ export interface BulkManualRequest {
     date_to: string;
     price: number;
     source?: string;
+    force?: boolean;
+    interpolate?: boolean;
+    price_start?: number | null;
+    price_end?: number | null;
 }
 
 export interface BulkManualResponse {
     asset_id: number;
     created_count: number;
     skipped_count: number;
+    overwritten_count: number;
+}
+
+export interface ExistingPriceItem {
+    date: string;
+    price: number;
+    source?: string | null;
+}
+
+export interface CheckExistingResponse {
+    asset_id: number;
+    count: number;
+    items: ExistingPriceItem[];
+}
+
+export interface TestFetchResponse {
+    asset_id: number;
+    date: string;
+    price: number;
+    source: string;
+    quote_currency: string;
 }
 
 export interface RawAsset {

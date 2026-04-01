@@ -55,17 +55,11 @@ export const formatAssetDisplay = (
         return { display: sym, truncated: false, fullText: sym };
     }
 
-    const fullText = `${label} (${sym})`;
+    const fullText = label;
 
-    if (maxLength && fullText.length > maxLength) {
-        // Truncate the label, keep the symbol visible
-        const availableForLabel = maxLength - sym.length - 4; // account for " ()" and "…"
-        if (availableForLabel > 3) {
-            const truncatedLabel = label.slice(0, availableForLabel) + '…';
-            return { display: `${truncatedLabel} (${sym})`, truncated: true, fullText };
-        }
-        // If there's not enough room, just show symbol
-        return { display: sym, truncated: true, fullText };
+    if (maxLength && label.length > maxLength) {
+        const truncatedLabel = label.slice(0, maxLength - 1) + '…';
+        return { display: truncatedLabel, truncated: true, fullText };
     }
 
     return { display: fullText, truncated: false, fullText };
