@@ -99,7 +99,7 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
                         cursor="pointer"
                         onClick={onPriceBadgeClick}
                     >
-                        ✅ {priceSuccessCount} fresh
+                        ✅ {priceSuccessCount}
                     </Badge>
                 )}
                 {priceStaleCount > 0 && (
@@ -121,7 +121,7 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
                         cursor="pointer"
                         onClick={onPriceBadgeClick}
                     >
-                        ⚠️ {priceErrorCount} error
+                        ⚠️ {priceErrorCount}
                     </Badge>
                 )}
                 {priceSuccessCount === 0 && priceStaleCount === 0 && priceErrorCount === 0 && (
@@ -460,6 +460,11 @@ export const SummaryBar: React.FC<{
                 <Text fontSize="sm" fontWeight="bold" color={realizedColor}>
                     {formatCurrency(summary.total_realized_pnl, baseCurrency)}
                 </Text>
+                {summary.taxable_realized_pnl !== 0 && (
+                    <Text fontSize="2xs" color="gray.500">
+                        Taxable: {formatCurrency(summary.taxable_realized_pnl, baseCurrency)}
+                    </Text>
+                )}
             </Box>
             <Box>
                 <Text fontSize="xs" color="gray.500">Fees</Text>

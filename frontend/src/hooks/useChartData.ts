@@ -278,6 +278,63 @@ export interface PerformersResponse {
     group_type: string;
     top_performers: PerformerItem[];
     flop_performers: PerformerItem[];
+    total_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Asset period delta types & hook
+// ---------------------------------------------------------------------------
+
+export interface AssetPeriodDelta {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    total_return: number;
+    roi_pct: number;
+    unrealized_change: number;
+    realized_in_period: number;
+    cost_change: number;
+    market_value_change: number;
+}
+
+export interface AssetPeriodDeltasResponse {
+    version_id: number;
+    period: string;
+    deltas: AssetPeriodDelta[];
+}
+
+export function useAssetPeriodDeltas(
+    versionId: number | null,
+    period: string,
+    enabled = true,
+) {
+    const result = useQuery<AssetPeriodDeltasResponse>({
+        queryKey: ['asset-period-deltas', versionId, period],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            sp.set('period', period);
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/asset-period-deltas?${sp.toString()}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId && period !== 'all',
+        staleTime: 5 * 60_000,
+    });
+
+    // Build Map<assetId, AssetPeriodDelta> for O(1) lookups
+    const deltaMap = result.data?.deltas
+        ? new Map(result.data.deltas.map(d => [d.asset_id, d]))
+        : new Map<number, AssetPeriodDelta>();
+
+    return {
+        data: result.data ?? null,
+        deltaMap,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+    };
 }
 
 

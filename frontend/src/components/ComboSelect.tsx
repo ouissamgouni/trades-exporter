@@ -6,7 +6,7 @@ interface ComboSelectProps {
     onChange: (value: string) => void;
     options: string[];
     placeholder?: string;
-    size?: 'sm' | 'md';
+    size?: 'xs' | 'sm' | 'md';
     width?: string;
 }
 
@@ -94,7 +94,7 @@ export const ComboSelect: React.FC<ComboSelectProps> = ({
                             bg="blue.50"
                             _hover={{ bg: 'blue.100' }}
                             onClick={() => handleSelect(value)}
-                            fontSize="sm"
+                            fontSize="xs"
                             borderBottom="1px solid"
                             borderColor="gray.100"
                         >
@@ -112,13 +112,13 @@ export const ComboSelect: React.FC<ComboSelectProps> = ({
                                 bg={value === option ? 'blue.50' : undefined}
                                 _hover={{ bg: 'blue.100' }}
                                 onClick={() => handleSelect(option)}
-                                fontSize="sm"
+                                fontSize="xs"
                             >
                                 <Text>{option}</Text>
                             </Box>
                         ))
                     ) : inputValue ? (
-                        <Box p={2} color="gray.500" fontSize="sm">
+                        <Box p={2} color="gray.500" fontSize="xs">
                             <Text>Using custom: "{inputValue}"</Text>
                         </Box>
                     ) : (
@@ -130,7 +130,7 @@ export const ComboSelect: React.FC<ComboSelectProps> = ({
                                 bg={value === option ? 'blue.50' : undefined}
                                 _hover={{ bg: 'blue.100' }}
                                 onClick={() => handleSelect(option)}
-                                fontSize="sm"
+                                fontSize="xs"
                             >
                                 <Text>{option}</Text>
                             </Box>

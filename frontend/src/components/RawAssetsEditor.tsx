@@ -5,6 +5,7 @@ import {
     Table, Text, HStack
 } from '@chakra-ui/react';
 import React, { useEffect, useState, useMemo } from 'react';
+import { LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight } from 'react-icons/lu';
 import { API_URL, Asset, RawAsset } from '../types';
 import { useAssets } from '../hooks/useAssets';
 import { AssetSelector } from './AssetSelector';
@@ -59,6 +60,9 @@ interface SuggestedMatch {
     confidence: number;
 }
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
 export const RawAssetsEditor: React.FC = () => {
     const [rawAssets, setRawAssets] = useState<RawAsset[]>([]);
     const { assets, refetchAssets } = useAssets();
@@ -70,6 +74,10 @@ export const RawAssetsEditor: React.FC = () => {
     const [newRawAsset, setNewRawAsset] = useState<Partial<RawAsset>>({});
     const [sourceFilter, setSourceFilter] = useState('');
     const [linkedFilter, setLinkedFilter] = useState<string>('');
+
+    // Pagination
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
     // Confirmation dialogs
     const deleteConfirm = useConfirmDialog<RawAsset>();
@@ -260,6 +268,21 @@ export const RawAssetsEditor: React.FC = () => {
     const suggestionsAvailableCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0).length;
     const highConfidenceCount = Array.from(suggestionsMap.values()).filter(s => s.length > 0 && s[0].confidence >= 0.9).length;
 
+    const linkedCount = rawAssets.filter(ra => ra.asset_id !== null).length;
+    const unlinkedCount = rawAssets.filter(ra => ra.asset_id === null).length;
+
+    // Pagination computation
+    const totalRows = rawAssets.length;
+    const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage = Math.min(page, pageCount - 1);
+    const paginatedRawAssets = useMemo(() => {
+        const start = safePage * pageSize;
+        return rawAssets.slice(start, start + pageSize);
+    }, [rawAssets, safePage, pageSize]);
+
+    // Reset page when data changes
+    useEffect(() => { setPage(0); }, [sourceFilter, linkedFilter]);
+
     if (loading) return (
         <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
             <Spinner size="xl" color="blue.500" />
@@ -273,28 +296,25 @@ export const RawAssetsEditor: React.FC = () => {
         </Box>
     );
 
-    const linkedCount = rawAssets.filter(ra => ra.asset_id !== null).length;
-    const unlinkedCount = rawAssets.filter(ra => ra.asset_id === null).length;
-
     return (
         <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
+            <Flex justify="space-between" align="center" mb={3} borderBottom="1px" borderColor="gray.200" pb={2}>
                 <Box>
-                    <Heading as="h2" size="md" mb={1}>🔗 Raw Assets Mapping</Heading>
-                    <Text color="gray.600" fontSize="sm">
+                    <Heading as="h2" size="sm" mb={0.5}>🔗 Raw Assets Mapping</Heading>
+                    <Text color="gray.600" fontSize="xs">
                         Link source-specific asset symbols to normalized assets.
                     </Text>
                 </Box>
                 <Flex gap={2}>
                     {highConfidenceCount > 0 && (
-                        <Button colorPalette="green" variant="outline" onClick={autoMapAll}>
+                        <Button size="xs" colorPalette="green" variant="outline" onClick={autoMapAll}>
                             ✨ Auto-Map ({highConfidenceCount})
                         </Button>
                     )}
-                    <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    <Button size="xs" colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Mapping
                     </Button>
-                    <Button onClick={fetchRawAssets} variant="outline">
+                    <Button size="xs" onClick={fetchRawAssets} variant="outline">
                         🔄 Refresh
                     </Button>
                 </Flex>
@@ -304,7 +324,7 @@ export const RawAssetsEditor: React.FC = () => {
             {suggestionsAvailableCount > 0 && (
                 <Box mb={4} p={3} bg="blue.50" borderRadius="md" borderWidth={1} borderColor="blue.200">
                     <HStack justify="space-between">
-                        <Text fontSize="sm" color="blue.700">
+                        <Text fontSize="xs" color="blue.700">
                             💡 <strong>{suggestionsAvailableCount}</strong> unlinked asset(s) have suggested matches.
                             {highConfidenceCount > 0 && ` ${highConfidenceCount} high-confidence match(es) can be auto-mapped.`}
                         </Text>
@@ -312,10 +332,10 @@ export const RawAssetsEditor: React.FC = () => {
                 </Box>
             )}
 
-            <Flex gap={4} mb={6} align="center" flexWrap="wrap">
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Source:</Text>
-                    <NativeSelect.Root size="sm" width="150px">
+            <Flex gap={3} mb={3} align="center" flexWrap="wrap">
+                <Flex align="center" gap={1.5}>
+                    <Text fontWeight="medium" fontSize="xs">Source:</Text>
+                    <NativeSelect.Root size="xs" width="130px">
                         <NativeSelect.Field
                             value={sourceFilter}
                             onChange={e => setSourceFilter(e.target.value)}
@@ -327,9 +347,9 @@ export const RawAssetsEditor: React.FC = () => {
                         </NativeSelect.Field>
                     </NativeSelect.Root>
                 </Flex>
-                <Flex align="center" gap={2}>
-                    <Text fontWeight="medium" fontSize="sm">Status:</Text>
-                    <NativeSelect.Root size="sm" width="120px">
+                <Flex align="center" gap={1.5}>
+                    <Text fontWeight="medium" fontSize="xs">Status:</Text>
+                    <NativeSelect.Root size="xs" width="100px">
                         <NativeSelect.Field
                             value={linkedFilter}
                             onChange={e => setLinkedFilter(e.target.value)}
@@ -341,14 +361,60 @@ export const RawAssetsEditor: React.FC = () => {
                     </NativeSelect.Root>
                 </Flex>
                 {(sourceFilter || linkedFilter) && (
-                    <Button size="sm" variant="outline" onClick={() => { setSourceFilter(''); setLinkedFilter(''); }}>
+                    <Button size="xs" variant="outline" onClick={() => { setSourceFilter(''); setLinkedFilter(''); }}>
                         Clear Filters
                     </Button>
                 )}
             </Flex>
 
-            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm">
-                <Table.Root size="sm">
+            <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" fontSize="xs">
+                {/* Pagination bar (top) */}
+                {totalRows > PAGE_SIZE_OPTIONS[0] && (
+                    <Box borderBottom="1px solid" borderColor="gray.100">
+                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <Button
+                                            key={size}
+                                            size="2xs"
+                                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
+                                            borderRadius="0"
+                                            onClick={() => { setPageSize(size); setPage(0); }}
+                                            px={2}
+                                            fontSize="xs"
+                                        >
+                                            {size}
+                                        </Button>
+                                    ))}
+                                </Flex>
+                            </Flex>
+                            <Text fontSize="2xs" color="gray.500">
+                                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+                            </Text>
+                            <Flex align="center" gap={1}>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                                    <LuChevronsLeft size={12} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                    <LuChevronLeft size={14} />
+                                </Button>
+                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                    {safePage + 1} / {pageCount}
+                                </Text>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronRight size={14} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronsRight size={12} />
+                                </Button>
+                            </Flex>
+                        </Flex>
+                    </Box>
+                )}
+                <Table.Root size="xs">
                     <Table.Header>
                         <Table.Row>
                             <Table.ColumnHeader>Source Symbol</Table.ColumnHeader>
@@ -368,7 +434,7 @@ export const RawAssetsEditor: React.FC = () => {
                                 </Table.Cell>
                             </Table.Row>
                         ) : (
-                            rawAssets.map(rawAsset => {
+                            paginatedRawAssets.map(rawAsset => {
                                 const key = getEditKey(rawAsset);
                                 const isEditing = editingKey === key;
                                 const suggestions = suggestionsMap.get(key) || [];
@@ -377,7 +443,7 @@ export const RawAssetsEditor: React.FC = () => {
                                 return (
                                     <Table.Row key={key} bg={isUnlinked ? 'orange.50' : undefined}>
                                         <Table.Cell maxW="200px">
-                                            <Text fontWeight="medium" fontSize="sm" truncate title={rawAsset.symbol}>{rawAsset.symbol}</Text>
+                                            <Text fontWeight="medium" fontSize="xs" truncate title={rawAsset.symbol}>{rawAsset.symbol}</Text>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Badge colorPalette="purple">{rawAsset.source}</Badge>
@@ -398,7 +464,7 @@ export const RawAssetsEditor: React.FC = () => {
                                                 rawAsset.asset_id ? (
                                                     <Badge colorPalette="green">{getAssetSymbol(rawAsset.asset_id)}</Badge>
                                                 ) : (
-                                                    <Text fontSize="sm" color="gray.400">Not linked</Text>
+                                                    <Text fontSize="xs" color="gray.400">Not linked</Text>
                                                 )
                                             )}
                                         </Table.Cell>
@@ -460,10 +526,56 @@ export const RawAssetsEditor: React.FC = () => {
                         )}
                     </Table.Body>
                 </Table.Root>
+                {/* Pagination bar (bottom) */}
+                {totalRows > PAGE_SIZE_OPTIONS[0] && (
+                    <Box borderTop="1px solid" borderColor="gray.100">
+                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <Button
+                                            key={size}
+                                            size="2xs"
+                                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
+                                            borderRadius="0"
+                                            onClick={() => { setPageSize(size); setPage(0); }}
+                                            px={2}
+                                            fontSize="xs"
+                                        >
+                                            {size}
+                                        </Button>
+                                    ))}
+                                </Flex>
+                            </Flex>
+                            <Text fontSize="2xs" color="gray.500">
+                                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+                            </Text>
+                            <Flex align="center" gap={1}>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                                    <LuChevronsLeft size={12} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                    <LuChevronLeft size={14} />
+                                </Button>
+                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                    {safePage + 1} / {pageCount}
+                                </Text>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronRight size={14} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronsRight size={12} />
+                                </Button>
+                            </Flex>
+                        </Flex>
+                    </Box>
+                )}
             </Box>
 
-            <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
-                <Text fontSize="sm" color="gray.600">
+            <Box mt={2} p={2} bg="white" borderRadius="md" boxShadow="sm">
+                <Text fontSize="xs" color="gray.600">
                     <strong>Total:</strong> {rawAssets.length} raw assets
                     {' • '}<Badge colorPalette="green" size="sm">{linkedCount} linked</Badge>
                     {' • '}<Badge colorPalette="orange" size="sm">{unlinkedCount} unlinked</Badge>

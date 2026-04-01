@@ -184,11 +184,20 @@ def mock_realized_pnl():
     entry.proceeds_price_source = "price_service"
     entry.proceeds_price_timestamp = datetime.utcnow()
     
+    # Derivative/related asset
+    entry.related_asset_symbol = None
+    
     # Mock asset relationship
     entry.asset = MagicMock()
     entry.asset.asset_id = 2
     entry.asset.symbol = "BTC"
     entry.asset.label = "Bitcoin"
+    
+    # Mock transaction relationship (for account_id/account_name)
+    entry.transaction = MagicMock()
+    entry.transaction.account_id = 1
+    entry.transaction.account_rel = MagicMock()
+    entry.transaction.account_rel.name = "TestAccount"
     
     return entry
 

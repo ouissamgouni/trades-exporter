@@ -108,6 +108,7 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
                     accounts={accounts}
                     dimensions={dimensions}
                     accountBalances={accountBalances}
+                    pnlVersionId={state.currentVersionId ?? undefined}
                 />
             </Box>
         );
@@ -117,9 +118,9 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
         <Box>
             <Flex align="center" gap={2} mb={3}>
                 <Heading size="sm">{title}</Heading>
-                {drill.period && (
+                {state.timeframeRange !== 'all' && (
                     <Badge colorPalette="blue" variant="subtle" size="sm">
-                        {drill.period.toUpperCase()}
+                        {state.timeframeRange.toUpperCase()}
                     </Badge>
                 )}
                 <Text fontSize="xs" color="gray.500">
@@ -156,6 +157,7 @@ export const PnLLevel1: React.FC<PnLLevel1Props> = ({
                 liveBalanceLoading={liveBalanceLoading}
                 liveAccountErrors={liveAccountErrors}
                 liveFetchedAccountIds={liveFetchedAccountIds}
+                pnlVersionId={state.currentVersionId ?? undefined}
             />
         </Box>
     );

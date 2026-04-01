@@ -14,10 +14,9 @@ import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { toaster } from './ui/toaster';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
 import { TablePagination } from './TablePagination';
-import { PriceHealthTable } from './PriceHealthTable';
-import { PriceInvestigationChart } from './PriceInvestigationChart';
+import { PriceHealthCards } from './PriceHealthCards';
 
-type PriceViewMode = 'health' | 'chart' | 'table';
+type PriceViewMode = 'health' | 'table';
 
 export const PricesViewer: React.FC = () => {
     const [viewMode, setViewMode] = useState<PriceViewMode>('health');
@@ -242,15 +241,13 @@ export const PricesViewer: React.FC = () => {
                     <Text color="gray.600" fontSize="sm">
                         {viewMode === 'health'
                             ? 'Monitor price data freshness and detect anomalies across all assets.'
-                            : viewMode === 'chart'
-                                ? 'Compare asset price performance over time (rebased return %).'
-                                : 'View and manage historical cryptocurrency price snapshots.'}
+                            : 'View and manage historical cryptocurrency price snapshots.'}
                     </Text>
                 </Box>
                 <Flex gap={2} align="center">
                     {/* View mode toggle */}
                     <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
-                        {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'chart' as const, label: '📈 Chart' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (
+                        {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (
                             <Button
                                 key={opt.value}
                                 size="sm"
@@ -280,12 +277,7 @@ export const PricesViewer: React.FC = () => {
 
             {/* === HEALTH VIEW === */}
             {viewMode === 'health' && (
-                <PriceHealthTable />
-            )}
-
-            {/* === CHART VIEW === */}
-            {viewMode === 'chart' && (
-                <PriceInvestigationChart />
+                <PriceHealthCards />
             )}
 
             {/* === TABLE VIEW === */}

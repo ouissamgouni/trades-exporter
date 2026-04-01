@@ -50,7 +50,7 @@ import {
     WarningsTabWrapper,
     TransactionsTabWrapper,
 } from './AuditTabWrappers';
-import { ActivityFeed } from './ActivityFeed';
+
 // Re-export for backwards compatibility
 export { getPersistedPageSize } from '../../hooks/usePagination';
 
@@ -467,125 +467,138 @@ export const UnitDetailRow: React.FC<UnitDetailRowProps> = ({ unit, baseCurrency
                     </Card.Body>
                 </Card.Root>
 
-                {/* Two columns: Cost Lot Events | P&L + Warnings */}
-                <Flex gap={4} wrap="wrap">
-                    {/* Cost Lot Events Card - Now using unified component in compact mode */}
-                    <Card.Root size="sm" variant="outline" flex="1" minW="400px" overflow="hidden">
-                        <Card.Body p={3} overflow="auto">
-                            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
-                                📦 Cost Lot Events
-                            </Text>
-                            {versionId && (
-                                <CostLotEventsTable
-                                    {...EVENT_TABLE_PRESETS.UNIT_DETAIL}
-                                    versionId={versionId}
-                                    unitId={unit.unit_id}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                    maxHeight="400px"
-                                    hidePagination={true}
-                                />
-                            )}
-                        </Card.Body>
-                    </Card.Root>
-
-                    {/* P&L Card */}
-                    <Card.Root size="sm" variant="outline" flex="1" minW="280px">
-                        <Card.Body p={3}>
-                            <Text fontSize="xs" fontWeight="bold" color="green.600" mb={2}>
-                                💰 Realized P&L ({unit.realized_entries?.length || 0})
-                            </Text>
-                            {unit.realized_entries && unit.realized_entries.length > 0 ? (
-                                <Table.Root size="sm">
-                                    <Table.Header>
-                                        <Table.Row>
-                                            <Table.ColumnHeader fontSize="xs">Asset</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="right">Proceeds</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs">FMV</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="right">Cost</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="right">P&L</Table.ColumnHeader>
-                                            <Table.ColumnHeader fontSize="xs" textAlign="center">Type</Table.ColumnHeader>
-                                        </Table.Row>
-                                    </Table.Header>
-                                    <Table.Body>
+                {/* Realized P&L - Full Width */}
+                <Card.Root size="sm" variant="outline" overflow="hidden">
+                    <Card.Body p={3} overflow="auto">
+                        <Text fontSize="xs" fontWeight="bold" color="green.600" mb={2}>
+                            💰 Realized P&L ({unit.realized_entries?.length || 0})
+                        </Text>
+                        {unit.realized_entries && unit.realized_entries.length > 0 ? (
+                            <Box overflowX="auto">
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'left' }}>Asset</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>Qty</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>Proceeds</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>FMV Price</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Source</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'left' }}>FMV Time</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>Cost Basis</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'right' }}>P&L</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Taxability</th>
+                                            <th style={{ padding: '4px 6px', fontSize: 10, whiteSpace: 'nowrap', fontWeight: 600, textAlign: 'center' }}>Origin</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
                                         {unit.realized_entries.map((entry, i) => (
-                                            <Table.Row key={i} bg={entry.is_fee ? 'orange.50' : undefined}>
-                                                <Table.Cell fontSize="xs">
+                                            <tr key={i} style={{ borderBottom: '1px solid #f1f3f5', background: entry.is_fee ? '#FFFAF0' : undefined }}>
+                                                <td style={{ padding: '3px 6px' }}>
                                                     <Badge size="xs">{entry.asset.symbol || `#${entry.asset.id}`}</Badge>
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
+                                                    <ValueDisplay value={entry.qty} />
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
                                                     <ValueDisplay value={entry.proceeds_in_base} currency={baseCurrency} />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs">
-                                                    {entry.proceeds_price != null ? (
-                                                        <Flex gap={1} align="center" wrap="wrap">
-                                                            <Text fontSize="2xs" fontFamily="mono" color="gray.600">
-                                                                {formatQuantity(entry.proceeds_price)}
-                                                            </Text>
-                                                            {entry.proceeds_price_source && (
-                                                                <Badge size="xs" colorPalette={entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'cyan' : entry.proceeds_source === 'provisional' ? 'orange' : 'gray'} variant="subtle">
-                                                                    {entry.proceeds_price_source}
-                                                                </Badge>
-                                                            )}
-                                                        </Flex>
-                                                    ) : (
-                                                        <Text fontSize="2xs" color="gray.400">-</Text>
-                                                    )}
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="right">
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
+                                                    {entry.proceeds_price != null
+                                                        ? <ValueDisplay value={entry.proceeds_price} currency={baseCurrency} />
+                                                        : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'center' }}>
+                                                    {entry.proceeds_price_source ? (
+                                                        <Badge size="xs" variant="subtle"
+                                                            colorPalette={
+                                                                entry.proceeds_source === 'fmv' || entry.proceeds_source === 'fmv_lookup' ? 'cyan'
+                                                                    : entry.proceeds_source === 'provisional' ? 'orange'
+                                                                        : 'gray'
+                                                            }>
+                                                            {entry.proceeds_price_source}
+                                                        </Badge>
+                                                    ) : <Text fontSize="2xs" color="gray.400">-</Text>}
+                                                </td>
+                                                <td style={{ padding: '3px 6px' }}>
+                                                    <Text fontSize="2xs" color="gray.500" whiteSpace="nowrap">
+                                                        {entry.proceeds_price_timestamp ? formatDateLocale(entry.proceeds_price_timestamp) : '-'}
+                                                    </Text>
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
                                                     <ValueDisplay value={entry.cost_basis_in_base} currency={baseCurrency} />
-                                                </Table.Cell>
-                                                <Table.Cell
-                                                    fontSize="xs"
-                                                    textAlign="right"
-                                                    color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'}
-                                                    fontWeight="bold"
-                                                >
-                                                    <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
-                                                </Table.Cell>
-                                                <Table.Cell fontSize="xs" textAlign="center">
-                                                    {entry.is_fee ? (
-                                                        <Badge size="xs" colorPalette="orange">Fee</Badge>
-                                                    ) : (
-                                                        <Badge size="xs" colorPalette="blue">Disposal</Badge>
-                                                    )}
-                                                </Table.Cell>
-                                            </Table.Row>
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'right' }}>
+                                                    <Text color={entry.pnl_in_base >= 0 ? 'green.600' : 'red.600'} fontWeight="medium" fontSize="2xs">
+                                                        <ValueDisplay value={entry.pnl_in_base} currency={baseCurrency} />
+                                                    </Text>
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'center' }}>
+                                                    <Badge size="xs" variant="subtle"
+                                                        colorPalette={entry.disposal_taxable ? 'red' : 'green'}>
+                                                        {entry.disposal_taxable ? 'Taxable' : 'Non-Taxable'}
+                                                    </Badge>
+                                                </td>
+                                                <td style={{ padding: '3px 6px', textAlign: 'center' }}>
+                                                    <Badge size="xs" colorPalette={entry.is_fee ? 'orange' : 'blue'} variant="subtle">
+                                                        {entry.is_fee ? 'Fee' : 'Disposal'}
+                                                    </Badge>
+                                                </td>
+                                            </tr>
                                         ))}
-                                    </Table.Body>
-                                </Table.Root>
-                            ) : (
-                                <Text fontSize="xs" color="gray.400">No realized P&L</Text>
-                            )}
+                                    </tbody>
+                                </table>
+                            </Box>
+                        ) : (
+                            <Text fontSize="xs" color="gray.400">No realized P&L</Text>
+                        )}
+                    </Card.Body>
+                </Card.Root>
+
+                {/* Cost Lot Events - Full Width */}
+                <Card.Root size="sm" variant="outline" overflow="hidden">
+                    <Card.Body p={3} overflow="auto">
+                        <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2}>
+                            📦 Cost Lot Events
+                        </Text>
+                        {versionId && (
+                            <CostLotEventsTable
+                                {...EVENT_TABLE_PRESETS.UNIT_DETAIL}
+                                versionId={versionId}
+                                unitId={unit.unit_id}
+                                baseCurrency={baseCurrency}
+                                onTransactionClick={onTransactionClick}
+                                maxHeight="400px"
+                                hidePagination={true}
+                            />
+                        )}
+                    </Card.Body>
+                </Card.Root>
+
+                {/* Warnings Card - Full Width */}
+                {(unit.warnings && unit.warnings.length > 0) && (
+                    <Card.Root size="sm" variant="outline" borderColor="orange.200" bg="orange.50">
+                        <Card.Body p={3}>
+                            <Text fontSize="xs" fontWeight="bold" color="orange.600" mb={2}>
+                                <FiAlertTriangle style={{ display: 'inline', marginRight: 4 }} />
+                                Warnings ({unit.warnings.length})
+                            </Text>
+                            {unit.warnings.map((w, i) => (
+                                <Box key={i} bg="white" p={2} borderRadius="sm" mb={1} borderLeft="3px solid" borderColor="orange.400">
+                                    <Text fontSize="xs" color="orange.800" fontWeight="medium">{w.warning_type}</Text>
+                                    <Text fontSize="xs" color="gray.700">{w.message}</Text>
+                                    {w.transaction_id && (
+                                        <TransactionCell
+                                            txId={w.transaction_id}
+                                            baseCurrency={baseCurrency}
+                                            onTransactionClick={onTransactionClick}
+                                            prefix="View TX"
+                                        />
+                                    )}
+                                </Box>
+                            ))}
                         </Card.Body>
                     </Card.Root>
-
-                    {/* Warnings Card - Separate */}
-                    {(unit.warnings && unit.warnings.length > 0) && (
-                        <Card.Root size="sm" variant="outline" flex="1" minW="280px" borderColor="orange.200" bg="orange.50">
-                            <Card.Body p={3}>
-                                <Text fontSize="xs" fontWeight="bold" color="orange.600" mb={2}>
-                                    <FiAlertTriangle style={{ display: 'inline', marginRight: 4 }} />
-                                    Warnings ({unit.warnings.length})
-                                </Text>
-                                {unit.warnings.map((w, i) => (
-                                    <Box key={i} bg="white" p={2} borderRadius="sm" mb={1} borderLeft="3px solid" borderColor="orange.400">
-                                        <Text fontSize="xs" color="orange.800" fontWeight="medium">{w.warning_type}</Text>
-                                        <Text fontSize="xs" color="gray.700">{w.message}</Text>
-                                        {w.transaction_id && (
-                                            <TransactionCell
-                                                txId={w.transaction_id}
-                                                baseCurrency={baseCurrency}
-                                                onTransactionClick={onTransactionClick}
-                                                prefix="View TX"
-                                            />
-                                        )}
-                                    </Box>
-                                ))}
-                            </Card.Body>
-                        </Card.Root>
-                    )}
-                </Flex>
+                )}
             </Flex>
         </Box>
     );
@@ -2317,367 +2330,3 @@ const TransactionsTab: React.FC<{
         </Box>
     );
 };
-
-// Legacy-compatible export for PnLPanel integration
-// Accepts optional costLots, realizedPnL, warnings, settlements, consumedSlices, fees
-interface PnLAuditViewProps {
-    calculationUnits?: CalculationUnit[];
-    costLots?: CostLot[];
-    consumedSlices?: ConsumedSliceDetail[];  // Consumed slices from /consumed-slices endpoint
-    realizedPnL?: RealizedPnLRow[];
-    warnings?: PnLWarningItem[];
-    fees?: FeeEntry[];  // Fee entries for Fees tab
-    settlements?: Settlement[];  // Audit trail for negative lot settlements
-    lotEvents?: CostLotEventEntry[];  // Audit trail for lot lifecycle events (only for Cost Lot Events tab)
-    baseCurrency: string;
-    versionId?: number | null;  // Version ID for on-demand loading in expanded rows
-    onTransactionClick?: (txId: number) => void;
-    onAssetClick?: (assetId: number) => void;
-    onUnitClick?: (unitId: number) => void;
-    defaultTab?: 'units' | 'lots' | 'realized' | 'fees' | 'warnings' | 'events';  // Control initial tab
-    onTabChange?: (tab: string) => void;  // Callback when tab changes - triggers lazy loading
-    isLoadingUnits?: boolean;  // Loading state for units tab
-    isLoadingLots?: boolean;   // Loading state for lots tab
-    isLoadingRealized?: boolean;  // Loading state for realized tab
-    isLoadingFees?: boolean;  // Loading state for fees tab
-    isLoadingWarnings?: boolean;  // Loading state for warnings tab
-    isLoadingEvents?: boolean;  // Loading state for events tab
-    idCounts?: {  // ID array counts from calculation (for tab titles, derived from list.length)
-        unitCount: number;
-        lotCount: number;
-        consumedCount: number;
-        realizedCount: number;
-        feeCount: number;
-        warningCount: number;
-        settlementCount: number;
-        eventCount: number;
-    };
-    // Manual price entry support for warnings
-    quoteAssetId?: number;
-    onPriceAdded?: (assetId: number, warningId: string) => void;
-    assets?: Array<AssetRef>;
-    /** Current P&L balance per asset: symbol (uppercase) → qty */
-    assetBalanceMap?: Map<string, number>;
-    // Pagination props per tab
-    unitsPagination?: { page: number; pageSize: number; total: number };
-    lotsPagination?: { page: number; pageSize: number; total: number };
-    realizedPagination?: { page: number; pageSize: number; total: number };
-    feesPagination?: { page: number; pageSize: number; total: number };
-    warningsPagination?: { page: number; pageSize: number; total: number };
-    eventsPagination?: { page: number; pageSize: number; total: number };
-    // Pagination change handlers
-    onUnitsPageChange?: (page: number, pageSize: number) => void;
-    onLotsPageChange?: (page: number, pageSize: number) => void;
-    onRealizedPageChange?: (page: number, pageSize: number) => void;
-    onFeesPageChange?: (page: number, pageSize: number) => void;
-    onWarningsPageChange?: (page: number, pageSize: number) => void;
-    onEventsPageChange?: (page: number, pageSize: number) => void;
-}
-
-export const PnLAuditView: React.FC<PnLAuditViewProps> = ({
-    calculationUnits = [],
-    costLots: propCostLots,
-    consumedSlices: propConsumedSlices,
-    realizedPnL: propRealizedPnL,
-    warnings: propWarnings,
-    fees: propFees,
-    settlements: propSettlements,
-    lotEvents: propLotEvents,
-    baseCurrency,
-    versionId,
-    onTransactionClick,
-    onAssetClick,
-    onUnitClick,
-    defaultTab = 'units',
-    onTabChange,
-    isLoadingUnits = false,
-    isLoadingLots = false,
-    isLoadingRealized = false,
-    isLoadingFees = false,
-    isLoadingWarnings = false,
-    isLoadingEvents = false,
-    idCounts,
-    quoteAssetId,
-    onPriceAdded,
-    assets,
-    assetBalanceMap,
-    // Pagination props
-    unitsPagination,
-    lotsPagination,
-    realizedPagination,
-    feesPagination,
-    warningsPagination,
-    eventsPagination,
-    onUnitsPageChange,
-    onLotsPageChange,
-    onRealizedPageChange,
-    onFeesPageChange,
-    onWarningsPageChange,
-    onEventsPageChange,
-}) => {
-    // Controlled tab state - initialized from defaultTab prop and updates when it changes
-    const [activeTab, setActiveTab] = useState<string>(defaultTab);
-
-    // Update activeTab when defaultTab prop changes (for navigation from warnings card)
-    useEffect(() => {
-        setActiveTab(defaultTab);
-    }, [defaultTab]);
-
-    // Handle tab change - notify parent for lazy loading
-    const handleTabChange = (tab: string) => {
-        setActiveTab(tab);
-        onTabChange?.(tab);
-    };
-
-    // ── Transaction-level filters for P&L audit ──
-    const defaultPnlFilterState: TransactionFilterState = useMemo(() => ({
-        ...defaultFilterState,
-        reviewStatus: [],  // not relevant for P&L
-        taxability: [],    // not relevant for P&L
-    }), []);
-
-    const [txFilters, setTxFilters] = useState<TransactionFilterState>(defaultPnlFilterState);
-    const [txFilterExpanded, setTxFilterExpanded] = useState(false);
-
-    const txFilterParams = useMemo(
-        () => buildPnLFilterParams(txFilters),
-        [txFilters],
-    );
-
-    const pnlHiddenFilters: (keyof TransactionFilterState)[] = useMemo(
-        () => ['reviewStatus', 'taxability', 'connectorRunIds'],
-        [],
-    );
-
-    // Use provided data directly - no fallback derivation
-    const costLots = propCostLots || [];
-    const consumedSlices = propConsumedSlices || [];
-    const realizedPnL = propRealizedPnL || [];
-    const warnings = propWarnings || [];
-    const fees = propFees || [];
-    const settlements = propSettlements || [];
-
-    // Tab title counts: use pagination total if available, otherwise idCounts from calculation
-    // Shows accurate counts even before full data is lazy-loaded
-    const unitsCount = unitsPagination?.total ?? (idCounts?.unitCount ?? 0);
-    const lotsCount = lotsPagination?.total ?? (idCounts?.lotCount ?? 0);
-    const consumedCount = consumedSlices.length > 0 ? consumedSlices.length : (idCounts?.consumedCount ?? 0);
-    const realizedCount = realizedPagination?.total ?? (realizedPnL.length > 0 ? realizedPnL.length : (idCounts?.realizedCount ?? 0));
-    const feesCount = feesPagination?.total ?? (fees.length > 0 ? fees.length : (idCounts?.feeCount ?? 0));
-    const warningsCount = warningsPagination?.total ?? (warnings.length > 0 ? warnings.length : (idCounts?.warningCount ?? 0));
-    const settlementsCount = settlements.length > 0 ? settlements.length : (idCounts?.settlementCount ?? 0);
-    const eventsCount = eventsPagination?.total ?? (idCounts?.eventCount ?? 0);
-
-    return (
-        <Box mt={4}>
-            {/* Transaction-level filters for P&L audit data */}
-            {versionId && (
-                <Box mb={4}>
-                    <TransactionFilters
-                        filters={txFilters}
-                        onChange={setTxFilters}
-                        onClear={() => { setTxFilters(defaultPnlFilterState); }}
-                        expanded={txFilterExpanded}
-                        onExpandedChange={setTxFilterExpanded}
-                        resetFilters={defaultPnlFilterState}
-                        filterOptionsUrl={`${API_URL}/pnl/versions/${versionId}/filter-options`}
-                        filterOptionsQueryKey={['pnlFilterOptions', String(versionId)]}
-                        hiddenFilters={pnlHiddenFilters}
-                    />
-                </Box>
-            )}
-
-            <Tabs.Root value={activeTab} onValueChange={(e) => handleTabChange(e.value)}>
-                <Tabs.List mb={4}>
-                    <Tabs.Trigger value="units">
-                        <FiLayers style={{ marginRight: 4 }} />
-                        Activity Feed ({unitsCount})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="lots">
-                        <FiDatabase style={{ marginRight: 4 }} />
-                        Cost Lots ({lotsCount})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="realized">
-                        <FiDollarSign style={{ marginRight: 4 }} />
-                        Realized P&L ({realizedCount})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="fees">
-                        💰 Fees ({feesCount})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="events">
-                        <FiActivity style={{ marginRight: 4 }} />
-                        Cost Lot Events ({eventsCount})
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="transactions">
-                        <FiFileText style={{ marginRight: 4 }} />
-                        Transactions
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="warnings">
-                        <FiAlertTriangle style={{ marginRight: 4 }} />
-                        Warnings ({warningsCount})
-                    </Tabs.Trigger>
-                </Tabs.List>
-
-                <Tabs.Content value="units">
-                    {versionId ? (
-                        <ActivityFeed
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            txFilterParams={txFilterParams}
-                            assetBalanceMap={assetBalanceMap}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="lots">
-                    {versionId ? (
-                        <LotsTabWrapper
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            lazy={true}
-                            enabled={activeTab === 'lots'}
-                            txFilterParams={txFilterParams}
-                            renderTab={({ lots, baseCurrency, onTransactionClick }) => (
-                                <CostLotsTab
-                                    lots={lots}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                />
-                            )}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="realized">
-                    {versionId ? (
-                        <RealizedTabWrapper
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            lazy={true}
-                            enabled={activeTab === 'realized'}
-                            txFilterParams={txFilterParams}
-                            renderTab={({ entries, baseCurrency, onTransactionClick }) => (
-                                <RealizedPnLTab
-                                    entries={entries}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                />
-                            )}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="fees">
-                    {versionId ? (
-                        <FeesTabWrapper
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            onUnitClick={onUnitClick}
-                            lazy={true}
-                            enabled={activeTab === 'fees'}
-                            txFilterParams={txFilterParams}
-                            renderTab={({ fees, baseCurrency, onTransactionClick, onUnitClick }) => (
-                                <FeesTab
-                                    fees={fees}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                    onUnitClick={onUnitClick}
-                                />
-                            )}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="events">
-                    {versionId ? (
-                        <LotEventsTab
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="transactions">
-                    {versionId ? (
-                        <TransactionsTabWrapper
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            lazy={true}
-                            enabled={activeTab === 'transactions'}
-                            txFilterParams={txFilterParams}
-                            renderTab={({ versionId, baseCurrency, onTransactionClick }) => (
-                                <TransactionsTab
-                                    versionId={versionId}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                />
-                            )}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-
-                <Tabs.Content value="warnings">
-                    {versionId ? (
-                        <WarningsTabWrapper
-                            versionId={versionId}
-                            baseCurrency={baseCurrency}
-                            onTransactionClick={onTransactionClick}
-                            quoteAssetId={quoteAssetId}
-                            onPriceAdded={onPriceAdded}
-                            assets={assets}
-                            lazy={true}
-                            enabled={activeTab === 'warnings'}
-                            txFilterParams={txFilterParams}
-                            renderTab={({ warnings, baseCurrency, onTransactionClick, quoteAssetId, onPriceAdded, assets }) => (
-                                <WarningsTab
-                                    warnings={warnings}
-                                    baseCurrency={baseCurrency}
-                                    onTransactionClick={onTransactionClick}
-                                    quoteAssetId={quoteAssetId}
-                                    onPriceAdded={onPriceAdded}
-                                    assets={assets}
-                                />
-                            )}
-                        />
-                    ) : (
-                        <Box p={4} textAlign="center" color="gray.500">
-                            No version ID available
-                        </Box>
-                    )}
-                </Tabs.Content>
-            </Tabs.Root>
-        </Box>
-    );
-};
-
-export default PnLAuditView;

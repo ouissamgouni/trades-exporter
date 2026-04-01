@@ -333,7 +333,7 @@ const AccountsManagement: React.FC = () => {
                         <Text color="gray.500" fontSize="sm">No accounts match the selected filters</Text>
                     </Box>
                 ) : (
-                    <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={1.5}>
+                    <SimpleGrid columns={{ base: 1, md: 2, lg: 3, xl: 4 }} gap={1.5}>
                         {displayedAccounts.map((account) => {
                             const isExpanded = expandedAccountIds.has(account.id);
                             const isEnabled = account.enabled !== false;

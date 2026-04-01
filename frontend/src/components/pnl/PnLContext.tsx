@@ -47,6 +47,7 @@ export interface PnLContextValue {
         costBasis: number;
         unrealizedPnl: number;
         realizedPnl: number;
+        taxableRealizedPnl: number;
         totalFees: number;
         feeEntryCount: number;
     } | null;
@@ -227,7 +228,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         {
             period: state.timeframeRange,
             groupBy: state.performerGroupBy,
-            topN: 25,
+            topN: 500,
             dimensionId: state.performerGroupBy === 'category' ? state.performerDimensionId : undefined,
             pricesReady,
         },
@@ -301,6 +302,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
                 unrealized_pnl: 0,
                 unrealized_pnl_pct: 0,
                 realized_pnl: 0,
+                taxable_realized_pnl: 0,
                 total_fees: 0,
                 lot_count: 0,
                 realized_event_count: 0,
@@ -320,6 +322,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
                 costBasis: ss.cost_basis,
                 unrealizedPnl: mm?.unrealized_pnl ?? 0,
                 realizedPnl: ss.realized_pnl,
+                taxableRealizedPnl: ss.taxable_realized_pnl ?? 0,
                 totalFees: ss.total_fees,
                 feeEntryCount: ss.fee_entry_count,
             };
@@ -331,6 +334,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
                 costBasis: ms.cost_basis,
                 unrealizedPnl: ms.unrealized_pnl,
                 realizedPnl: ms.realized_pnl,
+                taxableRealizedPnl: ms.taxable_realized_pnl ?? 0,
                 totalFees: ms.total_fees,
                 feeEntryCount: ms.fee_entry_count,
             };
@@ -341,6 +345,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
                 costBasis: assets.reduce((s, a) => s + a.cost_basis, 0),
                 unrealizedPnl: state.summary.total_unrealized_pnl,
                 realizedPnl: state.summary.total_realized_pnl,
+                taxableRealizedPnl: state.summary.taxable_realized_pnl ?? 0,
                 totalFees: state.summary.total_fees,
                 feeEntryCount: state.summary.fee_entry_count,
             };

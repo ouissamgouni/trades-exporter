@@ -203,9 +203,9 @@ export const DrillSidebar: React.FC<DrillSidebarProps> = ({
         return (
             <Box p={3} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" h="100%">
                 <Heading size="sm" mb={2}>{metricLabel}</Heading>
-                {drill.period && (
+                {state.timeframeRange !== 'all' && (
                     <Badge colorPalette="blue" variant="subtle" size="xs" mb={2}>
-                        {drill.period.toUpperCase()}
+                        {state.timeframeRange.toUpperCase()}
                     </Badge>
                 )}
 

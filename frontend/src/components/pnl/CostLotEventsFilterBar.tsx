@@ -30,12 +30,20 @@ export interface FilterState {
     search: string;
 }
 
+export interface FilterOptionWithCount {
+    value: string;
+    label?: string;
+    count: number;
+}
+
 export interface CostLotEventsFilterBarProps {
     filters: FilterState;
     onFiltersChange: (filters: FilterState) => void;
     eventCounts: Record<LotEventType, number>;
     accounts?: { id: number; name: string }[];
     assets?: { id: number; symbol: string; label?: string }[];
+    eventTypeOptions?: FilterOptionWithCount[];
+    unitPatternOptions?: FilterOptionWithCount[];
     isLoading?: boolean;
     showDateRange?: boolean;
     showEventTypes?: boolean;
@@ -50,24 +58,12 @@ export interface CostLotEventsFilterBarProps {
 // Constants
 // ============================================================================
 
-// Event type pills configuration - all visible by default for full audit view
-const EVENT_PILLS: { key: LotEventType; label: string; defaultOn: boolean }[] = [
-    { key: 'created', label: 'Created', defaultOn: true },
-    { key: 'consumed', label: 'Consumed', defaultOn: true },
-    { key: 'created-negative', label: 'Negative', defaultOn: true },
-    { key: 'settled', label: 'Settled', defaultOn: true },
-    { key: 'transferred', label: 'Transferred', defaultOn: true },
-    { key: 'adjusted', label: 'Adjusted', defaultOn: true },
-    { key: 'merged', label: 'Merged', defaultOn: true },
-];
-
-// Unit pattern pills configuration
-const UNIT_PILLS: { key: string; label: string; defaultOn: boolean }[] = [
-    { key: 'swap', label: 'Swap', defaultOn: true },
-    { key: 'internal_transfer', label: 'Transfer', defaultOn: true },
-    { key: 'unmatched_internal_transfer', label: 'Unmatched', defaultOn: true },
-    { key: 'flow', label: 'Flow', defaultOn: true },
-];
+// Label overrides for known patterns (optional cosmetic improvement)
+const PATTERN_LABELS: Record<string, string> = {
+    internal_transfer: 'Transfer',
+    unmatched_internal_transfer: 'Unmatched',
+    'created-negative': 'Negative',
+};
 
 // Date presets
 const DATE_PRESETS = [
@@ -79,15 +75,11 @@ const DATE_PRESETS = [
     { label: 'Custom...', value: 'custom' },
 ];
 
-// Get default event types
-export const getDefaultEventTypes = (): LotEventType[] => {
-    return EVENT_PILLS.filter(p => p.defaultOn).map(p => p.key);
-};
+// Get default event types — empty means "no filter" = show all
+export const getDefaultEventTypes = (): LotEventType[] => [];
 
-// Get default unit patterns
-export const getDefaultUnitPatterns = (): string[] => {
-    return UNIT_PILLS.filter(p => p.defaultOn).map(p => p.key);
-};
+// Get default unit patterns — empty means "no filter" = show all
+export const getDefaultUnitPatterns = (): string[] => [];
 
 // ============================================================================
 // Hooks
@@ -474,6 +466,8 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
     eventCounts,
     accounts = [],
     assets = [],
+    eventTypeOptions = [],
+    unitPatternOptions = [],
     isLoading = false,
     showDateRange = true,
     showEventTypes = true,
@@ -557,18 +551,16 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
         setLocalSearch('');
     }, [onFiltersChange]);
 
-    // Check if filters are modified from defaults
+    // Check if filters are modified from defaults (empty = show all)
     const isModified = useMemo(() => {
-        const defaultTypes = getDefaultEventTypes();
-        const defaultPatterns = getDefaultUnitPatterns();
         return (
             filters.dateStart !== '' ||
             filters.dateEnd !== '' ||
             filters.search !== '' ||
             filters.accountIds.length > 0 ||
             filters.assetIds.length > 0 ||
-            JSON.stringify([...filters.eventTypes].sort()) !== JSON.stringify([...defaultTypes].sort()) ||
-            JSON.stringify([...filters.unitPatterns].sort()) !== JSON.stringify([...defaultPatterns].sort())
+            filters.eventTypes.length > 0 ||
+            filters.unitPatterns.length > 0
         );
     }, [filters]);
 
@@ -617,17 +609,17 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
                 <Box mt={1.5}>
                     {/* Row 1: Event Types & Unit Patterns */}
                     <Flex gap={4} align="center" wrap="wrap" mb={2}>
-                        {/* Event type pills */}
-                        {showEventTypes && (
+                        {/* Event type pills - dynamic from backend */}
+                        {showEventTypes && eventTypeOptions.length > 0 && (
                             <Flex align="center" gap={2}>
                                 <Text fontSize="2xs" color="gray.500" fontWeight="medium">Event:</Text>
                                 <Flex gap={1}>
-                                    {EVENT_PILLS.map(pill => (
+                                    {eventTypeOptions.map(opt => (
                                         <TogglePill
-                                            key={pill.key}
-                                            label={pill.label}
-                                            active={filters.eventTypes.includes(pill.key)}
-                                            onClick={() => toggleEventType(pill.key)}
+                                            key={opt.value}
+                                            label={PATTERN_LABELS[opt.value] || opt.label || opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
+                                            active={filters.eventTypes.includes(opt.value as LotEventType)}
+                                            onClick={() => toggleEventType(opt.value as LotEventType)}
                                             disabled={isLoading}
                                         />
                                     ))}
@@ -635,17 +627,17 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
                             </Flex>
                         )}
 
-                        {/* Unit pattern pills */}
-                        {showUnitPatterns && (
+                        {/* Unit pattern pills - dynamic from backend */}
+                        {showUnitPatterns && unitPatternOptions.length > 0 && (
                             <Flex align="center" gap={2}>
                                 <Text fontSize="2xs" color="gray.500" fontWeight="medium">Unit:</Text>
                                 <Flex gap={1}>
-                                    {UNIT_PILLS.map(pill => (
+                                    {unitPatternOptions.map(opt => (
                                         <TogglePill
-                                            key={pill.key}
-                                            label={pill.label}
-                                            active={filters.unitPatterns.includes(pill.key)}
-                                            onClick={() => toggleUnitPattern(pill.key)}
+                                            key={opt.value}
+                                            label={PATTERN_LABELS[opt.value] || opt.label || opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
+                                            active={filters.unitPatterns.includes(opt.value)}
+                                            onClick={() => toggleUnitPattern(opt.value)}
                                             disabled={isLoading}
                                         />
                                     ))}

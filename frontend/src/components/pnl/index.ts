@@ -14,7 +14,7 @@ export { PnLDetailPanel } from './PnLDetailPanel';
 export { PnLImpactPanel } from './PnLImpactPanel';
 export { FeesPanel } from './FeesPanel';
 export { WarningsPanel } from './WarningsPanel';
-export { PnLAuditView, UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
+export { UnitsTab, CostLotEventsTab } from './DataExplorerPanel';
 export { SlidePanel } from './SlidePanel';
 export { CategoryFilterBar } from './CategoryFilterBar';
 export { PnLBreakdownBar } from './PnLBreakdownBar';

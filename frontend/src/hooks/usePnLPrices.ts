@@ -23,6 +23,10 @@ export function usePnLPrices() {
     const loadingIdsRef = useRef(state.loadingPriceAssetIds);
     loadingIdsRef.current = state.loadingPriceAssetIds;
 
+    // Ref for prices read inside async closures (to carry forward last_known on client timeout).
+    const pricesRef = useRef(state.prices);
+    pricesRef.current = state.prices;
+
     /** Max time (ms) to wait for a single price fetch before aborting.
      *  Set higher than the backend max_timeout_seconds (10 s) so the server
      *  has time to fall back to its DB cache before the client aborts. */
@@ -52,12 +56,22 @@ export function usePnLPrices() {
             } catch (err) {
                 console.error(`Fetch failed for asset ${assetId}`, err);
                 const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+
+                // Carry forward last-known price from a prior successful fetch
+                const prev = pricesRef.current.find(p => p.asset.id === assetId);
+                const lastKnownPrice = prev?.price ?? prev?.last_known_price ?? null;
+                const lastKnownDate = prev?.fetched_at ?? prev?.last_known_price_date ?? null;
+                const lastKnownSource = prev?.source ?? prev?.last_known_source ?? null;
+
                 const errorItem: PriceResponse = {
                     asset: { id: assetId, symbol: 'Unknown' },
                     price: null,
                     price_quote: baseCurrency,
                     error: isTimeout ? 'Request timed out' : (err instanceof Error ? err.message : 'Unknown error'),
                     fetched_at: new Date().toISOString(),
+                    last_known_price: lastKnownPrice,
+                    last_known_price_date: lastKnownDate,
+                    last_known_source: lastKnownSource,
                 };
                 const balance = balances.find(b => b.asset.id === assetId);
                 if (balance) errorItem.asset.symbol = balance.asset.symbol;
@@ -153,6 +167,27 @@ export function usePnLPrices() {
         }
     }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
 
+    // Retry only failed prices, then trigger the same post-refresh logic
+    const retryFailedPrices = useCallback(async () => {
+        const failedIds = pricesRef.current
+            .filter(p => !!p.error || (p.price == null && !(p as any)._isNa))
+            .map(p => p.asset.id)
+            .filter((id): id is number => id !== undefined);
+        if (failedIds.length === 0 || !assets || assets.length === 0) return;
+
+        const priceable = assets.filter(a => a.has_lots !== false && failedIds.includes(a.asset.id!));
+        if (priceable.length === 0) return;
+        const balanceEntries: BalanceEntry[] = priceable.map(a => ({
+            asset: a.asset,
+            qty: a.quantity,
+            cost_basis_in_base: a.cost_basis,
+            avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
+            lot_count: a.lot_count,
+        }));
+        await fetchPrices(balanceEntries, config.base_currency_symbol);
+        versionMetrics.refetch();
+    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
+
     // Refs for values read inside effects that should NOT trigger re-runs
     const pnlAssetsRef = useRef(state.pnlAssets);
     pnlAssetsRef.current = state.pnlAssets;
@@ -189,6 +224,7 @@ export function usePnLPrices() {
         refreshSinglePrice,
         handlePriceAdded,
         handleRefreshPrices,
+        retryFailedPrices,
         removeWarning,
     };
 }

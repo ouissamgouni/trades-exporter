@@ -95,6 +95,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             unrealized_pnl: 0,
             unrealized_pnl_pct: 0,
             realized_pnl: balance.realized_pnl_in_base,
+            taxable_realized_pnl: balance.taxable_realized_pnl_in_base ?? 0,
             total_fees: balance.total_fees_in_base ?? 0,
             lot_count: balance.lot_count,
             realized_event_count: balance.realized_event_count,
@@ -669,5 +670,6 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
         serviceVersionId,
         lastCalculatedAt,
         triggerPnLRefresh,
+        calcServiceError,
     };
 }

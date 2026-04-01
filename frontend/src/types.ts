@@ -423,6 +423,76 @@ export interface PriceTimeseriesResponse {
     assets: PriceTimeseriesAsset[];
 }
 
+// ── Gap Detection ──
+
+export interface GapRange {
+    start_date: string;
+    end_date: string;
+    missing_days_count: number;
+    last_known_price?: number | null;
+    last_known_price_date?: string | null;
+    last_known_source?: string | null;
+}
+
+export interface GapDetectionResponse {
+    asset_id: number;
+    symbol: string;
+    price_type?: string | null;
+    total_expected: number;
+    total_covered: number;
+    coverage_pct: number;
+    gaps: GapRange[];
+}
+
+export interface GapSummaryItem {
+    asset_id: number;
+    symbol: string;
+    gap_count: number;
+    total_missing_days: number;
+}
+
+export interface GapSummaryResponse {
+    items: GapSummaryItem[];
+}
+
+export interface BackfillRequest {
+    asset_id: number;
+    date_from: string;
+    date_to: string;
+}
+
+export interface BackfillFetchedItem {
+    date: string;
+    price: number;
+    source: string;
+}
+
+export interface BackfillFailedItem {
+    date: string;
+    error: string;
+}
+
+export interface BackfillResponse {
+    asset_id: number;
+    fetched: BackfillFetchedItem[];
+    failed: BackfillFailedItem[];
+}
+
+export interface BulkManualRequest {
+    asset_id: number;
+    quote_asset_id?: number | null;
+    date_from: string;
+    date_to: string;
+    price: number;
+    source?: string;
+}
+
+export interface BulkManualResponse {
+    asset_id: number;
+    created_count: number;
+    skipped_count: number;
+}
+
 export interface RawAsset {
     symbol: string;
     source: string;
@@ -800,6 +870,10 @@ export interface PriceResponse {
     actual_price_date?: string;  // The actual date of the price used
     staleness_days?: number;  // Days between requested and actual price date
     warning?: string;  // Warning message for stale prices
+    // Last known price (returned on error so the UI can display it)
+    last_known_price?: number | null;
+    last_known_price_date?: string | null;
+    last_known_source?: string | null;
 }
 
 

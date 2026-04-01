@@ -1,0 +1,428 @@
+/**
+ * PriceHealthCards — Compact card-grid price health view.
+ *
+ * - Filter pills + search + sort toolbar
+ * - Responsive grid of compact cards (as many per row as fit)
+ * - PnL-style pagination bar (top + bottom) with chevron icons
+ * - Gap badge is clickable → expands card with bigger chart + CTAs
+ * - Info icon next to asset name opens AssetDetailSlidePanel
+ */
+
+import React, { useMemo, useState } from 'react';
+import {
+    Badge, Box, Button, Flex, Input, NativeSelect, Spinner, Text,
+} from '@chakra-ui/react';
+import {
+    FiInfo, FiSearch, FiRefreshCw,
+    FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight,
+} from 'react-icons/fi';
+import { usePriceHealth } from '../hooks/usePriceHealth';
+import { usePriceGapsSummary } from '../hooks/usePriceGaps';
+import { useAssetDetailPanel } from '../contexts/AssetDetailPanelContext';
+import { AssetPriceChart } from './AssetPriceChart';
+import { GapFixPanel } from './GapFixPanel';
+import { Tooltip } from './ui/tooltip';
+import type { PriceHealthRow } from '../types';
+
+// ---------------------------------------------------------------------------
+// Status config
+// ---------------------------------------------------------------------------
+
+const STATUS_CONFIG: Record<string, { color: string; label: string; emoji: string }> = {
+    healthy: { color: 'green', label: 'Healthy', emoji: '✅' },
+    warning: { color: 'yellow', label: 'Warning', emoji: '⚠️' },
+    stale: { color: 'red', label: 'Stale', emoji: '🔴' },
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatRelativeTime(isoString: string): string {
+    if (!isoString) return 'Never';
+    const d = new Date(isoString);
+    const diffMs = Date.now() - d.getTime();
+    const mins = Math.floor(diffMs / 60_000);
+    const hrs = Math.floor(diffMs / 3_600_000);
+    const days = Math.floor(diffMs / 86_400_000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m`;
+    if (hrs < 24) return `${hrs}h`;
+    if (days < 30) return `${days}d`;
+    if (days < 365) return `${Math.floor(days / 30)}mo`;
+    return `${Math.floor(days / 365)}y`;
+}
+
+function formatPrice(price: number): string {
+    if (price >= 1) return price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (price >= 0.01) return price.toFixed(4);
+    if (price >= 0.0001) return price.toFixed(6);
+    return price.toFixed(8);
+}
+
+// ---------------------------------------------------------------------------
+// Sort
+// ---------------------------------------------------------------------------
+
+type SortKey = 'status' | 'gaps' | 'days_stale' | 'symbol';
+const STATUS_ORDER: Record<string, number> = { stale: 0, warning: 1, healthy: 2 };
+
+function sortRows(rows: PriceHealthRow[], key: SortKey, gapMap: Map<number, number>): PriceHealthRow[] {
+    return [...rows].sort((a, b) => {
+        switch (key) {
+            case 'status': {
+                const c = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+                return c !== 0 ? c : b.days_stale - a.days_stale;
+            }
+            case 'gaps': return (gapMap.get(b.asset_id) ?? 0) - (gapMap.get(a.asset_id) ?? 0);
+            case 'days_stale': return b.days_stale - a.days_stale;
+            case 'symbol': return a.symbol.localeCompare(b.symbol);
+            default: return 0;
+        }
+    });
+}
+
+type StatusFilter = 'all' | 'healthy' | 'warning' | 'stale' | 'gaps';
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export const PriceHealthCards: React.FC = () => {
+    const { data, isLoading, error, refetch } = usePriceHealth();
+    const [search, setSearch] = useState('');
+    const [filter, setFilter] = useState<StatusFilter>('all');
+    const [sortKey, setSortKey] = useState<SortKey>('status');
+    const [page, setPage] = useState(0);         // 0-indexed like PnL
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+    const [expandedId, setExpandedId] = useState<number | null>(null);
+
+    const { openAssetPanel } = useAssetDetailPanel();
+
+    // Gap summary
+    const allAssetIds = useMemo(() => (data?.items ?? []).map(r => r.asset_id), [data?.items]);
+    const { data: gapSummary } = usePriceGapsSummary(allAssetIds);
+    const gapMap = useMemo(() => {
+        const m = new Map<number, number>();
+        if (gapSummary?.items) {
+            for (const item of gapSummary.items) {
+                if (item.total_missing_days > 0) m.set(item.asset_id, item.total_missing_days);
+            }
+        }
+        return m;
+    }, [gapSummary]);
+
+    // Filter + search + sort
+    const processed = useMemo(() => {
+        if (!data?.items) return [];
+        let items = data.items;
+        if (search) {
+            const q = search.toLowerCase();
+            items = items.filter(r =>
+                r.symbol.toLowerCase().includes(q) || (r.label && r.label.toLowerCase().includes(q))
+            );
+        }
+        if (filter !== 'all') {
+            items = filter === 'gaps'
+                ? items.filter(r => gapMap.has(r.asset_id))
+                : items.filter(r => r.status === filter);
+        }
+        return sortRows(items, sortKey, gapMap);
+    }, [data?.items, search, filter, sortKey, gapMap]);
+
+    // Pagination
+    const totalRows = processed.length;
+    const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage = Math.min(page, pageCount - 1);
+    const pageItems = useMemo(() => {
+        const start = safePage * pageSize;
+        return processed.slice(start, start + pageSize);
+    }, [processed, safePage, pageSize]);
+
+    React.useEffect(() => { setPage(0); }, [search, filter, sortKey]);
+
+    // Counts
+    const counts = useMemo(() => {
+        if (!data?.items) return { all: 0, healthy: 0, warning: 0, stale: 0, gaps: 0 };
+        return {
+            all: data.items.length,
+            healthy: data.summary.healthy,
+            warning: data.summary.warning,
+            stale: data.summary.stale,
+            gaps: gapMap.size,
+        };
+    }, [data, gapMap]);
+
+    // ── Loading / Error / Empty ──────────────────────────────────────────
+    if (isLoading) {
+        return (
+            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
+                <Spinner size="xl" color="blue.500" />
+                <Text mt={4}>Loading price health data...</Text>
+            </Box>
+        );
+    }
+    if (error) {
+        return (
+            <Box textAlign="center" py={10} bg="red.50" borderRadius="md" borderWidth={1} borderColor="red.200">
+                <Text color="red.600">Error: {error}</Text>
+                <Button size="sm" mt={3} onClick={() => refetch()}>Retry</Button>
+            </Box>
+        );
+    }
+    if (!data || data.items.length === 0) {
+        return (
+            <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
+                <Text color="gray.500">No price snapshot data found. Import prices first.</Text>
+            </Box>
+        );
+    }
+
+    // ── Pagination bar (PnL style) ──────────────────────────────────────
+    const paginationBar = totalRows > PAGE_SIZE_OPTIONS[0] ? (
+        <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
+            <Flex align="center" gap={2}>
+                <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                    {PAGE_SIZE_OPTIONS.map(size => (
+                        <Button
+                            key={size}
+                            size="2xs"
+                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                            colorPalette={pageSize === size ? 'blue' : 'gray'}
+                            borderRadius="0"
+                            onClick={() => { setPageSize(size); setPage(0); }}
+                            px={2}
+                            fontSize="xs"
+                        >
+                            {size}
+                        </Button>
+                    ))}
+                </Flex>
+            </Flex>
+            <Text fontSize="2xs" color="gray.500">
+                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+            </Text>
+            <Flex align="center" gap={1}>
+                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                    <FiChevronsLeft size={12} />
+                </Button>
+                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                    <FiChevronLeft size={14} />
+                </Button>
+                <Text fontSize="xs" color="gray.600" mx={1}>
+                    {safePage + 1} / {pageCount}
+                </Text>
+                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                    <FiChevronRight size={14} />
+                </Button>
+                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                    <FiChevronsRight size={12} />
+                </Button>
+            </Flex>
+        </Flex>
+    ) : null;
+
+    // ── Filter pills ────────────────────────────────────────────────────
+    const pills: Array<{ key: StatusFilter; label: string; count: number; color: string }> = [
+        { key: 'all', label: 'All', count: counts.all, color: 'gray' },
+        { key: 'healthy', label: 'Healthy', count: counts.healthy, color: 'green' },
+        { key: 'warning', label: 'Warning', count: counts.warning, color: 'yellow' },
+        { key: 'stale', label: 'Stale', count: counts.stale, color: 'red' },
+        { key: 'gaps', label: 'Gaps', count: counts.gaps, color: 'orange' },
+    ];
+
+    return (
+        <Box>
+            {/* ── Toolbar: pills + search + sort + refresh ── */}
+            <Flex gap={2} mb={2} flexWrap="wrap" align="center">
+                {pills.map(p => (
+                    <Badge
+                        key={p.key}
+                        cursor="pointer"
+                        colorPalette={p.color}
+                        variant={filter === p.key ? 'solid' : 'outline'}
+                        size="sm"
+                        px={2}
+                        py={0.5}
+                        borderRadius="full"
+                        onClick={() => setFilter(filter === p.key ? 'all' : p.key)}
+                    >
+                        {p.label} ({p.count})
+                    </Badge>
+                ))}
+                <Box flex={1} />
+                <Box position="relative" w="160px">
+                    <Input placeholder="Search..." size="xs" value={search} onChange={e => setSearch(e.target.value)} pl={7} borderRadius="md" />
+                    <Box position="absolute" left={2} top="50%" transform="translateY(-50%)" color="gray.400"><FiSearch size={12} /></Box>
+                </Box>
+                <NativeSelect.Root size="xs" w="120px">
+                    <NativeSelect.Field value={sortKey} onChange={e => setSortKey(e.target.value as SortKey)}>
+                        <option value="status">Sort: Status</option>
+                        <option value="gaps">Sort: Gaps</option>
+                        <option value="days_stale">Sort: Stale</option>
+                        <option value="symbol">Sort: A-Z</option>
+                    </NativeSelect.Field>
+                </NativeSelect.Root>
+                <Button size="xs" variant="outline" onClick={() => refetch()}><FiRefreshCw size={12} /></Button>
+            </Flex>
+
+            {/* ── Top pagination ── */}
+            {paginationBar && (
+                <Box borderBottom="1px solid" borderColor="gray.100" mb={2}>
+                    {paginationBar}
+                </Box>
+            )}
+
+            {/* ── Card grid ── */}
+            {pageItems.length === 0 ? (
+                <Box textAlign="center" py={10} bg="gray.50" borderRadius="md">
+                    <Text color="gray.400">No assets match your criteria.</Text>
+                </Box>
+            ) : (
+                <Flex flexWrap="wrap" gap={2}>
+                    {pageItems.map(row => (
+                        <HealthCard
+                            key={row.asset_id}
+                            row={row}
+                            gapDays={gapMap.get(row.asset_id)}
+                            expanded={expandedId === row.asset_id}
+                            onToggleExpand={() => setExpandedId(prev => prev === row.asset_id ? null : row.asset_id)}
+                            onOpenPanel={() => openAssetPanel(row.asset_id)}
+                        />
+                    ))}
+                </Flex>
+            )}
+
+            {/* ── Bottom pagination ── */}
+            {paginationBar && (
+                <Box borderTop="1px solid" borderColor="gray.100" mt={2}>
+                    {paginationBar}
+                </Box>
+            )}
+        </Box>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// Single health card — compact, fits many per row
+// ---------------------------------------------------------------------------
+
+interface HealthCardProps {
+    row: PriceHealthRow;
+    gapDays?: number;
+    expanded: boolean;
+    onToggleExpand: () => void;
+    onOpenPanel: () => void;
+}
+
+const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel }) => {
+    const cfg = STATUS_CONFIG[row.status];
+    const hasGaps = gapDays != null && gapDays > 0;
+
+    return (
+        <Box
+            bg="white"
+            border="1px solid"
+            borderColor={expanded ? 'orange.300' : 'gray.200'}
+            borderRadius="md"
+            px={2.5}
+            py={1.5}
+            minW="185px"
+            maxW={expanded ? '660px' : '220px'}
+            flex={expanded ? '1 0 570px' : '1 0 185px'}
+            _hover={{ borderColor: expanded ? 'orange.400' : 'blue.300', boxShadow: 'xs' }}
+            transition="all 0.15s"
+        >
+            {/* Row 1: name + info icon + tiny chart */}
+            <Flex align="center" gap={1.5} mb={1}>
+                <Text fontSize="xs" fontWeight="bold" truncate flex={1}>
+                    {row.symbol}
+                </Text>
+                <Tooltip content="Open details">
+                    <Box
+                        as="button"
+                        color="gray.400"
+                        _hover={{ color: 'blue.500' }}
+                        cursor="pointer"
+                        onClick={e => { e.stopPropagation(); onOpenPanel(); }}
+                        flexShrink={0}
+                    >
+                        <FiInfo size={12} />
+                    </Box>
+                </Tooltip>
+                {!expanded && (
+                    <Box w="60px" h="24px" flexShrink={0} overflow="hidden" position="relative">
+                        <Box position="absolute" inset={0}>
+                            <AssetPriceChart assetId={row.asset_id} symbol={row.symbol} mini />
+                        </Box>
+                    </Box>
+                )}
+            </Flex>
+
+            {/* Row 2: badges */}
+            <Flex gap={1} flexWrap="wrap" mb={0.5}>
+                <Badge size="xs" colorPalette={cfg.color} fontSize="9px">
+                    {cfg.label}
+                </Badge>
+                {row.is_flatline && (
+                    <Tooltip content="Last 5+ prices identical — possible broken feed">
+                        <Badge size="xs" colorPalette="orange" fontSize="9px">Flat</Badge>
+                    </Tooltip>
+                )}
+                {hasGaps && (
+                    <Badge
+                        size="xs"
+                        colorPalette="orange"
+                        variant={expanded ? 'solid' : 'subtle'}
+                        fontSize="9px"
+                        cursor="pointer"
+                        onClick={onToggleExpand}
+                        _hover={{ opacity: 0.8 }}
+                    >
+                        {gapDays}d gaps
+                    </Badge>
+                )}
+            </Flex>
+
+            {/* Row 3: price, age, source */}
+            <Flex gap={2} align="center">
+                <Text fontSize="xs" fontWeight="bold" fontFamily="mono">
+                    {formatPrice(row.last_price)}
+                </Text>
+                <Tooltip content={row.last_updated ? new Date(row.last_updated).toLocaleString() : ''}>
+                    <Text fontSize="2xs" color={row.status === 'stale' ? 'red.600' : 'gray.500'}>
+                        {formatRelativeTime(row.last_updated)}
+                    </Text>
+                </Tooltip>
+                <Text fontSize="2xs" color="gray.400" truncate>
+                    {row.last_source || '—'}
+                </Text>
+            </Flex>
+
+            {/* Expanded section: bigger chart + gap CTAs */}
+            {expanded && hasGaps && (
+                <ExpandedGapSection assetId={row.asset_id} symbol={row.symbol} />
+            )}
+        </Box>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// Expanded gap section — loaded only when card is expanded
+// ---------------------------------------------------------------------------
+
+const ExpandedGapSection: React.FC<{ assetId: number; symbol: string }> = ({ assetId, symbol }) => (
+    <Box mt={2} pt={2} borderTop="1px solid" borderColor="orange.100">
+        <GapFixPanel assetId={assetId} symbol={symbol} />
+    </Box>
+);
+
+export default PriceHealthCards;

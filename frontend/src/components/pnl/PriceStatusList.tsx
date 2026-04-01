@@ -11,17 +11,20 @@ import {
     Icon,
     Spinner,
 } from '@chakra-ui/react';
-import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiClock, FiDatabase, FiPlus, FiLoader } from 'react-icons/fi';
+import { FiCheckCircle, FiAlertCircle, FiAlertTriangle, FiSearch, FiClock, FiDatabase, FiPlus, FiLoader, FiRefreshCw } from 'react-icons/fi';
 import { AssetRef, PriceResponse } from '../../types';
 import { formatTimeLocale } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/tooltip';
 import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { usePriceGapsSummary } from '../../hooks/usePriceGaps';
+import { PriceGapAlert } from '../PriceGapAlert';
 
 interface PriceStatusListProps {
     prices: PriceResponse[];
     baseCurrency: string;
     quoteAssetId?: number;  // Base currency asset ID for manual price entry
     onPriceAdded?: (assetId: number) => void;  // Callback after manual price is saved
+    onRetryFailed?: () => void;  // Callback to retry all failed price fetches
     loadingAssetIds?: Set<number>;  // Asset IDs currently being fetched
     assetNameMap?: Map<number, string>;  // id → display name for loading placeholders
     totalAssetCount?: number;  // Total assets in table (including non-PnL)
@@ -47,6 +50,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
     baseCurrency,
     quoteAssetId,
     onPriceAdded,
+    onRetryFailed,
     loadingAssetIds,
     assetNameMap,
     totalAssetCount,
@@ -54,6 +58,22 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
 }) => {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+    // Fetch gap summary for all assets in the list
+    const assetIds = useMemo(
+        () => prices.map(p => p.asset.id).filter((id): id is number => id != null),
+        [prices],
+    );
+    const { data: gapSummary } = usePriceGapsSummary(assetIds);
+    const gapMap = useMemo(() => {
+        const m = new Map<number, number>();
+        if (gapSummary?.items) {
+            for (const item of gapSummary.items) {
+                if (item.total_missing_days > 0) m.set(item.asset_id, item.total_missing_days);
+            }
+        }
+        return m;
+    }, [gapSummary]);
 
     // State for manual price dialog
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -183,6 +203,18 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                             <Badge colorPalette="red" variant={statusFilter === 'error' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('error')}>
                                 {failedCount} Failed
                             </Badge>
+                            {failedCount > 0 && onRetryFailed && (
+                                <Button
+                                    size="2xs"
+                                    variant="outline"
+                                    colorPalette="red"
+                                    onClick={onRetryFailed}
+                                    disabled={loadingCount > 0}
+                                >
+                                    <FiRefreshCw size={12} />
+                                    <Text ml={1} fontSize="xs">Retry Failed</Text>
+                                </Button>
+                            )}
                             {naCount > 0 && (
                                 <Badge colorPalette="gray" variant={statusFilter === 'na' ? 'solid' : 'outline'} cursor="pointer" onClick={() => toggleFilter('na')}>
                                     {naCount} N/A
@@ -248,13 +280,22 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                             )}
                                         </Table.Cell>
                                         <Table.Cell fontWeight="medium">
-                                            <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
-                                                <Text>{item.asset.symbol}</Text>
-                                            </Tooltip>
+                                            <Flex align="center" gap={1}>
+                                                <Tooltip content={item.asset.label || item.asset.symbol || ''} openDelay={300} disabled={!item.asset.label}>
+                                                    <Text>{item.asset.symbol}</Text>
+                                                </Tooltip>
+                                                {gapMap.has(item.asset.id!) && (
+                                                    <Badge size="xs" colorPalette="orange" variant="subtle">
+                                                        {gapMap.get(item.asset.id!)} gap{gapMap.get(item.asset.id!)! !== 1 ? 's' : ''}
+                                                    </Badge>
+                                                )}
+                                            </Flex>
                                         </Table.Cell>
                                         <Table.Cell>
                                             <Text fontWeight={isError ? 'normal' : 'bold'}>
-                                                {formatCurrency(item.price, baseCurrency)}
+                                                {isError && item.last_known_price != null
+                                                    ? formatCurrency(item.last_known_price, baseCurrency)
+                                                    : formatCurrency(item.price, baseCurrency)}
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell>
@@ -264,11 +305,22 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                                                         Fetching...
                                                     </Text>
                                                 ) : isError ? (
-                                                    <Tooltip content={item.error || ''} openDelay={200}>
-                                                        <Text color="red.600" fontSize="xs" fontWeight="medium" truncate maxW="200px">
-                                                            {item.error}
-                                                        </Text>
-                                                    </Tooltip>
+                                                    <>
+                                                        <Tooltip content={item.error || ''} openDelay={200}>
+                                                            <Text color="red.600" fontSize="xs" fontWeight="medium" truncate maxW="200px">
+                                                                {item.error}
+                                                            </Text>
+                                                        </Tooltip>
+                                                        {item.last_known_price != null && (
+                                                            <Flex align="center" gap={1} color="gray.500" fontSize="xs">
+                                                                <FiClock size={10} />
+                                                                <Text>
+                                                                    Last: {formatTimeLocale(item.last_known_price_date)}
+                                                                    {item.last_known_source ? ` (${item.last_known_source})` : ''}
+                                                                </Text>
+                                                            </Flex>
+                                                        )}
+                                                    </>
                                                 ) : isNa ? (
                                                     <Text color="gray.500" fontSize="xs" fontWeight="medium">
                                                         No active lots

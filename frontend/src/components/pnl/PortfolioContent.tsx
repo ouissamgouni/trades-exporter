@@ -1,25 +1,27 @@
 /**
- * PortfolioContent — Unified portfolio view (L0 + drill)
+ * PortfolioContent — Unified portfolio view
  *
- * Renders the main Portfolio content:
- * - Breadcrumb navigation
- * - Level 0: Assets section (List/Treemap/Pie toggle), Charts section, PnL Audit section
- * - Level 1/2: PnLDetailPanel (drill-down detail)
+ * Two rendering modes:
+ * - Asset drill:          PnLDetailPanel (metrics + PnL Audit / Charts tabs)
+ * - Everything else (L0 / entity drill): Tabs — Assets | Charts | PnL Audit
+ *
+ * Entity drill (account/category) sets selectedAccountIds/selectedCategoryIds
+ * so the filter chip is visible and removable in AssetPnLTable.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Badge, Box, Button, Flex, Text } from '@chakra-ui/react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { FiGrid } from 'react-icons/fi';
 import { usePnL } from './PnLContext';
 import { AssetPnLTable, PnlStatusFilter, BalanceStatusFilter } from './AssetPnLTable';
 import { PnLDetailPanel, SectionToggle } from './PnLDetailPanel';
 import { InvestigationView } from './InvestigationView';
 import { AllocationTreemap } from './AllocationTreemap';
 import { MarketValuePieChart } from './MarketValuePieChart';
-import { CostBasisVsMarketValueChart } from './CostBasisVsMarketValueChart';
-import { AssetPerformanceComparison } from './AssetPerformanceComparison';
 import { DrillDownBreadcrumb } from './DrillDownBreadcrumb';
 import { ViewModeToggle, type AssetsViewMode } from './ViewModeToggle';
-
+import { usePortfolioTimeline } from '../../hooks/useChartData';
+import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import type { Range } from './TotalReturnScorecard';
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -58,6 +60,10 @@ export interface PortfolioContentProps {
     timeframeRange?: Range;
     periodDateFrom?: string;
     periodDateTo?: string;
+    /** Period delta map: assetId → AssetPeriodDelta */
+    periodDeltaMap?: Map<number, AssetPeriodDelta>;
+    /** Period label (e.g. "1W") for delta display on cards */
+    periodLabel?: string;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -74,32 +80,78 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     selectedAccountIds, onSelectedAccountIdsChange: setSelectedAccountIds,
     selectedCategoryIds, onSelectedCategoryIdsChange: setSelectedCategoryIds,
     timeframeRange, periodDateFrom, periodDateTo,
+    periodDeltaMap, periodLabel,
 }) => {
-    const { scorecardSummary } = usePnL();
+    const { scorecardSummary, state: pnlState } = usePnL();
     const [assetsView, setAssetsView] = useState<AssetsViewMode>('list');
-    const [auditOpen, setAuditOpen] = useState(false);
-    const auditRef = useRef<HTMLDivElement>(null);
-    const handleGoToAudit = useCallback(() => {
-        setAuditOpen(true);
-        setTimeout(() => auditRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-    }, []);
-
-    // Charts section state
-    const [chartsOpen, setChartsOpen] = useState(false);
     const [chartsTab, setChartsTab] = useState<'cost-basis' | 'performance'>('cost-basis');
-    const chartsRef = useRef<HTMLDivElement>(null);
-    const handleGoToCharts = useCallback(() => {
-        setChartsOpen(true);
-        setTimeout(() => chartsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-    }, []);
 
-    // --- Shared filter state (controls both list and treemap) ---
+    // ── Mode detection ──
+    const isAssetDrill = drill.level > 0 && drill.assetId != null;
+    const isEntityDrill = drill.level > 0 && drill.entityType != null && drill.entityId != null;
+    const isDrilled = isAssetDrill || isEntityDrill;
+
+    // ── Section open state (independently collapsible) ──
+    const [assetsOpen, setAssetsOpen] = useState(true);
+    const [auditOpen, setAuditOpen] = useState(true);
+
+    // Reset sections whenever drill context changes
+    useEffect(() => {
+        setAssetsOpen(true);
+        setAuditOpen(true);
+    }, [drill.level, drill.entityId, drill.assetId]);
+
+    // When auditDefaultPanel is set, open audit section
+    const auditDefaultPanel = pnlState.auditDefaultPanel;
+    useEffect(() => {
+        if (auditDefaultPanel) setAuditOpen(true);
+    }, [auditDefaultPanel]);
+
+    // ── Wrap filter change callbacks: reset drill when entity filter removed ──
+    const handleAccountIdsChange = useCallback((ids: number[]) => {
+        setSelectedAccountIds(ids);
+        if (drill.entityType === 'account' && drill.entityId && !ids.includes(drill.entityId)) {
+            dispatch({ type: 'DRILL_TO_BREADCRUMB', index: 0 });
+        }
+    }, [setSelectedAccountIds, drill.entityType, drill.entityId, dispatch]);
+
+    const handleCategoryIdsChange = useCallback((ids: number[]) => {
+        setSelectedCategoryIds(ids);
+        if (drill.entityType === 'category' && drill.entityId && !ids.includes(drill.entityId)) {
+            dispatch({ type: 'DRILL_TO_BREADCRUMB', index: 0 });
+        }
+    }, [setSelectedCategoryIds, drill.entityType, drill.entityId, dispatch]);
+
+    // ── Scoped timeline (contextualized when filters active) ──
+    const hasEntityFilter = selectedAccountIds.length > 0 || selectedCategoryIds.length > 0;
+    const entityTimelineFilters = useMemo(() => ({
+        granularity: 'daily' as const,
+        accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+        categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+    }), [selectedAccountIds, selectedCategoryIds]);
+    const scopedTimeline = usePortfolioTimeline(currentVersionId, entityTimelineFilters, !!currentVersionId && hasEntityFilter);
+    const effectiveTimeline = hasEntityFilter ? scopedTimeline : heroTimeline;
+
+    // ── Audit filters from selected filter IDs ──
+    // Use relatedAccountIds / relatedAssetIds so the audit matches transactions
+    // involving the asset/account in any role (from/to/fee quote), not just as primary.
+    const auditFilters = useMemo(() => {
+        const filters: Record<string, any> = {};
+        if (periodDateFrom && periodDateTo && timeframeRange !== 'all') {
+            filters.dateFrom = periodDateFrom;
+            filters.dateTo = periodDateTo;
+        }
+        if (selectedAccountIds.length > 0) filters.relatedAccountIds = selectedAccountIds.map(String);
+        if (selectedCategoryIds.length > 0) filters.categoryIds = selectedCategoryIds.map(String);
+        return Object.keys(filters).length > 0 ? filters : undefined;
+    }, [periodDateFrom, periodDateTo, timeframeRange, selectedAccountIds, selectedCategoryIds]);
+
+    // ── Shared filter state for list views ──
     const [search, setSearch] = useState('');
     const [minMarketValue, setMinMarketValue] = useState(5);
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
 
-    // Apply shared filters to treemap assets
     const filteredTreemapAssets = useMemo(() => {
         return displayAssets.filter(a => {
             if (search && (!a.asset.symbol || !a.asset.symbol.toLowerCase().includes(search.toLowerCase()))) return false;
@@ -128,201 +180,176 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
 
     const [filteredAssetCount, setFilteredAssetCount] = useState<number>(displayAssets.length);
 
-    // Filter timeline points to selected period date range
-    const periodFilteredPoints = useMemo(() => {
-        const allPoints = heroTimeline.data?.points || [];
-        if (!periodDateFrom || !periodDateTo || timeframeRange === 'all') return allPoints;
-        return allPoints.filter((p: any) => {
-            const d = (p.date ?? p.timestamp ?? '').slice(0, 10);
-            return d >= periodDateFrom && d <= periodDateTo;
-        });
-    }, [heroTimeline.data?.points, periodDateFrom, periodDateTo, timeframeRange]);
-
-    const assetsViewToggle = (
-        <ViewModeToggle value={assetsView} onChange={setAssetsView} />
+    // ── Shared assets table ──
+    const assetsTable = (
+        <>
+            <AssetPnLTable
+                assets={displayAssets}
+                baseCurrency={config.base_currency_symbol}
+                onAssetClick={onAssetClick}
+                onAccountClick={onAccountClick}
+                accountBalances={accountBalances}
+                accounts={accounts}
+                dimensions={dimensions}
+                availableAccountIds={availableAccountIds}
+                availableCategoryIds={availableCategoryIds}
+                onLoadAccountBalances={onLoadAccountBalances}
+                liveBalances={liveBalanceMap}
+                liveAccountBalances={liveAccountBalanceMap}
+                liveBalanceLoading={liveBalanceLoading}
+                unmappedLiveAssets={unmappedLiveAssets}
+                liveAccountErrors={liveAccountErrors}
+                liveFetchedAccountIds={liveFetchedAccountIds}
+                search={search}
+                onSearchChange={setSearch}
+                minMarketValue={minMarketValue}
+                onMinMarketValueChange={setMinMarketValue}
+                pnlStatus={pnlStatus}
+                onPnlStatusChange={setPnlStatus}
+                balanceStatus={balanceStatus}
+                onBalanceStatusChange={setBalanceStatus}
+                selectedAccountIds={selectedAccountIds}
+                onSelectedAccountIdsChange={handleAccountIdsChange}
+                selectedCategoryIds={selectedCategoryIds}
+                onSelectedCategoryIdsChange={handleCategoryIdsChange}
+                contentHidden={assetsView !== 'list'}
+                onFilteredCountChange={setFilteredAssetCount}
+                backendSummary={scorecardSummary ? {
+                    totalCost: scorecardSummary.costBasis,
+                    totalUnrealized: scorecardSummary.unrealizedPnl,
+                    totalRealized: scorecardSummary.realizedPnl,
+                    totalFees: scorecardSummary.totalFees,
+                    totalValue: scorecardSummary.portfolioValue,
+                } : undefined}
+                periodDeltaMap={periodDeltaMap}
+                periodLabel={periodLabel}
+                pnlVersionId={currentVersionId ?? undefined}
+                renderAfterFilters={<ViewModeToggle value={assetsView} onChange={setAssetsView} />}
+            />
+            {assetsView === 'treemap' && (
+                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                    <AllocationTreemap
+                        points={effectiveTimeline.data?.points || []}
+                        assetCategoryMaps={assetCategoryMaps}
+                        dimensions={dimensions}
+                        accounts={accounts}
+                        assets={filteredTreemapAssets}
+                        baseCurrency={config.base_currency_symbol}
+                        isLoading={effectiveTimeline.isLoading}
+                        accountBalances={accountBalances}
+                        onAssetNavigate={onAssetNavigate}
+                    />
+                </Box>
+            )}
+            {assetsView === 'pie' && (
+                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
+                    <MarketValuePieChart
+                        assets={filteredTreemapAssets}
+                        dimensions={dimensions}
+                        baseCurrency={config.base_currency_symbol}
+                        selectedCategoryIds={selectedCategoryIds}
+                        onCategoryClick={(catId) => {
+                            if (catId == null) return;
+                            handleCategoryIdsChange(
+                                selectedCategoryIds.includes(catId)
+                                    ? selectedCategoryIds.filter(id => id !== catId)
+                                    : [...selectedCategoryIds, catId]
+                            );
+                        }}
+                    />
+                </Box>
+            )}
+        </>
     );
 
-    return (
-        <>
-            {/* Breadcrumb — always visible ("Portfolio > All" at L0) */}
-            <DrillDownBreadcrumb onGoToAudit={handleGoToAudit} onGoToCharts={handleGoToCharts} />
+    // ── Shared audit block ──
+    const auditBlock = currentVersionId ? (
+        <Box p={3}>
+            <InvestigationView
+                versionId={currentVersionId}
+                baseCurrency={config.base_currency_symbol}
+                onTransactionClick={onTransactionClick}
+                onAssetClick={onAssetClick}
+                onUnitClick={onUnitClick}
+                assets={assets.map((a: any) => ({
+                    id: a.asset.id ?? 0,
+                    symbol: a.asset.symbol ?? '',
+                    label: a.asset.label ?? undefined,
+                }))}
+                initialFilters={auditFilters}
+                defaultPanel={auditDefaultPanel}
+                onPanelChange={() => {
+                    if (auditDefaultPanel) dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: null });
+                }}
+            />
+        </Box>
+    ) : null;
 
-            {/* Level 0: all-assets foldable sections */}
-            {drill.level === 0 && (
-                <>
-                    {showMismatchedOnly && (
-                        <Flex align="center" gap={2} mb={3} px={1}>
-                            <Badge colorPalette="orange" size="sm">
-                                Showing {displayAssets.length} mismatched asset{displayAssets.length !== 1 ? 's' : ''} only
-                            </Badge>
-                            <Text as="span" fontSize="xs" color="blue.500" cursor="pointer"
-                                _hover={{ textDecoration: 'underline' }}
-                                onClick={() => dispatch({ type: 'SET_SHOW_MISMATCHED_ONLY', value: false })}>
-                                Clear filter
-                            </Text>
-                        </Flex>
-                    )}
-
-                    {/* Assets / Treemap / Pie section */}
-                    <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mb={3}>
-                        <SectionToggle label="Assets" defaultOpen={false} badge={`${filteredAssetCount}`}>
-                            {/* AssetPnLTable always rendered for shared filter bar */}
-                            <AssetPnLTable
-                                assets={displayAssets}
-                                baseCurrency={config.base_currency_symbol}
-                                onAssetClick={onAssetClick}
-                                onAccountClick={onAccountClick}
-                                accountBalances={accountBalances}
-                                accounts={accounts}
-                                dimensions={dimensions}
-                                availableAccountIds={availableAccountIds}
-                                availableCategoryIds={availableCategoryIds}
-                                onLoadAccountBalances={onLoadAccountBalances}
-                                liveBalances={liveBalanceMap}
-                                liveAccountBalances={liveAccountBalanceMap}
-                                liveBalanceLoading={liveBalanceLoading}
-                                unmappedLiveAssets={unmappedLiveAssets}
-                                liveAccountErrors={liveAccountErrors}
-                                liveFetchedAccountIds={liveFetchedAccountIds}
-                                search={search}
-                                onSearchChange={setSearch}
-                                minMarketValue={minMarketValue}
-                                onMinMarketValueChange={setMinMarketValue}
-                                pnlStatus={pnlStatus}
-                                onPnlStatusChange={setPnlStatus}
-                                balanceStatus={balanceStatus}
-                                onBalanceStatusChange={setBalanceStatus}
-                                selectedAccountIds={selectedAccountIds}
-                                onSelectedAccountIdsChange={setSelectedAccountIds}
-                                selectedCategoryIds={selectedCategoryIds}
-                                onSelectedCategoryIdsChange={setSelectedCategoryIds}
-                                renderAfterFilters={assetsViewToggle}
-                                contentHidden={assetsView !== 'list'}
-                                onFilteredCountChange={setFilteredAssetCount}
-                                backendSummary={scorecardSummary ? {
-                                    totalCost: scorecardSummary.costBasis,
-                                    totalUnrealized: scorecardSummary.unrealizedPnl,
-                                    totalRealized: scorecardSummary.realizedPnl,
-                                    totalFees: scorecardSummary.totalFees,
-                                    totalValue: scorecardSummary.portfolioValue,
-                                } : undefined}
-                            />
-                            {assetsView === 'treemap' && (
-                                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
-                                    <AllocationTreemap
-                                        points={heroTimeline.data?.points || []}
-                                        assetCategoryMaps={assetCategoryMaps}
-                                        dimensions={dimensions}
-                                        accounts={accounts}
-                                        assets={filteredTreemapAssets}
-                                        baseCurrency={config.base_currency_symbol}
-                                        isLoading={heroTimeline.isLoading}
-                                        accountBalances={accountBalances}
-                                        onAssetNavigate={onAssetNavigate}
-                                    />
-                                </Box>
-                            )}
-                            {assetsView === 'pie' && (
-                                <Box mx={3} mb={3} mt={1} border="2px solid" borderColor="blue.100" borderRadius="md" overflow="hidden">
-                                    <MarketValuePieChart
-                                        assets={filteredTreemapAssets}
-                                        dimensions={dimensions}
-                                        baseCurrency={config.base_currency_symbol}
-                                        selectedCategoryIds={selectedCategoryIds}
-                                        onCategoryClick={(catId) => {
-                                            if (catId == null) return;
-                                            setSelectedCategoryIds(
-                                                selectedCategoryIds.includes(catId)
-                                                    ? selectedCategoryIds.filter(id => id !== catId)
-                                                    : [...selectedCategoryIds, catId]
-                                            );
-                                        }}
-                                    />
-                                </Box>
-                            )}
-                        </SectionToggle>
-                    </Box>
-
-                    {/* Charts — collapsed by default, openable via breadcrumb button */}
-                    {currentVersionId && (
-                        <Box ref={chartsRef} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mb={3}>
-                            <SectionToggle label="Charts" defaultOpen={false} open={chartsOpen} onOpenChange={setChartsOpen}>
-                                <Flex gap={1} px={2} pb={2}>
-                                    <Button
-                                        size="2xs"
-                                        variant={chartsTab === 'cost-basis' ? 'solid' : 'ghost'}
-                                        colorPalette={chartsTab === 'cost-basis' ? 'blue' : 'gray'}
-                                        onClick={() => setChartsTab('cost-basis')}
-                                    >
-                                        Cost Basis vs Value
-                                    </Button>
-                                    <Button
-                                        size="2xs"
-                                        variant={chartsTab === 'performance' ? 'solid' : 'ghost'}
-                                        colorPalette={chartsTab === 'performance' ? 'blue' : 'gray'}
-                                        onClick={() => setChartsTab('performance')}
-                                    >
-                                        Performance
-                                    </Button>
-                                </Flex>
-                                <Box px={2} pb={2}>
-                                    {chartsTab === 'cost-basis' && (
-                                        <CostBasisVsMarketValueChart
-                                            points={periodFilteredPoints}
-                                            baseCurrency={config.base_currency_symbol}
-                                            isLoading={heroTimeline.isLoading}
-                                        />
-                                    )}
-                                    {chartsTab === 'performance' && (
-                                        <AssetPerformanceComparison
-                                            versionId={currentVersionId}
-                                            baseCurrency={config.base_currency_symbol}
-                                            assets={filteredTreemapAssets}
-                                            sharedTimeline={
-                                                periodFilteredPoints !== (heroTimeline.data?.points || [])
-                                                    ? { ...heroTimeline, data: heroTimeline.data ? { ...heroTimeline.data, points: periodFilteredPoints } : null }
-                                                    : heroTimeline
-                                            }
-                                        />
-                                    )}
-                                </Box>
-                            </SectionToggle>
-                        </Box>
-                    )}
-
-                    {/* PnL Audit — collapsed by default, openable via breadcrumb button */}
-                    {currentVersionId && (
-                        <Box ref={auditRef} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-                            <SectionToggle label="PnL Audit" defaultOpen={false} open={auditOpen} onOpenChange={setAuditOpen}>
-                                <InvestigationView
-                                    versionId={currentVersionId}
-                                    baseCurrency={config.base_currency_symbol}
-                                    onTransactionClick={onTransactionClick}
-                                    onAssetClick={onAssetClick}
-                                    onUnitClick={onUnitClick}
-                                    assets={assets.map((a: any) => ({
-                                        id: a.asset.id ?? 0,
-                                        symbol: a.asset.symbol ?? '',
-                                        label: a.asset.label ?? undefined,
-                                    }))}
-                                    initialFilters={periodDateFrom && periodDateTo && timeframeRange !== 'all' ? { dateFrom: periodDateFrom, dateTo: periodDateTo } : undefined}
-                                />
-                            </SectionToggle>
-                        </Box>
-                    )}
-                </>
-            )}
-
-            {/* Level 1/2: Unified drill detail panel */}
-            {drill.level > 0 && (
+    // =====================================================================
+    // DRILL (asset or entity) → PnLDetailPanel (metrics + charts + PnL Audit)
+    // =====================================================================
+    if (isDrilled) {
+        return (
+            <>
+                <DrillDownBreadcrumb
+                    assetsOpen={assetsOpen}
+                    auditOpen={auditOpen}
+                    onToggleAssets={() => setAssetsOpen(v => !v)}
+                    onToggleAudit={() => setAuditOpen(v => !v)}
+                />
                 <PnLDetailPanel
                     drill={drill}
+                    assetsOpen={assetsOpen}
+                    auditOpen={auditOpen}
+                    onToggleAssets={() => setAssetsOpen(v => !v)}
+                    onToggleAudit={() => setAuditOpen(v => !v)}
                     onAssetClick={(id) => onAssetClick(id)}
                     onAccountClick={onAccountClick}
                     onAssetNavigate={onAssetNavigate}
                     onTransactionClick={onTransactionClick}
                     onUnitClick={onUnitClick}
                 />
+            </>
+        );
+    }
+
+    // =====================================================================
+    // L0 + ENTITY DRILL → Breadcrumb-driven tabs: Assets | PnL Audit
+    // =====================================================================
+    return (
+        <>
+            <DrillDownBreadcrumb
+                assetsOpen={assetsOpen}
+                auditOpen={auditOpen}
+                onToggleAssets={() => setAssetsOpen(v => !v)}
+                onToggleAudit={() => setAuditOpen(v => !v)}
+            />
+
+            {showMismatchedOnly && (
+                <Flex align="center" gap={2} mb={3} px={1}>
+                    <Badge colorPalette="orange" size="sm">
+                        Showing {displayAssets.length} mismatched asset{displayAssets.length !== 1 ? 's' : ''} only
+                    </Badge>
+                    <Text as="span" fontSize="xs" color="blue.500" cursor="pointer"
+                        _hover={{ textDecoration: 'underline' }}
+                        onClick={() => dispatch({ type: 'SET_SHOW_MISMATCHED_ONLY', value: false })}>
+                        Clear filter
+                    </Text>
+                </Flex>
+            )}
+
+            <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mt={2}>
+                <SectionToggle label="Assets" defaultOpen open={assetsOpen} onOpenChange={() => setAssetsOpen(v => !v)} badge={`${displayAssets.length}`}>
+                    {assetsTable}
+                </SectionToggle>
+            </Box>
+
+            {currentVersionId && (
+                <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" mt={2}>
+                    <SectionToggle label="PnL Audit" defaultOpen open={auditOpen} onOpenChange={() => setAuditOpen(v => !v)}>
+                        {auditBlock}
+                    </SectionToggle>
+                </Box>
             )}
         </>
     );

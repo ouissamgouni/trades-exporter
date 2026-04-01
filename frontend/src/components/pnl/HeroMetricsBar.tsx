@@ -1,7 +1,7 @@
 /**
  * HeroMetricsBar — Shared hero + metrics + PnL breakdown bar layout.
  *
- * Layout:  Hero (left)  |  Metrics row + PnL bar underneath (right)
+ * Layout:  Hero (left)  |  Metrics row (right, top) + PnL bar (right, bottom)
  *
  * Used by both TimeframeIndicators (L0) and PnLDetailPanel (L1/L2).
  */
@@ -38,8 +38,8 @@ export const HeroMetricsBar: React.FC<HeroMetricsBarProps> = ({
     fmtCurrencySigned: fmtSigned,
     color,
 }) => (
-    <Flex gap={3} align="stretch">
-        {/* LEFT: Hero card */}
+    <Flex gap={2} align="stretch">
+        {/* LEFT: Hero card — horizontal layout */}
         <Flex
             align="center"
             justify="center"
@@ -48,15 +48,14 @@ export const HeroMetricsBar: React.FC<HeroMetricsBarProps> = ({
             px={3}
             bg={totalReturn >= 0 ? 'green.50' : 'red.50'}
             borderRadius="md"
-            direction="column"
-            minW="140px"
+            direction="row"
             flexShrink={0}
         >
             {totalReturn >= 0
-                ? <FiTrendingUp size={18} color="var(--chakra-colors-green-600)" />
-                : <FiTrendingDown size={18} color="var(--chakra-colors-red-600)" />
+                ? <FiTrendingUp size={20} color="var(--chakra-colors-green-600)" />
+                : <FiTrendingDown size={20} color="var(--chakra-colors-red-600)" />
             }
-            <Text fontSize="2xl" fontWeight="bold" color={color(totalReturn)}>
+            <Text fontSize="xl" fontWeight="bold" color={color(totalReturn)} whiteSpace="nowrap">
                 {fmtSigned(totalReturn, baseCurrency)}
             </Text>
             <Badge
@@ -71,7 +70,7 @@ export const HeroMetricsBar: React.FC<HeroMetricsBarProps> = ({
 
         {/* RIGHT: Metrics row + PnL bar underneath */}
         <Box flex="1" minW={0}>
-            <Flex gap={1} align="stretch" flexWrap="wrap" mb={1.5}>
+            <Flex gap={1} align="stretch" flexWrap="wrap" mb={1}>
                 {children}
             </Flex>
             <PnLBreakdownBar

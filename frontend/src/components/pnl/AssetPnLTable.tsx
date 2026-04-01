@@ -16,7 +16,7 @@
  * - Unmapped live-only assets shown at bottom when toggle on
  */
 
-import React, { useState, useMemo, useCallback, useEffect, Fragment } from 'react';
+import React, { useContext, useState, useMemo, useCallback, useEffect, Fragment } from 'react';
 import {
     Badge,
     Box,
@@ -31,17 +31,22 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck } from 'react-icons/fi';
+import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck, FiDollarSign, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
+import { LuInfo, LuReceipt } from 'react-icons/lu';
+import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { AssetPnLCard } from './AssetPnLCard';
 import { AccountPnLCard } from './AccountPnLCard';
 import { AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
 import { Account, DimensionWithCategories } from '../../types';
+import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import { Tooltip } from '../ui/tooltip';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { ValueDisplay } from '../ValueDisplay';
 import { getAccountColor } from '../../utils/accountColors';
 import { DeltaBar } from './DeltaBar';
 import { PnLBreakdownBar } from './PnLBreakdownBar';
+import { HeroMetricsBar } from './HeroMetricsBar';
+import { MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { computeDelta, formatPct } from './deltaUtils';
 
 // ------------------------------------------------------------------
@@ -51,8 +56,8 @@ import { computeDelta, formatPct } from './deltaUtils';
 const TOTAL_COLUMNS_BY_ASSET = 10;
 const TOTAL_COLUMNS_BY_ACCOUNT = 7;
 
-const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 10;
 
 /** Extra-small font style applied to all table cells */
 const XS: { fontSize: string } = { fontSize: 'xs' };
@@ -148,6 +153,12 @@ interface AssetPnLTableProps {
     onFilteredCountChange?: (count: number) => void;
     /** Backend-computed portfolio totals (authoritative, not affected by dust filter) */
     backendSummary?: { totalCost: number; totalUnrealized: number; totalRealized: number; totalFees: number; totalValue: number };
+    /** Period delta map: assetId → AssetPeriodDelta */
+    periodDeltaMap?: Map<number, AssetPeriodDelta>;
+    /** Period label (e.g. "1W") for delta display */
+    periodLabel?: string;
+    /** PnL version ID to pass when opening asset detail panel */
+    pnlVersionId?: number;
 }
 
 // ------------------------------------------------------------------
@@ -297,7 +308,11 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     contentHidden = false,
     onFilteredCountChange,
     backendSummary,
+    periodDeltaMap,
+    periodLabel,
+    pnlVersionId,
 }) => {
+    const assetPanelCtx = useContext(AssetDetailPanelContext);
     const [sortField, setSortField] = useState<SortField>('market_value');
     const [sortDir, setSortDir] = useState<SortDirection>('desc');
     const [expandedAssetIds, setExpandedAssetIds] = useState<Set<number>>(new Set());
@@ -313,6 +328,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     const [_selectedAccountIds, _setSelectedAccountIds] = useState<number[]>([]);
     const [_selectedCategoryIds, _setSelectedCategoryIds] = useState<number[]>([]);
     const [filtersExpanded, setFiltersExpanded] = useState(false);
+    const [accountFilterSearch, setAccountFilterSearch] = useState('');
+    const [catFilterSearch, setCatFilterSearch] = useState('');
 
     // Resolve controlled vs internal
     const search = controlledSearch ?? _search;
@@ -450,6 +467,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             unrealized_pnl: 0,
             unrealized_pnl_pct: 0,
             realized_pnl: 0,
+            taxable_realized_pnl: 0,
             total_fees: 0,
             lot_count: 0,
             realized_event_count: 0,
@@ -758,8 +776,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 <Button
                     key={opt.value}
                     size="2xs"
-                    variant={value === opt.value ? 'solid' : 'ghost'}
-                    colorPalette="gray"
+                    variant={value === opt.value ? 'subtle' : 'ghost'}
+                    colorPalette={value === opt.value ? 'blue' : 'gray'}
                     borderRadius="0"
                     onClick={() => onChange(opt.value)}
                     px={2}
@@ -781,8 +799,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                         <Button
                             key={size}
                             size="2xs"
-                            variant={pageSize === size ? 'solid' : 'ghost'}
-                            colorPalette="gray"
+                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                            colorPalette={pageSize === size ? 'blue' : 'gray'}
                             borderRadius="0"
                             onClick={() => { setPageSize(size); setPage(0); }}
                             px={2}
@@ -822,254 +840,291 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     return (
         <Card.Root>
             <Card.Header pb={2}>
-                {/* Top row: Title only */}
-                <Flex justify="space-between" align="center" mb={2}>
-                    <Text fontWeight="bold" fontSize="lg">
+                {/* Top row: Title + asset search */}
+                <Flex justify="space-between" align="center" mb={2} gap={3}>
+                    <Text fontWeight="bold" fontSize="lg" flexShrink={0}>
                         {groupBy === 'asset'
                             ? `Asset P&L (${filtered.length} assets)`
                             : `Asset P&L (${byAccountRows.length} accounts)`
                         }
                     </Text>
+                    {!hideFilters && (
+                        <Box position="relative" maxW="220px" w="100%">
+                            <Input
+                                placeholder="Search asset..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                size="xs"
+                                pl={7}
+                            />
+                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                                <FiSearch size={12} color="gray" />
+                            </Box>
+                        </Box>
+                    )}
                 </Flex>
 
                 {/* Filter section — collapsible (hidden when parent manages filters) */}
                 {!hideFilters && (
                     <Collapsible.Root open={filtersExpanded}>
-                        {/* Filter header row */}
-                        <Flex
-                            align="center"
-                            justify="space-between"
-                            cursor="pointer"
-                            py={1}
-                            onClick={() => setFiltersExpanded(prev => !prev)}
-                            _hover={{ bg: 'gray.50' }}
-                            borderRadius="sm"
-                            userSelect="none"
-                        >
-                            <Flex align="center" gap={2}>
-                                {filtersExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
-                                <FiFilter size={12} color="gray" />
-                                <Text fontSize="xs" fontWeight="medium" color="gray.600">
-                                    Filters
-                                    {filtered.length < totalAssetCount && (
-                                        <Text as="span" color="gray.400" fontWeight="normal">
-                                            {' '}— showing {filtered.length} of {totalAssetCount}
-                                        </Text>
+                        <Box border="1px solid" borderColor={filtersExpanded ? 'blue.200' : 'gray.200'} borderRadius="md" px={2} py={1} transition="border-color 0.15s">
+                            {/* Filter header row */}
+                            <Flex
+                                align="center"
+                                justify="space-between"
+                                cursor="pointer"
+                                py={1}
+                                onClick={() => setFiltersExpanded(prev => !prev)}
+                                _hover={{ bg: 'gray.50' }}
+                                borderRadius="sm"
+                                userSelect="none"
+                            >
+                                <Flex align="center" gap={2}>
+                                    {filtersExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                                    <FiFilter size={12} color="gray" />
+                                    <Text fontSize="xs" fontWeight="medium" color="gray.600">
+                                        Filters
+                                        {filtered.length < totalAssetCount && (
+                                            <Text as="span" color="gray.400" fontWeight="normal">
+                                                {' '}— showing {filtered.length} of {totalAssetCount}
+                                            </Text>
+                                        )}
+                                    </Text>
+                                    {activeFilterCount > 0 && (
+                                        <Badge size="xs" colorPalette="blue" variant="solid">{activeFilterCount}</Badge>
                                     )}
-                                </Text>
+                                </Flex>
                                 {activeFilterCount > 0 && (
-                                    <Badge size="xs" colorPalette="blue" variant="solid">{activeFilterCount}</Badge>
+                                    <Button
+                                        size="2xs"
+                                        variant="ghost"
+                                        colorPalette="gray"
+                                        onClick={(e) => { e.stopPropagation(); clearAllFilters(); }}
+                                        gap={1}
+                                    >
+                                        <FiX size={10} />
+                                        Clear all
+                                    </Button>
                                 )}
                             </Flex>
-                            {activeFilterCount > 0 && (
-                                <Button
-                                    size="2xs"
-                                    variant="ghost"
-                                    colorPalette="gray"
-                                    onClick={(e) => { e.stopPropagation(); clearAllFilters(); }}
-                                    gap={1}
-                                >
-                                    <FiX size={10} />
-                                    Clear all
-                                </Button>
-                            )}
-                        </Flex>
 
-                        {/* Active filter chips — shown when filters are collapsed */}
-                        {!filtersExpanded && activeFilterChips.length > 0 && (
-                            <Flex flexWrap="wrap" gap={1.5} pt={1} pb={1}>
-                                {activeFilterChips.map(chip => (
-                                    <Badge
-                                        key={chip.id}
-                                        size="sm"
-                                        colorPalette={chip.color}
-                                        display="inline-flex"
-                                        alignItems="center"
-                                        gap={1}
-                                        px={2}
-                                        py={0.5}
-                                        borderRadius="md"
-                                        cursor="pointer"
-                                        transition="all 0.15s"
-                                        _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
-                                        onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
-                                    >
-                                        <Text fontSize="xs">{chip.label}</Text>
-                                        <Box as="span" display="flex" alignItems="center">
-                                            <FiX size={10} />
-                                        </Box>
-                                    </Badge>
-                                ))}
-                            </Flex>
-                        )}
-
-                        <Collapsible.Content>
-                            <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} gap={3} mt={2} pb={1}>
-                                {/* Asset name search */}
-                                <Box>
-                                    <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Asset name</Text>
-                                    <Box position="relative">
-                                        <Input
-                                            placeholder="Search..."
-                                            value={search}
-                                            onChange={(e) => setSearch(e.target.value)}
-                                            size="xs"
-                                            pl={7}
-                                        />
-                                        <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
-                                            <FiSearch size={12} color="gray" />
-                                        </Box>
-                                    </Box>
-                                </Box>
-
-                                {/* Min value */}
-                                <Box>
-                                    <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Min value</Text>
-                                    <Flex align="center" gap={2}>
-                                        <Slider.Root
+                            {/* Active filter chips — shown when filters are collapsed */}
+                            {!filtersExpanded && activeFilterChips.length > 0 && (
+                                <Flex flexWrap="wrap" gap={1.5} pt={1} pb={1}>
+                                    {activeFilterChips.map(chip => (
+                                        <Badge
+                                            key={chip.id}
                                             size="sm"
-                                            min={0}
-                                            max={100}
-                                            step={1}
-                                            value={[minMarketValue]}
-                                            onValueChange={(details) => setMinMarketValue(details.value[0])}
-                                            width="100%"
+                                            colorPalette={chip.color}
+                                            display="inline-flex"
+                                            alignItems="center"
+                                            gap={1}
+                                            px={2}
+                                            py={0.5}
+                                            borderRadius="md"
+                                            cursor="pointer"
+                                            transition="all 0.15s"
+                                            _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
+                                            onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
                                         >
-                                            <Slider.Control>
-                                                <Slider.Track>
-                                                    <Slider.Range />
-                                                </Slider.Track>
-                                                <Slider.Thumbs />
-                                            </Slider.Control>
-                                        </Slider.Root>
-                                        <Text fontSize="xs" color="gray.600" whiteSpace="nowrap" minW="28px" textAlign="right">
-                                            ${minMarketValue}
-                                        </Text>
-                                    </Flex>
-                                </Box>
-
-                                {/* P&L status */}
-                                <Box>
-                                    <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>P&L status</Text>
-                                    <SegmentedControl
-                                        value={pnlStatus}
-                                        options={[
-                                            { value: 'all', label: 'All' },
-                                            { value: 'with_pnl', label: 'With P&L' },
-                                            { value: 'no_pnl', label: 'No P&L' },
-                                        ]}
-                                        onChange={(v) => setPnlStatus(v as PnlStatusFilter)}
-                                    />
-                                </Box>
-
-                                {/* Balance status */}
-                                <Box>
-                                    <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Live balance</Text>
-                                    <SegmentedControl
-                                        value={balanceStatus}
-                                        options={[
-                                            { value: 'all', label: 'All' },
-                                            { value: 'mapped', label: 'Has balance' },
-                                            { value: 'unmapped', label: 'No balance' },
-                                        ]}
-                                        onChange={(v) => setBalanceStatus(v as BalanceStatusFilter)}
-                                    />
-                                </Box>
-                            </SimpleGrid>
-
-                            {/* Account / Category filter cards */}
-                            {(availableAccounts.length > 0 || relevantDimensions.length > 0) && (
-                                <SimpleGrid columns={{ base: 1, md: 2, lg: Math.min(1 + relevantDimensions.length, 3) }} gap={3} mt={3}>
-                                    {/* Accounts card */}
-                                    {availableAccounts.length > 0 && (
-                                        <Card.Root size="sm" variant="outline" borderColor={selectedAccountIds.length > 0 ? 'blue.200' : 'gray.200'} bg={selectedAccountIds.length > 0 ? 'blue.50' : 'white'}>
-                                            <Card.Body p={3}>
-                                                <Flex align="center" gap={2} mb={2}>
-                                                    <Text fontSize="2xs" fontWeight="semibold" color={selectedAccountIds.length > 0 ? 'blue.700' : 'gray.700'}>
-                                                        Accounts
-                                                    </Text>
-                                                    <Badge size="xs" colorPalette={selectedAccountIds.length > 0 ? 'blue' : 'gray'} ml="auto">
-                                                        {selectedAccountIds.length || 'All'}/{availableAccounts.length}
-                                                    </Badge>
-                                                </Flex>
-                                                <Flex gap={1} flexWrap="wrap">
-                                                    {availableAccounts.map((account) => {
-                                                        const isSelected = selectedAccountIds.includes(account.id);
-                                                        const color = getAccountColor(account.id);
-                                                        return (
-                                                            <Button
-                                                                key={account.id}
-                                                                size="2xs"
-                                                                variant={isSelected ? 'solid' : 'outline'}
-                                                                onClick={() => setSelectedAccountIds(
-                                                                    selectedAccountIds.includes(account.id)
-                                                                        ? selectedAccountIds.filter(id => id !== account.id)
-                                                                        : [...selectedAccountIds, account.id]
-                                                                )}
-                                                                bg={isSelected ? color : 'white'}
-                                                                color={isSelected ? 'white' : 'gray.700'}
-                                                                borderColor={color}
-                                                                _hover={{ bg: isSelected ? color : `${color}15`, opacity: 0.9 }}
-                                                                gap={1}
-                                                            >
-                                                                <Box w="6px" h="6px" borderRadius="full" bg={isSelected ? 'currentColor' : color} opacity={isSelected ? 0.7 : 1} />
-                                                                {account.name}
-                                                            </Button>
-                                                        );
-                                                    })}
-                                                </Flex>
-                                            </Card.Body>
-                                        </Card.Root>
-                                    )}
-
-                                    {/* Category dimension cards */}
-                                    {relevantDimensions.map((dimension) => {
-                                        const selectedInDim = dimension.categories.filter(
-                                            cat => selectedCategoryIds.includes(cat.id)
-                                        ).length;
-                                        return (
-                                            <Card.Root key={dimension.id} size="sm" variant="outline" borderColor={selectedInDim > 0 ? 'blue.200' : 'gray.200'} bg={selectedInDim > 0 ? 'blue.50' : 'white'}>
-                                                <Card.Body p={3}>
-                                                    <Flex align="center" gap={2} mb={2}>
-                                                        <Text fontSize="2xs" fontWeight="semibold" color={selectedInDim > 0 ? 'blue.700' : 'gray.700'}>
-                                                            {dimension.label}
-                                                        </Text>
-                                                        <Badge size="xs" colorPalette={selectedInDim > 0 ? 'blue' : 'gray'} ml="auto">
-                                                            {selectedInDim || 'All'}/{dimension.categories.length}
-                                                        </Badge>
-                                                    </Flex>
-                                                    <Flex gap={1} flexWrap="wrap">
-                                                        {dimension.categories.map((category) => {
-                                                            const isSelected = selectedCategoryIds.includes(category.id);
-                                                            return (
-                                                                <Button
-                                                                    key={category.id}
-                                                                    size="2xs"
-                                                                    variant={isSelected ? 'solid' : 'outline'}
-                                                                    colorPalette={isSelected ? 'blue' : 'gray'}
-                                                                    onClick={() => setSelectedCategoryIds(
-                                                                        selectedCategoryIds.includes(category.id)
-                                                                            ? selectedCategoryIds.filter(id => id !== category.id)
-                                                                            : [...selectedCategoryIds, category.id]
-                                                                    )}
-                                                                    borderColor={category.color || undefined}
-                                                                    bg={isSelected && category.color ? category.color : undefined}
-                                                                    color={isSelected && category.color ? 'white' : undefined}
-                                                                    _hover={{ bg: isSelected ? undefined : 'gray.100', opacity: 0.9 }}
-                                                                >
-                                                                    {category.label}
-                                                                </Button>
-                                                            );
-                                                        })}
-                                                    </Flex>
-                                                </Card.Body>
-                                            </Card.Root>
-                                        );
-                                    })}
-                                </SimpleGrid>
+                                            <Text fontSize="xs">{chip.label}</Text>
+                                            <Box as="span" display="flex" alignItems="center">
+                                                <FiX size={10} />
+                                            </Box>
+                                        </Badge>
+                                    ))}
+                                </Flex>
                             )}
 
-                        </Collapsible.Content>
+                            <Collapsible.Content>
+                                <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={3} mt={2} pb={1}>
+                                    {/* Min value */}
+                                    <Box>
+                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Min value</Text>
+                                        <Flex align="center" gap={2}>
+                                            <Slider.Root
+                                                size="sm"
+                                                min={0}
+                                                max={100}
+                                                step={1}
+                                                value={[minMarketValue]}
+                                                onValueChange={(details) => setMinMarketValue(details.value[0])}
+                                                width="100%"
+                                            >
+                                                <Slider.Control>
+                                                    <Slider.Track>
+                                                        <Slider.Range />
+                                                    </Slider.Track>
+                                                    <Slider.Thumbs />
+                                                </Slider.Control>
+                                            </Slider.Root>
+                                            <Text fontSize="xs" color="gray.600" whiteSpace="nowrap" minW="28px" textAlign="right">
+                                                ${minMarketValue}
+                                            </Text>
+                                        </Flex>
+                                    </Box>
+
+                                    {/* P&L status */}
+                                    <Box>
+                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>P&L status</Text>
+                                        <SegmentedControl
+                                            value={pnlStatus}
+                                            options={[
+                                                { value: 'all', label: 'All' },
+                                                { value: 'with_pnl', label: 'With P&L' },
+                                                { value: 'no_pnl', label: 'No P&L' },
+                                            ]}
+                                            onChange={(v) => setPnlStatus(v as PnlStatusFilter)}
+                                        />
+                                    </Box>
+
+                                    {/* Balance status */}
+                                    <Box>
+                                        <Text fontSize="2xs" fontWeight="medium" color="gray.500" mb={1}>Live balance</Text>
+                                        <SegmentedControl
+                                            value={balanceStatus}
+                                            options={[
+                                                { value: 'all', label: 'All' },
+                                                { value: 'mapped', label: 'Has balance' },
+                                                { value: 'unmapped', label: 'No balance' },
+                                            ]}
+                                            onChange={(v) => setBalanceStatus(v as BalanceStatusFilter)}
+                                        />
+                                    </Box>
+                                </SimpleGrid>
+
+                                {/* Account / Category filter cards */}
+                                {(availableAccounts.length > 0 || relevantDimensions.length > 0) && (
+                                    <SimpleGrid columns={{ base: 1, md: 2, lg: Math.min(1 + relevantDimensions.length, 3) }} gap={3} mt={3}>
+                                        {/* Accounts card */}
+                                        {availableAccounts.length > 0 && (() => {
+                                            const filteredAccounts = accountFilterSearch
+                                                ? availableAccounts.filter(a => a.name.toLowerCase().includes(accountFilterSearch.toLowerCase()))
+                                                : availableAccounts;
+                                            return (
+                                                <Card.Root size="sm" variant="outline" borderColor={selectedAccountIds.length > 0 ? 'blue.200' : 'gray.200'} bg={selectedAccountIds.length > 0 ? 'blue.50' : 'white'}>
+                                                    <Card.Body p={2}>
+                                                        <Flex align="center" gap={2} mb={1}>
+                                                            <Text fontSize="2xs" fontWeight="semibold" color={selectedAccountIds.length > 0 ? 'blue.700' : 'gray.700'}>
+                                                                Accounts
+                                                            </Text>
+                                                            <Badge size="xs" colorPalette={selectedAccountIds.length > 0 ? 'blue' : 'gray'} ml="auto">
+                                                                {selectedAccountIds.length || 'All'}/{availableAccounts.length}
+                                                            </Badge>
+                                                        </Flex>
+                                                        <Box position="relative" mb={1}>
+                                                            <Input
+                                                                placeholder="Search accounts..."
+                                                                value={accountFilterSearch}
+                                                                onChange={(e) => setAccountFilterSearch(e.target.value)}
+                                                                size="xs"
+                                                                pl={7}
+                                                            />
+                                                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                                                                <FiSearch size={10} color="gray" />
+                                                            </Box>
+                                                        </Box>
+                                                        <Box maxH="100px" overflowY="auto">
+                                                            <Flex gap={1} flexWrap="wrap">
+                                                                {filteredAccounts.map((account) => {
+                                                                    const isSelected = selectedAccountIds.includes(account.id);
+                                                                    const color = getAccountColor(account.id);
+                                                                    return (
+                                                                        <Button
+                                                                            key={account.id}
+                                                                            size="2xs"
+                                                                            variant={isSelected ? 'solid' : 'outline'}
+                                                                            onClick={() => setSelectedAccountIds(
+                                                                                selectedAccountIds.includes(account.id)
+                                                                                    ? selectedAccountIds.filter(id => id !== account.id)
+                                                                                    : [...selectedAccountIds, account.id]
+                                                                            )}
+                                                                            bg={isSelected ? color : 'white'}
+                                                                            color={isSelected ? 'white' : 'gray.700'}
+                                                                            borderColor={color}
+                                                                            _hover={{ bg: isSelected ? color : `${color}15`, opacity: 0.9 }}
+                                                                            gap={1}
+                                                                            fontSize="xs"
+                                                                        >
+                                                                            <Box w="6px" h="6px" borderRadius="full" bg={isSelected ? 'currentColor' : color} opacity={isSelected ? 0.7 : 1} />
+                                                                            {account.name}
+                                                                        </Button>
+                                                                    );
+                                                                })}
+                                                            </Flex>
+                                                        </Box>
+                                                    </Card.Body>
+                                                </Card.Root>
+                                            );
+                                        })()}
+
+                                        {/* Category dimension cards */}
+                                        {relevantDimensions.map((dimension) => {
+                                            const selectedInDim = dimension.categories.filter(
+                                                cat => selectedCategoryIds.includes(cat.id)
+                                            ).length;
+                                            const filteredCats = catFilterSearch
+                                                ? dimension.categories.filter(c => c.label.toLowerCase().includes(catFilterSearch.toLowerCase()))
+                                                : dimension.categories;
+                                            return (
+                                                <Card.Root key={dimension.id} size="sm" variant="outline" borderColor={selectedInDim > 0 ? 'blue.200' : 'gray.200'} bg={selectedInDim > 0 ? 'blue.50' : 'white'}>
+                                                    <Card.Body p={2}>
+                                                        <Flex align="center" gap={2} mb={1}>
+                                                            <Text fontSize="2xs" fontWeight="semibold" color={selectedInDim > 0 ? 'blue.700' : 'gray.700'}>
+                                                                {dimension.label}
+                                                            </Text>
+                                                            <Badge size="xs" colorPalette={selectedInDim > 0 ? 'blue' : 'gray'} ml="auto">
+                                                                {selectedInDim || 'All'}/{dimension.categories.length}
+                                                            </Badge>
+                                                        </Flex>
+                                                        <Box position="relative" mb={1}>
+                                                            <Input
+                                                                placeholder={`Search ${dimension.label.toLowerCase()}...`}
+                                                                value={catFilterSearch}
+                                                                onChange={(e) => setCatFilterSearch(e.target.value)}
+                                                                size="xs"
+                                                                pl={7}
+                                                            />
+                                                            <Box position="absolute" left={2} top="50%" transform="translateY(-50%)">
+                                                                <FiSearch size={10} color="gray" />
+                                                            </Box>
+                                                        </Box>
+                                                        <Box maxH="100px" overflowY="auto">
+                                                            <Flex gap={1} flexWrap="wrap">
+                                                                {filteredCats.map((category) => {
+                                                                    const isSelected = selectedCategoryIds.includes(category.id);
+                                                                    return (
+                                                                        <Button
+                                                                            key={category.id}
+                                                                            size="2xs"
+                                                                            variant={isSelected ? 'solid' : 'outline'}
+                                                                            colorPalette={isSelected ? 'blue' : 'gray'}
+                                                                            onClick={() => setSelectedCategoryIds(
+                                                                                selectedCategoryIds.includes(category.id)
+                                                                                    ? selectedCategoryIds.filter(id => id !== category.id)
+                                                                                    : [...selectedCategoryIds, category.id]
+                                                                            )}
+                                                                            borderColor={category.color || undefined}
+                                                                            bg={isSelected && category.color ? category.color : undefined}
+                                                                            color={isSelected && category.color ? 'white' : undefined}
+                                                                            _hover={{ bg: isSelected ? undefined : 'gray.100', opacity: 0.9 }}
+                                                                            fontSize="xs"
+                                                                        >
+                                                                            {category.label}
+                                                                        </Button>
+                                                                    );
+                                                                })}
+                                                            </Flex>
+                                                        </Box>
+                                                    </Card.Body>
+                                                </Card.Root>
+                                            );
+                                        })}
+                                    </SimpleGrid>
+                                )}
+
+                            </Collapsible.Content>
+                        </Box>
                     </Collapsible.Root>
                 )}
 
@@ -1078,17 +1133,28 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     const hasAccountOrCatFilter = (selectedAccountIds?.length ?? 0) > 0 || (selectedCategoryIds?.length ?? 0) > 0;
                     const totals = (!hasAccountOrCatFilter && backendSummary) ? backendSummary : filteredTotals;
                     const showDustNote = !hasAccountOrCatFilter && backendSummary && dustHiddenCount > 0;
+                    const totalReturn = totals.totalUnrealized + totals.totalRealized;
+                    const roi = totals.totalCost > 0 ? (totalReturn / totals.totalCost) * 100 : 0;
+                    const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
                     return filtered.length > 0 && totals.totalCost > 0 && (
-                        <Box mt={2} p={2} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.100">
-                            <PnLBreakdownBar
-                                costBasis={totals.totalCost}
-                                unrealizedPnl={totals.totalUnrealized}
-                                realizedPnl={totals.totalRealized}
-                                fees={totals.totalFees}
+                        <Box mt={2}>
+                            <HeroMetricsBar
+                                totalReturn={totalReturn}
+                                roi={roi}
                                 baseCurrency={baseCurrency}
-                                showLabels
-                                height={8}
-                            />
+                                costBasisInPeriod={totals.totalCost}
+                                unrealizedInPeriod={totals.totalUnrealized}
+                                realizedInPeriod={totals.totalRealized}
+                                feesInPeriod={totals.totalFees}
+                                fmtCurrencySigned={fmtCurrencySigned}
+                                color={colorFn}
+                            >
+                                <MetricItem label="Value" value={fmtCurrency(totals.totalValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
+                                <MetricItem label="Cost" value={fmtCurrency(totals.totalCost, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" />
+                                <MetricItem label="Unrealized" value={fmtCurrencySigned(totals.totalUnrealized, baseCurrency)} color={colorFn(totals.totalUnrealized)} icon={totals.totalUnrealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.totalUnrealized >= 0 ? 'green.50' : 'red.50'} />
+                                <MetricItem label="Realized" value={fmtCurrencySigned(totals.totalRealized, baseCurrency)} color={colorFn(totals.totalRealized)} icon={totals.totalRealized >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={totals.totalRealized >= 0 ? 'green.50' : 'red.50'} />
+                                <MetricItem label="Fees" value={fmtCurrency(totals.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />
+                            </HeroMetricsBar>
                             {showDustNote && (
                                 <Text fontSize="2xs" color="gray.400" mt={1} textAlign="right">
                                     {dustHiddenCount} small-value asset{dustHiddenCount !== 1 ? 's' : ''} hidden by dust filter
@@ -1120,8 +1186,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                             >
                                 <Button
                                     size="2xs"
-                                    variant={displayMode === 'cards' ? 'solid' : 'ghost'}
-                                    colorPalette="gray"
+                                    variant={displayMode === 'cards' ? 'subtle' : 'ghost'}
+                                    colorPalette={displayMode === 'cards' ? 'blue' : 'gray'}
                                     borderRadius="0"
                                     onClick={() => setDisplayMode('cards')}
                                     px={2}
@@ -1131,8 +1197,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 </Button>
                                 <Button
                                     size="2xs"
-                                    variant={displayMode === 'table' ? 'solid' : 'ghost'}
-                                    colorPalette="gray"
+                                    variant={displayMode === 'table' ? 'subtle' : 'ghost'}
+                                    colorPalette={displayMode === 'table' ? 'blue' : 'gray'}
                                     borderRadius="0"
                                     onClick={() => setDisplayMode('table')}
                                     px={2}
@@ -1154,8 +1220,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                             >
                                 <Button
                                     size="2xs"
-                                    variant={groupBy === 'asset' ? 'solid' : 'ghost'}
-                                    colorPalette="gray"
+                                    variant={groupBy === 'asset' ? 'subtle' : 'ghost'}
+                                    colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
                                     borderRadius="0"
                                     onClick={() => handleGroupByChange('asset')}
                                     px={2}
@@ -1165,8 +1231,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 </Button>
                                 <Button
                                     size="2xs"
-                                    variant={groupBy === 'account' ? 'solid' : 'ghost'}
-                                    colorPalette="gray"
+                                    variant={groupBy === 'account' ? 'subtle' : 'ghost'}
+                                    colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
                                     borderRadius="0"
                                     onClick={() => handleGroupByChange('account')}
                                     px={2}
@@ -1197,8 +1263,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     <Button
                                         key={opt.value}
                                         size="2xs"
-                                        variant={sortField === opt.value ? 'solid' : 'ghost'}
-                                        colorPalette="gray"
+                                        variant={sortField === opt.value ? 'subtle' : 'ghost'}
+                                        colorPalette={sortField === opt.value ? 'blue' : 'gray'}
                                         borderRadius="0"
                                         onClick={() => handleSort(opt.value as SortField)}
                                         px={2}
@@ -1292,6 +1358,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                     assetErrorAccounts={assetErrorAccounts}
                                                     hasLiveErrors={!!hasLiveErrors}
                                                     unrealizedPnlRange={unrealizedPnlRange}
+                                                    periodDelta={assetId != null ? periodDeltaMap?.get(assetId) : undefined}
+                                                    periodLabel={periodLabel}
+                                                    pnlVersionId={pnlVersionId}
                                                 />
                                             );
                                         })}
@@ -1452,9 +1521,24 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                 >
                                                                     {/* Asset (indented) */}
                                                                     <Table.Cell pl={10}>
-                                                                        <Badge size="xs" colorPalette="blue" fontWeight="bold" maxW="80px" truncate>
-                                                                            {d.asset_symbol}
-                                                                        </Badge>
+                                                                        <Flex align="center" gap={1}>
+                                                                            <Badge size="xs" colorPalette="blue" fontWeight="bold" maxW="80px" truncate>
+                                                                                {d.asset_symbol}
+                                                                            </Badge>
+                                                                            {d.asset_id != null && assetPanelCtx && (
+                                                                                <Box
+                                                                                    as="button"
+                                                                                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(d.asset_id!, { pnlVersionId }); }}
+                                                                                    p={0.5}
+                                                                                    borderRadius="sm"
+                                                                                    color="gray.400"
+                                                                                    _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                                                                    title="Asset details"
+                                                                                >
+                                                                                    <LuInfo size={10} />
+                                                                                </Box>
+                                                                            )}
+                                                                        </Flex>
                                                                     </Table.Cell>
                                                                     {/* Qty */}
                                                                     <Table.Cell>
@@ -1555,6 +1639,19 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                                                                 {assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : assetpnlrow.asset.symbol}
                                                                             </Badge>
                                                                         </Tooltip>
+                                                                        {assetpnlrow.asset.id != null && assetPanelCtx && (
+                                                                            <Box
+                                                                                as="button"
+                                                                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(assetpnlrow.asset.id!, { pnlVersionId }); }}
+                                                                                p={0.5}
+                                                                                borderRadius="sm"
+                                                                                color="gray.400"
+                                                                                _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                                                                title="Asset details"
+                                                                            >
+                                                                                <LuInfo size={12} />
+                                                                            </Box>
+                                                                        )}
                                                                         {isUnmapped && (
                                                                             <Tooltip content="This asset is not mapped in the database" openDelay={200}>
                                                                                 <Text color="orange.500" fontSize="xs" cursor="help">⚠</Text>

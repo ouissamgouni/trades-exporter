@@ -2,9 +2,10 @@
 Price Snapshots endpoints for the Trade Exporter API.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from collections import defaultdict
+from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional, Dict
 from pydantic import BaseModel
@@ -12,6 +13,13 @@ from sqlmodel import Session, select, func, col
 
 from backend.db.database import get_db
 from backend.db.models import PriceSnapshot, Asset, AppSettings, ensure_utc
+from backend.services.price_service import (
+    detect_gaps,
+    _expected_trading_days,
+    _is_business_day,
+    GapDetectionResult,
+    GapRange as GapRangeData,
+)
 
 router = APIRouter(prefix="/price-snapshots", tags=["Price Snapshots"])
 
@@ -88,6 +96,78 @@ class PaginatedPriceSnapshotsResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ============================================================================
+# Gap Detection Models
+# ============================================================================
+
+class GapRangeResponse(BaseModel):
+    start_date: str
+    end_date: str
+    missing_days_count: int
+    last_known_price: Optional[float] = None
+    last_known_price_date: Optional[str] = None
+    last_known_source: Optional[str] = None
+
+
+class GapDetectionResponse(BaseModel):
+    asset_id: int
+    symbol: str
+    price_type: Optional[str] = None
+    total_expected: int
+    total_covered: int
+    coverage_pct: float
+    gaps: List[GapRangeResponse]
+
+
+class GapSummaryItem(BaseModel):
+    asset_id: int
+    symbol: str
+    gap_count: int
+    total_missing_days: int
+
+
+class GapSummaryResponse(BaseModel):
+    items: List[GapSummaryItem]
+
+
+class BackfillRequest(BaseModel):
+    asset_id: int
+    date_from: str  # ISO date
+    date_to: str    # ISO date
+
+
+class BackfillFetchedItem(BaseModel):
+    date: str
+    price: float
+    source: str
+
+
+class BackfillFailedItem(BaseModel):
+    date: str
+    error: str
+
+
+class BackfillResponse(BaseModel):
+    asset_id: int
+    fetched: List[BackfillFetchedItem]
+    failed: List[BackfillFailedItem]
+
+
+class BulkManualRequest(BaseModel):
+    asset_id: int
+    quote_asset_id: Optional[int] = None
+    date_from: str  # ISO date
+    date_to: str    # ISO date
+    price: float
+    source: str = "manual"
+
+
+class BulkManualResponse(BaseModel):
+    asset_id: int
+    created_count: int
+    skipped_count: int  # already existing
 
 
 @router.get("", response_model=PaginatedPriceSnapshotsResponse)
@@ -191,6 +271,223 @@ def list_price_snapshots(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ============================================================================
+# Gap Detection, Backfill & Bulk-Manual Endpoints
+# ============================================================================
+
+
+@router.get("/gaps", response_model=GapDetectionResponse)
+def get_price_gaps(
+    asset_id: int = Query(..., description="Asset ID"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    session: Session = Depends(get_db),
+):
+    """Detect price gaps for a single asset."""
+    try:
+        d_from = date.fromisoformat(date_from) if date_from else None
+        d_to = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    try:
+        result = detect_gaps(session, asset_id, d_from, d_to)
+        return GapDetectionResponse(
+            asset_id=result.asset_id,
+            symbol=result.symbol,
+            price_type=result.price_type,
+            total_expected=result.total_expected,
+            total_covered=result.total_covered,
+            coverage_pct=result.coverage_pct,
+            gaps=[
+                GapRangeResponse(
+                    start_date=g.start_date,
+                    end_date=g.end_date,
+                    missing_days_count=g.missing_days_count,
+                    last_known_price=g.last_known_price,
+                    last_known_price_date=g.last_known_price_date,
+                    last_known_source=g.last_known_source,
+                )
+                for g in result.gaps
+            ],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gap detection error: {str(e)}")
+
+
+@router.get("/gaps/summary", response_model=GapSummaryResponse)
+def get_price_gaps_summary(
+    asset_ids: str = Query(..., description="Comma-separated asset IDs"),
+    session: Session = Depends(get_db),
+):
+    """Get gap counts for multiple assets (lightweight, for dashboards)."""
+    try:
+        ids = [int(x.strip()) for x in asset_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid asset_ids format.")
+
+    if not ids:
+        return GapSummaryResponse(items=[])
+
+    items: List[GapSummaryItem] = []
+    for aid in ids:
+        try:
+            result = detect_gaps(session, aid)
+            total_missing = sum(g.missing_days_count for g in result.gaps)
+            if result.gaps:
+                items.append(GapSummaryItem(
+                    asset_id=aid,
+                    symbol=result.symbol,
+                    gap_count=len(result.gaps),
+                    total_missing_days=total_missing,
+                ))
+        except ValueError:
+            continue  # skip unknown asset IDs
+
+    return GapSummaryResponse(items=items)
+
+
+@router.post("/backfill", response_model=BackfillResponse)
+def backfill_prices(
+    req: BackfillRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Attempt to fetch missing prices for an asset in a date range.
+
+    Uses the asset's configured price getters (live only, no fallback).
+    Returns which dates succeeded and which failed.
+    """
+    try:
+        d_from = date.fromisoformat(req.date_from)
+        d_to = date.fromisoformat(req.date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    asset = session.get(Asset, req.asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset ID {req.asset_id} not found")
+
+    is_crypto = (asset.price_type or "crypto").lower() == "crypto"
+
+    # Find which dates are actually missing
+    gap_result = detect_gaps(session, req.asset_id, d_from, d_to)
+    missing_dates: set[date] = set()
+    for g in gap_result.gaps:
+        gs = date.fromisoformat(g.start_date)
+        ge = date.fromisoformat(g.end_date)
+        for d in _expected_trading_days(gs, ge, is_crypto):
+            missing_dates.add(d)
+
+    if not missing_dates:
+        return BackfillResponse(asset_id=req.asset_id, fetched=[], failed=[])
+
+    # Lazy-import to avoid circular imports
+    from backend.services.price_service import PriceService
+    from backend.config.loader import load_settings as _load
+    settings = _load()
+    svc = PriceService(session=session, base_currency=settings.get("base_currency", "EUR"))
+
+    fetched: List[BackfillFetchedItem] = []
+    failed: List[BackfillFailedItem] = []
+
+    for d in sorted(missing_dates):
+        dt = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+        try:
+            result = svc.get_price_with_fallback(
+                asset_id=req.asset_id,
+                dt=dt,
+                use_fallback=False,
+                max_timeout_seconds=15,
+            )
+            fetched.append(BackfillFetchedItem(
+                date=d.isoformat(),
+                price=result.price,
+                source=result.source,
+            ))
+        except Exception as e:
+            failed.append(BackfillFailedItem(
+                date=d.isoformat(),
+                error=str(e)[:200],
+            ))
+
+    return BackfillResponse(asset_id=req.asset_id, fetched=fetched, failed=failed)
+
+
+@router.post("/bulk-manual", response_model=BulkManualResponse)
+def bulk_create_manual_prices(
+    req: BulkManualRequest,
+    session: Session = Depends(get_db),
+):
+    """
+    Create manual price snapshots for every expected trading day in a date range.
+
+    Skips dates that already have a snapshot for this asset+quote.
+    """
+    try:
+        d_from = date.fromisoformat(req.date_from)
+        d_to = date.fromisoformat(req.date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if req.price <= 0:
+        raise HTTPException(status_code=400, detail="Price must be positive.")
+
+    asset = session.get(Asset, req.asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail=f"Asset ID {req.asset_id} not found")
+
+    is_crypto = (asset.price_type or "crypto").lower() == "crypto"
+    expected = _expected_trading_days(d_from, d_to, is_crypto)
+
+    # Find existing dates to skip
+    existing_stmt = (
+        select(func.date(PriceSnapshot.snapshot_time))
+        .where(
+            PriceSnapshot.asset_id == req.asset_id,
+            PriceSnapshot.snapshot_time >= datetime.combine(d_from, datetime.min.time()),
+            PriceSnapshot.snapshot_time <= datetime.combine(d_to, datetime.max.time()),
+        )
+    )
+    if req.quote_asset_id is not None:
+        existing_stmt = existing_stmt.where(
+            PriceSnapshot.quote_asset_id == req.quote_asset_id
+        )
+    existing_dates: set[date] = set()
+    for row in session.exec(existing_stmt).all():
+        d = row[0] if isinstance(row, tuple) else row
+        if hasattr(d, "date"):
+            d = d.date()
+        existing_dates.add(d)
+
+    created = 0
+    skipped = 0
+    for d in expected:
+        if d in existing_dates:
+            skipped += 1
+            continue
+        snapshot = PriceSnapshot(
+            asset_id=req.asset_id,
+            quote_asset_id=req.quote_asset_id,
+            snapshot_time=datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc),
+            price=Decimal(str(req.price)),
+            source=req.source or "manual",
+        )
+        session.add(snapshot)
+        created += 1
+
+    if created:
+        session.commit()
+
+    return BulkManualResponse(
+        asset_id=req.asset_id,
+        created_count=created,
+        skipped_count=skipped,
+    )
 
 
 # ============================================================================
@@ -400,25 +697,44 @@ def get_price_timeseries(
         if len(ids) > 50:
             raise HTTPException(status_code=400, detail="Maximum 50 assets per request.")
 
-        # Build query
+        # Build base filters
+        base_filters = [col(PriceSnapshot.asset_id).in_(ids)]
+        if quote_asset_id is not None:
+            base_filters.append(PriceSnapshot.quote_asset_id == quote_asset_id)
+        if source:
+            base_filters.append(PriceSnapshot.source == source)
+        if date_from:
+            base_filters.append(PriceSnapshot.snapshot_time >= parse_datetime(date_from))
+        if date_to:
+            base_filters.append(PriceSnapshot.snapshot_time <= parse_datetime(date_to))
+
+        # Deduplicate: one price per (asset_id, date) using latest snapshot_time
+        date_col = func.date(PriceSnapshot.snapshot_time).label("snap_date")
+        max_time_sub = (
+            select(
+                PriceSnapshot.asset_id,
+                date_col,
+                func.max(PriceSnapshot.snapshot_time).label("max_time"),
+            )
+            .where(*base_filters)
+            .group_by(PriceSnapshot.asset_id, func.date(PriceSnapshot.snapshot_time))
+            .subquery()
+        )
+
         statement = (
             select(
                 PriceSnapshot.asset_id,
                 PriceSnapshot.snapshot_time,
                 PriceSnapshot.price,
             )
-            .where(col(PriceSnapshot.asset_id).in_(ids))
+            .join(
+                max_time_sub,
+                (PriceSnapshot.asset_id == max_time_sub.c.asset_id)
+                & (PriceSnapshot.snapshot_time == max_time_sub.c.max_time),
+            )
+            .where(*base_filters)
             .order_by(PriceSnapshot.asset_id, PriceSnapshot.snapshot_time)
         )
-
-        if quote_asset_id is not None:
-            statement = statement.where(PriceSnapshot.quote_asset_id == quote_asset_id)
-        if source:
-            statement = statement.where(PriceSnapshot.source == source)
-        if date_from:
-            statement = statement.where(PriceSnapshot.snapshot_time >= parse_datetime(date_from))
-        if date_to:
-            statement = statement.where(PriceSnapshot.snapshot_time <= parse_datetime(date_to))
 
         rows = session.exec(statement).all()
 
@@ -426,8 +742,13 @@ def get_price_timeseries(
         grouped: Dict[int, List[PriceTimeseriesPoint]] = defaultdict(list)
         for asset_id, snapshot_time, price in rows:
             dt = ensure_utc(snapshot_time)
-            grouped[asset_id].append(PriceTimeseriesPoint(
-                date=dt.strftime("%Y-%m-%d"),
+            date_str = dt.strftime("%Y-%m-%d")
+            # Safety: skip if we already have this date (e.g. ties on max_time)
+            pts = grouped[asset_id]
+            if pts and pts[-1].date == date_str:
+                continue
+            pts.append(PriceTimeseriesPoint(
+                date=date_str,
                 price=float(price),
             ))
 

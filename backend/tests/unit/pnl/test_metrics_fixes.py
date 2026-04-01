@@ -57,7 +57,7 @@ class TestSortTopFlop:
             _make_performer(3, "C", -20.0),
             _make_performer(4, "D", -50.0),
         ]
-        top, flop = _sort_top_flop(performers, top_n=25)
+        top, flop, total = _sort_top_flop(performers, top_n=25)
 
         # Top only includes non-negative returns
         assert len(top) == 2
@@ -71,6 +71,7 @@ class TestSortTopFlop:
         assert flop[0].total_return == -50.0
         assert flop[1].name == "C"
         assert flop[1].total_return == -20.0
+        assert total == 4
 
     def test_flop_empty_when_all_positive(self):
         """No flop performers when all returns are positive."""
@@ -78,19 +79,21 @@ class TestSortTopFlop:
             _make_performer(1, "A", 100.0),
             _make_performer(2, "B", 50.0),
         ]
-        top, flop = _sort_top_flop(performers, top_n=5)
+        top, flop, total = _sort_top_flop(performers, top_n=5)
 
         assert len(top) == 2
         assert len(flop) == 0
+        assert total == 2
 
     def test_flop_capped_at_top_n(self):
         """Flop list should be capped at top_n items."""
         performers = [_make_performer(i, f"X{i}", -i * 10.0) for i in range(1, 20)]
-        top, flop = _sort_top_flop(performers, top_n=5)
+        top, flop, total = _sort_top_flop(performers, top_n=5)
 
         # All performers are negative, so top is empty
         assert len(top) == 0
         assert len(flop) == 5
+        assert total == 19
         # Worst first
         assert flop[0].total_return == -190.0
 
@@ -101,7 +104,7 @@ class TestSortTopFlop:
             _make_performer(2, "B", 500.0),
             _make_performer(3, "C", 200.0),
         ]
-        top, flop = _sort_top_flop(performers, top_n=3)
+        top, flop, total = _sort_top_flop(performers, top_n=3)
 
         # Only non-negative in top
         assert len(top) == 2
@@ -114,17 +117,19 @@ class TestSortTopFlop:
     def test_single_negative_performer(self):
         """Single performer with negative return should only appear in flop, not top."""
         performers = [_make_performer(1, "A", -100.0)]
-        top, flop = _sort_top_flop(performers, top_n=5)
+        top, flop, total = _sort_top_flop(performers, top_n=5)
 
         assert len(top) == 0
         assert len(flop) == 1
         assert flop[0].total_return == -100.0
+        assert total == 1
 
     def test_empty_performers(self):
         """Empty list should return empty top and flop."""
-        top, flop = _sort_top_flop([], top_n=5)
+        top, flop, total = _sort_top_flop([], top_n=5)
         assert top == []
         assert flop == []
+        assert total == 0
 
 
 # ============================================================================

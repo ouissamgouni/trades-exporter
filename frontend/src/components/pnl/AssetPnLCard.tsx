@@ -11,7 +11,7 @@
  * 4. Expandable — per-account balance breakdown
  */
 
-import React from 'react';
+import React, { useContext } from 'react';
 import {
     Badge,
     Box,
@@ -22,8 +22,11 @@ import {
     Text,
 } from '@chakra-ui/react';
 import { FiChevronRight, FiChevronDown, FiAlertCircle } from 'react-icons/fi';
+import { LuInfo } from 'react-icons/lu';
+import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { AssetPnLRow, AccountBalanceBreakdown } from './types';
 import { Account } from '../../types';
+import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import { Tooltip } from '../ui/tooltip';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { ValueDisplay } from '../ValueDisplay';
@@ -71,6 +74,12 @@ export interface AssetPnLCardProps {
     hasLiveErrors: boolean;
     /** Min/max unrealized PnL across all visible cards (for heatmap coloring) */
     unrealizedPnlRange?: { min: number; max: number };
+    /** Period delta data for this asset (e.g. 1W change) */
+    periodDelta?: AssetPeriodDelta;
+    /** Period label to display (e.g. "1W") */
+    periodLabel?: string;
+    /** PnL version ID to pass when opening asset detail panel */
+    pnlVersionId?: number;
 }
 
 // ------------------------------------------------------------------
@@ -124,7 +133,11 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
     assetErrorAccounts,
     hasLiveErrors,
     unrealizedPnlRange,
+    periodDelta,
+    periodLabel,
+    pnlVersionId,
 }) => {
+    const assetPanelCtx = useContext(AssetDetailPanelContext);
     const assetId = row.asset.id;
     const isNoPnl = !row.has_lots;
     const isUnmapped = !!row.is_unmapped;
@@ -149,9 +162,9 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
             bg={isNoPnl ? 'gray.50' : undefined}
             size="sm"
         >
-            <Card.Body py={2.5} px={3}>
+            <Card.Body py={1.5} px={3}>
                 {/* ── Zone 1: Header ── */}
-                <Flex align="center" justify="space-between" mb={2}>
+                <Flex align="center" justify="space-between" mb={1}>
                     <Flex align="center" gap={1.5} minW={0} flex={1}>
                         {/* Expand chevron */}
                         {isExpandable ? (
@@ -189,6 +202,19 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                     : row.asset.symbol}
                             </Badge>
                         </Tooltip>
+                        {assetId != null && assetPanelCtx && (
+                            <Box
+                                as="button"
+                                onClick={(e: React.MouseEvent) => { e.stopPropagation(); assetPanelCtx.openAssetPanel(assetId, { pnlVersionId }); }}
+                                p={0.5}
+                                borderRadius="sm"
+                                color="gray.400"
+                                _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                                title="Asset details"
+                            >
+                                <LuInfo size={12} />
+                            </Box>
+                        )}
 
                         {isUnmapped && (
                             <Tooltip content="This asset is not mapped in the database" openDelay={200}>
@@ -262,7 +288,7 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
 
                 {/* ── Zone 2: Metrics grid ── */}
                 {!isNoPnl && (
-                    <Flex gap={3} mb={2}>
+                    <Flex gap={3} mb={1}>
                         {/* Qty */}
                         <Metric label="Qty" flex="1">
                             <Text fontSize="xs"><ValueDisplay value={row.quantity} options={compact} /></Text>
@@ -346,7 +372,7 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
 
                 {/* ── Cost vs PnL bar ── */}
                 {!isNoPnl && row.cost_basis > 0 && (
-                    <Box mb={2}>
+                    <Box mb={1}>
                         <PnLBreakdownBar
                             costBasis={row.cost_basis}
                             unrealizedPnl={row.unrealized_pnl}
@@ -374,7 +400,12 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                     <Text fontSize="xs" fontWeight="medium" color={row.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}>
                                         <ValueDisplay value={row.unrealized_pnl} currency={baseCurrency} options={compact} />
                                     </Text>
-                                    <Text fontSize="2xs" color="gray.500">{formatPct(row.unrealized_pnl_pct)}</Text>
+                                    <Text fontSize="2xs" color="gray.500">{`${row.unrealized_pnl_pct >= 0 ? '+' : ''}${Math.round(row.unrealized_pnl_pct * 100)}%`}</Text>
+                                    {periodDelta && periodLabel && (
+                                        <Text fontSize="2xs" color={periodDelta.unrealized_change >= 0 ? 'green.500' : 'red.500'}>
+                                            {periodLabel}: <ValueDisplay value={periodDelta.unrealized_change} currency={baseCurrency} options={compact} />
+                                        </Text>
+                                    )}
                                 </>
                             ) : (
                                 <Flex align="center" gap={1}>
@@ -388,11 +419,21 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                             <Text fontSize="xs" fontWeight="medium" color={row.realized_pnl >= 0 ? 'green.600' : 'red.600'}>
                                 <ValueDisplay value={row.realized_pnl} currency={baseCurrency} options={compact} />
                             </Text>
+                            {row.taxable_realized_pnl !== 0 && (
+                                <Text fontSize="2xs" color="gray.500">
+                                    Tax: <ValueDisplay value={row.taxable_realized_pnl} currency={baseCurrency} options={compact} />
+                                </Text>
+                            )}
+                            {periodDelta && periodLabel && (
+                                <Text fontSize="2xs" color={periodDelta.realized_in_period >= 0 ? 'green.500' : 'red.500'}>
+                                    {periodLabel}: <ValueDisplay value={periodDelta.realized_in_period} currency={baseCurrency} options={compact} />
+                                </Text>
+                            )}
                         </Metric>
 
                         <Metric label="Fees" flex="1">
-                            <Text fontSize="xs" color="gray.600">
-                                <ValueDisplay value={row.total_fees} currency={baseCurrency} options={compact} />
+                            <Text fontSize="2xs" color="gray.600">
+                                <ValueDisplay value={Math.round(row.total_fees)} currency={baseCurrency} options={compact} />
                             </Text>
                         </Metric>
                     </Flex>

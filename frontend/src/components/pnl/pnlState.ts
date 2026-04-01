@@ -50,9 +50,6 @@ export interface DrillBreadcrumb {
 
 export interface DrillSnapshot {
     level: 0 | 1 | 2;
-    period?: Range;
-    dateFrom?: string;
-    dateTo?: string;
     metric?: DrillMetric;
     entityType?: DrillEntityType;
     entityId?: number;
@@ -66,10 +63,6 @@ export interface DrillSnapshot {
 export interface DrillDownState {
     /** Current drill depth: 0=portfolio, 1=filtered, 2=asset audit */
     level: 0 | 1 | 2;
-    /** Period context */
-    period?: Range;
-    dateFrom?: string;
-    dateTo?: string;
     /** Which metric was clicked to enter L1 */
     metric?: DrillMetric;
     /** Entity filter (category/account performer click) */
@@ -120,9 +113,6 @@ export function createInitialDrillState(): DrillDownState {
 function toSnapshot(d: DrillDownState | DrillSnapshot): DrillSnapshot {
     return {
         level: d.level,
-        period: d.period,
-        dateFrom: d.dateFrom,
-        dateTo: d.dateTo,
         metric: d.metric,
         entityType: d.entityType,
         entityId: d.entityId,
@@ -210,6 +200,7 @@ export interface PnLState {
     lastPriceRefresh: Date | null;
     loadingPriceAssetIds: Set<number>;
     showPriceDrawer: boolean;
+    showBalanceDrawer: boolean;
 
     // ── Navigation ──
     viewMode: 'portfolio';
@@ -304,6 +295,7 @@ export type PnLAction =
     | { type: 'SET_LOADING_PRICE_ASSET_IDS'; ids: Set<number> }
     | { type: 'REMOVE_LOADING_PRICE_ASSET_ID'; id: number }
     | { type: 'SET_SHOW_PRICE_DRAWER'; value: boolean }
+    | { type: 'SET_SHOW_BALANCE_DRAWER'; value: boolean }
 
     // ── Navigation ──
     | { type: 'SET_VIEW_MODE'; mode: 'portfolio' }
@@ -332,7 +324,7 @@ export type PnLAction =
     | { type: 'SET_SHOW_MISMATCHED_ONLY'; value: boolean }
 
     // ── Drill-down ──
-    | { type: 'DRILL_INTO'; period?: Range; metric?: DrillMetric; entityType?: DrillEntityType; entityId?: number; entityLabel?: string; assetId?: number; assetSymbol?: string; assetLabel?: string; accountFilter?: number }
+    | { type: 'DRILL_INTO'; metric?: DrillMetric; entityType?: DrillEntityType; entityId?: number; entityLabel?: string; assetId?: number; assetSymbol?: string; assetLabel?: string; accountFilter?: number }
     | { type: 'DRILL_TO_ASSET'; assetId: number; assetSymbol: string; assetLabel?: string; accountFilter?: number }
     | { type: 'DRILL_BACK' }
     | { type: 'DRILL_TO_BREADCRUMB'; index: number }
@@ -401,6 +393,7 @@ export function createInitialPnLState(baseCurrency: string, baseCurrencyId: numb
         lastPriceRefresh: null,
         loadingPriceAssetIds: new Set(),
         showPriceDrawer: false,
+        showBalanceDrawer: false,
 
         // Navigation
         viewMode: 'portfolio',
@@ -545,6 +538,8 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
         }
         case 'SET_SHOW_PRICE_DRAWER':
             return { ...state, showPriceDrawer: action.value };
+        case 'SET_SHOW_BALANCE_DRAWER':
+            return { ...state, showBalanceDrawer: action.value };
 
         // ── Navigation ──
         case 'SET_VIEW_MODE':
@@ -609,21 +604,19 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
         case 'SET_DELTA_THRESHOLD':
             return { ...state, deltaThreshold: action.threshold };
         case 'SET_TIMEFRAME_RANGE':
-            return { ...state, timeframeRange: action.range };
+            return {
+                ...state,
+                timeframeRange: action.range,
+            };
         case 'SET_SHOW_MISMATCHED_ONLY':
             return { ...state, showMismatchedOnly: action.value };
 
         // ── Drill-down ──
         case 'DRILL_INTO': {
-            const prev = state.drill;
-            const dates = computeDateRange(action.period ?? prev.period);
             const isAssetDirect = action.assetId != null && !action.entityType && !action.metric;
             const level: 0 | 1 | 2 = isAssetDirect ? 2 : 1;
             const newDrill: DrillDownState = {
                 level,
-                period: action.period ?? prev.period,
-                dateFrom: dates.dateFrom,
-                dateTo: dates.dateTo,
                 metric: action.metric,
                 entityType: action.entityType,
                 entityId: action.entityId,
@@ -638,8 +631,7 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
             };
             // Build breadcrumb label for L1
             const l1Label = action.entityLabel
-                ?? action.metric?.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())
-                ?? (action.period ? action.period.toUpperCase() : undefined);
+                ?? action.metric?.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
             if (l1Label) {
                 newDrill.breadcrumbs.push({
                     label: l1Label,

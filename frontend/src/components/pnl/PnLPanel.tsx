@@ -6,9 +6,10 @@
  * This file is the render layer + navigation handlers only.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Box, Button, Dialog, Flex, Heading, Spinner, Text } from '@chakra-ui/react';
-import { FiRefreshCw, FiClock, FiSliders } from 'react-icons/fi';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Badge, Box, Button, Collapsible, Dialog, Flex, Heading, Spinner, Text } from '@chakra-ui/react';
+import { FiRefreshCw, FiClock, FiSliders, FiChevronDown, FiChevronRight, FiDollarSign, FiTrendingUp, FiTrendingDown, FiAlertTriangle, FiActivity, FiCheckCircle } from 'react-icons/fi';
+import { LuReceipt } from 'react-icons/lu';
 import { toaster } from '../ui/toaster';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { PnLStatusBadge } from './PnLStatusBadge';
@@ -19,8 +20,10 @@ import { RefreshPricesCard, WarningsCard, BalanceHealthCard } from './SummaryCar
 import { PortfolioContent } from './PortfolioContent';
 import { PnLImpactPanel } from './PnLImpactPanel';
 import { PriceStatusList } from './PriceStatusList';
-import { TimeframeIndicators } from './TotalReturnScorecard';
+import { TimeframeIndicators, MetricItem, fmtCurrency, fmtCurrencySigned } from './TotalReturnScorecard';
 import { SlidePanel } from './SlidePanel';
+import { BalanceSlidePanel } from './BalanceSlidePanel';
+import { UnitDetailSlidePanel } from './UnitDetailSlidePanel';
 import { TransactionDetailDrawer } from '../TransactionDetailDrawer';
 
 // Context + hooks
@@ -30,12 +33,35 @@ import { usePnLPrices } from '../../hooks/usePnLPrices';
 
 // Types
 import type { PnLImpactEvent, RealizedPnLRow } from './types';
-import type { DrillMetric, DrillEntityType } from './pnlState';
+import type { DrillEntityType } from './pnlState';
 import { computeDateRange } from './pnlState';
 import type { Range } from './TotalReturnScorecard';
-import { useVersionMetrics, useSettledMetrics, useMarketMetrics, useVersionPerformers } from '../../hooks/useChartData';
-import type { GroupBy } from '../../hooks/useChartData';
+import { useVersionMetrics, useSettledMetrics, useMarketMetrics, useVersionPerformers, usePortfolioTimeline, useAssetPeriodDeltas } from '../../hooks/useChartData';
+import type { GroupBy, TimelinePoint } from '../../hooks/useChartData';
 import { useCategoryMaps } from '../../hooks/useCategoryMaps';
+
+/** Tiny SVG sparkline for the collapsed overview bar */
+const Sparkline: React.FC<{ points: TimelinePoint[]; width?: number; height?: number }> = ({ points, width = 100, height = 24 }) => {
+    if (points.length < 2) return null;
+    // Use ROI (unrealized + realized) / cost_basis as performance line
+    const values = points.map(p => {
+        const cb = p.cost_basis_in_base;
+        if (cb <= 0) return 0;
+        return ((p.unrealized_pnl + p.cumulative_realized_pnl) / cb) * 100;
+    });
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const coords = values.map((v, i) =>
+        `${(i / (values.length - 1)) * width},${height - ((v - min) / range) * (height - 2) - 1}`
+    ).join(' ');
+    const isPositive = values[values.length - 1] >= values[0];
+    return (
+        <svg width={width} height={height} style={{ display: 'block', flexShrink: 0, border: '1px solid #E2E8F0', borderRadius: 4 }}>
+            <polyline fill="none" stroke={isPositive ? '#38A169' : '#E53E3E'} strokeWidth={1.5} points={coords} />
+        </svg>
+    );
+};
 
 interface PnLPanelProps {
     isActive?: boolean;
@@ -91,7 +117,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         accounts, isLoadingAccounts, dimensions,
         accountBalances, isLoadingAccountBalances, isLoadingBalances,
         summary, pnlAssets, fees, warnings, warningTypeCounts, idCounts,
-        prices, isRefreshingPrices, showPriceDrawer, loadingPriceAssetIds,
+        prices, isRefreshingPrices, showPriceDrawer, showBalanceDrawer, loadingPriceAssetIds,
         currentView, selectedAsset, assetRealizedEntries, initialAccountFilter,
         showHealthConfirm, healthCheckIssueCount, showCustomCalcDrawer, showHistoryPanel,
         showImpactPanel, impactEvent, selectedTransactionId, isTransactionDrawerOpen,
@@ -102,7 +128,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     const isLoadingVersions = versionsQuery.isLoading;
 
     // ── Price operations ──
-    const { fetchPrices, handlePriceAdded, handleRefreshPrices } = usePnLPrices();
+    const { fetchPrices, handlePriceAdded, handleRefreshPrices, retryFailedPrices } = usePnLPrices();
 
     // ── Data operations ──
     const {
@@ -123,9 +149,18 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         serviceVersionId,
         lastCalculatedAt,
         triggerPnLRefresh,
+        calcServiceError,
     } = usePnLData({ isActive, onOpenHealthCheck, fetchPrices });
 
     const { drill } = state;
+
+    // ── Collapsible Level 1 overview ──
+    const [isOverviewCollapsed, setIsOverviewCollapsed] = useState(false);
+
+    // Auto-collapse when drilling, auto-expand on return to L0
+    useEffect(() => {
+        setIsOverviewCollapsed(drill.level > 0);
+    }, [drill.level]);
 
     // ── Compute period date range for downstream scoping ──
     const { dateFrom: periodDateFrom, dateTo: periodDateTo } = useMemo(
@@ -137,60 +172,98 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
     const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
 
-    const hasActiveScope = selectedAccountIds.length > 0 || selectedCategoryIds.length > 0;
+    // ── Scoped timeline for L1 chart contextualization ──
+    const hasEntityFilter = selectedAccountIds.length > 0 || selectedCategoryIds.length > 0;
+    const entityTimelineFilters = useMemo(() => ({
+        granularity: 'daily' as const,
+        accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
+        categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+    }), [selectedAccountIds, selectedCategoryIds]);
+    const scopedTimeline = usePortfolioTimeline(currentVersionId, entityTimelineFilters, !!currentVersionId && hasEntityFilter);
+    const effectiveTimeline = hasEntityFilter ? scopedTimeline : heroTimeline;
 
-    // ── Scoped version metrics (backend-filtered when account/category filters are active) ──
+    // ── Sync entity filter IDs with drill state ──
+    // When drilling into account/category, set the filter so chips are visible in AssetPnLTable.
+    // When navigating back from entity drill, clear the entity-related filters.
+    const prevDrillRef = useRef(drill);
+    useEffect(() => {
+        const prev = prevDrillRef.current;
+        prevDrillRef.current = drill;
+
+        // When navigating back from entity drill, clear any entity-related filters
+        if (drill.level === 0 && prev.level > 0 && (prev.entityType === 'account' || prev.entityType === 'category')) {
+            setSelectedAccountIds([]);
+            setSelectedCategoryIds([]);
+        }
+    }, [drill.entityType, drill.entityId, drill.level]);
+
+    // ── Content scope: uses selected filter IDs (synced with drill entity) ──
+    const contentAccountIds = selectedAccountIds;
+    const contentCategoryIds = selectedCategoryIds;
+
+    const hasContentScope = contentAccountIds.length > 0 || contentCategoryIds.length > 0;
+    const hasPerformerScope = hasContentScope;
+
+    // ── Scoped version metrics (backend-filtered by content scope) ──
     const scopedVersionMetrics = useVersionMetrics(
         currentVersionId,
         {
             groupBy: performerGroupBy,
             topN: 25,
             dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
-            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
-            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+            accountIds: contentAccountIds.length > 0 ? contentAccountIds : undefined,
+            categoryIds: contentCategoryIds.length > 0 ? contentCategoryIds : undefined,
         },
-        !!currentVersionId && hasActiveScope,
+        !!currentVersionId && hasContentScope,
     );
 
-    // ── Scoped split metrics (same filter logic) ──
+    // ── Scoped split metrics (same content scope) ──
     const scopedSettled = useSettledMetrics(
         currentVersionId,
         {
-            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
-            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+            accountIds: contentAccountIds.length > 0 ? contentAccountIds : undefined,
+            categoryIds: contentCategoryIds.length > 0 ? contentCategoryIds : undefined,
         },
-        !!currentVersionId && hasActiveScope,
+        !!currentVersionId && hasContentScope,
     );
 
     const scopedMarket = useMarketMetrics(
         currentVersionId,
         {
-            accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
-            categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
+            accountIds: contentAccountIds.length > 0 ? contentAccountIds : undefined,
+            categoryIds: contentCategoryIds.length > 0 ? contentCategoryIds : undefined,
             pricesReady,
         },
-        !!currentVersionId && hasActiveScope,
+        !!currentVersionId && hasContentScope,
     );
 
+    // ── Performers: scoped only by manual user filters, NOT by drill entity ──
     const scopedPerformers = useVersionPerformers(
         currentVersionId,
         {
             period: timeframeRange,
             groupBy: performerGroupBy,
-            topN: 25,
+            topN: 500,
             dimensionId: performerGroupBy === 'category' ? performerDimensionId : undefined,
             accountIds: selectedAccountIds.length > 0 ? selectedAccountIds : undefined,
             categoryIds: selectedCategoryIds.length > 0 ? selectedCategoryIds : undefined,
             pricesReady,
         },
-        !!currentVersionId && hasActiveScope,
+        !!currentVersionId && hasPerformerScope,
     );
 
-    // ── Effective metrics: scoped when filters active, otherwise global ──
-    const effectiveMetrics = hasActiveScope ? scopedVersionMetrics : versionMetrics;
-    const effectiveSettled = hasActiveScope ? scopedSettled : settledMetrics;
-    const effectiveMarket = hasActiveScope ? scopedMarket : marketMetrics;
-    const effectivePerformers = hasActiveScope ? scopedPerformers : performers;
+    // ── Asset period deltas (for period-aware cards) ──
+    const assetPeriodDeltas = useAssetPeriodDeltas(
+        currentVersionId,
+        timeframeRange,
+        !!currentVersionId && timeframeRange !== 'all',
+    );
+
+    // ── Effective metrics: scoped when content scope active, otherwise global ──
+    const effectiveMetrics = hasContentScope ? scopedVersionMetrics : versionMetrics;
+    const effectiveSettled = hasContentScope ? scopedSettled : settledMetrics;
+    const effectiveMarket = hasContentScope ? scopedMarket : marketMetrics;
+    const effectivePerformers = hasPerformerScope ? scopedPerformers : performers;
     const effectiveSummary = useMemo(() => {
         const s = effectiveSettled.data?.summary;
         const m = effectiveMarket.data?.summary;
@@ -198,6 +271,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
             return {
                 costBasis: s.cost_basis,
                 realizedPnl: s.realized_pnl,
+                taxableRealizedPnl: s.taxable_realized_pnl ?? 0,
                 totalFees: s.total_fees,
                 feeEntryCount: s.fee_entry_count,
                 portfolioValue: m?.current_value ?? 0,
@@ -263,8 +337,17 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         dispatch({ type: 'SET_TRANSACTION_DRAWER', transactionId: null, isOpen: false });
     }, [dispatch]);
 
+    const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
+    const [isUnitDetailOpen, setIsUnitDetailOpen] = useState(false);
+
     const handleUnitClick = useCallback((unitId: number) => {
-        console.log('Navigate to calculation unit:', unitId);
+        setSelectedUnitId(unitId);
+        setIsUnitDetailOpen(true);
+    }, []);
+
+    const handleCloseUnitDetail = useCallback(() => {
+        setIsUnitDetailOpen(false);
+        setSelectedUnitId(null);
     }, []);
 
     const handleLoadVersion = useCallback(async (versionId: number) => {
@@ -296,8 +379,9 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     }, []);
 
     const handleWarningsClick = useCallback(() => {
-        // Warnings are visible in the PnL Audit section (inline in Portfolio)
-    }, []);
+        dispatch({ type: 'DRILL_RESET' });
+        dispatch({ type: 'SET_AUDIT_DEFAULT_PANEL', panel: 'warnings' });
+    }, [dispatch]);
 
     const handleToggleMismatchFilter = useCallback(() => {
         dispatch({ type: 'SET_SHOW_MISMATCHED_ONLY', value: !showMismatchedOnly });
@@ -307,22 +391,18 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
     // Drill-down handlers — progressive disclosure navigation
     // ══════════════════════════════════════════════════════════
 
-    /** Metric click from TimeframeIndicators */
-    const handleMetricDrill = useCallback((metric: DrillMetric, period?: Range) => {
-        dispatch({ type: 'DRILL_INTO', metric, period });
-    }, [dispatch]);
-
-    /** Unified performer click (asset/category/account) from TimeframeIndicators */
+    /** Unified performer click (asset/category/account) from TimeframeIndicators.
+     *  All types dispatch DRILL_INTO which updates breadcrumb. Sections stay visible. */
     const handlePerformerDrill = useCallback((id: number, groupType: string, name: string) => {
         if (groupType === 'asset') {
             const asset = assets.find(a => a.asset.id === id);
-            dispatch({ type: 'DRILL_INTO', assetId: id, assetSymbol: asset?.asset.symbol ?? name, assetLabel: asset?.asset.label ?? undefined, period: timeframeRange });
+            dispatch({ type: 'DRILL_INTO', assetId: id, assetSymbol: asset?.asset.symbol ?? name, assetLabel: asset?.asset.label ?? undefined });
         } else if (groupType === 'category') {
-            dispatch({ type: 'DRILL_INTO', entityType: 'category' as DrillEntityType, entityId: id, entityLabel: name, period: timeframeRange });
+            dispatch({ type: 'DRILL_INTO', entityType: 'category' as DrillEntityType, entityId: id, entityLabel: name });
         } else if (groupType === 'account') {
-            dispatch({ type: 'DRILL_INTO', entityType: 'account' as DrillEntityType, entityId: id, entityLabel: name, period: timeframeRange });
+            dispatch({ type: 'DRILL_INTO', entityType: 'account' as DrillEntityType, entityId: id, entityLabel: name });
         }
-    }, [assets, dispatch, timeframeRange]);
+    }, [assets, dispatch]);
 
     /** Asset navigate from treemap (double-click) */
     const handleAssetNavigate = useCallback((assetId: number, assetSymbol: string) => {
@@ -351,6 +431,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                         staleReasons={staleReasons}
                         lastCalculatedAt={lastCalculatedAt ?? loadedVersionCreatedAt}
                         currentVersionId={serviceVersionId ?? currentVersionId}
+                        errorMessage={calcServiceError}
                     />
                 </Flex>
                 <Flex gap={2} align="center">
@@ -417,77 +498,165 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
 
             {(status === 'preview' || status === 'persisted') && summary && (
                 <>
-                    {/* Toolbar: View toggle */}
-                    <Flex
-                        align="center"
-                        justify="space-between"
-                        gap={3}
-                        mb={4}
-                        p={2}
-                        bg="gray.50"
-                        borderRadius="md"
-                        border="1px solid"
-                        borderColor="gray.200"
-                    >
-                        {/* View toggle — single Portfolio mode */}
-                        <Flex gap={2} align="center">
-                            <Heading size="sm" color="gray.700">📊 Portfolio</Heading>
-                        </Flex>
-                    </Flex>
-
-                    {/* ═══════ Unified Timeframe Overview — always visible ═══════ */}
+                    {/* ═══════ Unified Timeframe Overview — collapsible ═══════ */}
                     {summary && assets.length > 0 && (
-                        <Flex gap={4} mb={4} align="flex-start">
-                            <Box flex="1" minW={0}>
-                                <TimeframeIndicators
-                                    points={heroTimeline.data?.points || []}
-                                    baseCurrency={config.base_currency_symbol}
-                                    isLoading={heroTimeline.isLoading || effectiveSettled.isLoading}
-                                    summary={effectiveSummary}
-                                    periodSummaryData={effectiveMetrics.data ?? undefined}
-                                    settledData={effectiveSettled.data ?? undefined}
-                                    marketData={effectiveMarket.data ?? undefined}
-                                    isMarketLoading={effectiveMarket.isLoading}
-                                    performersData={effectivePerformers.data ?? undefined}
-                                    isPerformersLoading={effectivePerformers.isLoading}
-                                    range={timeframeRange}
-                                    onRangeChange={(r: Range) => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r })}
-                                    groupBy={performerGroupBy}
-                                    onGroupByChange={(g: GroupBy) => dispatch({ type: 'SET_PERFORMER_GROUP_BY', groupBy: g })}
-                                    onPerformerClick={handlePerformerDrill}
-                                    onMetricClick={(metric) => handleMetricDrill(metric, timeframeRange)}
-                                    onFeesClick={handleFeesClick}
-                                    dimensions={dimensions}
-                                    selectedDimensionId={performerDimensionId}
-                                    onDimensionChange={(id: number | null) => dispatch({ type: 'SET_PERFORMER_DIMENSION_ID', id })}
-                                />
-                            </Box>
-                            <Flex direction="column" gap={2} w="220px" flexShrink={0}>
-                                <RefreshPricesCard
-                                    onRefreshPrices={handleRefreshPrices}
-                                    isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
-                                    priceSuccessCount={prices.filter(p => !p.error && p.price != null && !p.is_stale).length}
-                                    priceStaleCount={prices.filter(p => !p.error && p.price != null && p.is_stale).length}
-                                    priceErrorCount={prices.filter(p => !!p.error || p.price == null).length}
-                                    onPriceBadgeClick={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: true })}
-                                    refreshDisabled={!currentVersionId}
-                                    naCount={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id)).length}
-                                    pendingCount={loadingPriceAssetIds.size}
-                                    pnlAssetCount={pnlAssets.length}
-                                />
-                                <WarningsCard
-                                    summary={summary}
-                                    onWarningsClick={handleWarningsClick}
-                                    warningTypeCounts={warningTypeCounts}
-                                />
-                                <BalanceHealthCard
-                                    balanceHealth={balanceHealth}
-                                    onBalanceHealthClick={handleToggleMismatchFilter}
-                                    deltaThreshold={deltaThreshold}
-                                    onDeltaThresholdChange={(v: number) => dispatch({ type: 'SET_DELTA_THRESHOLD', threshold: v })}
-                                />
-                            </Flex>
-                        </Flex>
+                        <Collapsible.Root
+                            open={!isOverviewCollapsed}
+                            onOpenChange={(d) => setIsOverviewCollapsed(!d.open)}
+                        >
+                            {/* Collapsed summary bar */}
+                            <Collapsible.Trigger asChild>
+                                <Flex
+                                    align="center"
+                                    gap={2}
+                                    px={3}
+                                    py={2}
+                                    mb={isOverviewCollapsed ? 4 : 0}
+                                    bg="gray.50"
+                                    borderRadius="lg"
+                                    border="1px solid"
+                                    borderColor="gray.200"
+                                    cursor="pointer"
+                                    _hover={{ bg: 'gray.100' }}
+                                    userSelect="none"
+                                    flexWrap="wrap"
+                                >
+                                    {isOverviewCollapsed ? <FiChevronRight size={14} /> : <FiChevronDown size={14} />}
+                                    <Text fontSize="sm" fontWeight="semibold" color="gray.700">Overview</Text>
+                                    {timeframeRange && timeframeRange !== 'all' && (
+                                        <Badge colorPalette="purple" variant="solid" size="xs" px={1.5}>
+                                            {timeframeRange.toUpperCase()}
+                                        </Badge>
+                                    )}
+                                    {isOverviewCollapsed && effectiveSummary && (
+                                        <Flex gap={2} ml={2} align="center" flexWrap="wrap">
+                                            <MetricItem
+                                                label="ROI"
+                                                value={`${effectiveSummary.costBasis > 0 ? (((effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl) / effectiveSummary.costBasis) * 100).toFixed(1) : '0.0'}%`}
+                                                color={((effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl) >= 0) ? 'green.600' : 'red.600'}
+                                                icon={((effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl) >= 0) ? <FiTrendingUp size={10} /> : <FiTrendingDown size={10} />}
+                                                bg={((effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl) >= 0) ? 'green.50' : 'red.50'}
+                                            />
+                                            <MetricItem
+                                                label="Total Return"
+                                                value={fmtCurrencySigned(effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl, config.base_currency_symbol)}
+                                                color={((effectiveSummary.unrealizedPnl + effectiveSummary.realizedPnl) >= 0) ? 'green.600' : 'red.600'}
+                                                icon={<FiDollarSign size={10} />}
+                                                bg="blue.50"
+                                            />
+                                            <MetricItem
+                                                label="Value"
+                                                value={fmtCurrency(effectiveSummary.portfolioValue, config.base_currency_symbol)}
+                                                color="gray.800"
+                                                icon={<FiDollarSign size={10} />}
+                                                bg="blue.50"
+                                            />
+                                            <MetricItem
+                                                label="Cost"
+                                                value={fmtCurrency(effectiveSummary.costBasis, config.base_currency_symbol)}
+                                                color="gray.700"
+                                                icon={<LuReceipt size={10} />}
+                                                bg="gray.100"
+                                            />
+                                            <MetricItem
+                                                label="Fees"
+                                                value={fmtCurrency(effectiveSummary.totalFees, config.base_currency_symbol)}
+                                                color="orange.700"
+                                                icon={<LuReceipt size={10} />}
+                                                bg="orange.50"
+                                            />
+                                            <Sparkline points={effectiveTimeline.data?.points || []} />
+                                        </Flex>
+                                    )}
+                                    {/* ── Side-card mini badges (right-aligned, collapsed only) ── */}
+                                    {isOverviewCollapsed && (
+                                        <Flex gap={1.5} ml="auto" align="center" flexShrink={0}>
+                                            {(() => {
+                                                const freshCount = prices.filter(p => !p.error && p.price != null && !p.is_stale).length;
+                                                const staleCount = prices.filter(p => !p.error && p.price != null && p.is_stale).length;
+                                                const errorCount = prices.filter(p => !!p.error || p.price == null).length;
+                                                const priceTotal = freshCount + staleCount + errorCount;
+                                                return priceTotal > 0 ? (
+                                                    <Flex align="center" gap={1} px={1.5} py={0.5} bg={errorCount > 0 ? 'red.50' : staleCount > 0 ? 'orange.50' : 'green.50'} borderRadius="md" flexShrink={0}>
+                                                        <FiRefreshCw size={10} color={errorCount > 0 ? 'var(--chakra-colors-red-500)' : staleCount > 0 ? 'var(--chakra-colors-orange-500)' : 'var(--chakra-colors-green-500)'} />
+                                                        <Text fontSize="xs" fontWeight="semibold" color={errorCount > 0 ? 'red.600' : staleCount > 0 ? 'orange.600' : 'green.600'}>{freshCount}/{priceTotal}</Text>
+                                                    </Flex>
+                                                ) : null;
+                                            })()}
+                                            {summary && summary.warning_count > 0 && (
+                                                <Flex align="center" gap={1} px={1.5} py={0.5} bg={summary.error_count > 0 ? 'red.50' : 'orange.50'} borderRadius="md" flexShrink={0}>
+                                                    <FiAlertTriangle size={10} color={summary.error_count > 0 ? 'var(--chakra-colors-red-500)' : 'var(--chakra-colors-orange-500)'} />
+                                                    <Text fontSize="xs" fontWeight="semibold" color={summary.error_count > 0 ? 'red.600' : 'orange.600'}>{summary.warning_count}</Text>
+                                                </Flex>
+                                            )}
+                                            {balanceHealth && (
+                                                <Flex align="center" gap={1} px={1.5} py={0.5} bg={balanceHealth.mismatchCount > 0 ? 'orange.50' : 'green.50'} borderRadius="md" flexShrink={0}>
+                                                    <FiActivity size={10} color={balanceHealth.mismatchCount > 0 ? 'var(--chakra-colors-orange-500)' : 'var(--chakra-colors-green-500)'} />
+                                                    {balanceHealth.mismatchCount > 0 && (
+                                                        <Text fontSize="xs" fontWeight="semibold" color="orange.600">{balanceHealth.mismatchCount}</Text>
+                                                    )}
+                                                </Flex>
+                                            )}
+                                        </Flex>
+                                    )}
+                                </Flex>
+                            </Collapsible.Trigger>
+
+                            <Collapsible.Content>
+                                <Flex gap={4} mb={4} mt={2} align="flex-start">
+                                    <Box flex="1" minW={0}>
+                                        <TimeframeIndicators
+                                            points={effectiveTimeline.data?.points || []}
+                                            baseCurrency={config.base_currency_symbol}
+                                            isLoading={effectiveTimeline.isLoading || effectiveSettled.isLoading}
+                                            summary={effectiveSummary}
+                                            periodSummaryData={effectiveMetrics.data ?? undefined}
+                                            settledData={effectiveSettled.data ?? undefined}
+                                            marketData={effectiveMarket.data ?? undefined}
+                                            isMarketLoading={effectiveMarket.isLoading}
+                                            performersData={effectivePerformers.data ?? undefined}
+                                            isPerformersLoading={effectivePerformers.isLoading}
+                                            range={timeframeRange}
+                                            onRangeChange={(r: Range) => dispatch({ type: 'SET_TIMEFRAME_RANGE', range: r })}
+                                            groupBy={performerGroupBy}
+                                            onGroupByChange={(g: GroupBy) => dispatch({ type: 'SET_PERFORMER_GROUP_BY', groupBy: g })}
+                                            onPerformerClick={handlePerformerDrill}
+                                            onFeesClick={handleFeesClick}
+                                            dimensions={dimensions}
+                                            selectedDimensionId={performerDimensionId}
+                                            onDimensionChange={(id: number | null) => dispatch({ type: 'SET_PERFORMER_DIMENSION_ID', id })}
+                                            versionId={currentVersionId}
+                                            assets={assets}
+                                        />
+                                    </Box>
+                                    <Flex direction="column" gap={2} w="170px" flexShrink={0}>
+                                        <RefreshPricesCard
+                                            onRefreshPrices={handleRefreshPrices}
+                                            isRefreshingPrices={isRefreshingPrices || isLoadingBalances}
+                                            priceSuccessCount={prices.filter(p => !p.error && p.price != null && !p.is_stale).length}
+                                            priceStaleCount={prices.filter(p => !p.error && p.price != null && p.is_stale).length}
+                                            priceErrorCount={prices.filter(p => !!p.error || p.price == null).length}
+                                            onPriceBadgeClick={() => dispatch({ type: 'SET_SHOW_PRICE_DRAWER', value: true })}
+                                            refreshDisabled={!currentVersionId}
+                                            naCount={displayAssets.filter(da => !pnlAssets.some(pa => pa.asset.id === da.asset.id)).length}
+                                            pendingCount={loadingPriceAssetIds.size}
+                                            pnlAssetCount={pnlAssets.length}
+                                        />
+                                        <WarningsCard
+                                            summary={summary}
+                                            onWarningsClick={handleWarningsClick}
+                                            warningTypeCounts={warningTypeCounts}
+                                        />
+                                        <BalanceHealthCard
+                                            balanceHealth={balanceHealth}
+                                            onBalanceHealthClick={() => dispatch({ type: 'SET_SHOW_BALANCE_DRAWER', value: true })}
+                                            deltaThreshold={deltaThreshold}
+                                            onDeltaThresholdChange={(v: number) => dispatch({ type: 'SET_DELTA_THRESHOLD', threshold: v })}
+                                        />
+                                    </Flex>
+                                </Flex>
+                            </Collapsible.Content>
+                        </Collapsible.Root>
                     )}
 
                     {/* Main content — Portfolio View */}
@@ -527,6 +696,8 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                             timeframeRange={timeframeRange}
                             periodDateFrom={periodDateFrom}
                             periodDateTo={periodDateTo}
+                            periodDeltaMap={timeframeRange !== 'all' ? assetPeriodDeltas.deltaMap : undefined}
+                            periodLabel={timeframeRange !== 'all' ? timeframeRange.toUpperCase() : undefined}
                         />
                     )}
 
@@ -554,6 +725,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                     baseCurrency={config.base_currency_symbol}
                     quoteAssetId={config.base_currency_id ?? undefined}
                     onPriceAdded={(assetId) => handlePriceAdded(assetId)}
+                    onRetryFailed={retryFailedPrices}
                     loadingAssetIds={loadingPriceAssetIds}
                     assetNameMap={new Map(pnlAssets.map(a => [a.asset.id!, a.asset.symbol ?? `#${a.asset.id}`]))}
                     totalAssetCount={displayAssets.length}
@@ -563,6 +735,28 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                     }
                 />
             </SlidePanel>
+
+            {/* Balance Comparison Drawer */}
+            <BalanceSlidePanel
+                isOpen={showBalanceDrawer}
+                onClose={() => dispatch({ type: 'SET_SHOW_BALANCE_DRAWER', value: false })}
+                pnlAssets={pnlAssets.map(a => ({ symbol: a.asset.symbol ?? '', quantity: a.quantity }))}
+                liveBalanceMap={liveBalanceMap}
+                deltaThreshold={deltaThreshold}
+                onDeltaThresholdChange={(v: number) => dispatch({ type: 'SET_DELTA_THRESHOLD', threshold: v })}
+            />
+
+            {/* Unit Detail Slide Panel - opens when clicking unit from impact panel etc. */}
+            {currentVersionId && (
+                <UnitDetailSlidePanel
+                    isOpen={isUnitDetailOpen}
+                    onClose={handleCloseUnitDetail}
+                    versionId={currentVersionId}
+                    unitId={selectedUnitId}
+                    baseCurrency={config.base_currency_symbol}
+                    onTransactionClick={handleTransactionClick}
+                />
+            )}
 
             {/* Transaction Detail Drawer - opens when clicking any transaction badge */}
             <TransactionDetailDrawer

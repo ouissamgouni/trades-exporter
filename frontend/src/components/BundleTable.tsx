@@ -20,20 +20,22 @@ import {
     Flex,
     Input,
     NativeSelect,
+    SimpleGrid,
     Table,
     Text,
-    Textarea,
 } from '@chakra-ui/react';
+import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
-import { FiChevronDown, FiChevronRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader, FiFileText } from 'react-icons/fi';
 import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, AssetRef } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
 import { AssetBadge } from './AssetBadge';
-import { formatDateNumeric, getDateRangeDisplay, parseApiDate } from '../utils/dateUtils';
+import { formatDateTimeCompact, parseApiDate } from '../utils/dateUtils';
 import { formatQuantity } from '../utils/numberUtils';
 import { ValueDisplay } from './ValueDisplay';
+import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
 
 // ============================================================================
 // Types
@@ -100,18 +102,7 @@ interface TransactionDetail {
 // Helpers
 // ============================================================================
 
-const patternColors: Record<string, string> = {
-    [UnitPattern.INTERNAL_TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-    [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.FLOW]: 'green',
-    [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'yellow',
-    [UnitPattern.UNKNOWN]: 'gray',
-};
 
-// Using formatDateNumeric from dateUtils for consistent date formatting
-
-// Using getDateRangeDisplay from dateUtils for consistent date range display
 
 const getUniqueAssets = (transactions: TransactionSummary[]): AssetRef[] => {
     if (!transactions) return [];
@@ -615,12 +606,9 @@ const BundleRow: React.FC<BundleRowProps> = ({
     onTransactionClick,
 }) => {
     const [deleting, setDeleting] = useState(false);
-    const [editingNotes, setEditingNotes] = useState(false);
-    const [notesValue, setNotesValue] = useState(bundle.notes || '');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const assets = getUniqueAssets(bundle.transactions);
-    const dateRange = getDateRangeDisplay(bundle.transactions?.map(t => t.date_time) || []);
 
     const openDeleteConfirm = () => setShowDeleteConfirm(true);
 
@@ -638,118 +626,93 @@ const BundleRow: React.FC<BundleRowProps> = ({
         await onUpdate({ taxability_override: newValue as TaxabilityStatus });
     };
 
-    const handleSaveNotes = async () => {
-        if (notesValue === (bundle.notes || '')) {
-            setEditingNotes(false);
-            return;
-        }
-        await onUpdate({ notes: notesValue });
-        setEditingNotes(false);
+    const handlePatternChange = async (newValue: string) => {
+        await onUpdate({ pattern: newValue as UnitPattern });
     };
+
+    // Compute a compact date range using short datetime format
+    const txDates = (bundle.transactions || []).map(t => t.date_time).filter(Boolean);
+    const compactDateRange = useMemo(() => {
+        if (txDates.length === 0) return '-';
+        const timestamps = txDates.map(d => parseApiDate(d)?.getTime()).filter((t): t is number => t != null && !isNaN(t));
+        if (timestamps.length === 0) return '-';
+        const minStr = formatDateTimeCompact(new Date(Math.min(...timestamps)));
+        const maxStr = formatDateTimeCompact(new Date(Math.max(...timestamps)));
+        return minStr === maxStr ? minStr : `${minStr} – ${maxStr}`;
+    }, [txDates]);
 
     return (
         <>
-            {/* Main Row */}
-            <Table.Row
-                bg={isSelected ? 'blue.50' : isExpanded ? 'purple.50' : 'white'}
-                _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
-                css={{ fontSize: '11px' }}
+            <Card.Root
+                size="sm"
+                variant="outline"
+                bg={isSelected ? 'blue.50' : 'white'}
+                borderColor={isExpanded ? 'purple.300' : isSelected ? 'blue.200' : undefined}
+                _hover={{ shadow: 'md', borderColor: isExpanded ? 'purple.400' : 'blue.200' }}
+                transition="all 0.15s"
             >
-                {/* Checkbox */}
-                <Table.Cell width="30px" p={1}>
-                    <Checkbox.Root checked={isSelected} onCheckedChange={onToggleSelect}>
-                        <Checkbox.HiddenInput />
-                        <Checkbox.Control />
-                    </Checkbox.Root>
-                </Table.Cell>
-
-                {/* Expand Toggle */}
-                <Table.Cell width="30px" p={1}>
-                    <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={onToggleExpand}
-                        p={0}
-                        minW="20px"
-                        h="20px"
-                    >
-                        {isExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
-                    </Button>
-                </Table.Cell>
-
-                {/* Pattern */}
-                <Table.Cell width="80px" p={1}>
-                    <Badge size="xs" colorPalette={patternColors[bundle.pattern || 'unknown'] || 'gray'}>
-                        {bundle.pattern || 'unknown'}
-                    </Badge>
-                </Table.Cell>
-
-                {/* Label (inline editable) */}
-                <Table.Cell p={1} minW="150px">
-                    <InlineEditLabel
-                        value={bundle.label || ''}
-                        onSave={async (value) => onUpdate({ label: value })}
-                        placeholder={`Bundle #${bundle.id}`}
-                    />
-                </Table.Cell>
-
-                {/* Transaction Badges */}
-                <Table.Cell p={1} maxW="120px">
-                    <TransactionBadges
-                        transactions={bundle.transactions}
-                        baseCurrency={baseCurrency}
-                        maxVisible={3}
-                        onTransactionClick={onTransactionClick}
-                    />
-                </Table.Cell>
-
-                {/* Assets */}
-                <Table.Cell p={1} maxW="120px">
-                    <Flex gap={1} flexWrap="wrap">
-                        {assets.slice(0, 3).map((asset, idx) => (
-                            <AssetBadge
-                                key={asset.symbol || idx}
-                                asset={asset}
-                                size="xs"
-                                colorPalette="purple"
-                                maxLength={12}
+                <Card.Body p={3}>
+                    {/* Top row: checkbox + pattern selector + label + taxability + delete */}
+                    <Flex align="center" gap={1.5} mb={1.5}>
+                        <Checkbox.Root checked={isSelected} onCheckedChange={onToggleSelect}>
+                            <Checkbox.HiddenInput />
+                            <Checkbox.Control />
+                        </Checkbox.Root>
+                        <NativeSelect.Root size="xs" width="72px">
+                            <NativeSelect.Field
+                                value={bundle.pattern || UnitPattern.UNKNOWN}
+                                onChange={e => handlePatternChange(e.target.value)}
+                                style={{
+                                    fontSize: '9px',
+                                    padding: '1px 2px',
+                                    lineHeight: 1.2,
+                                    height: '20px',
+                                    backgroundColor: {
+                                        [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                        [UnitPattern.SWAP]: '#FEEBC8',
+                                        [UnitPattern.SPLIT]: '#E9D8FD',
+                                        [UnitPattern.FLOW]: '#C6F6D5',
+                                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: '#FEFCBF',
+                                        [UnitPattern.CUSTOM]: '#E2E8F0',
+                                        [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7',
+                                    borderRadius: '3px',
+                                }}
+                            >
+                                <option value={UnitPattern.SWAP}>Swap</option>
+                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                                <option value={UnitPattern.SPLIT}>Split</option>
+                                <option value={UnitPattern.FLOW}>Flow</option>
+                                <option value={UnitPattern.CUSTOM}>Custom</option>
+                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                            </NativeSelect.Field>
+                        </NativeSelect.Root>
+                        <Box flex={1} minW={0}>
+                            <InlineEditLabel
+                                value={bundle.label || ''}
+                                onSave={async (value) => onUpdate({ label: value })}
+                                placeholder={`Bundle #${bundle.id}`}
                             />
-                        ))}
-                        {assets.length > 3 && (
-                            <Text fontSize="10px" color="gray.500">+{assets.length - 3}</Text>
-                        )}
-                    </Flex>
-                </Table.Cell>
-
-                {/* Date Range */}
-                <Table.Cell width="90px" p={1}>
-                    <Text fontSize="10px" color="gray.600">{dateRange}</Text>
-                </Table.Cell>
-
-                {/* Taxability (editable dropdown) */}
-                <Table.Cell width="90px" p={1}>
-                    <NativeSelect.Root size="sm" width="80px">
-                        <NativeSelect.Field
-                            value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
-                            onChange={e => handleTaxabilityChange(e.target.value)}
-                            style={{
-                                fontSize: '10px',
-                                padding: '2px 4px',
-                                backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
-                                    bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
-                                borderRadius: '4px',
-                            }}
-                        >
-                            <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
-                            <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
-                            <option value={TaxabilityEnum.NON_TAXABLE}>Non-Tax</option>
-                        </NativeSelect.Field>
-                    </NativeSelect.Root>
-                </Table.Cell>
-
-                {/* Actions */}
-                <Table.Cell width="60px" p={1} textAlign="right">
-                    <Flex gap={1} justify="flex-end">
+                        </Box>
+                        <NativeSelect.Root size="xs" width="58px">
+                            <NativeSelect.Field
+                                value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
+                                onChange={e => handleTaxabilityChange(e.target.value)}
+                                style={{
+                                    fontSize: '9px',
+                                    padding: '1px 2px',
+                                    lineHeight: 1.2,
+                                    height: '20px',
+                                    backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
+                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
+                                    borderRadius: '3px',
+                                }}
+                            >
+                                <option value={TaxabilityEnum.UNKNOWN}>Unk</option>
+                                <option value={TaxabilityEnum.TAXABLE}>Tax</option>
+                                <option value={TaxabilityEnum.NON_TAXABLE}>Non</option>
+                            </NativeSelect.Field>
+                        </NativeSelect.Root>
                         <Button
                             size="xs"
                             variant="ghost"
@@ -758,67 +721,71 @@ const BundleRow: React.FC<BundleRowProps> = ({
                             loading={deleting}
                             title="Delete bundle"
                             p={1}
-                            minW="24px"
-                            h="24px"
+                            minW="20px"
+                            h="20px"
                         >
-                            <FiTrash2 size={12} />
+                            <FiTrash2 size={11} />
                         </Button>
                     </Flex>
-                </Table.Cell>
-            </Table.Row>
 
-            {/* Expanded Content */}
-            {isExpanded && (
-                <Table.Row>
-                    <Table.Cell colSpan={9} p={0} bg="gray.25">
-                        <Box p={3} borderBottom="2px solid" borderColor="purple.200">
-                            {/* Notes Section */}
-                            <Flex align="flex-start" gap={2} mb={3}>
-                                <Text fontSize="xs" color="gray.600" fontWeight="medium" minW="50px">Notes:</Text>
-                                {editingNotes ? (
-                                    <Flex direction="column" gap={1} flex={1}>
-                                        <Textarea
-                                            size="xs"
-                                            value={notesValue}
-                                            onChange={e => setNotesValue(e.target.value)}
-                                            rows={2}
-                                            fontSize="11px"
-                                            autoFocus
-                                        />
-                                        <Flex gap={1}>
-                                            <Button size="xs" colorPalette="green" onClick={handleSaveNotes}>Save</Button>
-                                            <Button size="xs" variant="ghost" onClick={() => { setNotesValue(bundle.notes || ''); setEditingNotes(false); }}>Cancel</Button>
-                                        </Flex>
-                                    </Flex>
-                                ) : (
-                                    <Text
-                                        fontSize="11px"
-                                        color={bundle.notes ? 'gray.700' : 'gray.400'}
-                                        fontStyle={bundle.notes ? 'normal' : 'italic'}
-                                        cursor="pointer"
-                                        _hover={{ color: 'blue.600' }}
-                                        onClick={() => setEditingNotes(true)}
-                                        flex={1}
-                                    >
-                                        {bundle.notes || 'Click to add notes...'}
-                                    </Text>
-                                )}
-                            </Flex>
-
-                            {/* Transactions - Full Table like P&L expanded row */}
-                            <Box mt={3}>
-                                <ExpandedTransactionTable
-                                    transactions={bundle.transactions}
-                                    bundleId={bundle.id}
-                                    baseCurrency={baseCurrency}
-                                    onRemoveTransaction={onRemoveTransaction}
-                                    onTransactionClick={onTransactionClick}
+                    {/* Assets + date + notes icon row */}
+                    <Flex align="center" gap={2} fontSize="10px" color="gray.600" flexWrap="wrap">
+                        <Flex gap={1} align="center" flexWrap="wrap">
+                            {assets.slice(0, 4).map((asset, idx) => (
+                                <AssetBadge
+                                    key={asset.symbol || idx}
+                                    asset={asset}
+                                    size="xs"
+                                    colorPalette="purple"
+                                    maxLength={12}
                                 />
+                            ))}
+                            {assets.length > 4 && (
+                                <Text fontSize="10px" color="gray.500">+{assets.length - 4}</Text>
+                            )}
+                        </Flex>
+                        <Text fontSize="10px" color="gray.500">{compactDateRange}</Text>
+                        <Tooltip content={bundle.notes || 'No notes'} openDelay={200}>
+                            <Box
+                                as="span"
+                                cursor="pointer"
+                                color={bundle.notes ? 'purple.500' : 'gray.300'}
+                                _hover={{ color: 'purple.600' }}
+                            >
+                                <FiFileText size={12} />
                             </Box>
+                        </Tooltip>
+                    </Flex>
+
+                    {/* Collapsible transaction list */}
+                    <Box
+                        mt={1.5}
+                        pt={1}
+                        borderTop="1px solid"
+                        borderColor="gray.100"
+                        cursor="pointer"
+                        onClick={onToggleExpand}
+                        _hover={{ color: 'purple.600' }}
+                        textAlign="center"
+                    >
+                        <Flex align="center" justify="center" gap={1}>
+                            {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                            <Text fontSize="2xs" color="gray.500">
+                                {bundle.transactions?.length || 0} transaction{(bundle.transactions?.length || 0) !== 1 ? 's' : ''}
+                            </Text>
+                        </Flex>
+                    </Box>
+
+                    {isExpanded && (
+                        <Box mt={1.5}>
+                            <BundleMemberTransactionsTable
+                                transactionIds={(bundle.transactions || []).map(t => t.id)}
+                                onTransactionClick={onTransactionClick}
+                            />
                         </Box>
-                    </Table.Cell>
-                </Table.Row>
-            )}
+                    )}
+                </Card.Body>
+            </Card.Root>
 
             {/* Delete Confirmation Dialog */}
             <ConfirmDialog
@@ -875,6 +842,70 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({ selectedCount, onDelete
         </Box>
     );
 };
+
+// ============================================================================
+// Pagination Bar (reusable top + bottom)
+// ============================================================================
+
+interface PaginationBarProps {
+    page: number;
+    setPage: React.Dispatch<React.SetStateAction<number>>;
+    pageSize: number;
+    setPageSize: React.Dispatch<React.SetStateAction<number>>;
+    pageSizeOptions: number[];
+    totalItems: number;
+    totalPages: number;
+    rangeStart: number;
+    rangeEnd: number;
+    mt?: number | string;
+    mb?: number | string;
+}
+
+const PaginationBar: React.FC<PaginationBarProps> = ({
+    page, setPage, pageSize, setPageSize, pageSizeOptions,
+    totalItems, totalPages, rangeStart, rangeEnd, mt, mb,
+}) => (
+    <Flex justify="space-between" align="center" px={1} mt={mt} mb={mb}>
+        <Flex align="center" gap={0}>
+            {pageSizeOptions.map(size => (
+                <Button
+                    key={size}
+                    size="2xs"
+                    variant={pageSize === size ? 'solid' : 'outline'}
+                    colorPalette={pageSize === size ? 'blue' : 'gray'}
+                    borderRadius={0}
+                    onClick={() => setPageSize(size)}
+                    px={2}
+                    fontWeight="normal"
+                    _first={{ borderLeftRadius: 'md' }}
+                    _last={{ borderRightRadius: 'md' }}
+                >
+                    {size}
+                </Button>
+            ))}
+        </Flex>
+        <Text fontSize="xs" color="gray.500">
+            {rangeStart}–{rangeEnd} of {totalItems}
+        </Text>
+        <Flex align="center" gap={1}>
+            <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={page === 0}>
+                <FiChevronsLeft size={14} />
+            </Button>
+            <Button size="2xs" variant="ghost" onClick={() => setPage((p: number) => Math.max(0, p - 1))} disabled={page === 0}>
+                <FiChevronLeft size={14} />
+            </Button>
+            <Text fontSize="xs" color="gray.600" px={1}>
+                {page + 1}/{totalPages}
+            </Text>
+            <Button size="2xs" variant="ghost" onClick={() => setPage((p: number) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+                <FiChevronRight size={14} />
+            </Button>
+            <Button size="2xs" variant="ghost" onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
+                <FiChevronsRight size={14} />
+            </Button>
+        </Flex>
+    </Flex>
+);
 
 // ============================================================================
 // Main Component
@@ -977,6 +1008,17 @@ export const BundleTable: React.FC<BundleTableProps> = ({
         }
     }, [onBundleDelete, onRefresh]);
 
+    const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+    const [pageSize, setPageSize] = useState(10);
+    const [page, setPage] = useState(0); // 0-indexed
+    const totalPages = Math.max(1, Math.ceil(filteredBundles.length / pageSize));
+    const pagedBundles = filteredBundles.slice(page * pageSize, (page + 1) * pageSize);
+    const rangeStart = filteredBundles.length === 0 ? 0 : page * pageSize + 1;
+    const rangeEnd = Math.min((page + 1) * pageSize, filteredBundles.length);
+
+    // Reset to page 0 when filters or page size change
+    useEffect(() => { setPage(0); }, [filters, pageSize]);
+
     const allSelected = filteredBundles.length > 0 && filteredBundles.every(b => selectedIds.has(b.id));
 
     if (bundles.length === 0) {
@@ -1006,55 +1048,59 @@ export const BundleTable: React.FC<BundleTableProps> = ({
                 loading={bulkLoading}
             />
 
-            <Box overflowX="auto" bg="white" borderRadius="md" borderWidth={1} borderColor="gray.200">
-                <Table.Root size="sm" variant="line">
-                    <Table.Header>
-                        <Table.Row css={{ fontSize: '10px', bg: 'gray.100' }}>
-                            <Table.ColumnHeader width="30px" p={1}>
-                                <Checkbox.Root checked={allSelected} onCheckedChange={toggleSelectAll}>
-                                    <Checkbox.HiddenInput />
-                                    <Checkbox.Control />
-                                </Checkbox.Root>
-                            </Table.ColumnHeader>
-                            <Table.ColumnHeader width="30px" p={1}></Table.ColumnHeader>
-                            <Table.ColumnHeader width="80px" p={1}>Pattern</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} minW="150px">Label</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} minW="110px">Trx</Table.ColumnHeader>
-                            <Table.ColumnHeader p={1} maxW="120px">Assets</Table.ColumnHeader>
-                            <Table.ColumnHeader width="90px" p={1}>Date Range</Table.ColumnHeader>
-                            <Table.ColumnHeader width="90px" p={1}>Taxability</Table.ColumnHeader>
-                            <Table.ColumnHeader width="60px" p={1}></Table.ColumnHeader>
-                        </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                        {filteredBundles.length === 0 ? (
-                            <Table.Row>
-                                <Table.Cell colSpan={9}>
-                                    <Text textAlign="center" py={4} color="gray.500" fontSize="sm">
-                                        No bundles match the current filters
-                                    </Text>
-                                </Table.Cell>
-                            </Table.Row>
-                        ) : (
-                            filteredBundles.map(bundle => (
-                                <BundleRow
-                                    key={bundle.id}
-                                    bundle={bundle}
-                                    baseCurrency={baseCurrency}
-                                    isExpanded={expandedIds.has(bundle.id)}
-                                    isSelected={selectedIds.has(bundle.id)}
-                                    onToggleExpand={() => toggleExpand(bundle.id)}
-                                    onToggleSelect={() => toggleSelect(bundle.id)}
-                                    onUpdate={(updates) => handleUpdate(bundle.id, updates)}
-                                    onDelete={() => handleDelete(bundle.id)}
-                                    onRemoveTransaction={onRemoveTransaction}
-                                    onTransactionClick={onTransactionClick}
-                                />
-                            ))
-                        )}
-                    </Table.Body>
-                </Table.Root>
-            </Box>
+            {filteredBundles.length === 0 ? (
+                <Box textAlign="center" py={4} bg="gray.50" borderRadius="md">
+                    <Text color="gray.500" fontSize="sm">No bundles match the current filters</Text>
+                </Box>
+            ) : (
+                <>
+                    {/* Top pagination bar */}
+                    <PaginationBar
+                        page={page}
+                        setPage={setPage}
+                        pageSize={pageSize}
+                        setPageSize={setPageSize}
+                        pageSizeOptions={PAGE_SIZE_OPTIONS}
+                        totalItems={filteredBundles.length}
+                        totalPages={totalPages}
+                        rangeStart={rangeStart}
+                        rangeEnd={rangeEnd}
+                        mb={2}
+                    />
+
+                    <SimpleGrid columns={{ base: 1, sm: 2, md: 3, lg: 4 }} gap={3}>
+                        {pagedBundles.map(bundle => (
+                            <BundleRow
+                                key={bundle.id}
+                                bundle={bundle}
+                                baseCurrency={baseCurrency}
+                                isExpanded={expandedIds.has(bundle.id)}
+                                isSelected={selectedIds.has(bundle.id)}
+                                onToggleExpand={() => toggleExpand(bundle.id)}
+                                onToggleSelect={() => toggleSelect(bundle.id)}
+                                onUpdate={(updates) => handleUpdate(bundle.id, updates)}
+                                onDelete={() => handleDelete(bundle.id)}
+                                onRemoveTransaction={onRemoveTransaction}
+                                onTransactionClick={onTransactionClick}
+                            />
+                        ))}
+                    </SimpleGrid>
+
+                    {/* Bottom pagination bar */}
+                    <PaginationBar
+                        page={page}
+                        setPage={setPage}
+                        pageSize={pageSize}
+                        setPageSize={setPageSize}
+                        pageSizeOptions={PAGE_SIZE_OPTIONS}
+                        totalItems={filteredBundles.length}
+                        totalPages={totalPages}
+                        rangeStart={rangeStart}
+                        rangeEnd={rangeEnd}
+                        mt={3}
+                    />
+                </>
+            )}
 
             {/* Bulk Delete Confirmation Dialog */}
             <ConfirmDialog

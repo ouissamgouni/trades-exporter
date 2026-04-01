@@ -16,6 +16,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Badge,
     Box,
+    Button,
     Card,
     Flex,
     Heading,
@@ -23,7 +24,7 @@ import {
     Text,
 } from '@chakra-ui/react';
 import { FiAlertTriangle, FiBox, FiDollarSign, FiList, FiLayers, FiTrendingUp } from 'react-icons/fi';
-import { ActivityFeed } from './ActivityFeed';
+import { PnLAuditTransactionsView } from './PnLAuditTransactionsView';
 import { SlidePanel } from './SlidePanel';
 import { TransactionFilters, TransactionFilterState, defaultFilterState } from '../TransactionFilters';
 import { buildPnLFilterParams } from '../../utils/pnlFilterParams';
@@ -34,7 +35,6 @@ import { FeesSlidePanel } from './FeesSlidePanel';
 import { WarningsSlidePanel } from './WarningsSlidePanel';
 import { LotEventsSlidePanel } from './LotEventsSlidePanel';
 import { TransactionsSlidePanel } from './TransactionsSlidePanel';
-import { UnitDetailSlidePanel } from './UnitDetailSlidePanel';
 import { ValueDisplay } from '../ValueDisplay';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ const StatsCard: React.FC<StatsCardProps> = ({ label, value, icon, color, detail
         _hover={{ borderColor: `${color}.300`, shadow: 'sm' }}
         transition="all 0.15s"
         flex="1"
-        minW="140px"
+        minW="120px"
     >
         <Card.Body p={3}>
             <Flex align="center" gap={2}>
@@ -202,22 +202,6 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
         onPanelChange?.(null);
     }, [onPanelChange]);
 
-    // ── Unit detail side panel ──────────────────────────────────────────────
-    const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
-    const [isUnitDetailOpen, setIsUnitDetailOpen] = useState(false);
-
-    const handleUnitClick = useCallback((unitId: number) => {
-        setSelectedUnitId(unitId);
-        setIsUnitDetailOpen(true);
-        // Also propagate to parent if provided
-        onUnitClick?.(unitId);
-    }, [onUnitClick]);
-
-    const handleCloseUnitDetail = useCallback(() => {
-        setIsUnitDetailOpen(false);
-        setSelectedUnitId(null);
-    }, []);
-
     // ── Render ──────────────────────────────────────────────────────────────
     const s = summary;
 
@@ -238,7 +222,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 borderBottomWidth={1}
                 borderColor="gray.100"
                 pb={2}
-                mb={3}
+                mb={1.5}
             >
                 <TransactionFilters
                     filters={txFilters}
@@ -253,7 +237,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
             </Box>
 
             {/* ── Quick Stats Bar ─────────────────────────────────────── */}
-            <Flex gap={2} mb={4} wrap="wrap">
+            <Flex gap={2} mb={2} wrap="wrap" align="center">
                 {summaryLoading ? (
                     <Flex align="center" gap={2} py={4} w="100%" justify="center">
                         <Spinner size="sm" />
@@ -329,15 +313,12 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 ) : null}
             </Flex>
 
-            {/* ── Activity Feed (primary view) ─────────────────────────── */}
-            <ActivityFeed
+            {/* ── Transactions View ─────────────────────────────────────── */}
+            <PnLAuditTransactionsView
                 versionId={versionId}
                 baseCurrency={baseCurrency}
                 txFilterParams={txFilterParams}
                 onTransactionClick={onTransactionClick}
-                onAssetClick={onAssetClick}
-                onUnitClick={handleUnitClick}
-                assetBalanceMap={assetBalanceMap}
             />
 
             {/* ── Slide Panels ─────────────────────────────────────────── */}
@@ -349,7 +330,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 txFilterParams={txFilterParams}
                 onAssetClick={onAssetClick}
                 onTransactionClick={onTransactionClick}
-                onUnitClick={handleUnitClick}
+                onUnitClick={onUnitClick}
             />
             <RealizedPnLSlidePanel
                 isOpen={openPanel === 'realized'}
@@ -359,7 +340,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 txFilterParams={txFilterParams}
                 onAssetClick={onAssetClick}
                 onTransactionClick={onTransactionClick}
-                onUnitClick={handleUnitClick}
+                onUnitClick={onUnitClick}
             />
             <FeesSlidePanel
                 isOpen={openPanel === 'fees'}
@@ -369,7 +350,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 txFilterParams={txFilterParams}
                 onAssetClick={onAssetClick}
                 onTransactionClick={onTransactionClick}
-                onUnitClick={handleUnitClick}
+                onUnitClick={onUnitClick}
             />
             <WarningsSlidePanel
                 isOpen={openPanel === 'warnings'}
@@ -379,7 +360,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 txFilterParams={txFilterParams}
                 onPriceAdded={onPriceAdded}
                 onTransactionClick={onTransactionClick}
-                onUnitClick={handleUnitClick}
+                onUnitClick={onUnitClick}
             />
             <LotEventsSlidePanel
                 isOpen={openPanel === 'events'}
@@ -388,7 +369,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 baseCurrency={baseCurrency}
                 txFilterParams={txFilterParams}
                 onTransactionClick={onTransactionClick}
-                onUnitClick={handleUnitClick}
+                onUnitClick={onUnitClick}
             />
             <TransactionsSlidePanel
                 isOpen={openPanel === 'transactions'}
@@ -397,14 +378,6 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 baseCurrency={baseCurrency}
                 onTransactionClick={onTransactionClick}
                 contextFilters={txFilters}
-            />
-            <UnitDetailSlidePanel
-                isOpen={isUnitDetailOpen}
-                onClose={handleCloseUnitDetail}
-                versionId={versionId}
-                unitId={selectedUnitId}
-                baseCurrency={baseCurrency}
-                onTransactionClick={onTransactionClick}
             />
         </Box>
     );

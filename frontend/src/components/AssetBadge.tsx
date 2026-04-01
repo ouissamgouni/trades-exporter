@@ -9,10 +9,12 @@
  * - Supports onClick for inline editing scenarios
  */
 
-import React from 'react';
+import React, { useContext } from 'react';
 import { Badge, Box, Flex, Text } from '@chakra-ui/react';
+import { LuInfo } from 'react-icons/lu';
 import { Tooltip } from './ui/tooltip';
 import { AssetRef } from '../types';
+import { AssetDetailPanelContext } from '../contexts/AssetDetailPanelContext';
 
 export interface AssetBadgeProps {
     /** Nested asset reference with id, symbol, and label */
@@ -31,6 +33,8 @@ export interface AssetBadgeProps {
     showWarning?: boolean;
     /** Custom fallback text when no asset and no sourceSymbol */
     fallback?: string;
+    /** Hide the info icon that opens the asset detail panel */
+    hideInfoIcon?: boolean;
 }
 
 /**
@@ -78,8 +82,13 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
     maxLength = 20,
     onClick,
     showWarning = true,
+    hideInfoIcon = false,
     fallback = '-',
 }) => {
+    // Use context directly (before early returns — rules of hooks)
+    const panelCtx = useContext(AssetDetailPanelContext);
+    const openAssetPanel = panelCtx?.openAssetPanel ?? null;
+
     // Determine what to display
     const hasLinkedAsset = asset && (asset.symbol || asset.label);
     const hasSourceSymbol = !!sourceSymbol;
@@ -168,19 +177,56 @@ export const AssetBadge: React.FC<AssetBadgeProps> = ({
         </Box>
     );
 
+    const showInfoBtn = !hideInfoIcon && openAssetPanel && asset?.id;
+
     return (
-        <Tooltip content={tooltipContent} openDelay={200}>
-            <Badge
-                size={size}
-                colorPalette={colorPalette}
-                variant="subtle"
-                cursor={onClick ? 'pointer' : 'default'}
-                onClick={onClick}
-                title={truncated ? fullText : undefined}
-            >
-                {display}
-            </Badge>
-        </Tooltip>
+        <Flex
+            display="inline-flex"
+            align="center"
+            position="relative"
+            role="group"
+            gap={0}
+        >
+            <Tooltip content={tooltipContent} openDelay={200}>
+                <Badge
+                    size={size}
+                    colorPalette={colorPalette}
+                    variant="subtle"
+                    cursor={onClick ? 'pointer' : 'default'}
+                    onClick={onClick}
+                    title={truncated ? fullText : undefined}
+                >
+                    {display}
+                </Badge>
+            </Tooltip>
+            {showInfoBtn && (
+                <Tooltip content="View asset details" openDelay={100}>
+                    <Box
+                        as="button"
+                        display="inline-flex"
+                        alignItems="center"
+                        justifyContent="center"
+                        ml={0.5}
+                        w={4}
+                        h={4}
+                        borderRadius="full"
+                        color="gray.400"
+                        opacity={0}
+                        _groupHover={{ opacity: 1 }}
+                        _hover={{ color: 'blue.500', bg: 'blue.50' }}
+                        transition="opacity 0.15s, color 0.15s"
+                        cursor="pointer"
+                        flexShrink={0}
+                        onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            openAssetPanel!(asset!.id!);
+                        }}
+                    >
+                        <LuInfo size={12} />
+                    </Box>
+                </Tooltip>
+            )}
+        </Flex>
     );
 };
 

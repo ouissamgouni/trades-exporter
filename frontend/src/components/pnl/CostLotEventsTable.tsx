@@ -385,6 +385,8 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
 interface FilterOptions {
     assets: { id: number; symbol: string; label?: string }[];
     accounts: { id: number; name: string }[];
+    eventTypes: { value: string; label?: string; count: number }[];
+    unitPatterns: { value: string; label?: string; count: number }[];
 }
 
 interface UseFilterOptionsResult {
@@ -394,7 +396,7 @@ interface UseFilterOptionsResult {
 }
 
 const useFilterOptions = (versionId: number): UseFilterOptionsResult => {
-    const [options, setOptions] = useState<FilterOptions>({ assets: [], accounts: [] });
+    const [options, setOptions] = useState<FilterOptions>({ assets: [], accounts: [], eventTypes: [], unitPatterns: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const fetchedRef = useRef(false);
@@ -421,6 +423,8 @@ const useFilterOptions = (versionId: number): UseFilterOptionsResult => {
                 setOptions({
                     assets: data.assets || [],
                     accounts: data.accounts || [],
+                    eventTypes: data.event_types || [],
+                    unitPatterns: data.unit_patterns || [],
                 });
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Unknown error');
@@ -692,6 +696,8 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                         eventCounts={eventCounts}
                         assets={filterOptions.assets}
                         accounts={filterOptions.accounts}
+                        eventTypeOptions={filterOptions.eventTypes}
+                        unitPatternOptions={filterOptions.unitPatterns}
                         isLoading={isRefreshing || isLoadingFilterOptions}
                         showDateRange={enabledFeatures.dateRangeFilter}
                         showEventTypes={enabledFeatures.eventTypeFilters}
@@ -785,6 +791,8 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     eventCounts={eventCounts}
                     assets={filterOptions.assets}
                     accounts={filterOptions.accounts}
+                    eventTypeOptions={filterOptions.eventTypes}
+                    unitPatternOptions={filterOptions.unitPatterns}
                     isLoading={isRefreshing || isLoadingFilterOptions}
                     showDateRange={enabledFeatures.dateRangeFilter}
                     showEventTypes={enabledFeatures.eventTypeFilters}
