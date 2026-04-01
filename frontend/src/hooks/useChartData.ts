@@ -177,6 +177,11 @@ export interface PerformerItem {
     group_type: 'asset' | 'account' | 'category';
     total_return: number;
     roi_pct: number;
+    unrealized_pnl: number;
+    market_value: number;
+    cost_basis: number;
+    total_fees: number;
+    efficiency: number;
 }
 
 export interface MetricsRangeData {
@@ -211,6 +216,125 @@ export interface VersionMetricsResponse {
     version_id: number;
     summary: MetricsSummary;
     ranges: Partial<Record<RangeKey, MetricsRangeData>>;
+}
+
+// ---------------------------------------------------------------------------
+// Settled metrics types (cost-lot-based, no prices needed)
+// ---------------------------------------------------------------------------
+
+export interface SettledSummary {
+    cost_basis: number;
+    realized_pnl: number;
+    taxable_realized_pnl: number;
+    total_fees: number;
+    fee_entry_count: number;
+}
+
+export interface SettledRangeData {
+    cost_basis: number;
+    realized_pnl: number;
+    taxable_realized_pnl: number;
+    realized_in_period: number;
+    cost_basis_in_period: number;
+    fees_in_period: number;
+}
+
+export interface SettledMetricsResponse {
+    version_id: number;
+    summary: SettledSummary;
+    ranges: Partial<Record<RangeKey, SettledRangeData>>;
+}
+
+// ---------------------------------------------------------------------------
+// Market metrics types (price-dependent)
+// ---------------------------------------------------------------------------
+
+export interface MarketSummary {
+    current_value: number;
+    unrealized_pnl: number;
+}
+
+export interface MarketRangeData {
+    current_value: number;
+    unrealized_pnl: number;
+    unrealized_in_period: number;
+    total_return: number;
+    roi_pct: number;
+}
+
+export interface MarketMetricsResponse {
+    version_id: number;
+    summary: MarketSummary;
+    ranges: Partial<Record<RangeKey, MarketRangeData>>;
+}
+
+// ---------------------------------------------------------------------------
+// Performers response type
+// ---------------------------------------------------------------------------
+
+export interface PerformersResponse {
+    version_id: number;
+    period: string;
+    group_type: string;
+    top_performers: PerformerItem[];
+    flop_performers: PerformerItem[];
+    total_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Asset period delta types & hook
+// ---------------------------------------------------------------------------
+
+export interface AssetPeriodDelta {
+    asset_id: number;
+    symbol: string;
+    label?: string | null;
+    total_return: number;
+    roi_pct: number;
+    unrealized_change: number;
+    realized_in_period: number;
+    cost_change: number;
+    market_value_change: number;
+}
+
+export interface AssetPeriodDeltasResponse {
+    version_id: number;
+    period: string;
+    deltas: AssetPeriodDelta[];
+}
+
+export function useAssetPeriodDeltas(
+    versionId: number | null,
+    period: string,
+    enabled = true,
+) {
+    const result = useQuery<AssetPeriodDeltasResponse>({
+        queryKey: ['asset-period-deltas', versionId, period],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            sp.set('period', period);
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/asset-period-deltas?${sp.toString()}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId && period !== 'all',
+        staleTime: 5 * 60_000,
+    });
+
+    // Build Map<assetId, AssetPeriodDelta> for O(1) lookups
+    const deltaMap = result.data?.deltas
+        ? new Map(result.data.deltas.map(d => [d.asset_id, d]))
+        : new Map<number, AssetPeriodDelta>();
+
+    return {
+        data: result.data ?? null,
+        deltaMap,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+    };
 }
 
 
@@ -273,6 +397,164 @@ export function useVersionMetrics(
     };
 }
 
+// ---------------------------------------------------------------------------
+// useSettledMetrics  (React Query)
+// ---------------------------------------------------------------------------
+
+export interface SettledMetricsParams {
+    assetIds?: number[];
+    accountIds?: number[];
+    categoryIds?: number[];
+}
+
+export function useSettledMetrics(
+    versionId: number | null,
+    params: SettledMetricsParams = {},
+    enabled = true,
+) {
+    const result = useQuery<SettledMetricsResponse>({
+        queryKey: [
+            'settled-metrics', versionId,
+            params.assetIds?.join(','),
+            params.accountIds?.join(','),
+            params.categoryIds?.join(','),
+        ],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            if (params.assetIds?.length) sp.set('asset_ids', params.assetIds.join(','));
+            if (params.accountIds?.length) sp.set('account_ids', params.accountIds.join(','));
+            if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
+            const qs = sp.toString() ? `?${sp.toString()}` : '';
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/metrics/settled${qs}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+        refetch: result.refetch,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// useMarketMetrics  (React Query)
+// ---------------------------------------------------------------------------
+
+export interface MarketMetricsParams {
+    assetIds?: number[];
+    accountIds?: number[];
+    categoryIds?: number[];
+    /** Include in queryKey so React Query refetches when live prices arrive */
+    pricesReady?: boolean;
+}
+
+export function useMarketMetrics(
+    versionId: number | null,
+    params: MarketMetricsParams = {},
+    enabled = true,
+) {
+    const result = useQuery<MarketMetricsResponse>({
+        queryKey: [
+            'market-metrics', versionId,
+            params.assetIds?.join(','),
+            params.accountIds?.join(','),
+            params.categoryIds?.join(','),
+            params.pricesReady ?? false,
+        ],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            if (params.assetIds?.length) sp.set('asset_ids', params.assetIds.join(','));
+            if (params.accountIds?.length) sp.set('account_ids', params.accountIds.join(','));
+            if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
+            const qs = sp.toString() ? `?${sp.toString()}` : '';
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/metrics/market${qs}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 2 * 60_000, // 2 min — prices change more frequently
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+        refetch: result.refetch,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// useVersionPerformers  (React Query)
+// ---------------------------------------------------------------------------
+
+export interface PerformersParams {
+    period?: string;
+    groupBy?: GroupBy;
+    topN?: number;
+    dimensionId?: number | null;
+    assetIds?: number[];
+    accountIds?: number[];
+    categoryIds?: number[];
+    /** Include in queryKey so React Query refetches when live prices arrive */
+    pricesReady?: boolean;
+}
+
+export function useVersionPerformers(
+    versionId: number | null,
+    params: PerformersParams = {},
+    enabled = true,
+) {
+    const result = useQuery<PerformersResponse>({
+        queryKey: [
+            'version-performers', versionId,
+            params.period,
+            params.groupBy,
+            params.topN,
+            params.dimensionId,
+            params.assetIds?.join(','),
+            params.accountIds?.join(','),
+            params.categoryIds?.join(','),
+            params.pricesReady ?? false,
+        ],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            if (params.period) sp.set('period', params.period);
+            if (params.groupBy) sp.set('group_by', params.groupBy);
+            if (params.topN) sp.set('top_n', String(params.topN));
+            if (params.dimensionId != null) sp.set('dimension_id', String(params.dimensionId));
+            if (params.assetIds?.length) sp.set('asset_ids', params.assetIds.join(','));
+            if (params.accountIds?.length) sp.set('account_ids', params.accountIds.join(','));
+            if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
+            const qs = sp.toString() ? `?${sp.toString()}` : '';
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/performers${qs}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+        refetch: result.refetch,
+    };
+}
 
 
 // ---------------------------------------------------------------------------

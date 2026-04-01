@@ -50,49 +50,47 @@ export const UnitDetailSlidePanel: React.FC<UnitDetailSlidePanelProps> = ({
         setIsLoading(true);
         setError(null);
 
-        // Fetch the single unit from the units endpoint filtered by search on unit_id
-        fetch(`${API_URL}/pnl/versions/${versionId}/units?search=${unitId}&limit=1`)
+        fetch(`${API_URL}/pnl/versions/${versionId}/units/${unitId}`)
             .then(r => {
+                if (r.status === 404) {
+                    setError('Calculation unit not found');
+                    setIsLoading(false);
+                    return null;
+                }
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 return r.json();
             })
-            .then(data => {
-                const items = data.items || data;
-                const found = Array.isArray(items) ? items.find((u: any) => u.unit_id === unitId) : null;
-                if (found) {
-                    // Map backend response to frontend type
-                    setUnit({
-                        unit_id: found.unit_id,
-                        unit_label: found.unit_label || '',
-                        pattern: found.pattern,
-                        date: found.timestamp,
-                        transactions: (found.transactions || []).map((tx: any) => ({
-                            id: tx.id,
-                            date_time: tx.date_time,
-                            account_id: tx.account_id,
-                            account_name: tx.account_name,
-                            source: tx.source,
-                            transaction_type: tx.transaction_type,
-                            source_transaction_type: tx.source_transaction_type,
-                            direction: tx.direction,
-                            asset_symbol: tx.asset?.symbol,
-                            quantity: tx.quantity,
-                            price: tx.price,
-                            total: tx.total,
-                            fee: tx.fee,
-                            network: tx.network,
-                        })),
-                        legs: found.legs || [],
-                        realized_entries: found.realized_entries,
-                        realized_pnl_in_base: found.realized_pnl_in_base,
-                        has_fees: found.has_fees,
-                        total_fees_in_base: found.total_fees_in_base,
-                        warnings: found.warnings,
-                        event_ids: found.event_ids,
-                    });
-                } else {
-                    setError('Calculation unit not found');
-                }
+            .then(found => {
+                if (!found) return;
+                setUnit({
+                    unit_id: found.unit_id,
+                    unit_label: found.unit_label || '',
+                    pattern: found.pattern,
+                    date: found.timestamp,
+                    transactions: (found.transactions || []).map((tx: any) => ({
+                        id: tx.id,
+                        date_time: tx.date_time,
+                        account_id: tx.account_id,
+                        account_name: tx.account_name,
+                        source: tx.source,
+                        transaction_type: tx.transaction_type,
+                        source_transaction_type: tx.source_transaction_type,
+                        direction: tx.direction,
+                        asset_symbol: tx.asset?.symbol,
+                        quantity: tx.quantity,
+                        price: tx.price,
+                        total: tx.total,
+                        fee: tx.fee,
+                        network: tx.network,
+                    })),
+                    legs: found.legs || [],
+                    realized_entries: found.realized_entries,
+                    realized_pnl_in_base: found.realized_pnl_in_base,
+                    has_fees: found.has_fees,
+                    total_fees_in_base: found.total_fees_in_base,
+                    warnings: found.warnings,
+                    event_ids: found.event_ids,
+                });
                 setIsLoading(false);
             })
             .catch(err => {

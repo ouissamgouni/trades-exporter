@@ -125,6 +125,8 @@ export interface TransactionsTableProps<T extends Transaction = Transaction> {
     onDataChange?: () => void;
     /** Custom API URL to fetch transactions from (overrides default /transactions endpoint) */
     customApiUrl?: string;
+    /** Hide the direction/review legend bar */
+    hideLegend?: boolean;
 
     // ============== Plugin Architecture Props ==============
 
@@ -182,11 +184,12 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
     onSelectionChange,
     initialSelectedIds,
     showFilters = true,
-    defaultFiltersCollapsed = false,
+    defaultFiltersCollapsed = true,
     showBundles = true,
     showSuggestions = false,
     onDataChange,
     customApiUrl,
+    hideLegend = false,
     // Plugin architecture props
     tableId = 'default',
     initialColumnVisibility: initialVisibilityProp,
@@ -502,7 +505,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
     // TanStack Query for transactions - use stable string key to avoid reference issues
     const { data: transactionResponse, isLoading: loading, error: queryError, refetch: refetchTransactions } = useQuery({
-        queryKey: ['transactions', 'with-metadata', filterKey, pagination.page, pagination.pageSize, sortBy, sortDir],
+        queryKey: ['transactions', 'with-metadata', filterKey, pagination.page, pagination.pageSize, sortBy, sortDir, customApiUrl],
         queryFn: async () => {
             const params = new URLSearchParams();
             // Apply review status filter (support multiple via comma-separated)
@@ -1838,40 +1841,73 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             {/* Transactions content */}
             <>
                 {/* Transactions tab header with actions */}
-                {!embeddedMode && (
-                    <Flex justify="flex-end" align="center" mb={4} gap={2}>
-                        {/* Column visibility picker */}
-                        <ColumnVisibilityPopover
-                            table={tanstackTable}
-                            onReset={() => {
-                                setColumnVisibility(presetToVisibility(
-                                    tableConfig.columnPreset,
-                                    tableConfig.hiddenColumns,
-                                    tableConfig.shownColumns
-                                ));
-                            }}
-                            size="sm"
-                        />
-                        <Button
-                            onClick={error ? handleRetry : handleReset}
-                            variant="outline"
-                            colorPalette={error ? "red" : "gray"}
-                            size="sm"
-                        >
-                            {error ? "🔄 Retry" : "↺ Reset"}
-                        </Button>
-                        <Button
-                            onClick={() => handleRefresh()}
-                            variant="outline"
-                            size="sm"
-                        >
-                            🔄 Refresh
-                        </Button>
+                {!embeddedMode && !hideLegend && (
+                    <Flex justify="space-between" align="center" mb={2} gap={2} flexWrap="wrap">
+                        {/* Legend (left side) */}
+                        {!loading && !error && (
+                            <Flex gap={3} align="center" flexWrap="wrap">
+                                <Text fontSize="xs" color="gray.500">Dir:</Text>
+                                <Flex align="center" gap={1}>
+                                    <Box w={3} h={3} bg="green.100" borderRadius="sm" />
+                                    <Text fontSize="xs">↓In</Text>
+                                </Flex>
+                                <Flex align="center" gap={1}>
+                                    <Box w={3} h={3} bg="red.100" borderRadius="sm" />
+                                    <Text fontSize="xs">↑Out</Text>
+                                </Flex>
+                                <Flex align="center" gap={1}>
+                                    <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
+                                    <Text fontSize="xs">↔Int</Text>
+                                </Flex>
+                                <Text fontSize="xs" color="gray.500" ml={2}>Review:</Text>
+                                <Flex align="center" gap={1}>
+                                    <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
+                                    <Text fontSize="xs">Pending</Text>
+                                </Flex>
+                                <Flex align="center" gap={1}>
+                                    <Box w={1} h={3} bg="green.500" borderRadius="sm" />
+                                    <Text fontSize="xs">Valid</Text>
+                                </Flex>
+                                <Flex align="center" gap={1}>
+                                    <Box w={1} h={3} bg="red.500" borderRadius="sm" />
+                                    <Text fontSize="xs">Invalid</Text>
+                                </Flex>
+                            </Flex>
+                        )}
+                        {/* Actions (right side) */}
+                        <Flex gap={2} align="center">
+                            <ColumnVisibilityPopover
+                                table={tanstackTable}
+                                onReset={() => {
+                                    setColumnVisibility(presetToVisibility(
+                                        tableConfig.columnPreset,
+                                        tableConfig.hiddenColumns,
+                                        tableConfig.shownColumns
+                                    ));
+                                }}
+                                size="sm"
+                            />
+                            <Button
+                                onClick={error ? handleRetry : handleReset}
+                                variant="outline"
+                                colorPalette={error ? "red" : "gray"}
+                                size="sm"
+                            >
+                                {error ? "🔄 Retry" : "↺ Reset"}
+                            </Button>
+                            <Button
+                                onClick={() => handleRefresh()}
+                                variant="outline"
+                                size="sm"
+                            >
+                                🔄 Refresh
+                            </Button>
+                        </Flex>
                     </Flex>
                 )}
 
                 {showFilters && (
-                    <Box mb={4}>
+                    <Box mb={2}>
                         <TransactionFilters
                             filters={filters}
                             onChange={setFilters}
@@ -1887,7 +1923,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
 
                 {/* Top Pagination - show when more than 15 transactions */}
                 {!loading && !error && !embeddedMode && (filterMetadata?.filtered_count ?? 0) > 15 && (
-                    <Box mb={4}>
+                    <Box mb={2}>
                         <TablePagination
                             pagination={pagination}
                             total={filterMetadata?.filtered_count ?? 0}
@@ -1914,37 +1950,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                     </Box>
                 )}
 
-                {/* Legend */}
-                {!loading && !error && !embeddedMode && (
-                    <Flex mb={4} gap={3} align="center" flexWrap="wrap">
-                        <Text fontSize="xs" color="gray.500">Dir:</Text>
-                        <Flex align="center" gap={1}>
-                            <Box w={3} h={3} bg="green.100" borderRadius="sm" />
-                            <Text fontSize="xs">↓In</Text>
-                        </Flex>
-                        <Flex align="center" gap={1}>
-                            <Box w={3} h={3} bg="red.100" borderRadius="sm" />
-                            <Text fontSize="xs">↑Out</Text>
-                        </Flex>
-                        <Flex align="center" gap={1}>
-                            <Box w={3} h={3} bg="gray.100" borderRadius="sm" />
-                            <Text fontSize="xs">↔Int</Text>
-                        </Flex>
-                        <Text fontSize="xs" color="gray.500" ml={2}>Review:</Text>
-                        <Flex align="center" gap={1}>
-                            <Box w={1} h={3} bg="yellow.500" borderRadius="sm" />
-                            <Text fontSize="xs">Pending</Text>
-                        </Flex>
-                        <Flex align="center" gap={1}>
-                            <Box w={1} h={3} bg="green.500" borderRadius="sm" />
-                            <Text fontSize="xs">Valid</Text>
-                        </Flex>
-                        <Flex align="center" gap={1}>
-                            <Box w={1} h={3} bg="red.500" borderRadius="sm" />
-                            <Text fontSize="xs">Invalid</Text>
-                        </Flex>
-                    </Flex>
-                )}
+
 
                 {/* Transaction table - only show when not loading or erroring */}
                 {!loading && !error && (
@@ -1964,8 +1970,8 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                         )}
                                     </Table.ColumnHeader>
                                     {showColumn('id') && renderSortableHeader('id', 'ID')}
-                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time')}
-                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', '180px')}
+                                    {showColumn('date') && renderSortableHeader('date', 'Date/Time', undefined, { pr: 1 })}
+                                    {showColumn('source') && renderSortableHeader('source', 'Source Info', '180px', { pr: 1 })}
                                     {showColumn('accounts') && <Table.ColumnHeader width="130px">From / To</Table.ColumnHeader>}
                                     {showColumn('direction') && renderSortableHeader('direction', 'Dir')}
                                     {showColumn('type') && renderSortableHeader('type', 'Type')}
@@ -1981,7 +1987,7 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                     {showColumn('sourceTransactionId') && <Table.ColumnHeader>Source Tx ID</Table.ColumnHeader>}
                                     {/* Additional plugin columns */}
                                     {additionalColumns.map(col => (
-                                        <Table.ColumnHeader key={col.id} width={col.width}>{col.header}</Table.ColumnHeader>
+                                        <Table.ColumnHeader key={col.id} width={col.width} {...(col.headerBg ? { bg: col.headerBg } : {})}>{col.header}</Table.ColumnHeader>
                                     ))}
                                     {showColumn('status') && (!embeddedMode || showSelectionInEmbedded) && renderSortableHeader('status', 'Status', undefined, { position: 'sticky', right: '50px', bg: 'gray.100', zIndex: 10, borderLeft: '2px solid', borderColor: 'gray.300', fontSize: '7px', px: 1 })}
                                     {!embeddedMode && <Table.ColumnHeader position="sticky" right={0} bg="gray.100" zIndex={10} minW="50px" px={0}></Table.ColumnHeader>}

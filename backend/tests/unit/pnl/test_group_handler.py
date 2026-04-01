@@ -36,6 +36,8 @@ from tests.unit.pnl.conftest import (
     create_airdrop_group,
     create_payment_group,
     make_unit,
+    make_transaction,
+    make_leg,
 )
 
 
@@ -2051,3 +2053,160 @@ class TestFeeTrackingNoSlices:
         assert fe.fee_value_in_base == Decimal("40")
         # This one HAS a RealizedPnl (lots were consumed)
         assert fe.realized_pnl is not None
+
+
+class TestMixedAssetProceeds:
+    """Test proceeds computation for mixed-asset units (EUR + non-base on both sides)."""
+
+    def test_mixed_asset_swap_uses_fmv_for_non_base_disposal(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        Bug #72640: When a unit has EUR AND another asset on BOTH sides,
+        the non-base-currency disposal should use FMV, not pro-rata from EUR inflows.
+
+        Unit structure (rebalancing):
+          Outflows: EUR 1057.40  +  INDW.PA 2.383
+          Inflows:  EUR 1057.98  +  INDW.PA 92.028
+          Fee:      EUR 0.50
+
+        Before fix: INDW.PA disposal got pro-rata of EUR → proceeds=2.38 → PnL=−1036
+        After fix:  INDW.PA disposal uses FMV → proceeds=2.383*100=238.30 → correct PnL
+        """
+        lot_manager = LotManager(fifo_config)
+        # Asset 5 = AAPL in mock, price=100. Using it to represent INDW.PA.
+        mock_price_service.prices[5] = Decimal("100")
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Seed EUR lot (for EUR outflow)
+        eur_lot = create_lot(
+            asset_id=1, account_id=1, qty=Decimal("2000"),
+            unit_cost=Decimal("1"), acquired_at=base_datetime - timedelta(days=30),
+        )
+        seed_lot(lot_manager, eur_lot)
+
+        # Seed AAPL lot (for AAPL outflow of 2.383 units, at cost=200/unit)
+        aapl_lot = create_lot(
+            asset_id=5, account_id=1, qty=Decimal("10"),
+            unit_cost=Decimal("200"), acquired_at=base_datetime - timedelta(days=60),
+        )
+        seed_lot(lot_manager, aapl_lot)
+
+        # Build the mixed-asset unit
+        out_eur_tx = make_transaction(id=100, asset_id=1, quantity=Decimal("1057.40"), account_id=1, date_time=base_datetime)
+        out_aapl_tx = make_transaction(id=101, asset_id=5, quantity=Decimal("2.383"), account_id=1, date_time=base_datetime)
+        in_eur_tx = make_transaction(id=102, asset_id=1, quantity=Decimal("1057.98"), account_id=1, date_time=base_datetime)
+        in_aapl_tx = make_transaction(id=103, asset_id=5, quantity=Decimal("92.028"), account_id=1, date_time=base_datetime)
+        fee_tx = make_transaction(id=104, asset_id=1, quantity=Decimal("0.50"), account_id=1, date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=1, leg_type=LegType.OUTFLOW, quantity=Decimal("1057.40"), transaction=out_eur_tx),
+            make_leg(asset_id=5, leg_type=LegType.OUTFLOW, quantity=Decimal("2.383"), transaction=out_aapl_tx),
+            make_leg(asset_id=1, leg_type=LegType.INFLOW, quantity=Decimal("1057.98"), transaction=in_eur_tx),
+            make_leg(asset_id=5, leg_type=LegType.INFLOW, quantity=Decimal("92.028"), transaction=in_aapl_tx),
+            make_leg(asset_id=1, leg_type=LegType.FEE, quantity=Decimal("0.50"), transaction=fee_tx),
+        ]
+
+        unit = make_unit(legs=legs, pattern="swap", bundle_taxability_override="non_taxable")
+
+        result = handle_unit(unit, lot_manager, fmv_service, fifo_config)
+
+        # AAPL disposal should have a RealizedPnl using FMV, not base_currency pro-rata
+        aapl_pnl = [p for p in result.realized_pnl_records if p.asset_id == 5]
+        assert len(aapl_pnl) == 1
+
+        entry = aapl_pnl[0]
+        # FMV: 2.383 * 100 = 238.30
+        assert entry.proceeds_in_base == Decimal("2.383") * Decimal("100")
+        assert entry.proceeds_price_source != "direct"  # Not the base_currency path
+        assert entry.proceeds_source != "base_currency"
+
+    def test_pure_sell_still_uses_base_currency_proceeds(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        Regression: Pure sell (AAPL → EUR) should still use EUR inflow as proceeds,
+        not FMV. This is the normal sell case that must NOT be broken.
+        """
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Seed AAPL lot
+        aapl_lot = create_lot(
+            asset_id=5, account_id=1, qty=Decimal("10"),
+            unit_cost=Decimal("80"), acquired_at=base_datetime - timedelta(days=60),
+        )
+        seed_lot(lot_manager, aapl_lot)
+
+        # Pure sell: 5 AAPL → 600 EUR
+        outflow_tx = make_transaction(id=200, asset_id=5, quantity=Decimal("5"), account_id=1, date_time=base_datetime)
+        inflow_tx = make_transaction(id=201, asset_id=1, quantity=Decimal("600"), account_id=1, date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=5, leg_type=LegType.OUTFLOW, quantity=Decimal("5"), transaction=outflow_tx),
+            make_leg(asset_id=1, leg_type=LegType.INFLOW, quantity=Decimal("600"), transaction=inflow_tx),
+        ]
+        unit = make_unit(legs=legs, pattern="swap")
+
+        result = handle_unit(unit, lot_manager, fmv_service, fifo_config)
+
+        aapl_pnl = [p for p in result.realized_pnl_records if p.asset_id == 5]
+        assert len(aapl_pnl) == 1
+
+        entry = aapl_pnl[0]
+        # Proceeds should be the actual EUR received (600), not FMV (5*100=500)
+        assert entry.proceeds_in_base == Decimal("600")
+        assert entry.proceeds_source == "base_currency"
+        # cost = 5 * 80 = 400, pnl = 600 - 400 = 200
+        assert entry.pnl_in_base == Decimal("200")
+
+    def test_mixed_asset_eur_disposal_still_uses_pro_rata(
+        self, fifo_config, mock_price_service, base_datetime
+    ):
+        """
+        In a mixed-asset unit, the EUR disposal (base currency) should still use
+        the base_currency pro-rata path — only non-base disposals should use FMV.
+        Base currency disposals skip PnL creation anyway, but verify the path is correct.
+        """
+        lot_manager = LotManager(fifo_config)
+        fmv_service = FMVService(mock_price_service, fifo_config)
+
+        # Seed lots
+        eur_lot = create_lot(
+            asset_id=1, account_id=1, qty=Decimal("2000"),
+            unit_cost=Decimal("1"), acquired_at=base_datetime - timedelta(days=30),
+        )
+        seed_lot(lot_manager, eur_lot)
+        aapl_lot = create_lot(
+            asset_id=5, account_id=1, qty=Decimal("10"),
+            unit_cost=Decimal("200"), acquired_at=base_datetime - timedelta(days=60),
+        )
+        seed_lot(lot_manager, aapl_lot)
+
+        # Mixed unit: EUR+AAPL outflow, EUR+AAPL inflow
+        out_eur_tx = make_transaction(id=300, asset_id=1, quantity=Decimal("500"), account_id=1, date_time=base_datetime)
+        out_aapl_tx = make_transaction(id=301, asset_id=5, quantity=Decimal("3"), account_id=1, date_time=base_datetime)
+        in_eur_tx = make_transaction(id=302, asset_id=1, quantity=Decimal("500"), account_id=1, date_time=base_datetime)
+        in_aapl_tx = make_transaction(id=303, asset_id=5, quantity=Decimal("30"), account_id=1, date_time=base_datetime)
+
+        legs = [
+            make_leg(asset_id=1, leg_type=LegType.OUTFLOW, quantity=Decimal("500"), transaction=out_eur_tx),
+            make_leg(asset_id=5, leg_type=LegType.OUTFLOW, quantity=Decimal("3"), transaction=out_aapl_tx),
+            make_leg(asset_id=1, leg_type=LegType.INFLOW, quantity=Decimal("500"), transaction=in_eur_tx),
+            make_leg(asset_id=5, leg_type=LegType.INFLOW, quantity=Decimal("30"), transaction=in_aapl_tx),
+        ]
+        unit = make_unit(legs=legs, pattern="swap", bundle_taxability_override="non_taxable")
+
+        result = handle_unit(unit, lot_manager, fmv_service, fifo_config)
+
+        # EUR disposal is base currency → skips PnL creation entirely
+        eur_pnl = [p for p in result.realized_pnl_records if p.asset_id == 1]
+        assert len(eur_pnl) == 0
+
+        # AAPL disposal should use FMV (not base_currency pro-rata)
+        aapl_pnl = [p for p in result.realized_pnl_records if p.asset_id == 5]
+        assert len(aapl_pnl) == 1
+        entry = aapl_pnl[0]
+        # FMV: 3 * 100 = 300
+        assert entry.proceeds_in_base == Decimal("300")
+        assert entry.proceeds_source != "base_currency"

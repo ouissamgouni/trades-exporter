@@ -14,7 +14,7 @@ import {
 import { BiTransfer } from 'react-icons/bi';
 import { RiExchangeFundsLine } from 'react-icons/ri';
 import { FaQuestion } from 'react-icons/fa';
-import { LuPencil, LuPackageX, LuCheck, LuPlus, LuMinus, LuX } from 'react-icons/lu';
+import { LuPencil, LuPackageX, LuCheck, LuPlus, LuMinus, LuX, LuShieldOff, LuCircleHelp } from 'react-icons/lu';
 import { FiCopy, FiPlusCircle } from 'react-icons/fi';
 import { LuPackage2 } from 'react-icons/lu';
 
@@ -464,7 +464,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Date/Time - click to edit */}
                 {showColumn('date') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')} cursor="pointer">
+                    <Table.Cell py={1} pr={1} onClick={() => !isEditingCell(tx.id, 'date_time') && startCellEdit(tx, 'date_time')} cursor="pointer">
                         {isEditingCell(tx.id, 'date_time') ? (
                             <Input
                                 ref={editInputRef as React.RefObject<HTMLInputElement>}
@@ -485,7 +485,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Source Info - merged column with Source Account, Source, Source Type, Source Symbol */}
                 {showColumn('source') && (
-                    <Table.Cell py={1} cursor="pointer">
+                    <Table.Cell py={1} pr={1} cursor="pointer">
                         {isEditingCell(tx.id, 'account_id') ? (
                             <Flex direction="column" gap={1} minW="120px">
                                 <AccountSelector
@@ -1505,31 +1505,38 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 non_taxable: 'Non-Taxable',
                                 unknown: '?',
                             };
+                            const iconMap: Record<string, React.ReactNode> = {
+                                taxable: <LuCheck size={12} />,
+                                non_taxable: <LuShieldOff size={12} />,
+                                unknown: <LuCircleHelp size={12} />,
+                            };
                             const nextMap: Record<string, string> = {
                                 unknown: 'taxable',
                                 taxable: 'non_taxable',
                                 non_taxable: 'unknown',
                             };
                             return (
-                                <Badge
-                                    size="sm"
-                                    colorPalette={colorMap[status] || 'gray'}
-                                    cursor="pointer"
-                                    onClick={async () => {
-                                        const next = nextMap[status] || 'unknown';
-                                        try {
-                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                method: 'PATCH',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ taxability_status: next }),
-                                            });
-                                            if (!response.ok) throw new Error('Failed to update');
-                                            invalidateTransactionData();
-                                        } catch { }
-                                    }}
-                                >
-                                    {labelMap[status] || status}
-                                </Badge>
+                                <Tooltip content={labelMap[status] || status} openDelay={200}>
+                                    <Badge
+                                        size="sm"
+                                        colorPalette={colorMap[status] || 'gray'}
+                                        cursor="pointer"
+                                        onClick={async () => {
+                                            const next = nextMap[status] || 'unknown';
+                                            try {
+                                                const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                    method: 'PATCH',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ taxability_status: next }),
+                                                });
+                                                if (!response.ok) throw new Error('Failed to update');
+                                                invalidateTransactionData();
+                                            } catch { }
+                                        }}
+                                    >
+                                        {iconMap[status] || status}
+                                    </Badge>
+                                </Tooltip>
                             );
                         })()}
                     </Table.Cell>
@@ -1601,7 +1608,7 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Additional plugin columns */}
                 {additionalColumns.map(col => (
-                    <Table.Cell key={col.id} py={1}>
+                    <Table.Cell key={col.id} py={1} {...(col.cellBg ? { bg: col.cellBg } : {})}>
                         {col.render(tx as Transaction)}
                     </Table.Cell>
                 ))}

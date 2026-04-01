@@ -6,8 +6,11 @@ Models perp fills as USDC margin flows for the P&L engine.
 Opening a position = USDC outflow (margin locked).
 Closing a position = USDC inflow (margin returned ± PnL).
 
-The notional difference between open and close flows captures the
-realized P&L naturally through the USDC lot system.
+The P&L engine treats derivative settlements specially:
+- Gains (perp_close inflows) create zero-cost RealizedPnl entries.
+- Losses (perp_close disposals) override proceeds to zero.
+Both carry related_asset_symbol from tags[0]["coin"] for per-asset attribution.
+
 Stores closedPnl from the API in transaction tags for validation.
 """
 

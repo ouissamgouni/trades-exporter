@@ -62,6 +62,7 @@ class TestVersionMetricsAllTime:
     """Tests for the 'all' range computation."""
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -73,11 +74,12 @@ class TestVersionMetricsAllTime:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_all_time_basic_metrics(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """All-time: total_return = unrealized + realized, roi = tr / cost_basis."""
         version = _make_version()
         session = _make_mock_session(version, _utc(2024, 1, 1), _utc(2024, 6, 1))
+        mock_fees_asset.return_value = {}
 
         mock_lot_current.return_value = ({10: 2.0, 20: 10.0}, {10: 20000.0, 20: 15000.0})
 
@@ -116,6 +118,7 @@ class TestVersionMetricsAllTime:
         assert abs(m.roi_pct - 142.86) < 0.1
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -127,11 +130,12 @@ class TestVersionMetricsAllTime:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_top_flop_ranking(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Top/flop performers should be ranked by total return."""
         version = _make_version()
         session = _make_mock_session(version, _utc(2024, 1, 1), _utc(2024, 6, 1))
+        mock_fees_asset.return_value = {}
 
         mock_lot_current.return_value = (
             {10: 2.0, 20: 10.0, 30: 100.0},
@@ -181,6 +185,7 @@ class TestVersionMetricsRanges:
     """Tests for specific period ranges (1m, 3m, etc.)."""
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -192,13 +197,14 @@ class TestVersionMetricsRanges:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_period_delta_computation(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Period return = unrealized_change + realized_in_period."""
         version = _make_version()
         now = datetime.now(timezone.utc)
         start_date = _utc(2023, 1, 1)
         session = _make_mock_session(version, start_date, now)
+        mock_fees_asset.return_value = {}
 
         now_str = now.strftime("%Y-%m-%d")
 
@@ -273,6 +279,7 @@ class TestVersionMetricsEdgeCases:
         assert result is None
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -284,11 +291,12 @@ class TestVersionMetricsEdgeCases:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_zero_cost_basis_no_division_error(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Zero cost basis should yield 0% ROI, not a division error."""
         version = _make_version()
         session = _make_mock_session(version, _utc(2024, 1, 1), _utc(2024, 6, 1))
+        mock_fees_asset.return_value = {}
 
         mock_lot_current.return_value = ({10: 1.0}, {10: 0.0})
 
@@ -322,6 +330,7 @@ class TestVersionMetricsEdgeCases:
             assert result.ranges[key].roi_pct == 0.0
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -333,11 +342,12 @@ class TestVersionMetricsEdgeCases:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_all_ranges_present(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """All 5 standard ranges should be present in the result."""
         version = _make_version()
         session = _make_mock_session(version, _utc(2024, 1, 1), _utc(2024, 6, 1))
+        mock_fees_asset.return_value = {}
 
         mock_lot_current.return_value = ({}, {})
 
@@ -366,6 +376,7 @@ class TestVersionMetricsEdgeCases:
         assert set(result.ranges.keys()) == {"all", "3y", "1y", "6m", "3m", "1m", "1w"}
 
     @patch(f"{MOCK_PREFIX}._refresh_prices_for_assets")
+    @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._compute_fees_in_period")
     @patch(f"{MOCK_PREFIX}._compute_fee_summary")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
@@ -377,11 +388,12 @@ class TestVersionMetricsEdgeCases:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_flop_only_includes_negatives(
         self, mock_lot_current, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_refresh,
+        mock_symbols, mock_labels, mock_fees, mock_fees_period, mock_fees_asset, mock_refresh,
     ):
         """Flop performers should only include assets with negative total return."""
         version = _make_version()
         session = _make_mock_session(version, _utc(2024, 1, 1), _utc(2024, 6, 1))
+        mock_fees_asset.return_value = {}
 
         mock_lot_current.return_value = ({10: 1.0, 20: 1.0}, {10: 100.0, 20: 100.0})
 

@@ -1467,6 +1467,10 @@ class RealizedPnl(SQLModel, table=True):
     proceeds_price: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(36, 18)))  # Price used for FMV
     proceeds_price_source: Optional[str] = Field(default=None)  # 'coingecko', 'manual', 'fallback', etc.
     proceeds_price_timestamp: Optional[datetime] = Field(default=None)  # When price was fetched
+
+    # Related asset for derivative settlements (e.g., "ETH" for an ETH perp settled in USDC)
+    # Allows grouping derivative PnL under the underlying asset in the UI
+    related_asset_symbol: Optional[str] = Field(default=None, index=True)
     
 
     # Relationships

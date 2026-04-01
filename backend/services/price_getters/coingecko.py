@@ -9,7 +9,7 @@ The external_id should be the CoinGecko coin ID (e.g., "bitcoin", "ethereum", "s
 
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
 from backend.config.loader import (
@@ -348,10 +348,14 @@ class CoinGeckoPriceGetter(BasePriceGetter):
         )
 
         url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+        # Use full-day window (86400s) instead of 1h — narrow windows return
+        # no data for today because CoinGecko aggregates daily prices.
+        day_start = int(datetime.combine(dt.date(), datetime.min.time(),
+                                         tzinfo=timezone.utc).timestamp())
         params = {
             "vs_currency": quote,
-            "from": timestamp,
-            "to": timestamp + 3600,
+            "from": day_start,
+            "to": day_start + 86400,
         }
 
         data = self._fetch_from_api(

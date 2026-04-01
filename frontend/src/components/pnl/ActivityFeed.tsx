@@ -450,7 +450,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                         onClick={() => setHasFees(v => !v)}
                     >
                         💸
-                        <Text ml={1}>Fees{filterOptions ? ` (${filterOptions.has_fees_count})` : ''}</Text>
+                        <Text ml={1}>Has Fees{filterOptions ? ` (${filterOptions.has_fees_count})` : ''}</Text>
                     </Button>
                 </Flex>
                 {/* Active filter indicator */}

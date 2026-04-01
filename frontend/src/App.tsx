@@ -7,8 +7,11 @@ import { API_URL, SyncJobProgress, ConnectorProgress, Account, Asset, BundleSugg
 import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext';
 import { defaultFilterState } from './components/TransactionFilters';
 import { FiActivity, FiCheckCircle } from 'react-icons/fi';
+import logoSrc from './assets/logo.png';
 import { DataHealthCheckDrawer } from './components/DataHealthCheckDrawer';
 import { useAssets } from './hooks/useAssets';
+import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
+import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
 import type { PnLCalcStatus } from './components/pnl/types';
 
 // Setup status interface
@@ -175,21 +178,59 @@ const AppContent = () => {
     return (
         <Box minH="100vh" bg="gray.50">
             <TestModeBanner />
-            <Container maxW="6xl" py={8}>
-                <Heading as="h1" size="xl" mb={4} textAlign="center" color="blue.700">
-                    Trades Exporter
-                </Heading>
+            <Container maxW="8xl" py={2}>
+                {/* Compact header: Title (left) + Workflow (center) + Data Health (right) */}
+                <Flex align="center" justify="space-between" mb={2} flexWrap="wrap" gap={2}>
+                    <Heading as="h1" size="md" color="blue.700" whiteSpace="nowrap">
+                        <Flex align="center" gap={1.5} display="inline-flex">
+                            <img src={logoSrc} alt="TradeTrail" width={24} height={24} />
+                            TradeTrail
+                        </Flex>
+                    </Heading>
 
-                {/* Workflow indicator */}
-                <HStack justify="center" mb={6} flexWrap="wrap" gap={2}>
-                    <Badge colorScheme="gray" px={2} py={1}>1. Setup</Badge>
-                    <Text color="gray.400">→</Text>
-                    <Badge colorScheme="blue" px={2} py={1}>2. Sync/Add</Badge>
-                    <Text color="gray.400">→</Text>
-                    <Badge colorScheme="orange" px={2} py={1}>3. Review</Badge>
-                    <Text color="gray.400">→</Text>
-                    <Badge colorScheme="green" px={2} py={1}>4. P&L</Badge>
-                </HStack>
+                    <HStack gap={1.5} flexWrap="wrap">
+                        <Badge colorScheme="gray" size="sm" px={1.5} py={0.5}>1. Setup</Badge>
+                        <Text color="gray.400" fontSize="xs">→</Text>
+                        <Badge colorScheme="blue" size="sm" px={1.5} py={0.5}>2. Sync/Add</Badge>
+                        <Text color="gray.400" fontSize="xs">→</Text>
+                        <Badge colorScheme="orange" size="sm" px={1.5} py={0.5}>3. Review</Badge>
+                        <Text color="gray.400" fontSize="xs">→</Text>
+                        <Badge colorScheme="green" size="sm" px={1.5} py={0.5}>4. P&L</Badge>
+                    </HStack>
+
+                    {/* Data Health Badge — moved from tab bar */}
+                    <Box>
+                        {validationSummary && (
+                            <Button
+                                variant="ghost"
+                                p={0}
+                                onClick={() => {
+                                    refreshHealthData();
+                                    setIsHealthCheckOpen(true);
+                                }}
+                                cursor="pointer"
+                                _hover={{ transform: 'scale(1.05)' }}
+                                transition="all 0.2s"
+                            >
+                                {validationSummary.has_issues ? (
+                                    <Badge colorPalette="orange" size="lg" variant="solid" px={3} py={1}>
+                                        <Flex align="center" gap={1}>
+                                            <FiActivity />
+                                            <Text>Data Issues: {validationSummary.total_issues}</Text>
+                                        </Flex>
+                                    </Badge>
+                                ) : (
+                                    <Badge colorPalette="green" size="lg" variant="subtle" px={3} py={1}>
+                                        <Flex align="center" gap={1}>
+                                            <FiCheckCircle />
+                                            <Text>Data Healthy</Text>
+                                        </Flex>
+                                    </Badge>
+                                )}
+                            </Button>
+                        )}
+                    </Box>
+                </Flex>
 
                 <Tabs.Root defaultValue="setup" lazyMount value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
                     <Tabs.List>
@@ -258,38 +299,6 @@ const AppContent = () => {
                             <Tabs.Trigger value="prices">📈 Prices</Tabs.Trigger>
                         </Box>
 
-                        {/* Global Data Health Badge */}
-                        <Box ml="auto" display="flex" alignItems="center" gap={2}>
-                            {validationSummary && (
-                                <Button
-                                    variant="ghost"
-                                    p={0}
-                                    onClick={() => {
-                                        refreshHealthData();
-                                        setIsHealthCheckOpen(true);
-                                    }}
-                                    cursor="pointer"
-                                    _hover={{ transform: 'scale(1.05)' }}
-                                    transition="all 0.2s"
-                                >
-                                    {validationSummary.has_issues ? (
-                                        <Badge colorPalette="orange" size="lg" variant="solid" px={3} py={1}>
-                                            <Flex align="center" gap={1}>
-                                                <FiActivity />
-                                                <Text>Data Issues: {validationSummary.total_issues}</Text>
-                                            </Flex>
-                                        </Badge>
-                                    ) : (
-                                        <Badge colorPalette="green" size="lg" variant="subtle" px={3} py={1}>
-                                            <Flex align="center" gap={1}>
-                                                <FiCheckCircle />
-                                                <Text>Data Healthy</Text>
-                                            </Flex>
-                                        </Badge>
-                                    )}
-                                </Button>
-                            )}
-                        </Box>
                     </Tabs.List>
 
                     {/* Step 1: Configuration */}
@@ -374,9 +383,12 @@ const AppContent = () => {
 const App = () => {
     return (
         <QueryClientProvider client={queryClient}>
+            <AssetDetailPanelProvider>
             <DataHealthProvider>
                 <AppContent />
+                <AssetDetailSlidePanel />
             </DataHealthProvider>
+            </AssetDetailPanelProvider>
         </QueryClientProvider>
     );
 };

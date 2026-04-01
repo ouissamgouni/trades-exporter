@@ -135,7 +135,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
             >
                 {/* Left: Item count info */}
                 {showItemCount && (
-                    <Text fontSize="sm" color="gray.600" _dark={{ color: 'gray.400' }}>
+                    <Text fontSize="xs" color="gray.600" _dark={{ color: 'gray.400' }}>
                         Showing {startItem}-{endItem} of <strong>{total}</strong> items
                     </Text>
                 )}
@@ -220,7 +220,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
                 {/* Right: Page size selector */}
                 {showPageSizeSelector && (
                     <Flex align="center" gap={2}>
-                        <Text fontSize="sm" color="gray.600" _dark={{ color: 'gray.400' }}>
+                        <Text fontSize="xs" color="gray.600" _dark={{ color: 'gray.400' }}>
                             Per page:
                         </Text>
                         <NativeSelect.Root size="sm" width="75px">

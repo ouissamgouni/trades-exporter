@@ -152,20 +152,22 @@ export const BundlesListPanel: React.FC<BundlesListPanelProps> = ({
 
     return (
         <Box>
-            {/* Header */}
-            <Flex justify="space-between" align="center" mb={4}>
-                <Heading size="sm">{title} ({isLoading ? '...' : bundles.length})</Heading>
-                <Flex gap={2}>
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleRefresh}
-                        disabled={isLoading}
-                    >
-                        {isLoading ? <Spinner size="xs" /> : '↻'} Refresh
-                    </Button>
+            {/* Header — only when title is provided */}
+            {title && (
+                <Flex justify="space-between" align="center" mb={4}>
+                    <Heading size="sm">{title} ({isLoading ? '...' : bundles.length})</Heading>
+                    <Flex gap={2}>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleRefresh}
+                            disabled={isLoading}
+                        >
+                            {isLoading ? <Spinner size="xs" /> : '↻'} Refresh
+                        </Button>
+                    </Flex>
                 </Flex>
-            </Flex>
+            )}
 
             {/* Error state */}
             {error && (

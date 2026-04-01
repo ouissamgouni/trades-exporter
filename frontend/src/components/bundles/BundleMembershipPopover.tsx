@@ -30,15 +30,6 @@ import { TaxabilityStatus, UnitPattern } from '../../enums';
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
-// Pattern colors - same as BundleTable / SuggestionPopover
-const patternColors: Record<string, string> = {
-    [UnitPattern.INTERNAL_TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-    [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.FLOW]: 'cyan',
-    [UnitPattern.CUSTOM]: 'purple',
-};
-
 interface BundleMembershipPopoverProps {
     /** The bundle ID to display */
     bundleId: number;
@@ -68,6 +59,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
     const [error, setError] = useState<string | null>(null);
     const [taxability, setTaxability] = useState<string>(TaxabilityStatus.UNKNOWN);
     const [taxabilityLoading, setTaxabilityLoading] = useState(false);
+    const [pattern, setPattern] = useState<string>(UnitPattern.UNKNOWN);
 
     // Fetch bundle details lazily when opened
     useEffect(() => {
@@ -83,6 +75,7 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                 const data = await response.json();
                 if (!cancelled) setBundle(data);
                 if (!cancelled) setTaxability(data.taxability_override || TaxabilityStatus.UNKNOWN);
+                if (!cancelled) setPattern(data.pattern || UnitPattern.UNKNOWN);
             } catch (err) {
                 if (!cancelled) setError(err instanceof Error ? err.message : 'Unknown error');
             } finally {
@@ -94,36 +87,55 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
         return () => { cancelled = true; };
     }, [open, bundleId]);
 
-    // Update taxability override via PATCH
-    const handleTaxabilityChange = async (newValue: string) => {
-        setTaxability(newValue);
-        setTaxabilityLoading(true);
+    // Update bundle field via PATCH
+    const patchBundle = async (updates: Record<string, any>, label: string) => {
         try {
             const response = await fetch(`${API_URL}/bundles/${bundleId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue,
-                }),
+                body: JSON.stringify(updates),
             });
-            if (!response.ok) throw new Error('Failed to update taxability');
+            if (!response.ok) throw new Error(`Failed to update ${label}`);
 
             queryClient.invalidateQueries({ queryKey: ['bundles'] });
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
 
             toaster.success({
-                title: 'Taxability updated',
-                description: `Bundle #${bundleId} set to ${newValue}`,
+                title: `${label} updated`,
+                description: `Bundle #${bundleId}`,
             });
         } catch (err) {
-            // Revert on failure
-            setTaxability(bundle?.taxability_override || TaxabilityStatus.UNKNOWN);
             toaster.error({
                 title: 'Error',
-                description: err instanceof Error ? err.message : 'Failed to update taxability',
+                description: err instanceof Error ? err.message : `Failed to update ${label}`,
             });
+            throw err;
+        }
+    };
+
+    const handleTaxabilityChange = async (newValue: string) => {
+        const prev = taxability;
+        setTaxability(newValue);
+        setTaxabilityLoading(true);
+        try {
+            await patchBundle(
+                { taxability_override: newValue === TaxabilityStatus.UNKNOWN ? null : newValue },
+                'Taxability',
+            );
+        } catch {
+            setTaxability(prev);
         } finally {
             setTaxabilityLoading(false);
+        }
+    };
+
+    const handlePatternChange = async (newValue: string) => {
+        const prev = pattern;
+        setPattern(newValue);
+        try {
+            await patchBundle({ pattern: newValue }, 'Pattern');
+        } catch {
+            setPattern(prev);
         }
     };
 
@@ -191,12 +203,34 @@ export const BundleMembershipPopover: React.FC<BundleMembershipPopoverProps> = (
                                 {loading ? (
                                     <Spinner size="xs" />
                                 ) : bundle ? (
-                                    <Badge
-                                        colorPalette={patternColors[bundle.pattern || ''] || 'gray'}
-                                        size="sm"
-                                    >
-                                        {bundle.pattern || 'unknown'}
-                                    </Badge>
+                                    <NativeSelect.Root size="sm" width="120px">
+                                        <NativeSelect.Field
+                                            value={pattern}
+                                            onChange={(e) => handlePatternChange(e.target.value)}
+                                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                            style={{
+                                                fontSize: '11px',
+                                                padding: '2px 6px',
+                                                fontWeight: 600,
+                                                backgroundColor: {
+                                                    [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                                    [UnitPattern.SWAP]: '#FEEBC8',
+                                                    [UnitPattern.SPLIT]: '#E9D8FD',
+                                                    [UnitPattern.FLOW]: '#C6F6D5',
+                                                    [UnitPattern.CUSTOM]: '#E2E8F0',
+                                                    [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                                }[pattern] || '#EDF2F7',
+                                                borderRadius: '4px',
+                                            }}
+                                        >
+                                            <option value={UnitPattern.SWAP}>Swap</option>
+                                            <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
+                                            <option value={UnitPattern.SPLIT}>Split</option>
+                                            <option value={UnitPattern.FLOW}>Flow</option>
+                                            <option value={UnitPattern.CUSTOM}>Custom</option>
+                                            <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                                        </NativeSelect.Field>
+                                    </NativeSelect.Root>
                                 ) : null}
                                 <Badge size="sm" colorPalette="purple" variant="subtle">
                                     📦 #{bundleId}

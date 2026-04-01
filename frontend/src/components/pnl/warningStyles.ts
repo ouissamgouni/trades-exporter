@@ -71,6 +71,42 @@ export function getWarningTypeConfig(warningType: string): WarningTypeConfig {
         };
     }
 
+    // FMV fetch failures — price service could not retrieve a quote
+    if (warningType === 'fmv_fetch_failed') {
+        return {
+            colorPalette: 'purple',
+            icon: '💰',
+            level: 'warning',
+        };
+    }
+
+    // Zero-cost lot — phantom gains risk
+    if (warningType === 'zero_cost_lot') {
+        return {
+            colorPalette: 'orange',
+            icon: '⚠️',
+            level: 'warning',
+        };
+    }
+
+    // Unmatched group — disposal group could not be paired
+    if (warningType === 'unmatched_group') {
+        return {
+            colorPalette: 'orange',
+            icon: '⚠️',
+            level: 'warning',
+        };
+    }
+
+    // Fee consumption failed — non-critical
+    if (warningType === 'fee_consumption_failed') {
+        return {
+            colorPalette: 'gray',
+            icon: 'ℹ️',
+            level: 'info',
+        };
+    }
+
     // Unexpected errors
     if (warningType === 'unexpected_error') {
         return {

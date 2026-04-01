@@ -197,8 +197,8 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     return (
       <Box
         key={tab.id}
-        px={{ base: 2, md: 3 }}
-        py={2}
+        px={{ base: 1.5, md: 2 }}
+        py={1.5}
         borderRadius="md"
         cursor="pointer"
         bg={isActive ? "blue.500" : "white"}
@@ -213,9 +213,9 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
         transition="all 0.2s"
         minW={{ base: "auto", md: "110px" }}
       >
-        <HStack justify="center" gap={1.5}>
-          <Text fontSize={{ base: "sm", md: "md" }}>{tab.icon}</Text>
-          <Text fontWeight="semibold" fontSize={{ base: "xs", md: "sm" }} display={{ base: "none", sm: "block" }}>
+        <HStack justify="center" gap={1}>
+          <Text fontSize={{ base: "xs", md: "sm" }}>{tab.icon}</Text>
+          <Text fontWeight="semibold" fontSize={{ base: "2xs", md: "xs" }} display={{ base: "none", sm: "block" }}>
             {tab.label}
           </Text>
           {hasSubItems && (
@@ -243,8 +243,8 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     return (
       <Box
         key={item.id}
-        px={3}
-        py={1.5}
+        px={2}
+        py={1}
         borderRadius="full"
         cursor="pointer"
         bg={isActive ? "blue.50" : "white"}
@@ -285,12 +285,12 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     <Container maxW="container.xl" py={1}>
       <VStack align="stretch" gap={1}>
         {/* Header with overall progress */}
-        <Flex justify="space-between" align="right" mb={2} flexWrap="wrap" gap={3}>
+        <Flex justify="space-between" align="right" mb={1} flexWrap="wrap" gap={2}>
           <Badge
             colorScheme={completionPercentage === 100 ? "green" : "orange"}
-            fontSize="xs"
-            px={3}
-            py={1}
+            fontSize="2xs"
+            px={2}
+            py={0.5}
             borderRadius="md"
           >
             {completionPercentage}% Complete
@@ -302,12 +302,12 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
           borderWidth={1}
           borderRadius="lg"
           bg="white"
-          p={{ base: 2, md: 3 }}
+          p={{ base: 1.5, md: 2 }}
         >
           {/* Primary Tabs Row */}
           <HStack
-            gap={{ base: 1.5, md: 2 }}
-            mb={secondaryItems.length > 0 ? 3 : 0}
+            gap={{ base: 1, md: 1.5 }}
+            mb={secondaryItems.length > 0 ? 2 : 0}
             flexWrap={{ base: "wrap", md: "nowrap" }}
             justify={{ base: "center", md: "flex-start" }}
           >
@@ -317,7 +317,7 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
           {/* Secondary Items Row (Pills) */}
           {secondaryItems.length > 0 && (
             <Box
-              pt={3}
+              pt={2}
               borderTopWidth={1}
               borderColor="gray.100"
             >
@@ -336,7 +336,7 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
         <Box
           borderWidth={1}
           borderRadius="lg"
-          p={{ base: 4, md: 6 }}
+          p={{ base: 2, md: 3 }}
           bg="white"
           minH="500px"
         >

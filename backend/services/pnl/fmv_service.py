@@ -49,9 +49,11 @@ class FMVService:
         self,
         price_service: Optional[Any],
         config: PnLConfig,
+        session: Optional[Any] = None,
     ):
         self.price_service = price_service
         self.config = config
+        self.session = session
 
         # Cache for failed lookups to avoid repeated attempts
         self._failed_lookups: Dict[Tuple[int, str], str] = {}
@@ -161,7 +163,30 @@ class FMVService:
                             timestamp=dt,
                         )
                 
-                # No price found
+                # No price found — try stablecoin peg fallback
+                asset_symbol = getattr(tx, 'asset_symbol', None)
+                peg_currency = (
+                    self.config.stablecoin_pegs.get(asset_symbol)
+                    if asset_symbol and self.config.stablecoin_pegs
+                    else None
+                )
+                if peg_currency and self.session and self.price_service and hasattr(self.price_service, 'converter'):
+                    try:
+                        forex_rate = self.price_service.converter.convert(
+                            self.session, 1.0, peg_currency, self.config.base_currency_symbol, dt
+                        )
+                        if forex_rate and forex_rate > 0:
+                            value = Decimal(str(qty)) * Decimal(str(forex_rate))
+                            return FMVResult(
+                                value=value,
+                                success=True,
+                                source="stablecoin_peg",
+                                price=Decimal(str(forex_rate)),
+                                timestamp=dt,
+                            )
+                    except Exception as peg_err:
+                        log.warning(f"Stablecoin peg fallback failed for {asset_symbol}: {peg_err}")
+
                 error = f"No price found for asset {asset_id}"
                 self._failed_lookups[cache_key] = error
                 if skip_on_error:

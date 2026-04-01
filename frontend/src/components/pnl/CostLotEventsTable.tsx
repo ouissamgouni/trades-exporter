@@ -21,9 +21,8 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Box, Flex, Button, Badge, Text, IconButton, Spinner } from '@chakra-ui/react';
 import { Table } from '@chakra-ui/react';
 import { Tooltip } from '../ui/tooltip';
-import { FiHelpCircle, FiRefreshCw } from 'react-icons/fi';
+import { FiHelpCircle, FiRefreshCw, FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight } from 'react-icons/fi';
 import { usePagination } from '../../hooks/usePagination';
-import { TablePagination } from '../TablePagination';
 import { formatDateTimeLocale } from '../../utils/dateUtils';
 import { CostLotEventEntry, LotEventType } from './types';
 import { AssetRef, API_URL } from '../../types';
@@ -385,6 +384,8 @@ const useLotEventsQuery = (params: UseLotEventsQueryParams): UseLotEventsQueryRe
 interface FilterOptions {
     assets: { id: number; symbol: string; label?: string }[];
     accounts: { id: number; name: string }[];
+    eventTypes: { value: string; label?: string; count: number }[];
+    unitPatterns: { value: string; label?: string; count: number }[];
 }
 
 interface UseFilterOptionsResult {
@@ -394,7 +395,7 @@ interface UseFilterOptionsResult {
 }
 
 const useFilterOptions = (versionId: number): UseFilterOptionsResult => {
-    const [options, setOptions] = useState<FilterOptions>({ assets: [], accounts: [] });
+    const [options, setOptions] = useState<FilterOptions>({ assets: [], accounts: [], eventTypes: [], unitPatterns: [] });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const fetchedRef = useRef(false);
@@ -421,6 +422,8 @@ const useFilterOptions = (versionId: number): UseFilterOptionsResult => {
                 setOptions({
                     assets: data.assets || [],
                     accounts: data.accounts || [],
+                    eventTypes: data.event_types || [],
+                    unitPatterns: data.unit_patterns || [],
                 });
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Unknown error');
@@ -692,6 +695,8 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                         eventCounts={eventCounts}
                         assets={filterOptions.assets}
                         accounts={filterOptions.accounts}
+                        eventTypeOptions={filterOptions.eventTypes}
+                        unitPatternOptions={filterOptions.unitPatterns}
                         isLoading={isRefreshing || isLoadingFilterOptions}
                         showDateRange={enabledFeatures.dateRangeFilter}
                         showEventTypes={enabledFeatures.eventTypeFilters}
@@ -785,6 +790,8 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     eventCounts={eventCounts}
                     assets={filterOptions.assets}
                     accounts={filterOptions.accounts}
+                    eventTypeOptions={filterOptions.eventTypes}
+                    unitPatternOptions={filterOptions.unitPatterns}
                     isLoading={isRefreshing || isLoadingFilterOptions}
                     showDateRange={enabledFeatures.dateRangeFilter}
                     showEventTypes={enabledFeatures.eventTypeFilters}
@@ -1141,15 +1148,48 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
             </Box>
 
             {/* Pagination */}
-            {!hidePagination && enabledFeatures.pagination && (
-                <TablePagination
-                    page={pagination.page}
-                    pageSize={pagination.pageSize}
-                    total={total}
-                    onPageChange={pagination.setPage}
-                    onPageSizeChange={pagination.setPageSize}
-                />
-            )}
+            {!hidePagination && enabledFeatures.pagination && total > 0 && (() => {
+                const PAGE_SIZE_OPTIONS = [25, 50, 100];
+                const pageCount = Math.max(1, Math.ceil(total / pagination.pageSize));
+                const safePage = pagination.page;
+                return (
+                    <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
+                        <Flex align="center" gap={2}>
+                            <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                            <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                                {PAGE_SIZE_OPTIONS.map(size => (
+                                    <Button key={size} size="2xs"
+                                        variant={pagination.pageSize === size ? 'subtle' : 'ghost'}
+                                        colorPalette={pagination.pageSize === size ? 'blue' : 'gray'}
+                                        borderRadius="0"
+                                        onClick={() => { pagination.setPageSize(size); pagination.setPage(1); }}
+                                        px={2} fontSize="xs">
+                                        {size}
+                                    </Button>
+                                ))}
+                            </Flex>
+                        </Flex>
+                        <Text fontSize="2xs" color="gray.500">
+                            {(safePage - 1) * pagination.pageSize + 1}–{Math.min(safePage * pagination.pageSize, total)} of {total}
+                        </Text>
+                        <Flex align="center" gap={1}>
+                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(1)} disabled={safePage <= 1} px={1}>
+                                <FiChevronsLeft size={12} />
+                            </Button>
+                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage - 1)} disabled={safePage <= 1} px={1}>
+                                <FiChevronLeft size={14} />
+                            </Button>
+                            <Text fontSize="xs" color="gray.600" mx={1}>{safePage} / {pageCount}</Text>
+                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(safePage + 1)} disabled={safePage >= pageCount} px={1}>
+                                <FiChevronRight size={14} />
+                            </Button>
+                            <Button size="2xs" variant="ghost" onClick={() => pagination.setPage(pageCount)} disabled={safePage >= pageCount} px={1}>
+                                <FiChevronsRight size={12} />
+                            </Button>
+                        </Flex>
+                    </Flex>
+                );
+            })()}
         </Box>
     );
 };

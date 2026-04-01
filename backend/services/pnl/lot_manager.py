@@ -681,3 +681,53 @@ class LotManager:
         """Clear all lots (for testing)."""
         self.lots_map.clear()
         self.negative_lots_map.clear()
+
+
+# =============================================================================
+# Standalone force-settle (outside engine context)
+# =============================================================================
+
+def force_settle_lot(session: Session, lot_id: int, max_base_value: Decimal = Decimal("1.0")) -> CostLot:
+    """
+    Manually force-settle a small unsettled negative lot (dust).
+
+    Validates that the lot is negative, unsettled, and its absolute base value
+    is below ``max_base_value``. Sets qty_remaining=0 and is_settled=True,
+    then emits a SETTLED event without a triggering transaction (manual action).
+
+    Raises:
+        ValueError: if lot not found, not eligible, or too large.
+    """
+    lot = session.get(CostLot, lot_id)
+    if lot is None:
+        raise ValueError(f"Lot {lot_id} not found")
+    if not lot.is_negative:
+        raise ValueError(f"Lot {lot_id} is not a negative lot")
+    if lot.is_settled:
+        raise ValueError(f"Lot {lot_id} is already settled")
+
+    abs_value = abs(lot.qty_remaining * lot.unit_cost_in_base)
+    if abs_value > max_base_value:
+        raise ValueError(
+            f"Lot {lot_id} value ({float(abs_value):.4f}) exceeds threshold ({float(max_base_value):.2f})"
+        )
+
+    qty_delta = -lot.qty_remaining  # move qty_remaining to 0
+    cost_delta = qty_delta * lot.unit_cost_in_base
+
+    lot.qty_remaining = Decimal(0)
+    lot.is_settled = True
+    lot.notes = (lot.notes + "; " if lot.notes else "") + "manual-settle: dust"
+
+    event = CostLotEvent(
+        event_type=LotEventType.SETTLED.value,
+        quantity_delta=qty_delta,
+        cost_basis_delta=cost_delta,
+        qty_remaining_after=Decimal(0),
+        cost_basis_remaining_after=Decimal(0),
+        timestamp=utc_now(),
+    )
+    lot.events.append(event)
+
+    session.add(lot)
+    return lot

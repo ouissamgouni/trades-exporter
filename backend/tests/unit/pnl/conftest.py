@@ -121,6 +121,7 @@ def mock_price_service():
         5: Decimal("100"),  # AAPL
         6: Decimal("0.90"),  # CHF
         7: Decimal("0.0067"),  # JPY
+        8: Decimal("0.90"),  # USDC (in EUR)
     }
 
     def get_price(asset_id, dt=None, price_quote=None):
@@ -165,6 +166,7 @@ def mock_asset_service():
         5: Mock(asset_id=5, symbol="AAPL", asset_type="stock"),
         6: Mock(asset_id=6, symbol="CHF", asset_type="fiat"),
         7: Mock(asset_id=7, symbol="JPY", asset_type="fiat"),
+        8: Mock(asset_id=8, symbol="USDC", asset_type="crypto"),
     }
 
     def get_asset(asset_id):
@@ -179,8 +181,8 @@ def mock_asset_service():
 # ============================================================================
 
 # Standard asset/symbol mappings for tests
-ASSET_SYMBOL_MAP = {1: "EUR", 2: "BTC", 3: "ETH", 4: "USDT", 5: "AAPL", 6: "CHF", 7: "JPY"}
-ASSET_TYPE_MAP = {1: "fiat", 2: "crypto", 3: "crypto", 4: "crypto", 5: "stock", 6: "fiat", 7: "fiat"}
+ASSET_SYMBOL_MAP = {1: "EUR", 2: "BTC", 3: "ETH", 4: "USDT", 5: "AAPL", 6: "CHF", 7: "JPY", 8: "USDC"}
+ASSET_TYPE_MAP = {1: "fiat", 2: "crypto", 3: "crypto", 4: "crypto", 5: "stock", 6: "fiat", 7: "fiat", 8: "crypto"}
 
 
 def make_asset(asset_id: int, symbol: str = None) -> Asset:

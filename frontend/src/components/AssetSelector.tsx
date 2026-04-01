@@ -259,7 +259,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                         _hover={{ bg: 'gray.100' }}
                         onClick={() => handleSelect(null)}
                         color="gray.500"
-                        fontSize="sm"
+                        fontSize="xs"
                     >
                         -- Not linked --
                     </Box>
@@ -273,7 +273,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                             bg={value === asset.asset_id ? 'blue.50' : undefined}
                             _hover={{ bg: 'blue.100' }}
                             onClick={() => handleSelect(asset.asset_id!)}
-                            fontSize="sm"
+                            fontSize="xs"
                         >
                             <Text fontWeight="medium">{asset.symbol}</Text>
                             {asset.label && <Text fontSize="xs" color="gray.500">{asset.label}</Text>}
@@ -282,7 +282,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
                     {/* No results / Create new */}
                     {filteredAssets.length === 0 && (
-                        <Box p={2} color="gray.500" fontSize="sm">
+                        <Box p={2} color="gray.500" fontSize="xs">
                             No assets found
                         </Box>
                     )}
@@ -294,7 +294,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
                         _hover={{ bg: 'green.50' }}
                         onClick={openCreateDialog}
                         color="green.600"
-                        fontSize="sm"
+                        fontSize="xs"
                         borderTop="1px solid"
                         borderColor="gray.100"
                     >
