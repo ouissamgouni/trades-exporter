@@ -18,6 +18,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Optional, List
 
+from sqlalchemy import text
+
 from backend.config.loader import configure_logging
 
 log = configure_logging("pnl_calculation_service")
@@ -227,6 +229,15 @@ class PnLCalculationService:
                 if previous_auto_version_id and previous_auto_version_id != new_version_id:
                     old_version = session.get(CalculationVersion, previous_auto_version_id)
                     if old_version and old_version.trigger in ("auto", "refresh") and old_version.status == "draft":
+                        # Clear self-referencing FKs before cascade delete
+                        session.exec(
+                            text(
+                                "UPDATE cost_lots SET settled_by_lot_id = NULL, source_lot_id = NULL "
+                                "WHERE unit_id IN ("
+                                "  SELECT id FROM calculation_units WHERE version_id = :vid"
+                                ")"
+                            ).bindparams(vid=previous_auto_version_id)
+                        )
                         session.delete(old_version)
                         session.commit()
                         log.info("pnl_old_auto_draft_deleted", old_version_id=previous_auto_version_id)

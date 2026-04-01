@@ -400,6 +400,20 @@ class PersistenceStage(PipelineStage):
         # Handle tags
         tags = tx.tags if isinstance(tx.tags, list) else []
 
+        # Auto-detect include_fee for trades: when the fee is denominated in the
+        # same asset as the inflow, the exchange already deducted it from the
+        # received quantity — including it again as a separate disposal would
+        # double-count and create a spurious negative lot.
+        include_fee = tx.include_fee or False
+        if tx.transaction_type == "trade" and include_fee and tx.source_fee_quote_asset_symbol:
+            fee_sym = (tx.source_fee_quote_asset_symbol or "").upper()
+            if tx.direction == "inflow" and fee_sym == (tx.source_asset_symbol or "").upper():
+                # Buy: fee in same asset as what we receive → already deducted
+                include_fee = False
+            elif tx.direction == "outflow" and fee_sym == (tx.source_price_quote_asset_symbol or "").upper():
+                # Sell: fee in quote currency → already deducted from proceeds
+                include_fee = False
+
         return NormalizedTransaction(
             source=tx.source,
             account_id=tx.account_id,
@@ -420,7 +434,7 @@ class PersistenceStage(PipelineStage):
             quantity=tx.quantity,
             price=tx.price,
             fee=tx.fee,
-            include_fee=tx.include_fee or False,
+            include_fee=include_fee,
             taxability_status=tx.taxability_status or "unknown",
             source_from_account=tx.source_from_account,
             source_to_account=tx.source_to_account,

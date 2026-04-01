@@ -5,7 +5,7 @@ import {
     Table, Tabs, Tag, Text, Textarea, Progress
 } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { LuChevronDown, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2, LuX } from 'react-icons/lu';
+import { LuChevronDown, LuChevronLeft, LuChevronRight, LuChevronsLeft, LuChevronsRight, LuFilter, LuPlay, LuSearch, LuCheck, LuTags, LuSettings, LuTrash2, LuX } from 'react-icons/lu';
 import { API_URL, Asset, AssetPriceGetter, Category, DimensionCategories } from '../types';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
@@ -17,6 +17,9 @@ import { toaster } from './ui/toaster';
 
 // Use ASSET_TYPE_OPTIONS but it now only has 3 values: crypto, stock, fiat
 const PRICE_TYPE_OPTIONS = ASSET_TYPE_OPTIONS;
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
 
 interface PriceGetterFormData {
     price_getter: string;
@@ -147,6 +150,10 @@ export const AssetsEditor: React.FC = () => {
     const [mockModeEnabled, setMockModeEnabled] = useState(false);
     const [mockModeLoading, setMockModeLoading] = useState(false);
 
+    // Pagination
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+
     // Price getter test modal
     const [showTestModal, setShowTestModal] = useState(false);
     const [testModalGetter, setTestModalGetter] = useState<AssetPriceGetter | null>(null);
@@ -246,6 +253,18 @@ export const AssetsEditor: React.FC = () => {
             return true;
         });
     }, [allAssets, searchFilter, statusFilter, typeFilter, categoryFilter, priceGetterFilter]);
+
+    // Pagination computation
+    const totalRows = assets.length;
+    const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage = Math.min(page, pageCount - 1);
+    const paginatedAssets = useMemo(() => {
+        const start = safePage * pageSize;
+        return assets.slice(start, start + pageSize);
+    }, [assets, safePage, pageSize]);
+
+    // Reset page when filters change
+    useEffect(() => { setPage(0); }, [searchFilter, statusFilter, typeFilter, categoryFilter, priceGetterFilter]);
 
     // Clear selection when filters change
     useEffect(() => {
@@ -1029,27 +1048,42 @@ export const AssetsEditor: React.FC = () => {
         if (!asset.categories || asset.categories.length === 0) {
             return <Text color="gray.400" fontSize="2xs">—</Text>;
         }
+        const MAX_VISIBLE = 2;
+        const visible = asset.categories.slice(0, MAX_VISIBLE);
+        const remaining = asset.categories.length - MAX_VISIBLE;
         return (
-            <Flex gap={0.5} flexWrap="wrap">
-                {asset.categories.slice(0, 4).map(cat => (
-                    <Badge
+            <Flex direction="column" gap={0}>
+                {visible.map(cat => (
+                    <Text
                         key={cat.id}
                         fontSize="2xs"
-                        px={1}
-                        py={0}
-                        lineHeight="1.4"
-                        style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
-                        colorPalette={!cat.color ? 'gray' : undefined}
-                        variant="subtle"
+                        lineHeight="1.5"
+                        whiteSpace="nowrap"
+                        overflow="hidden"
+                        textOverflow="ellipsis"
+                        maxW="260px"
                         title={`${cat.dimension_label}: ${cat.label}`}
                     >
-                        {cat.dimension_label?.charAt(0)}: {cat.label}
-                    </Badge>
+                        <Text as="span" fontWeight="semibold" color="gray.500">{cat.dimension_label}:</Text>{' '}
+                        <Badge
+                            fontSize="2xs"
+                            px={1}
+                            py={0}
+                            lineHeight="1.3"
+                            style={cat.color ? { backgroundColor: cat.color, color: '#fff' } : undefined}
+                            colorPalette={!cat.color ? 'gray' : undefined}
+                            variant="subtle"
+                        >
+                            {cat.label}
+                        </Badge>
+                    </Text>
                 ))}
-                {asset.categories.length > 4 && (
-                    <Badge fontSize="2xs" px={1} py={0} colorPalette="gray" variant="outline">
-                        +{asset.categories.length - 4}
-                    </Badge>
+                {remaining > 0 && (
+                    <Tooltip content={asset.categories.slice(MAX_VISIBLE).map(c => `${c.dimension_label}: ${c.label}`).join('\n')}>
+                        <Text fontSize="2xs" color="blue.500" cursor="pointer" _hover={{ textDecoration: 'underline' }}>
+                            +{remaining} more
+                        </Text>
+                    </Tooltip>
                 )}
             </Flex>
         );
@@ -1065,10 +1099,9 @@ export const AssetsEditor: React.FC = () => {
 
     const renderPriceGetters = (asset: Asset) => {
         if (!asset.price_getters || asset.price_getters.length === 0) {
-            return <Text color="gray.400" fontSize="xs">None (uses default)</Text>;
+            return <Text color="gray.400" fontSize="2xs">—</Text>;
         }
 
-        // Helper to format params for tooltip
         const formatParams = (params: Record<string, any>) => {
             if (!params || Object.keys(params).length === 0) return '';
             return Object.entries(params)
@@ -1076,9 +1109,13 @@ export const AssetsEditor: React.FC = () => {
                 .join(', ');
         };
 
+        const MAX_VISIBLE = 2;
+        const visible = asset.price_getters.slice(0, MAX_VISIBLE);
+        const remaining = asset.price_getters.length - MAX_VISIBLE;
+
         return (
-            <Flex gap={1} flexWrap="wrap">
-                {asset.price_getters.map(pg => {
+            <Flex direction="column" gap={0}>
+                {visible.map(pg => {
                     const paramsStr = formatParams(pg.params);
                     const tooltip = [
                         pg.price_getter,
@@ -1088,17 +1125,26 @@ export const AssetsEditor: React.FC = () => {
                     ].filter(Boolean).join(' | ');
 
                     return (
-                        <Badge
-                            key={pg.id}
-                            colorPalette={pg.enabled ? 'blue' : 'gray'}
-                            fontSize="xs"
-                            title={tooltip}
-                        >
-                            {pg.price_getter}
-                            {pg.external_id && `: ${pg.external_id}`}
-                        </Badge>
+                        <Text key={pg.id} fontSize="2xs" lineHeight="1.5" whiteSpace="nowrap" overflow="hidden" textOverflow="ellipsis" maxW="180px" title={tooltip}>
+                            <Badge
+                                colorPalette={pg.enabled ? 'blue' : 'gray'}
+                                fontSize="2xs"
+                                px={1}
+                                py={0}
+                                lineHeight="1.3"
+                            >
+                                {pg.price_getter}{pg.external_id ? `: ${pg.external_id}` : ''}
+                            </Badge>
+                        </Text>
                     );
                 })}
+                {remaining > 0 && (
+                    <Tooltip content={asset.price_getters.slice(MAX_VISIBLE).map(pg => `${pg.price_getter}${pg.external_id ? `: ${pg.external_id}` : ''}`).join('\n')}>
+                        <Text fontSize="2xs" color="blue.500" cursor="pointer" _hover={{ textDecoration: 'underline' }}>
+                            +{remaining} more
+                        </Text>
+                    </Tooltip>
+                )}
             </Flex>
         );
     };
@@ -1118,10 +1164,10 @@ export const AssetsEditor: React.FC = () => {
 
     return (
         <Box>
-            <Flex justify="space-between" align="center" mb={6} borderBottom="1px" borderColor="gray.200" pb={2}>
+            <Flex justify="space-between" align="center" mb={3} borderBottom="1px" borderColor="gray.200" pb={2}>
                 <Box>
-                    <Heading as="h2" size="md" mb={1}>💎 Assets</Heading>
-                    <Text color="gray.600" fontSize="sm">
+                    <Heading as="h2" size="sm" mb={0.5}>💎 Assets</Heading>
+                    <Text color="gray.600" fontSize="xs">
                         Manage assets and their price getter configurations.
                     </Text>
                 </Box>
@@ -1141,13 +1187,13 @@ export const AssetsEditor: React.FC = () => {
                             Mock {mockModeEnabled ? '🟢' : '⚪'}
                         </Text>
                     </Flex>
-                    <Button colorPalette="green" onClick={openImportDialog}>
+                    <Button size="xs" colorPalette="green" onClick={openImportDialog}>
                         📥 Import CSV
                     </Button>
-                    <Button colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
+                    <Button size="xs" colorPalette="blue" onClick={() => setShowCreateDialog(true)}>
                         ➕ Add Asset
                     </Button>
-                    <Button onClick={refreshAssets} variant="outline">
+                    <Button size="xs" onClick={refreshAssets} variant="outline">
                         🔄 Refresh
                     </Button>
                 </Flex>
@@ -1411,7 +1457,53 @@ export const AssetsEditor: React.FC = () => {
             )}
 
             <Box overflowX="auto" bg="white" borderRadius="md" boxShadow="sm" fontSize="xs" pb={selectedIds.size > 0 ? '48px' : '0'}>
-                <Table.Root size="sm">
+                {/* Pagination bar (top) */}
+                {totalRows > PAGE_SIZE_OPTIONS[0] && (
+                    <Box borderBottom="1px solid" borderColor="gray.100">
+                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <Button
+                                            key={size}
+                                            size="2xs"
+                                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
+                                            borderRadius="0"
+                                            onClick={() => { setPageSize(size); setPage(0); }}
+                                            px={2}
+                                            fontSize="xs"
+                                        >
+                                            {size}
+                                        </Button>
+                                    ))}
+                                </Flex>
+                            </Flex>
+                            <Text fontSize="2xs" color="gray.500">
+                                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+                            </Text>
+                            <Flex align="center" gap={1}>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                                    <LuChevronsLeft size={12} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                    <LuChevronLeft size={14} />
+                                </Button>
+                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                    {safePage + 1} / {pageCount}
+                                </Text>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronRight size={14} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronsRight size={12} />
+                                </Button>
+                            </Flex>
+                        </Flex>
+                    </Box>
+                )}
+                <Table.Root size="xs">
                     <Table.Header>
                         <Table.Row>
                             <Table.ColumnHeader width="30px">
@@ -1444,7 +1536,7 @@ export const AssetsEditor: React.FC = () => {
                                 </Table.Cell>
                             </Table.Row>
                         ) : (
-                            assets.map(asset => (
+                            paginatedAssets.map(asset => (
                                 <Table.Row key={asset.asset_id} bg={selectedIds.has(asset.asset_id!) ? 'blue.50' : undefined}>
                                     <Table.Cell>
                                         <Checkbox.Root
@@ -1577,11 +1669,57 @@ export const AssetsEditor: React.FC = () => {
                         )}
                     </Table.Body>
                 </Table.Root>
+                {/* Pagination bar (bottom) */}
+                {totalRows > PAGE_SIZE_OPTIONS[0] && (
+                    <Box borderTop="1px solid" borderColor="gray.100">
+                        <Flex justify="space-between" align="center" width="100%" py={1.5} px={3}>
+                            <Flex align="center" gap={2}>
+                                <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <Button
+                                            key={size}
+                                            size="2xs"
+                                            variant={pageSize === size ? 'subtle' : 'ghost'}
+                                            colorPalette={pageSize === size ? 'blue' : 'gray'}
+                                            borderRadius="0"
+                                            onClick={() => { setPageSize(size); setPage(0); }}
+                                            px={2}
+                                            fontSize="xs"
+                                        >
+                                            {size}
+                                        </Button>
+                                    ))}
+                                </Flex>
+                            </Flex>
+                            <Text fontSize="2xs" color="gray.500">
+                                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
+                            </Text>
+                            <Flex align="center" gap={1}>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
+                                    <LuChevronsLeft size={12} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
+                                    <LuChevronLeft size={14} />
+                                </Button>
+                                <Text fontSize="xs" color="gray.600" mx={1}>
+                                    {safePage + 1} / {pageCount}
+                                </Text>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronRight size={14} />
+                                </Button>
+                                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
+                                    <LuChevronsRight size={12} />
+                                </Button>
+                            </Flex>
+                        </Flex>
+                    </Box>
+                )}
             </Box>
 
-            <Box mt={4} p={4} bg="white" borderRadius="md" boxShadow="sm">
+            <Box mt={2} p={2} bg="white" borderRadius="md" boxShadow="sm">
                 <Flex justify="space-between" align="center">
-                    <Text fontSize="sm" color="gray.600">
+                    <Text fontSize="xs" color="gray.600">
                         <strong>Showing:</strong> {assets.length} of {allAssets.length} assets
                         {hasActiveFilters && ' (filtered)'}
                     </Text>

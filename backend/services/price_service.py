@@ -13,16 +13,18 @@ Architecture:
 - CurrencyConverter: Handles fiat currency conversion
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from decimal import Decimal
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from dataclasses import dataclass, field, asdict
 
 from sqlmodel import Session, select
-from sqlalchemy import func
+from sqlalchemy import case, func
 
 from backend.config.loader import configure_logging
 from backend.db.database import get_engine
-from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter, AppSettings
+from backend.db.models import Asset, PriceSnapshot, AssetPriceGetter, AppSettings, NormalizedTransaction
 from backend.services.price_getters import (
     get_price_getter,
     BasePriceGetter,
@@ -32,6 +34,7 @@ from backend.services.price_getters.base import (
     PriceResult,
     PriceGetterError,
     PriceGetterAggregateError,
+    PriceErrorReason,
 )
 
 log = configure_logging("price_service")
@@ -264,9 +267,10 @@ class PriceCache:
                 PriceSnapshot.source.notin_(exclude_sources)
             )
         
-        # Order by closest time
+        # Manual overrides always win, then closest time
         statement = statement.order_by(
-            func.abs(func.extract("epoch", PriceSnapshot.snapshot_time - dt))
+            case((PriceSnapshot.source == "manual", 0), else_=1),
+            func.abs(func.extract("epoch", PriceSnapshot.snapshot_time - dt)),
         ).limit(1)
         
         result = session.exec(statement).first()
@@ -307,9 +311,10 @@ class PriceCache:
                 PriceSnapshot.source.notin_(exclude_sources)
             )
         
-        # Order by closest time
+        # Manual overrides always win, then closest time
         statement = statement.order_by(
-            func.abs(func.extract("epoch", PriceSnapshot.snapshot_time - dt))
+            case((PriceSnapshot.source == "manual", 0), else_=1),
+            func.abs(func.extract("epoch", PriceSnapshot.snapshot_time - dt)),
         ).limit(1)
         
         return session.exec(statement).first()
@@ -357,9 +362,10 @@ class PriceCache:
                 PriceSnapshot.source.notin_(exclude_sources)
             )
         
-        # Order by most recent first
+        # Manual overrides always win, then most recent first
         statement = statement.order_by(
-            PriceSnapshot.snapshot_time.desc()
+            case((PriceSnapshot.source == "manual", 0), else_=1),
+            PriceSnapshot.snapshot_time.desc(),
         ).limit(1)
         
         return session.exec(statement).first()
@@ -827,6 +833,7 @@ class PriceService:
         price_quote: Optional[str] = None,
         use_fallback: bool = True,
         staleness_window_days: int = 7,
+        max_timeout_seconds: Optional[int] = None,
     ) -> PriceResult:
         """
         Get asset price with fallback to latest known price if fetch fails.
@@ -841,6 +848,8 @@ class PriceService:
             price_quote: Quote currency (defaults to base_currency)
             use_fallback: If True, fall back to latest cached price on failure
             staleness_window_days: Max days to look back for fallback price
+            max_timeout_seconds: Max seconds to wait for live fetch before falling
+                back to cached price. None means no timeout (old behavior).
             
         Returns:
             PriceResult with price and staleness metadata:
@@ -883,36 +892,20 @@ class PriceService:
             # Get price getters for this asset
             price_getters = self.resolver.resolve(session, asset)
             
-            # Try to fetch price normally
+            # Try to fetch price normally (with optional timeout)
             original_error: Optional[str] = None
             try:
-                result = self._fetch_price(session, asset, dt, price_getters)
-                price = result.price
-                native_quote = result.quote_currency.upper()
-                source = result.source
-                
-                # Convert if needed
-                if native_quote != requested_quote:
-                    price = self.converter.convert(
-                        session, price, native_quote, requested_quote, dt
-                    )
-                
-                # Cache the result
-                self.cache.store(
-                    session, asset_id, quote_asset_id, price, dt, source
+                result = self._fetch_price_with_timeout(
+                    session, asset, dt, price_getters,
+                    requested_quote, quote_asset_id,
+                    max_timeout_seconds=max_timeout_seconds,
                 )
+                return result
                 
-                return PriceResult(
-                    price=price,
-                    quote_currency=requested_quote,
-                    source=source,
-                    timestamp=dt,
-                    ticker_used=result.ticker_used,
-                    actual_price_date=dt,
-                )
-                
-            except (PriceGetterAggregateError, Exception) as e:
+            except (PriceGetterAggregateError, FuturesTimeoutError, Exception) as e:
                 original_error = str(e)
+                if isinstance(e, FuturesTimeoutError):
+                    original_error = f"Live price fetch timed out after {max_timeout_seconds}s"
                 log.warning(
                     f"Price fetch failed for {asset.symbol} at {dt.date()}: {original_error}"
                 )
@@ -944,7 +937,9 @@ class PriceService:
                     errors=[PriceGetterError(
                         message=f"Price fetch failed and no fallback available: {original_error}",
                         getter_name="fallback",
+                        reason=PriceErrorReason.NO_DATA_RETURNED,
                         asset_symbol=asset.symbol,
+                        details=f"No cached price found in DB. Original error: {original_error}",
                     )],
                 )
             
@@ -973,6 +968,65 @@ class PriceService:
             
         finally:
             self._close_session(session)
+
+    def _fetch_price_with_timeout(
+        self,
+        session: Session,
+        asset: "Asset",
+        dt: datetime,
+        price_getters: list,
+        requested_quote: str,
+        quote_asset_id: Optional[int],
+        max_timeout_seconds: Optional[int] = None,
+    ) -> PriceResult:
+        """
+        Fetch price, convert currency, and cache — with an optional timeout.
+        
+        If max_timeout_seconds is set, the live fetch + conversion runs inside a
+        thread pool with the given timeout.  On timeout a FuturesTimeoutError is
+        raised so the caller can fall back to cached data.
+        """
+
+        def _do_fetch() -> PriceResult:
+            result = self._fetch_price(session, asset, dt, price_getters)
+            price = result.price
+            native_quote = result.quote_currency.upper()
+            source = result.source
+
+            # Convert if needed
+            if native_quote != requested_quote:
+                price = self.converter.convert(
+                    session, price, native_quote, requested_quote, dt
+                )
+
+            # Cache the result
+            self.cache.store(
+                session, asset.asset_id, quote_asset_id, price, dt, source
+            )
+
+            return PriceResult(
+                price=price,
+                quote_currency=requested_quote,
+                source=source,
+                timestamp=dt,
+                ticker_used=result.ticker_used,
+                actual_price_date=dt,
+            )
+
+        if max_timeout_seconds is None:
+            return _do_fetch()
+
+        # Run with timeout — the thread continues in the background but we
+        # stop waiting and let the caller fall back to cached data.
+        # NOTE: We avoid using `with` (context manager) because its __exit__
+        # calls shutdown(wait=True), which blocks until the background thread
+        # finishes — defeating the purpose of the timeout.
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(_do_fetch)
+            return future.result(timeout=max_timeout_seconds)
+        finally:
+            executor.shutdown(wait=False)
 
     def get_staleness_window_for_asset(
         self,
@@ -1012,6 +1066,193 @@ class PriceService:
             return asset_getter.staleness_window_days
         
         return default_window_days
+
+
+# ============================================================================
+# Gap Detection
+# ============================================================================
+
+@dataclass
+class GapRange:
+    """A contiguous range of missing price days."""
+    start_date: str  # ISO date string
+    end_date: str
+    missing_days_count: int
+    last_known_price: Optional[float] = None
+    last_known_price_date: Optional[str] = None
+    last_known_source: Optional[str] = None
+
+
+@dataclass
+class GapDetectionResult:
+    """Result of gap analysis for a single asset."""
+    asset_id: int
+    symbol: str
+    price_type: Optional[str]
+    total_expected: int
+    total_covered: int
+    coverage_pct: float
+    gaps: List[GapRange] = field(default_factory=list)
+    has_transactions: bool = True
+
+
+def _is_business_day(d: date) -> bool:
+    return d.weekday() < 5  # Mon-Fri
+
+
+def _expected_trading_days(
+    start: date, end: date, is_crypto: bool,
+) -> List[date]:
+    """Return the list of expected price dates between start and end (inclusive)."""
+    days: List[date] = []
+    d = start
+    while d <= end:
+        if is_crypto or _is_business_day(d):
+            days.append(d)
+        d += timedelta(days=1)
+    return days
+
+
+def detect_gaps(
+    session: Session,
+    asset_id: int,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    quote_asset_id: Optional[int] = None,
+) -> GapDetectionResult:
+    """
+    Detect price gaps for a single asset.
+
+    For crypto assets every calendar day is expected.
+    For stocks / fiat / other only business days (Mon-Fri) are expected.
+
+    Args:
+        session: DB session
+        asset_id: Asset to analyse
+        date_from: Override start date (default: first snapshot date)
+        date_to: Override end date (default: today)
+        quote_asset_id: Filter snapshots by quote currency (default: all)
+
+    Returns:
+        GapDetectionResult with coverage stats and gap ranges.
+    """
+    asset = session.get(Asset, asset_id)
+    if not asset:
+        raise ValueError(f"Asset ID {asset_id} not found")
+
+    is_crypto = (asset.price_type or "crypto").lower() == "crypto"
+
+    # Determine date range
+    if date_from is None:
+        # Use first transaction date for this asset (PnL-relevant start)
+        first_tx_stmt = (
+            select(func.min(NormalizedTransaction.date_time))
+            .where(NormalizedTransaction.asset_id == asset_id)
+        )
+        first_tx_dt = session.exec(first_tx_stmt).one()
+        if first_tx_dt is None:
+            # No transactions → gaps are irrelevant
+            return GapDetectionResult(
+                asset_id=asset_id,
+                symbol=asset.symbol,
+                price_type=asset.price_type,
+                total_expected=0,
+                total_covered=0,
+                coverage_pct=0.0,
+                has_transactions=False,
+            )
+        date_from = first_tx_dt.date() if hasattr(first_tx_dt, "date") else first_tx_dt
+
+    if date_to is None:
+        date_to = date.today()
+
+    # Collect existing price dates
+    snap_stmt = (
+        select(func.date(PriceSnapshot.snapshot_time))
+        .where(
+            PriceSnapshot.asset_id == asset_id,
+            PriceSnapshot.snapshot_time >= datetime.combine(date_from, datetime.min.time()),
+            PriceSnapshot.snapshot_time <= datetime.combine(date_to, datetime.max.time()),
+        )
+        .distinct()
+    )
+    if quote_asset_id is not None:
+        snap_stmt = snap_stmt.where(PriceSnapshot.quote_asset_id == quote_asset_id)
+    existing_dates: set[date] = set()
+    for row in session.exec(snap_stmt).all():
+        d = row[0] if isinstance(row, tuple) else row
+        if hasattr(d, "date"):
+            d = d.date()
+        existing_dates.add(d)
+
+    expected = _expected_trading_days(date_from, date_to, is_crypto)
+    if not expected:
+        return GapDetectionResult(
+            asset_id=asset_id,
+            symbol=asset.symbol,
+            price_type=asset.price_type,
+            total_expected=0,
+            total_covered=0,
+            coverage_pct=0.0,
+        )
+
+    missing = sorted(d for d in expected if d not in existing_dates)
+    covered = len(expected) - len(missing)
+    coverage_pct = (covered / len(expected) * 100) if expected else 0.0
+
+    # Merge consecutive missing days into gap ranges
+    #  For stocks allow a 3-day jump (covers weekends) without splitting the range.
+    max_gap_jump = 1 if is_crypto else 3
+    gap_ranges: List[Tuple[date, date, int]] = []
+    if missing:
+        g_start = missing[0]
+        g_end = missing[0]
+        g_count = 1
+        for d in missing[1:]:
+            if (d - g_end).days <= max_gap_jump:
+                g_end = d
+                g_count += 1
+            else:
+                gap_ranges.append((g_start, g_end, g_count))
+                g_start = d
+                g_end = d
+                g_count = 1
+        gap_ranges.append((g_start, g_end, g_count))
+
+    # For each gap range, find last known price before it
+    gaps: List[GapRange] = []
+    for g_start, g_end, g_count in gap_ranges:
+        last_snap_stmt = (
+            select(PriceSnapshot)
+            .where(
+                PriceSnapshot.asset_id == asset_id,
+                PriceSnapshot.snapshot_time < datetime.combine(g_start, datetime.min.time()),
+            )
+            .order_by(PriceSnapshot.snapshot_time.desc())
+            .limit(1)
+        )
+        if quote_asset_id is not None:
+            last_snap_stmt = last_snap_stmt.where(PriceSnapshot.quote_asset_id == quote_asset_id)
+        last_snap = session.exec(last_snap_stmt).first()
+
+        gaps.append(GapRange(
+            start_date=g_start.isoformat(),
+            end_date=g_end.isoformat(),
+            missing_days_count=g_count,
+            last_known_price=float(last_snap.price) if last_snap else None,
+            last_known_price_date=last_snap.snapshot_time.date().isoformat() if last_snap else None,
+            last_known_source=last_snap.source if last_snap else None,
+        ))
+
+    return GapDetectionResult(
+        asset_id=asset_id,
+        symbol=asset.symbol,
+        price_type=asset.price_type,
+        total_expected=len(expected),
+        total_covered=covered,
+        coverage_pct=round(coverage_pct, 2),
+        gaps=gaps,
+    )
 
 
 # ============================================================================

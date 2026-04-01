@@ -123,6 +123,24 @@ export function formatDateTimeLocale(value: string | number | Date | null | unde
 }
 
 /**
+ * Format a date/time as a human-friendly relative string (e.g. "5m ago", "2h ago", "3d ago").
+ */
+export function formatRelativeTime(value: string | number | Date | null | undefined): string {
+    const date = parseApiDate(value);
+    if (!date) return 'Never';
+    const diffMs = Date.now() - date.getTime();
+    const mins = Math.floor(diffMs / 60_000);
+    const hrs = Math.floor(diffMs / 3_600_000);
+    const days = Math.floor(diffMs / 86_400_000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    if (hrs < 24) return `${hrs}h ago`;
+    if (days < 30) return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+}
+
+/**
  * Format time only using the browser's locale settings
  */
 export function formatTimeLocale(value: string | number | Date | null | undefined): string {

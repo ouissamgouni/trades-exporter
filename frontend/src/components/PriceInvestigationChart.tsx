@@ -20,6 +20,7 @@ import {
 import { FiX, FiPlus } from 'react-icons/fi';
 import { ResponsiveLine } from '@nivo/line';
 import { usePriceHealth, usePriceTimeseries } from '../hooks/usePriceHealth';
+import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import type { PriceHealthRow } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -98,9 +99,10 @@ export const PriceInvestigationChart: React.FC = () => {
     const [initialised, setInitialised] = useState(false);
 
     // ----- Data -----
+    const baseCurrency = useBaseCurrency();
     const { data: healthData, isLoading: healthLoading } = usePriceHealth();
     const { data: tsData, isLoading: tsLoading, error: tsError } = usePriceTimeseries(
-        { assetIds: selectedIds },
+        { assetIds: selectedIds, quoteAssetId: baseCurrency.assetId },
         selectedIds.length > 0,
     );
 

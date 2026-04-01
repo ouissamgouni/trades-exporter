@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Heading, Text, VStack, Tabs, Badge } from '@chakra-ui/react';
+import { VStack, Tabs, Badge } from '@chakra-ui/react';
 import { useQuery } from '@tanstack/react-query';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, TransactionFilterState } from './TransactionFilters';
@@ -105,23 +105,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
     });
 
     return (
-        <VStack gap={4} align="stretch" p={4}>
-            {/* Header — only rendered when there's content */}
-            {preset.heading && (
-                <Box>
-                    <Heading size="lg">{preset.heading}</Heading>
-                    {preset.description && (
-                        <Text color="gray.600" fontSize="sm">
-                            {preset.description}
-                        </Text>
-                    )}
-                </Box>
-            )}
-
+        <VStack gap={1} align="stretch" p={2} pt={0}>
             <Tabs.Root defaultValue="transactions" lazyMount>
-                <Tabs.List mb={4}>
+                <Tabs.List mb={2}>
                     <Tabs.Trigger value="transactions">
-                        📋 Transactions
+                        {preset.heading ? `${preset.heading}` : '📋 Transactions'}
                     </Tabs.Trigger>
                     <Tabs.Trigger value="bundles">
                         📦 Bundles
@@ -143,8 +131,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({ mode }) => {
                 </Tabs.Content>
 
                 <Tabs.Content value="bundles">
-                    {preset.showSuggestions && <BundleSuggestionsPanel mb={4} />}
-                    <BundlesListPanel title={preset.bundlesTitle} />
+                    {preset.showSuggestions && <BundleSuggestionsPanel mb={2} />}
+                    <BundlesListPanel title="" />
                 </Tabs.Content>
             </Tabs.Root>
         </VStack>

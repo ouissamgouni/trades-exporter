@@ -17,6 +17,7 @@ interface PnLStatusBadgeProps {
     staleReasons?: string[];
     lastCalculatedAt?: string | null;
     currentVersionId?: number | null;
+    errorMessage?: string | null;
     size?: 'sm' | 'md';
 }
 
@@ -53,6 +54,7 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
     staleReasons = [],
     lastCalculatedAt,
     currentVersionId,
+    errorMessage,
     size = 'sm',
 }) => {
     const config = STATUS_CONFIG[status];
@@ -65,11 +67,13 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
         ].filter(Boolean).join(' · ')
         : null;
 
-    const tooltipContent = status === 'stale' && staleReasons.length > 0
-        ? `Changes detected:\n${staleReasons.slice(0, 5).join('\n')}${staleReasons.length > 5 ? `\n...and ${staleReasons.length - 5} more` : ''}`
-        : lastCalculatedAt
-            ? `Last calculated: ${formatDateTimeLocale(lastCalculatedAt)}`
-            : undefined;
+    const tooltipContent = status === 'error' && errorMessage
+        ? `Error: ${errorMessage}`
+        : status === 'stale' && staleReasons.length > 0
+            ? `Changes detected:\n${staleReasons.slice(0, 5).join('\n')}${staleReasons.length > 5 ? `\n...and ${staleReasons.length - 5} more` : ''}`
+            : lastCalculatedAt
+                ? `Last calculated: ${formatDateTimeLocale(lastCalculatedAt)}`
+                : undefined;
 
     const badge = (
         <Badge

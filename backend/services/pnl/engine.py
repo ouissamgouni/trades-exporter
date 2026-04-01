@@ -75,7 +75,7 @@ class PnLEngine:
 
         # Initialize components
         self.lot_manager = LotManager(self.config)
-        self.fmv_service = FMVService(price_service, self.config)
+        self.fmv_service = FMVService(price_service, self.config, session=self.session)
 
         self._base_currency_symbol: Optional[str] = None
 
@@ -502,6 +502,17 @@ class PnLEngine:
         version = self.session.get(CalculationVersion, version_id)
         if not version:
             return False
+        
+        # Clear self-referencing FKs before cascade delete
+        from sqlalchemy import text
+        self.session.exec(
+            text(
+                "UPDATE cost_lots SET settled_by_lot_id = NULL, source_lot_id = NULL "
+                "WHERE unit_id IN ("
+                "  SELECT id FROM calculation_units WHERE version_id = :vid"
+                ")"
+            ).bindparams(vid=version_id)
+        )
         
         # Cascade delete handles all related records automatically
         self.session.delete(version)

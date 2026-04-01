@@ -18,7 +18,7 @@ export {
     SummaryCards,
     SummaryBar,
     AssetPnLTable,
-    AssetDetailView,
+    PnLDetailPanel,
     PnLImpactPanel,
     FeesPanel,
     WarningsPanel,

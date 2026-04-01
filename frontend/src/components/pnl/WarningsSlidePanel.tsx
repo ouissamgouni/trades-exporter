@@ -2,8 +2,8 @@
  * WarningsSlidePanel — Slide panel for Warnings aggregate view.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Badge, Box, Button, Flex, Text } from '@chakra-ui/react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Badge, Box, Button, Checkbox, Flex, Text } from '@chakra-ui/react';
 import { FiSearch } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
@@ -12,6 +12,8 @@ import { TablePagination } from '../TablePagination';
 import { TabLoadingState, TabErrorState, TabEmptyState } from './AuditTabWrappers';
 import { API_URL } from '../../types';
 import { CostBasisChainTooltip } from './CostBasisChainTooltip';
+import { Tooltip } from '../ui/tooltip';
+import { toaster } from '../ui/toaster';
 
 interface FilterOption { value: string; label?: string; count: number }
 interface WarningsFilterOptions {
@@ -135,6 +137,54 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
         setTypeFilter('all'); setLevelFilter('all'); setAssetFilter('all'); setSearchInput('');
     };
 
+    // ── Force-settle state ──
+    const [selectedLotIds, setSelectedLotIds] = useState<Set<number>>(new Set());
+    const [settling, setSettling] = useState(false);
+
+    const toggleLot = useCallback((lotId: number) => {
+        setSelectedLotIds(prev => {
+            const next = new Set(prev);
+            if (next.has(lotId)) next.delete(lotId); else next.add(lotId);
+            return next;
+        });
+    }, []);
+
+    const settleOne = useCallback(async (lotId: number) => {
+        setSettling(true);
+        try {
+            const res = await fetch(`${API_URL}/pnl/cost-lots/${lotId}/force-settle`, { method: 'POST' });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({ detail: 'Settle failed' }));
+                toaster.error({ title: 'Settle failed', description: body.detail });
+            } else {
+                toaster.success({ title: `Lot #${lotId} settled` });
+                setSelectedLotIds(prev => { const n = new Set(prev); n.delete(lotId); return n; });
+                refetch();
+            }
+        } finally { setSettling(false); }
+    }, [refetch]);
+
+    const settleBulk = useCallback(async () => {
+        if (selectedLotIds.size === 0) return;
+        setSettling(true);
+        try {
+            const res = await fetch(`${API_URL}/pnl/cost-lots/bulk-force-settle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lot_ids: [...selectedLotIds] }),
+            });
+            if (!res.ok) {
+                toaster.error({ title: 'Bulk settle failed' });
+            } else {
+                const body = await res.json();
+                if (body.settled?.length) toaster.success({ title: `Settled ${body.settled.length} lot(s)` });
+                if (body.rejected?.length) toaster.warning({ title: `${body.rejected.length} lot(s) rejected`, description: body.rejected[0]?.message });
+                setSelectedLotIds(new Set());
+                refetch();
+            }
+        } finally { setSettling(false); }
+    }, [selectedLotIds, refetch]);
+
     return (
         <SlidePanel isOpen={isOpen} onClose={onClose} title="Warnings" width="900px">
             <Flex gap={2} mb={3} wrap="wrap" align="center">
@@ -157,6 +207,11 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                     </Button>
                 ))}
                 {hasAnyFilter && <Button size="2xs" variant="ghost" onClick={clearFilters}>Clear</Button>}
+                {selectedLotIds.size > 0 && (
+                    <Button size="2xs" colorPalette="orange" loading={settling} onClick={settleBulk}>
+                        Settle Selected ({selectedLotIds.size})
+                    </Button>
+                )}
             </Flex>
 
             {/* Type + Asset dropdowns */}
@@ -194,6 +249,7 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                            <th style={{ width: 24, padding: '4px 4px', fontSize: 10 }} />
                                             <th style={{ textAlign: 'left', padding: '4px 6px', fontSize: 10 }}>Date</th>
                                             <th style={{ textAlign: 'left', padding: '4px 6px', fontSize: 10 }}>Type</th>
                                             <th style={{ textAlign: 'left', padding: '4px 6px', fontSize: 10 }}>Message</th>
@@ -207,12 +263,22 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                         {warnings.map((w: WarningEntry, idx: number) => {
                                             const level = TYPE_LEVEL[w.warning_type] || 'info';
                                             const lotId = w.details?.lot_id as number | undefined;
-                                            const isProvisional = w.warning_type === 'provisional_cost_lot';
                                             const isUnsettled = w.warning_type === 'unsettled_negative_lot';
-                                            const hasActions = isProvisional || isUnsettled;
                                             return (
                                                 <React.Fragment key={idx}>
-                                                    <tr style={{ borderBottom: hasActions ? 'none' : '1px solid #f1f3f5' }}>
+                                                    <tr style={{ borderBottom: isUnsettled ? 'none' : '1px solid #f1f3f5' }}>
+                                                        <td style={{ padding: '3px 4px', textAlign: 'center' }}>
+                                                            {isUnsettled && lotId && (
+                                                                <Checkbox.Root
+                                                                    size="sm"
+                                                                    checked={selectedLotIds.has(lotId)}
+                                                                    onCheckedChange={() => toggleLot(lotId)}
+                                                                >
+                                                                    <Checkbox.HiddenInput />
+                                                                    <Checkbox.Control />
+                                                                </Checkbox.Root>
+                                                            )}
+                                                        </td>
                                                         <td style={{ padding: '3px 6px' }}>
                                                             <Text fontSize="2xs" color="gray.500">
                                                                 {w.timestamp ? new Date(w.timestamp).toLocaleDateString() : '-'}
@@ -224,9 +290,11 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                                             </Badge>
                                                         </td>
                                                         <td style={{ padding: '3px 6px', maxWidth: 250 }}>
-                                                            <Text fontSize="2xs" color="gray.600" lineClamp={2}>
-                                                                {w.message}
-                                                            </Text>
+                                                            <Tooltip content={w.message} openDelay={300}>
+                                                                <Text fontSize="2xs" color="gray.600" lineClamp={2}>
+                                                                    {w.message}
+                                                                </Text>
+                                                            </Tooltip>
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
                                                             {w.transaction_id ? (
@@ -276,33 +344,23 @@ export const WarningsSlidePanel: React.FC<WarningSlidePanelProps> = ({
                                                         </td>
                                                         <td style={{ padding: '3px 6px' }}>
                                                             <Flex gap={1} align="center">
-                                                                {w.transaction_id && onTransactionClick && (
-                                                                    <Button size="2xs" variant="ghost" colorPalette="blue"
-                                                                        onClick={() => onTransactionClick(w.transaction_id!)}>
-                                                                        View TX
-                                                                    </Button>
-                                                                )}
                                                                 {lotId && onLotClick && (
                                                                     <Button size="2xs" variant="ghost" colorPalette="purple"
                                                                         onClick={() => onLotClick(lotId)}>
                                                                         View Lot
                                                                     </Button>
                                                                 )}
+                                                                {isUnsettled && lotId && (
+                                                                    <Button size="2xs" variant="outline" colorPalette="orange"
+                                                                        loading={settling}
+                                                                        onClick={() => settleOne(lotId)}>
+                                                                        Settle
+                                                                    </Button>
+                                                                )}
                                                             </Flex>
                                                         </td>
                                                     </tr>
-                                                    {/* Root cause info row for provisional/unsettled */}
-                                                    {hasActions && (
-                                                        <tr style={{ borderBottom: '1px solid #f1f3f5' }}>
-                                                            <td colSpan={7} style={{ padding: '2px 6px 6px 24px' }}>
-                                                                <Text fontSize="2xs" color={isProvisional ? 'orange.600' : 'red.600'} fontStyle="italic">
-                                                                    {isProvisional
-                                                                        ? '💡 Cost basis is estimated via FMV. The acquisition transaction for this asset has not been imported yet. Import it to get the actual cost.'
-                                                                        : '💡 This negative lot was never settled by an incoming acquisition. Check if the buy/deposit transaction is missing from your data.'}
-                                                                </Text>
-                                                            </td>
-                                                        </tr>
-                                                    )}
+
                                                 </React.Fragment>
                                             );
                                         })}

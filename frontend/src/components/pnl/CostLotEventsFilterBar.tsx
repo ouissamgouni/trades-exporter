@@ -12,8 +12,9 @@
  */
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Box, Flex, Input, Button, Text, IconButton, Spinner } from '@chakra-ui/react';
-import { FiSearch, FiChevronDown, FiChevronUp, FiX, FiCalendar, FiRefreshCw, FiFilter } from 'react-icons/fi';
+import { Box, Flex, Input, Button, Text, IconButton, Spinner, Badge } from '@chakra-ui/react';
+import { FiSearch, FiChevronDown, FiChevronUp, FiX, FiCalendar, FiRefreshCw } from 'react-icons/fi';
+import { LuChevronDown, LuFilter, LuRotateCcw, LuX } from 'react-icons/lu';
 import { LotEventType } from './types';
 
 // ============================================================================
@@ -30,12 +31,20 @@ export interface FilterState {
     search: string;
 }
 
+export interface FilterOptionWithCount {
+    value: string;
+    label?: string;
+    count: number;
+}
+
 export interface CostLotEventsFilterBarProps {
     filters: FilterState;
     onFiltersChange: (filters: FilterState) => void;
     eventCounts: Record<LotEventType, number>;
     accounts?: { id: number; name: string }[];
     assets?: { id: number; symbol: string; label?: string }[];
+    eventTypeOptions?: FilterOptionWithCount[];
+    unitPatternOptions?: FilterOptionWithCount[];
     isLoading?: boolean;
     showDateRange?: boolean;
     showEventTypes?: boolean;
@@ -50,24 +59,12 @@ export interface CostLotEventsFilterBarProps {
 // Constants
 // ============================================================================
 
-// Event type pills configuration - all visible by default for full audit view
-const EVENT_PILLS: { key: LotEventType; label: string; defaultOn: boolean }[] = [
-    { key: 'created', label: 'Created', defaultOn: true },
-    { key: 'consumed', label: 'Consumed', defaultOn: true },
-    { key: 'created-negative', label: 'Negative', defaultOn: true },
-    { key: 'settled', label: 'Settled', defaultOn: true },
-    { key: 'transferred', label: 'Transferred', defaultOn: true },
-    { key: 'adjusted', label: 'Adjusted', defaultOn: true },
-    { key: 'merged', label: 'Merged', defaultOn: true },
-];
-
-// Unit pattern pills configuration
-const UNIT_PILLS: { key: string; label: string; defaultOn: boolean }[] = [
-    { key: 'swap', label: 'Swap', defaultOn: true },
-    { key: 'internal_transfer', label: 'Transfer', defaultOn: true },
-    { key: 'unmatched_internal_transfer', label: 'Unmatched', defaultOn: true },
-    { key: 'flow', label: 'Flow', defaultOn: true },
-];
+// Label overrides for known patterns (optional cosmetic improvement)
+const PATTERN_LABELS: Record<string, string> = {
+    internal_transfer: 'Transfer',
+    unmatched_internal_transfer: 'Unmatched',
+    'created-negative': 'Negative',
+};
 
 // Date presets
 const DATE_PRESETS = [
@@ -79,15 +76,11 @@ const DATE_PRESETS = [
     { label: 'Custom...', value: 'custom' },
 ];
 
-// Get default event types
-export const getDefaultEventTypes = (): LotEventType[] => {
-    return EVENT_PILLS.filter(p => p.defaultOn).map(p => p.key);
-};
+// Get default event types — empty means "no filter" = show all
+export const getDefaultEventTypes = (): LotEventType[] => [];
 
-// Get default unit patterns
-export const getDefaultUnitPatterns = (): string[] => {
-    return UNIT_PILLS.filter(p => p.defaultOn).map(p => p.key);
-};
+// Get default unit patterns — empty means "no filter" = show all
+export const getDefaultUnitPatterns = (): string[] => [];
 
 // ============================================================================
 // Hooks
@@ -474,6 +467,8 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
     eventCounts,
     accounts = [],
     assets = [],
+    eventTypeOptions = [],
+    unitPatternOptions = [],
     isLoading = false,
     showDateRange = true,
     showEventTypes = true,
@@ -557,18 +552,16 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
         setLocalSearch('');
     }, [onFiltersChange]);
 
-    // Check if filters are modified from defaults
+    // Check if filters are modified from defaults (empty = show all)
     const isModified = useMemo(() => {
-        const defaultTypes = getDefaultEventTypes();
-        const defaultPatterns = getDefaultUnitPatterns();
         return (
             filters.dateStart !== '' ||
             filters.dateEnd !== '' ||
             filters.search !== '' ||
             filters.accountIds.length > 0 ||
             filters.assetIds.length > 0 ||
-            JSON.stringify([...filters.eventTypes].sort()) !== JSON.stringify([...defaultTypes].sort()) ||
-            JSON.stringify([...filters.unitPatterns].sort()) !== JSON.stringify([...defaultPatterns].sort())
+            filters.eventTypes.length > 0 ||
+            filters.unitPatterns.length > 0
         );
     }, [filters]);
 
@@ -585,178 +578,218 @@ export const CostLotEventsFilterBar: React.FC<CostLotEventsFilterBarProps> = ({
         return asset?.symbol || 'Unknown';
     }, [filters.assetIds, assets]);
 
+    // Build active filter chips for inline display
+    const activeChips = useMemo(() => {
+        const chips: { id: string; label: string; color: string; onClear: () => void }[] = [];
+        if (filters.eventTypes.length > 0) {
+            chips.push({ id: 'events', label: `Events: ${filters.eventTypes.length}`, color: 'blue', onClear: () => onFiltersChange({ ...filters, eventTypes: [] }) });
+        }
+        if (filters.unitPatterns.length > 0) {
+            chips.push({ id: 'units', label: `Units: ${filters.unitPatterns.length}`, color: 'purple', onClear: () => onFiltersChange({ ...filters, unitPatterns: [] }) });
+        }
+        if (filters.accountIds.length > 0) {
+            const acc = accounts.find(a => a.id === filters.accountIds[0]);
+            chips.push({ id: 'account', label: `Acct: ${acc?.name || 'Unknown'}`, color: 'teal', onClear: () => onFiltersChange({ ...filters, accountIds: [] }) });
+        }
+        if (filters.assetIds.length > 0) {
+            const asset = assets.find(a => a.id === filters.assetIds[0]);
+            chips.push({ id: 'asset', label: `Asset: ${asset?.symbol || 'Unknown'}`, color: 'orange', onClear: () => onFiltersChange({ ...filters, assetIds: [] }) });
+        }
+        if (filters.dateStart || filters.dateEnd) {
+            chips.push({ id: 'date', label: 'Date range', color: 'cyan', onClear: () => onFiltersChange({ ...filters, dateStart: '', dateEnd: '' }) });
+        }
+        if (filters.search) {
+            chips.push({ id: 'search', label: `"${filters.search}"`, color: 'gray', onClear: () => { onFiltersChange({ ...filters, search: '' }); setLocalSearch(''); } });
+        }
+        return chips;
+    }, [filters, accounts, assets, onFiltersChange]);
+
     return (
-        <Box
-            borderBottom="1px solid"
-            borderColor="gray.200"
-            py={1.5}
-            px={3}
-            mb={2}
-        >
-            {/* Collapsible header */}
-            <Flex
-                align="center"
-                justify="space-between"
-                cursor="pointer"
-                onClick={() => setIsCollapsed(!isCollapsed)}
-                py={0.5}
-            >
-                <Flex align="center" gap={1.5}>
-                    <FiFilter size={11} color="gray" />
-                    <Text fontSize="2xs" fontWeight="medium" color="gray.500">Filters</Text>
-                    {isModified && (
-                        <Text fontSize="2xs" color="blue.500" fontWeight="medium">• modified</Text>
-                    )}
-                    {isLoading && <Spinner size="xs" color="gray.400" />}
-                </Flex>
-                {isCollapsed ? <FiChevronDown size={12} color="gray" /> : <FiChevronUp size={12} color="gray" />}
-            </Flex>
-
-            {/* Collapsible content */}
-            {!isCollapsed && (
-                <Box mt={1.5}>
-                    {/* Row 1: Event Types & Unit Patterns */}
-                    <Flex gap={4} align="center" wrap="wrap" mb={2}>
-                        {/* Event type pills */}
-                        {showEventTypes && (
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="2xs" color="gray.500" fontWeight="medium">Event:</Text>
-                                <Flex gap={1}>
-                                    {EVENT_PILLS.map(pill => (
-                                        <TogglePill
-                                            key={pill.key}
-                                            label={pill.label}
-                                            active={filters.eventTypes.includes(pill.key)}
-                                            onClick={() => toggleEventType(pill.key)}
-                                            disabled={isLoading}
-                                        />
-                                    ))}
-                                </Flex>
-                            </Flex>
+        <Box mb={3}>
+            <Box bg="gray.50" borderRadius="md" border="1px solid" borderColor={isModified ? 'blue.300' : 'gray.200'} overflow="visible">
+                {/* Clickable header */}
+                <Flex align="center" justify="space-between" p={3}
+                    cursor="pointer" transition="background 0.15s" _hover={{ bg: 'gray.100' }}
+                    onClick={() => setIsCollapsed(c => !c)} borderRadius="md">
+                    <Flex align="center" gap={1.5} flex={1} minW={0} flexWrap="wrap">
+                        <Box transition="transform 0.2s" transform={!isCollapsed ? 'rotate(0deg)' : 'rotate(-90deg)'} flexShrink={0}>
+                            <LuChevronDown size={14} />
+                        </Box>
+                        <LuFilter size={12} />
+                        <Text fontWeight="semibold" fontSize="xs" flexShrink={0}>Filters</Text>
+                        {activeChips.length > 0 && (
+                            <Badge size="xs" colorPalette="blue">{activeChips.length} active</Badge>
                         )}
-
-                        {/* Unit pattern pills */}
-                        {showUnitPatterns && (
-                            <Flex align="center" gap={2}>
-                                <Text fontSize="2xs" color="gray.500" fontWeight="medium">Unit:</Text>
-                                <Flex gap={1}>
-                                    {UNIT_PILLS.map(pill => (
-                                        <TogglePill
-                                            key={pill.key}
-                                            label={pill.label}
-                                            active={filters.unitPatterns.includes(pill.key)}
-                                            onClick={() => toggleUnitPattern(pill.key)}
-                                            disabled={isLoading}
-                                        />
-                                    ))}
-                                </Flex>
+                        {isLoading && <Spinner size="xs" color="gray.400" />}
+                        {activeChips.length > 0 && (
+                            <Flex flexWrap="wrap" gap={1} align="center" ml={1} onClick={e => e.stopPropagation()}>
+                                {activeChips.map(chip => (
+                                    <Badge key={chip.id} size="sm" colorPalette={chip.color} display="inline-flex" alignItems="center" gap={1}
+                                        px={2} py={0.5} borderRadius="md" cursor="pointer" transition="all 0.15s"
+                                        _hover={{ transform: 'scale(0.95)', opacity: 0.8 }} onClick={e => { e.stopPropagation(); chip.onClear(); }}>
+                                        <Text fontSize="xs">{chip.label}</Text>
+                                        <LuX size={12} />
+                                    </Badge>
+                                ))}
                             </Flex>
                         )}
                     </Flex>
-
-                    {/* Row 2: Dropdowns, Date, Search, Reset */}
-                    <Flex gap={3} align="center" wrap="wrap">
-                        {/* Account dropdown */}
-                        {showAccountFilter && accounts.length > 0 && (
-                            <FilterDropdown
-                                label="Accounts"
-                                value={accountDisplay}
-                                options={accounts.map(a => ({ id: a.id, name: a.name }))}
-                                onSelect={selectAccount}
-                                searchPlaceholder="Search accounts..."
-                                disabled={isLoading}
-                            />
-                        )}
-
-                        {/* Asset dropdown */}
-                        {showAssetFilter && assets.length > 0 && (
-                            <FilterDropdown
-                                label="Assets"
-                                value={assetDisplay}
-                                options={assets.map(a => ({
-                                    id: a.id,
-                                    name: a.symbol,
-                                    subtitle: a.label,
-                                }))}
-                                onSelect={selectAsset}
-                                searchPlaceholder="Search assets..."
-                                disabled={isLoading}
-                            />
-                        )}
-
-                        {/* Date range */}
-                        {showDateRange && (
-                            <DateRangeFilter
-                                dateStart={filters.dateStart}
-                                dateEnd={filters.dateEnd}
-                                onApply={applyDateRange}
-                                disabled={isLoading}
-                            />
-                        )}
-
-                        {/* Search */}
-                        {showSearch && (
-                            <Flex
-                                align="center"
-                                bg="white"
-                                border="1px solid"
-                                borderColor="gray.300"
-                                borderRadius="md"
-                                px={1.5}
-                                h="22px"
-                                flex="1"
-                                maxW="160px"
-                                _focusWithin={{ borderColor: 'blue.400' }}
-                            >
-                                <FiSearch color="gray" size={10} />
-                                <Input
-                                    placeholder="Search..."
-                                    size="2xs"
-                                    fontSize="2xs"
-                                    value={localSearch}
-                                    onChange={(e) => setLocalSearch(e.target.value)}
-                                    border="none"
-                                    _focus={{ boxShadow: 'none' }}
-                                    h="18px"
-                                />
-                                {localSearch && (
-                                    <IconButton
-                                        size="xs"
-                                        variant="ghost"
-                                        aria-label="Clear search"
-                                        onClick={() => setLocalSearch('')}
-                                        p={0}
-                                        minW="16px"
-                                        h="16px"
-                                    >
-                                        <FiX size={10} />
-                                    </IconButton>
-                                )}
-                            </Flex>
-                        )}
-
-                        {/* Loading indicator */}
-                        {isLoading && <Spinner size="xs" color="gray.400" />}
-
-                        {/* Reset button */}
+                    <Flex gap={1.5} onClick={e => e.stopPropagation()} flexShrink={0}>
                         {isModified && (
-                            <Button
-                                size="2xs"
-                                variant="ghost"
-                                onClick={resetFilters}
-                                color="gray.500"
-                                fontWeight="normal"
-                                fontSize="2xs"
-                                h="22px"
-                                _hover={{ color: 'gray.700', bg: 'gray.100' }}
-                            >
-                                <FiRefreshCw size={10} style={{ marginRight: 2 }} />
-                                Reset
+                            <Button size="xs" variant="ghost" onClick={resetFilters} color="gray.500" _hover={{ color: 'gray.700' }}>
+                                <LuRotateCcw size={10} />
+                                <Text ml={0.5} fontSize="2xs">Clear All</Text>
                             </Button>
                         )}
                     </Flex>
-                </Box>
-            )}
+                </Flex>
+
+                {/* Collapsible content */}
+                {!isCollapsed && (
+                    <Box p={3} pt={1}>
+                        {/* Row 1: Event Types & Unit Patterns */}
+                        <Flex gap={4} align="center" wrap="wrap" mb={2}>
+                            {/* Event type pills - dynamic from backend */}
+                            {showEventTypes && eventTypeOptions.length > 0 && (
+                                <Flex align="center" gap={2}>
+                                    <Text fontSize="2xs" color="gray.500" fontWeight="medium">Event:</Text>
+                                    <Flex gap={1}>
+                                        {eventTypeOptions.map(opt => (
+                                            <TogglePill
+                                                key={opt.value}
+                                                label={PATTERN_LABELS[opt.value] || opt.label || opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
+                                                active={filters.eventTypes.includes(opt.value as LotEventType)}
+                                                onClick={() => toggleEventType(opt.value as LotEventType)}
+                                                disabled={isLoading}
+                                            />
+                                        ))}
+                                    </Flex>
+                                </Flex>
+                            )}
+
+                            {/* Unit pattern pills - dynamic from backend */}
+                            {showUnitPatterns && unitPatternOptions.length > 0 && (
+                                <Flex align="center" gap={2}>
+                                    <Text fontSize="2xs" color="gray.500" fontWeight="medium">Unit:</Text>
+                                    <Flex gap={1}>
+                                        {unitPatternOptions.map(opt => (
+                                            <TogglePill
+                                                key={opt.value}
+                                                label={PATTERN_LABELS[opt.value] || opt.label || opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
+                                                active={filters.unitPatterns.includes(opt.value)}
+                                                onClick={() => toggleUnitPattern(opt.value)}
+                                                disabled={isLoading}
+                                            />
+                                        ))}
+                                    </Flex>
+                                </Flex>
+                            )}
+                        </Flex>
+
+                        {/* Row 2: Dropdowns, Date, Search, Reset */}
+                        <Flex gap={3} align="center" wrap="wrap">
+                            {/* Account dropdown */}
+                            {showAccountFilter && accounts.length > 0 && (
+                                <FilterDropdown
+                                    label="Accounts"
+                                    value={accountDisplay}
+                                    options={accounts.map(a => ({ id: a.id, name: a.name }))}
+                                    onSelect={selectAccount}
+                                    searchPlaceholder="Search accounts..."
+                                    disabled={isLoading}
+                                />
+                            )}
+
+                            {/* Asset dropdown */}
+                            {showAssetFilter && assets.length > 0 && (
+                                <FilterDropdown
+                                    label="Assets"
+                                    value={assetDisplay}
+                                    options={assets.map(a => ({
+                                        id: a.id,
+                                        name: a.symbol,
+                                        subtitle: a.label,
+                                    }))}
+                                    onSelect={selectAsset}
+                                    searchPlaceholder="Search assets..."
+                                    disabled={isLoading}
+                                />
+                            )}
+
+                            {/* Date range */}
+                            {showDateRange && (
+                                <DateRangeFilter
+                                    dateStart={filters.dateStart}
+                                    dateEnd={filters.dateEnd}
+                                    onApply={applyDateRange}
+                                    disabled={isLoading}
+                                />
+                            )}
+
+                            {/* Search */}
+                            {showSearch && (
+                                <Flex
+                                    align="center"
+                                    bg="white"
+                                    border="1px solid"
+                                    borderColor="gray.300"
+                                    borderRadius="md"
+                                    px={1.5}
+                                    h="22px"
+                                    flex="1"
+                                    maxW="160px"
+                                    _focusWithin={{ borderColor: 'blue.400' }}
+                                >
+                                    <FiSearch color="gray" size={10} />
+                                    <Input
+                                        placeholder="Search..."
+                                        size="2xs"
+                                        fontSize="2xs"
+                                        value={localSearch}
+                                        onChange={(e) => setLocalSearch(e.target.value)}
+                                        border="none"
+                                        _focus={{ boxShadow: 'none' }}
+                                        h="18px"
+                                    />
+                                    {localSearch && (
+                                        <IconButton
+                                            size="xs"
+                                            variant="ghost"
+                                            aria-label="Clear search"
+                                            onClick={() => setLocalSearch('')}
+                                            p={0}
+                                            minW="16px"
+                                            h="16px"
+                                        >
+                                            <FiX size={10} />
+                                        </IconButton>
+                                    )}
+                                </Flex>
+                            )}
+
+                            {/* Loading indicator */}
+                            {isLoading && <Spinner size="xs" color="gray.400" />}
+
+                            {/* Reset button */}
+                            {isModified && (
+                                <Button
+                                    size="2xs"
+                                    variant="ghost"
+                                    onClick={resetFilters}
+                                    color="gray.500"
+                                    fontWeight="normal"
+                                    fontSize="2xs"
+                                    h="22px"
+                                    _hover={{ color: 'gray.700', bg: 'gray.100' }}
+                                >
+                                    <FiRefreshCw size={10} style={{ marginRight: 2 }} />
+                                    Reset
+                                </Button>
+                            )}
+                        </Flex>
+                    </Box>
+                )}
+            </Box>
         </Box>
     );
 };

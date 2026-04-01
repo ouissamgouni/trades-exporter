@@ -32,14 +32,6 @@ import { TaxabilityStatus as TaxabilityStatusEnum, UnitPattern } from '../../enu
 import { BundleMemberTransactionsTable } from '../tables/wrappers/BundleMemberTransactionsTable';
 import { toaster } from '../ui/toaster';
 
-// Pattern colors (same as BundleSuggestionsPanel)
-const patternColors: Record<string, string> = {
-    [UnitPattern.INTERNAL_TRANSFER]: 'blue',
-    [UnitPattern.SWAP]: 'orange',
-    [UnitPattern.SPLIT]: 'purple',
-    [UnitPattern.FLOW]: 'cyan',
-};
-
 interface SuggestionPopoverProps {
     /** The suggestion to display */
     suggestion: BundleSuggestion;
@@ -70,6 +62,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
     const [taxability, setTaxability] = useState<TaxabilityStatus>(
         suggestion.taxability_suggestion || TaxabilityStatusEnum.UNKNOWN,
     );
+    const [selectedPattern, setSelectedPattern] = useState<string>(suggestion.pattern);
     const [accepting, setAccepting] = useState(false);
 
     const acceptSuggestion = async () => {
@@ -79,7 +72,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    pattern: suggestion.pattern,
+                    pattern: selectedPattern,
                     transaction_ids: suggestion.transactions.map((t) => t.id),
                     label: suggestion.label,
                     taxability_override: taxability,
@@ -176,9 +169,34 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                         {/* Header */}
                         <Box p={3} bg="teal.50" borderBottomWidth={1} borderColor="teal.100">
                             <Flex justify="space-between" align="center" mb={1}>
-                                <Badge colorPalette={patternColors[suggestion.pattern] || 'gray'} size="sm">
-                                    {suggestion.pattern}
-                                </Badge>
+                                <NativeSelect.Root size="sm" width="120px">
+                                    <NativeSelect.Field
+                                        value={selectedPattern}
+                                        onChange={(e) => setSelectedPattern(e.target.value)}
+                                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                        style={{
+                                            fontSize: '11px',
+                                            padding: '2px 6px',
+                                            fontWeight: 600,
+                                            backgroundColor: {
+                                                [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
+                                                [UnitPattern.SWAP]: '#FEEBC8',
+                                                [UnitPattern.SPLIT]: '#E9D8FD',
+                                                [UnitPattern.FLOW]: '#C6F6D5',
+                                                [UnitPattern.CUSTOM]: '#E2E8F0',
+                                                [UnitPattern.UNKNOWN]: '#EDF2F7',
+                                            }[selectedPattern] || '#EDF2F7',
+                                            borderRadius: '4px',
+                                        }}
+                                    >
+                                        <option value={UnitPattern.SWAP}>Swap</option>
+                                        <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
+                                        <option value={UnitPattern.SPLIT}>Split</option>
+                                        <option value={UnitPattern.FLOW}>Flow</option>
+                                        <option value={UnitPattern.CUSTOM}>Custom</option>
+                                        <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                                    </NativeSelect.Field>
+                                </NativeSelect.Root>
                                 <Text fontSize="xs" color="gray.500" fontWeight="medium">
                                     {Math.round(suggestion.confidence * 100)}% confidence
                                 </Text>

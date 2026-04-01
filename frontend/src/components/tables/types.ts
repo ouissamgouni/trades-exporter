@@ -114,6 +114,12 @@ export interface ColumnPlugin<T extends Transaction = Transaction> {
      */
     width?: string;
 
+    /** Background color for the column header (overrides default). */
+    headerBg?: string;
+
+    /** Background color for each cell in the column (overrides row bg). */
+    cellBg?: string;
+
     /**
      * Render function for cell content.
      * Receives the transaction row data.

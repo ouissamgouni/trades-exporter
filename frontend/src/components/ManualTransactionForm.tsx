@@ -429,13 +429,13 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
     );
 
     return (
-        <Box maxW="1200px" mx="auto">
+        <Box fontSize="xs">
             {/* Header */}
-            <Box mb={6}>
-                <Heading as="h2" size="lg" mb={2} color="gray.800">
+            <Box mb={4}>
+                <Heading as="h2" size="sm" mb={1} color="gray.800">
                     Add Transaction
                 </Heading>
-                <Text color="gray.500" fontSize="sm">
+                <Text color="gray.500" fontSize="xs">
                     Create a new transaction manually for OTC trades, airdrops, or other non-exchange activities.
                 </Text>
             </Box>
@@ -456,10 +456,10 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
 
                     {/* Section 1: Source & Timing */}
                     <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Card.Header bg="gray.50" py={3} px={4} borderTopRadius="xl">
-                            <Heading size="sm" color="gray.700">📍 Source & Timing</Heading>
+                        <Card.Header bg="gray.50" py={2} px={3} borderTopRadius="xl">
+                            <Heading size="xs" color="gray.700">📍 Source & Timing</Heading>
                         </Card.Header>
-                        <Card.Body p={4}>
+                        <Card.Body p={3}>
                             <Grid templateColumns={{ base: "1fr", md: "repeat(5, 1fr)" }} gap={4}>
                                 <GridItem>
                                     <Label required>Account</Label>
@@ -471,6 +471,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         placeholder="Select or create account..."
                                         rawAccountSource={formData.source}
                                         rawAccountLabel={undefined}
+                                        size="xs"
                                     />
                                     {/* Show account suggestions when source_account has a related account */}
                                     {formData.source_account && !formData.account_id && (() => {
@@ -507,6 +508,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         options={SOURCE_OPTIONS}
                                         placeholder="Select source..."
                                         width="100%"
+                                        size="xs"
                                     />
                                 </GridItem>
                                 <GridItem>
@@ -515,7 +517,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         type="datetime-local"
                                         value={formData.date_time}
                                         onChange={e => handleInputChange('date_time', e.target.value)}
-                                        size="sm"
+                                        size="xs"
                                         borderRadius="md"
                                     />
                                 </GridItem>
@@ -525,7 +527,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         placeholder="e.g., airdrop, otc"
                                         value={formData.source_transaction_type}
                                         onChange={e => handleInputChange('source_transaction_type', e.target.value)}
-                                        size="sm"
+                                        size="xs"
                                         borderRadius="md"
                                     />
                                 </GridItem>
@@ -535,7 +537,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         placeholder="External transaction ID"
                                         value={formData.source_transaction_id}
                                         onChange={e => handleInputChange('source_transaction_id', e.target.value)}
-                                        size="sm"
+                                        size="xs"
                                         borderRadius="md"
                                     />
                                 </GridItem>
@@ -543,19 +545,19 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                         </Card.Body>
                     </Card.Root>
 
-                    {/* Section 2 + Tags: Transaction Details (75%) and Tags (25%) side by side */}
+                    {/* Section 2 + Pricing: Transaction Details (1/2) and Pricing & Fees (1/2) side by side */}
                     <Flex gap={4} direction={{ base: "column", lg: "row" }}>
-                        {/* Section 2: Transaction Details - 75% */}
-                        <Box flex="3">
+                        {/* Section 2: Transaction Details - 50% */}
+                        <Box flex="1">
                             <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
-                                <Card.Header bg="blue.50" py={3} px={4} borderTopRadius="xl">
-                                    <Heading size="sm" color="blue.700">💱 Transaction Details</Heading>
+                                <Card.Header bg="blue.50" py={2} px={3} borderTopRadius="xl">
+                                    <Heading size="xs" color="blue.700">💱 Transaction Details</Heading>
                                 </Card.Header>
-                                <Card.Body p={4}>
+                                <Card.Body p={3}>
                                     <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
                                         <GridItem>
                                             <Label required>Type</Label>
-                                            <NativeSelect.Root size="sm">
+                                            <NativeSelect.Root size="xs">
                                                 <NativeSelect.Field
                                                     value={formData.simplified_type}
                                                     onChange={e => handleInputChange('simplified_type', e.target.value)}
@@ -570,7 +572,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         </GridItem>
                                         <GridItem>
                                             <Label required>Direction</Label>
-                                            <NativeSelect.Root size="sm">
+                                            <NativeSelect.Root size="xs">
                                                 <NativeSelect.Field
                                                     value={formData.direction}
                                                     onChange={e => handleInputChange('direction', e.target.value)}
@@ -589,7 +591,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                         </GridItem>
                                         <GridItem>
                                             <Label>Review Status</Label>
-                                            <NativeSelect.Root size="sm">
+                                            <NativeSelect.Root size="xs">
                                                 <NativeSelect.Field
                                                     value={formData.review_status}
                                                     onChange={e => handleInputChange('review_status', e.target.value)}
@@ -613,7 +615,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     </Label>
                                                     {!creatingAccount ? (
                                                         <Flex gap={2}>
-                                                            <NativeSelect.Root size="sm" flex={1}>
+                                                            <NativeSelect.Root size="xs" flex={1}>
                                                                 <NativeSelect.Field
                                                                     value={formData.direction === 'outflow' ? (formData.to_account_id || '') : (formData.from_account_id || '')}
                                                                     onChange={e => {
@@ -634,7 +636,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                     ))}
                                                                 </NativeSelect.Field>
                                                             </NativeSelect.Root>
-                                                            <Button size="sm" variant="outline" onClick={() => setCreatingAccount(true)}>
+                                                            <Button size="xs" variant="outline" onClick={() => setCreatingAccount(true)}>
                                                                 + New
                                                             </Button>
                                                         </Flex>
@@ -644,11 +646,11 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                 placeholder="New account name"
                                                                 value={newAccountName}
                                                                 onChange={e => setNewAccountName(e.target.value)}
-                                                                size="sm"
+                                                                size="xs"
                                                                 borderRadius="md"
                                                             />
                                                             <Flex gap={2}>
-                                                                <NativeSelect.Root size="sm" flex={1}>
+                                                                <NativeSelect.Root size="xs" flex={1}>
                                                                     <NativeSelect.Field
                                                                         value={newAccountType}
                                                                         onChange={e => setNewAccountType(e.target.value as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment')}
@@ -665,7 +667,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                 <Checkbox.Root
                                                                     checked={newAccountOwned}
                                                                     onCheckedChange={(e) => setNewAccountOwned(!!e.checked)}
-                                                                    size="sm"
+                                                                    size="xs"
                                                                 >
                                                                     <Checkbox.HiddenInput />
                                                                     <Checkbox.Control />
@@ -674,7 +676,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                             </Flex>
                                                             <Flex gap={2}>
                                                                 <Button
-                                                                    size="sm"
+                                                                    size="xs"
                                                                     colorPalette="green"
                                                                     onClick={async () => {
                                                                         if (newAccountName) {
@@ -693,7 +695,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                 >
                                                                     Create
                                                                 </Button>
-                                                                <Button size="sm" variant="ghost" onClick={() => {
+                                                                <Button size="xs" variant="ghost" onClick={() => {
                                                                     setCreatingAccount(false);
                                                                     setNewAccountName('');
                                                                 }}>
@@ -719,7 +721,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                         <Flex align="center" gap={2}>
                                                                             <Text fontSize="lg">🏠</Text>
                                                                             <Box>
-                                                                                <Text fontSize="sm" fontWeight="bold" color="green.700">Internal Transfer</Text>
+                                                                                <Text fontSize="xs" fontWeight="bold" color="green.700">Internal Transfer</Text>
                                                                                 <Text fontSize="xs" color="green.600">Both accounts are owned - no taxable event</Text>
                                                                             </Box>
                                                                         </Flex>
@@ -727,7 +729,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                                         <Flex align="center" gap={2}>
                                                                             <Text fontSize="lg">🌐</Text>
                                                                             <Box>
-                                                                                <Text fontSize="sm" fontWeight="bold" color="orange.700">External Transfer</Text>
+                                                                                <Text fontSize="xs" fontWeight="bold" color="orange.700">External Transfer</Text>
                                                                                 <Text fontSize="xs" color="orange.600">
                                                                                     {!counterpartyAcc?.owned ? 'To external party' : 'From external party'}
                                                                                 </Text>
@@ -760,6 +762,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     placeholder="Select or create asset..."
                                                     rawAssetSource="manual"
                                                     rawAssetSymbol={formData.source_asset_symbol}
+                                                    size="xs"
                                                 />
                                                 {/* Show asset suggestions when source symbol is provided */}
                                                 {formData.source_asset_symbol && !formData.asset_id && (() => {
@@ -794,7 +797,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     placeholder="Original symbol"
                                                     value={formData.source_asset_symbol}
                                                     onChange={e => handleInputChange('source_asset_symbol', e.target.value.toUpperCase())}
-                                                    size="sm"
+                                                    size="xs"
                                                     borderRadius="md"
                                                 />
                                             </GridItem>
@@ -806,7 +809,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     placeholder="0.00"
                                                     value={formData.quantity}
                                                     onChange={e => handleInputChange('quantity', e.target.value)}
-                                                    size="sm"
+                                                    size="xs"
                                                     borderRadius="md"
                                                     fontWeight="semibold"
                                                 />
@@ -818,13 +821,181 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             </Card.Root>
                         </Box>
 
-                        {/* Section 2.5: Tags - 25% */}
+                        {/* Section 3: Pricing & Fees - 50% */}
                         <Box flex="1">
                             <Card.Root shadow="sm" borderRadius="xl" overflow="visible" h="100%">
-                                <Card.Header bg="purple.50" py={3} px={4} borderTopRadius="xl">
-                                    <Heading size="sm" color="purple.700">🏷️ Tags</Heading>
+                                <Card.Header bg="green.50" py={2} px={3} borderTopRadius="xl">
+                                    <Heading size="xs" color="green.700">💰 Pricing & Fees</Heading>
                                 </Card.Header>
-                                <Card.Body p={4}>
+                                <Card.Body p={3}>
+                                    <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
+                                        {/* Price Section */}
+                                        <Box>
+                                            <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Price</Text>
+                                            <Grid templateColumns="1fr 1fr" gap={3}>
+                                                <GridItem>
+                                                    <Label>Unit Price</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="any"
+                                                        placeholder="0.00"
+                                                        value={formData.price}
+                                                        onChange={e => handleInputChange('price', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                    />
+                                                </GridItem>
+                                                <GridItem>
+                                                    <Label required>Quote Asset</Label>
+                                                    <AssetSelector
+                                                        value={formData.price_quote_asset_id}
+                                                        onChange={(id) => handleInputChange('price_quote_asset_id', id)}
+                                                        assets={assets}
+                                                        onAssetCreated={refetchAssets}
+                                                        defaultSymbol=""
+                                                        placeholder="e.g., EUR"
+                                                        rawAssetSource="manual"
+                                                        rawAssetSymbol={formData.source_price_quote_asset_symbol}
+                                                        size="xs"
+                                                    />
+                                                    {/* Show suggestions when source symbol is provided */}
+                                                    {formData.source_price_quote_asset_symbol && !formData.price_quote_asset_id && (() => {
+                                                        const suggestions = getAssetSuggestions(formData.source_price_quote_asset_symbol, assets, 0.5, 3);
+                                                        return suggestions.length > 0 ? (
+                                                            <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                                {suggestions.map((s, idx) => (
+                                                                    <Tooltip
+                                                                        key={idx}
+                                                                        content={`${formatConfidence(s.confidence)} match`}
+                                                                        openDelay={100}
+                                                                    >
+                                                                        <Badge
+                                                                            size="xs"
+                                                                            colorPalette={getConfidenceColor(s.confidence)}
+                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                            cursor="pointer"
+                                                                            onClick={() => handleInputChange('price_quote_asset_id', s.item.asset_id!)}
+                                                                        >
+                                                                            {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
+                                                                        </Badge>
+                                                                    </Tooltip>
+                                                                ))}
+                                                            </HStack>
+                                                        ) : null;
+                                                    })()}
+                                                </GridItem>
+                                            </Grid>
+                                            <Box mt={3}>
+                                                <Label>Total Value</Label>
+                                                <Input
+                                                    type="number"
+                                                    step="any"
+                                                    placeholder="Auto: Price × Quantity"
+                                                    value={formData.total}
+                                                    onChange={e => handleInputChange('total', e.target.value)}
+                                                    size="xs"
+                                                    borderRadius="md"
+                                                    bg="gray.50"
+                                                />
+                                            </Box>
+                                        </Box>
+
+                                        {/* Fee Section */}
+                                        <Box>
+                                            <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Fee</Text>
+                                            <Grid templateColumns="1fr 1fr" gap={3}>
+                                                <GridItem>
+                                                    <Label>Fee Amount</Label>
+                                                    <Input
+                                                        type="number"
+                                                        step="any"
+                                                        placeholder="0.00"
+                                                        value={formData.fee}
+                                                        onChange={e => handleInputChange('fee', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                    />
+                                                </GridItem>
+                                                <GridItem>
+                                                    <Label required>Fee Quote Asset</Label>
+                                                    <AssetSelector
+                                                        value={formData.fee_quote_asset_id}
+                                                        onChange={(id) => handleInputChange('fee_quote_asset_id', id)}
+                                                        assets={assets}
+                                                        onAssetCreated={refetchAssets}
+                                                        defaultSymbol=""
+                                                        placeholder="e.g., EUR"
+                                                        rawAssetSource="manual"
+                                                        rawAssetSymbol={formData.source_fee_quote_asset_symbol}
+                                                        size="xs"
+                                                    />
+                                                    {/* Show suggestions when source symbol is provided */}
+                                                    {formData.source_fee_quote_asset_symbol && !formData.fee_quote_asset_id && (() => {
+                                                        const suggestions = getAssetSuggestions(formData.source_fee_quote_asset_symbol, assets, 0.5, 3);
+                                                        return suggestions.length > 0 ? (
+                                                            <HStack gap={1} flexWrap="wrap" mt={1}>
+                                                                <Text fontSize="xs" color="gray.500">Suggestions:</Text>
+                                                                {suggestions.map((s, idx) => (
+                                                                    <Tooltip
+                                                                        key={idx}
+                                                                        content={`${formatConfidence(s.confidence)} match`}
+                                                                        openDelay={100}
+                                                                    >
+                                                                        <Badge
+                                                                            size="xs"
+                                                                            colorPalette={getConfidenceColor(s.confidence)}
+                                                                            variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                            cursor="pointer"
+                                                                            onClick={() => handleInputChange('fee_quote_asset_id', s.item.asset_id!)}
+                                                                        >
+                                                                            {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
+                                                                        </Badge>
+                                                                    </Tooltip>
+                                                                ))}
+                                                            </HStack>
+                                                        ) : null;
+                                                    })()}
+                                                </GridItem>
+                                            </Grid>
+                                        </Box>
+                                    </Grid>
+
+                                    {/* P&L Options */}
+                                    <Flex gap={6} mt={4} pt={4} borderTop="1px" borderColor="gray.200">
+                                        <Checkbox.Root
+                                            checked={formData.include_fee}
+                                            onCheckedChange={(e) => handleInputChange('include_fee', !!e.checked)}
+                                        >
+                                            <Checkbox.HiddenInput />
+                                            <Checkbox.Control />
+                                            <Checkbox.Label fontSize="xs">Include Fee in P&L</Checkbox.Label>
+                                        </Checkbox.Root>
+                                        <NativeSelect.Root size="xs" maxW="160px">
+                                            <NativeSelect.Field
+                                                value={formData.taxability_status}
+                                                onChange={(e) => handleInputChange('taxability_status', e.target.value)}
+                                            >
+                                                <option value="unknown">Unknown</option>
+                                                <option value="taxable">Taxable</option>
+                                                <option value="non_taxable">Non-Taxable</option>
+                                            </NativeSelect.Field>
+                                        </NativeSelect.Root>
+                                    </Flex>
+                                </Card.Body>
+                            </Card.Root>
+                        </Box>
+                    </Flex>
+
+                    {/* Section 4: Tags (1/3) + Network & Advanced (2/3) side by side */}
+                    <Flex gap={4} direction={{ base: "column", lg: "row" }}>
+                        {/* Tags - 1/3 */}
+                        <Box flex="1" minW={0}>
+                            <Card.Root shadow="sm" borderRadius="xl" overflow="hidden" h="100%">
+                                <Card.Header bg="purple.50" py={2} px={3} borderTopRadius="xl">
+                                    <Heading size="xs" color="purple.700">🏷️ Tags</Heading>
+                                </Card.Header>
+                                <Card.Body p={3}>
                                     <Text fontSize="xs" color="gray.500" mb={3}>
                                         Add key-value tags to categorize this transaction
                                     </Text>
@@ -853,7 +1024,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                             placeholder="Key (e.g., category)"
                                             value={newTagKey}
                                             onChange={e => setNewTagKey(e.target.value)}
-                                            size="sm"
+                                            size="xs"
                                             borderRadius="md"
                                             flex={1}
                                         />
@@ -877,12 +1048,12 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                                     setNewTagValue('');
                                                 }
                                             }}
-                                            size="sm"
+                                            size="xs"
                                             borderRadius="md"
                                             flex={1}
                                         />
                                         <Button
-                                            size="sm"
+                                            size="xs"
                                             variant="outline"
                                             onClick={() => {
                                                 if (newTagKey.trim() && newTagValue.trim()) {
@@ -903,295 +1074,112 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                             Add
                                         </Button>
                                     </Flex>
-
-                                    {/* Existing tags suggestions */}
-                                    {availableTags.length > 0 && (
-                                        <Box>
-                                            <Text fontSize="xs" color="gray.500" mb={2}>Click to add existing tags:</Text>
-                                            <Flex gap={2} wrap="wrap">
-                                                {availableTags
-                                                    .filter(tag => !tagExists(formData.tags, tag.key, tag.value))
-                                                    .slice(0, 15)
-                                                    .map((tag, idx) => (
-                                                        <Badge
-                                                            key={idx}
-                                                            colorPalette="gray"
-                                                            variant="subtle"
-                                                            cursor="pointer"
-                                                            onClick={() => handleInputChange('tags', [...formData.tags, tag])}
-                                                            _hover={{ bg: 'purple.100' }}
-                                                        >
-                                                            + {tag.key}: {tag.value}
-                                                        </Badge>
-                                                    ))}
-                                            </Flex>
-                                        </Box>
-                                    )}
                                 </Card.Body>
                             </Card.Root>
                         </Box>
+
+                        {/* Network & Advanced - 2/3 */}
+                        <Box flex="2">
+                            <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
+                                <Collapsible.Root open={showAdvanced} onOpenChange={(e) => setShowAdvanced(e.open)}>
+                                    <Collapsible.Trigger asChild>
+                                        <Card.Header
+                                            bg="purple.50"
+                                            py={3}
+                                            px={4}
+                                            borderTopRadius="xl"
+                                            cursor="pointer"
+                                            _hover={{ bg: "purple.100" }}
+                                            transition="background 0.2s"
+                                        >
+                                            <Flex justify="space-between" align="center">
+                                                <Heading size="xs" color="purple.700">🔗 Network & Advanced</Heading>
+                                                <Text color="purple.600" fontSize="xs">
+                                                    {showAdvanced ? '▲ Hide' : '▼ Show'}
+                                                </Text>
+                                            </Flex>
+                                        </Card.Header>
+                                    </Collapsible.Trigger>
+                                    <Collapsible.Content>
+                                        <Card.Body p={3}>
+                                            <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
+                                                <GridItem>
+                                                    <Label>Network</Label>
+                                                    <Input
+                                                        placeholder="ethereum, base, solana..."
+                                                        value={formData.network}
+                                                        onChange={e => handleInputChange('network', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                    />
+                                                </GridItem>
+                                                <GridItem>
+                                                    <Label>From Address</Label>
+                                                    <Input
+                                                        placeholder="0x..."
+                                                        value={formData.from_address}
+                                                        onChange={e => handleInputChange('from_address', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                        fontFamily="mono"
+                                                        fontSize="xs"
+                                                    />
+                                                </GridItem>
+                                                <GridItem>
+                                                    <Label>To Address</Label>
+                                                    <Input
+                                                        placeholder="0x..."
+                                                        value={formData.to_address}
+                                                        onChange={e => handleInputChange('to_address', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                        fontFamily="mono"
+                                                        fontSize="xs"
+                                                    />
+                                                </GridItem>
+                                            </Grid>
+                                            <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={4}>
+                                                <GridItem>
+                                                    <Label>Transaction Hash</Label>
+                                                    <Input
+                                                        placeholder="0x..."
+                                                        value={formData.network_transaction_id}
+                                                        onChange={e => handleInputChange('network_transaction_id', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                        fontFamily="mono"
+                                                        fontSize="xs"
+                                                    />
+                                                </GridItem>
+                                                <GridItem>
+                                                    <Label>Token Contract</Label>
+                                                    <Input
+                                                        placeholder="0x..."
+                                                        value={formData.token_contract_address}
+                                                        onChange={e => handleInputChange('token_contract_address', e.target.value)}
+                                                        size="xs"
+                                                        borderRadius="md"
+                                                        fontFamily="mono"
+                                                        fontSize="xs"
+                                                    />
+                                                </GridItem>
+                                            </Grid>
+                                            <Box mt={4}>
+                                                <Label>Review Notes</Label>
+                                                <Input
+                                                    placeholder="Add any notes about this transaction..."
+                                                    value={formData.review_notes}
+                                                    onChange={e => handleInputChange('review_notes', e.target.value)}
+                                                    size="xs"
+                                                    borderRadius="md"
+                                                />
+                                            </Box>
+                                        </Card.Body>
+                                    </Collapsible.Content>
+                                </Collapsible.Root>
+                            </Card.Root>
+                        </Box>
                     </Flex>
-
-                    {/* Section 3: Pricing */}
-                    <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Card.Header bg="green.50" py={3} px={4} borderTopRadius="xl">
-                            <Heading size="sm" color="green.700">💰 Pricing & Fees</Heading>
-                        </Card.Header>
-                        <Card.Body p={4}>
-                            <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={6}>
-                                {/* Price Section */}
-                                <Box>
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Price</Text>
-                                    <Grid templateColumns="1fr 1fr" gap={3}>
-                                        <GridItem>
-                                            <Label>Unit Price</Label>
-                                            <Input
-                                                type="number"
-                                                step="any"
-                                                placeholder="0.00"
-                                                value={formData.price}
-                                                onChange={e => handleInputChange('price', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                            />
-                                        </GridItem>
-                                        <GridItem>
-                                            <Label required>Quote Asset</Label>
-                                            <AssetSelector
-                                                value={formData.price_quote_asset_id}
-                                                onChange={(id) => handleInputChange('price_quote_asset_id', id)}
-                                                assets={assets}
-                                                onAssetCreated={refetchAssets}
-                                                defaultSymbol=""
-                                                placeholder="e.g., EUR"
-                                                rawAssetSource="manual"
-                                                rawAssetSymbol={formData.source_price_quote_asset_symbol}
-                                            />
-                                            {/* Show suggestions when source symbol is provided */}
-                                            {formData.source_price_quote_asset_symbol && !formData.price_quote_asset_id && (() => {
-                                                const suggestions = getAssetSuggestions(formData.source_price_quote_asset_symbol, assets, 0.5, 3);
-                                                return suggestions.length > 0 ? (
-                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                        <Text fontSize="xs" color="gray.500">Suggestions:</Text>
-                                                        {suggestions.map((s, idx) => (
-                                                            <Tooltip
-                                                                key={idx}
-                                                                content={`${formatConfidence(s.confidence)} match`}
-                                                                openDelay={100}
-                                                            >
-                                                                <Badge
-                                                                    size="xs"
-                                                                    colorPalette={getConfidenceColor(s.confidence)}
-                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                    cursor="pointer"
-                                                                    onClick={() => handleInputChange('price_quote_asset_id', s.item.asset_id!)}
-                                                                >
-                                                                    {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
-                                                                </Badge>
-                                                            </Tooltip>
-                                                        ))}
-                                                    </HStack>
-                                                ) : null;
-                                            })()}
-                                        </GridItem>
-                                    </Grid>
-                                    <Box mt={3}>
-                                        <Label>Total Value</Label>
-                                        <Input
-                                            type="number"
-                                            step="any"
-                                            placeholder="Auto: Price × Quantity"
-                                            value={formData.total}
-                                            onChange={e => handleInputChange('total', e.target.value)}
-                                            size="sm"
-                                            borderRadius="md"
-                                            bg="gray.50"
-                                        />
-                                    </Box>
-                                </Box>
-
-                                {/* Fee Section */}
-                                <Box>
-                                    <Text fontSize="xs" fontWeight="bold" color="gray.500" mb={3} textTransform="uppercase">Fee</Text>
-                                    <Grid templateColumns="1fr 1fr" gap={3}>
-                                        <GridItem>
-                                            <Label>Fee Amount</Label>
-                                            <Input
-                                                type="number"
-                                                step="any"
-                                                placeholder="0.00"
-                                                value={formData.fee}
-                                                onChange={e => handleInputChange('fee', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                            />
-                                        </GridItem>
-                                        <GridItem>
-                                            <Label required>Fee Quote Asset</Label>
-                                            <AssetSelector
-                                                value={formData.fee_quote_asset_id}
-                                                onChange={(id) => handleInputChange('fee_quote_asset_id', id)}
-                                                assets={assets}
-                                                onAssetCreated={refetchAssets}
-                                                defaultSymbol=""
-                                                placeholder="e.g., EUR"
-                                                rawAssetSource="manual"
-                                                rawAssetSymbol={formData.source_fee_quote_asset_symbol}
-                                            />
-                                            {/* Show suggestions when source symbol is provided */}
-                                            {formData.source_fee_quote_asset_symbol && !formData.fee_quote_asset_id && (() => {
-                                                const suggestions = getAssetSuggestions(formData.source_fee_quote_asset_symbol, assets, 0.5, 3);
-                                                return suggestions.length > 0 ? (
-                                                    <HStack gap={1} flexWrap="wrap" mt={1}>
-                                                        <Text fontSize="xs" color="gray.500">Suggestions:</Text>
-                                                        {suggestions.map((s, idx) => (
-                                                            <Tooltip
-                                                                key={idx}
-                                                                content={`${formatConfidence(s.confidence)} match`}
-                                                                openDelay={100}
-                                                            >
-                                                                <Badge
-                                                                    size="xs"
-                                                                    colorPalette={getConfidenceColor(s.confidence)}
-                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                                    cursor="pointer"
-                                                                    onClick={() => handleInputChange('fee_quote_asset_id', s.item.asset_id!)}
-                                                                >
-                                                                    {s.item.symbol}{s.confidence >= 0.9 && ' ✓'}
-                                                                </Badge>
-                                                            </Tooltip>
-                                                        ))}
-                                                    </HStack>
-                                                ) : null;
-                                            })()}
-                                        </GridItem>
-                                    </Grid>
-                                </Box>
-                            </Grid>
-
-                            {/* P&L Options */}
-                            <Flex gap={6} mt={4} pt={4} borderTop="1px" borderColor="gray.200">
-                                <Checkbox.Root
-                                    checked={formData.include_fee}
-                                    onCheckedChange={(e) => handleInputChange('include_fee', !!e.checked)}
-                                >
-                                    <Checkbox.HiddenInput />
-                                    <Checkbox.Control />
-                                    <Checkbox.Label fontSize="sm">Include Fee in P&L</Checkbox.Label>
-                                </Checkbox.Root>
-                                <NativeSelect.Root size="sm" maxW="160px">
-                                    <NativeSelect.Field
-                                        value={formData.taxability_status}
-                                        onChange={(e) => handleInputChange('taxability_status', e.target.value)}
-                                    >
-                                        <option value="unknown">Unknown</option>
-                                        <option value="taxable">Taxable</option>
-                                        <option value="non_taxable">Non-Taxable</option>
-                                    </NativeSelect.Field>
-                                </NativeSelect.Root>
-                            </Flex>
-                        </Card.Body>
-                    </Card.Root>
-
-                    {/* Section 4: Advanced (Collapsible) */}
-                    <Card.Root shadow="sm" borderRadius="xl" overflow="visible">
-                        <Collapsible.Root open={showAdvanced} onOpenChange={(e) => setShowAdvanced(e.open)}>
-                            <Collapsible.Trigger asChild>
-                                <Card.Header
-                                    bg="purple.50"
-                                    py={3}
-                                    px={4}
-                                    borderTopRadius="xl"
-                                    cursor="pointer"
-                                    _hover={{ bg: "purple.100" }}
-                                    transition="background 0.2s"
-                                >
-                                    <Flex justify="space-between" align="center">
-                                        <Heading size="sm" color="purple.700">🔗 Network & Advanced</Heading>
-                                        <Text color="purple.600" fontSize="sm">
-                                            {showAdvanced ? '▲ Hide' : '▼ Show'}
-                                        </Text>
-                                    </Flex>
-                                </Card.Header>
-                            </Collapsible.Trigger>
-                            <Collapsible.Content>
-                                <Card.Body p={4}>
-                                    <Grid templateColumns={{ base: "1fr", md: "repeat(3, 1fr)" }} gap={4} mb={4}>
-                                        <GridItem>
-                                            <Label>Network</Label>
-                                            <Input
-                                                placeholder="ethereum, base, solana..."
-                                                value={formData.network}
-                                                onChange={e => handleInputChange('network', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                            />
-                                        </GridItem>
-                                        <GridItem>
-                                            <Label>From Address</Label>
-                                            <Input
-                                                placeholder="0x..."
-                                                value={formData.from_address}
-                                                onChange={e => handleInputChange('from_address', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                                fontFamily="mono"
-                                                fontSize="xs"
-                                            />
-                                        </GridItem>
-                                        <GridItem>
-                                            <Label>To Address</Label>
-                                            <Input
-                                                placeholder="0x..."
-                                                value={formData.to_address}
-                                                onChange={e => handleInputChange('to_address', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                                fontFamily="mono"
-                                                fontSize="xs"
-                                            />
-                                        </GridItem>
-                                    </Grid>
-                                    <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={4}>
-                                        <GridItem>
-                                            <Label>Transaction Hash</Label>
-                                            <Input
-                                                placeholder="0x..."
-                                                value={formData.network_transaction_id}
-                                                onChange={e => handleInputChange('network_transaction_id', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                                fontFamily="mono"
-                                                fontSize="xs"
-                                            />
-                                        </GridItem>
-                                        <GridItem>
-                                            <Label>Token Contract</Label>
-                                            <Input
-                                                placeholder="0x..."
-                                                value={formData.token_contract_address}
-                                                onChange={e => handleInputChange('token_contract_address', e.target.value)}
-                                                size="sm"
-                                                borderRadius="md"
-                                                fontFamily="mono"
-                                                fontSize="xs"
-                                            />
-                                        </GridItem>
-                                    </Grid>
-                                    <Box mt={4}>
-                                        <Label>Review Notes</Label>
-                                        <Input
-                                            placeholder="Add any notes about this transaction..."
-                                            value={formData.review_notes}
-                                            onChange={e => handleInputChange('review_notes', e.target.value)}
-                                            size="sm"
-                                            borderRadius="md"
-                                        />
-                                    </Box>
-                                </Card.Body>
-                            </Collapsible.Content>
-                        </Collapsible.Root>
-                    </Card.Root>
 
                 </Flex>
 
@@ -1211,7 +1199,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             variant="ghost"
                             onClick={handleClear}
                             disabled={loading}
-                            size="lg"
+                            size="xs"
                         >
                             Clear
                         </Button>
@@ -1219,10 +1207,10 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                             type="submit"
                             colorPalette="blue"
                             disabled={loading}
-                            size="lg"
-                            px={8}
+                            size="xs"
+                            px={6}
                         >
-                            {loading ? <Spinner size="sm" mr={2} /> : null}
+                            {loading ? <Spinner size="xs" mr={2} /> : null}
                             {loading ? 'Creating...' : '➕ Create Transaction'}
                         </Button>
                     </Flex>
@@ -1232,10 +1220,10 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
             {/* Recent Transactions */}
             {recentTransactions.length > 0 && (
                 <Card.Root mt={8} shadow="sm" borderRadius="xl">
-                    <Card.Header bg="gray.50" py={3} px={4}>
-                        <Heading size="sm" color="gray.700">✨ Recently Created</Heading>
+                    <Card.Header bg="gray.50" py={2} px={3}>
+                        <Heading size="xs" color="gray.700">✨ Recently Created</Heading>
                     </Card.Header>
-                    <Card.Body p={4}>
+                    <Card.Body p={3}>
                         <Flex direction="column" gap={2}>
                             {recentTransactions.map(tx => (
                                 <Flex
@@ -1245,7 +1233,7 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                                     p={3}
                                     bg="gray.50"
                                     borderRadius="lg"
-                                    fontSize="sm"
+                                    fontSize="xs"
                                     _hover={{ bg: "gray.100" }}
                                     transition="background 0.2s"
                                 >

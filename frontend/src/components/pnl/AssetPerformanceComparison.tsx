@@ -25,19 +25,11 @@ import {
 import type { AssetPnLRow } from './types';
 import { AssetComparisonPicker } from './AssetComparisonPicker';
 import { Tooltip } from '../ui/tooltip';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-type ZoomPreset = 'all' | '1y' | '6m' | '3m' | '1m';
-const ZOOM_PRESETS: Record<ZoomPreset, { label: string; days: number | null }> = {
-    all: { label: 'All', days: null },
-    '1y': { label: '1Y', days: 365 },
-    '6m': { label: '6M', days: 180 },
-    '3m': { label: '3M', days: 90 },
-    '1m': { label: '1M', days: 30 },
-};
+import {
+    type ZoomPreset,
+    ZOOM_PRESETS,
+    filterPointsByZoom,
+} from './chartUtils';
 
 const PORTFOLIO_LINE_COLOR = '#718096'; // gray.500
 
@@ -120,6 +112,12 @@ interface AssetPerformanceComparisonProps {
         isLoading: boolean;
         error: string | null;
     };
+    /** Controlled zoom — when provided, overrides internal state */
+    zoom?: ZoomPreset;
+    /** Callback when user changes zoom (only relevant if zoom is controlled) */
+    onZoomChange?: (z: ZoomPreset) => void;
+    /** Context label (e.g. account/category name) shown in heading & portfolio ROI legend */
+    contextLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,10 +129,15 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
     baseCurrency,
     assets,
     sharedTimeline,
+    zoom: controlledZoom,
+    onZoomChange,
+    contextLabel,
 }) => {
     // ---- State ----
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
-    const [zoom, setZoom] = useState<ZoomPreset>('all');
+    const [internalZoom, setInternalZoom] = useState<ZoomPreset>('all');
+    const zoom = controlledZoom ?? internalZoom;
+    const setZoom = onZoomChange ?? setInternalZoom;
     const [showPortfolio, setShowPortfolio] = useState(true);
     const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>(['^GSPC']);
     const [scaleMode, setScaleMode] = useState<ScaleMode>('auto');
@@ -155,15 +158,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
     const allPoints: TimelinePoint[] = timeline.data?.points || [];
 
     // ---- Zoom filter ----
-    const filteredPoints = useMemo(() => {
-        const preset = ZOOM_PRESETS[zoom];
-        if (!preset.days || !allPoints.length) return allPoints;
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - preset.days);
-        const cutoffStr = cutoff.toISOString().split('T')[0];
-        const filtered = allPoints.filter(p => p.date >= cutoffStr);
-        return filtered.length >= 2 ? filtered : allPoints;
-    }, [allPoints, zoom]);
+    const filteredPoints = useMemo(() => filterPointsByZoom(allPoints, zoom), [allPoints, zoom]);
 
     // ---- Date range for benchmark fetch ----
     const dateRange = useMemo(() => {
@@ -183,6 +178,8 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
     );
     const anyBenchmarkLoading = benchmarkResults.some(r => r.isLoading);
     const benchmarkErrors = benchmarkResults.filter(r => r.error).map(r => `${r.ticker}: ${r.error}`);
+
+    const portfolioRoiLabel = contextLabel ? `${contextLabel} ROI` : 'Portfolio ROI';
 
     // ---- Build chart series (useMemo) ----
     const { chartData, colorMap } = useMemo(() => {
@@ -237,20 +234,22 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
             }
         }
 
-        // 2) Portfolio benchmark — ROI%: (unrealized + realized) / cost_basis
+        // 2) Portfolio benchmark — ROI%: (unrealized + realized) / cost_basis, rebased to 0% at start
         if (showPortfolio && filteredPoints.length >= 2) {
             const data: { x: string; y: number }[] = [];
+            let roi0: number | null = null;
             for (const pt of filteredPoints) {
                 const costBasis = pt.cost_basis_in_base;
                 if (costBasis <= 0) continue;
                 const unrealized = pt.unrealized_pnl;
                 const realized = pt.cumulative_realized_pnl;
                 const roi = ((unrealized + realized) / costBasis) * 100;
-                data.push({ x: pt.date, y: roi });
+                if (roi0 === null) roi0 = roi;
+                data.push({ x: pt.date, y: roi - roi0 });
             }
             if (data.length >= 2) {
-                series.push({ id: '📊 Portfolio ROI', data });
-                colors['📊 Portfolio ROI'] = portfolioColor;
+                series.push({ id: `📊 ${portfolioRoiLabel}`, data });
+                colors[`📊 ${portfolioRoiLabel}`] = portfolioColor;
             }
         }
 
@@ -272,7 +271,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         });
 
         return { chartData: series, colorMap: colors };
-    }, [filteredPoints, selectedIds, assets, showPortfolio, benchmarkResults, portfolioColor, colorOverrides, benchmarkColorOverrides]);
+    }, [filteredPoints, selectedIds, assets, showPortfolio, benchmarkResults, portfolioColor, colorOverrides, benchmarkColorOverrides, portfolioRoiLabel]);
 
     // ---- Derived values ----
     const totalDays = filteredPoints.length > 1
@@ -282,7 +281,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
         )
         : 0;
 
-    const portfolioId = '📊 Portfolio ROI';
+    const portfolioId = `📊 ${portfolioRoiLabel}`;
 
     // Identify which series are "benchmarks" (dashed lines)
     const benchmarkSeriesIds = useMemo(() => {
@@ -336,7 +335,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                 {/* Header row */}
                 <Flex justify="space-between" align="center" mb={3} wrap="wrap" gap={2}>
                     <Flex align="center" gap={2}>
-                        <Heading size="sm" color="gray.700">Performance Comparison</Heading>
+                        <Heading size="sm" color="gray.700">{contextLabel ? `${contextLabel} — Performance Comparison` : 'Performance Comparison'}</Heading>
                         <Tooltip content="Rebased return comparison: each line starts at 0% on the first visible date. Portfolio ROI = (unrealized + realized) / cost basis — measures actual return on invested capital. Compare against benchmarks (S&P 500, BTC) to assess relative performance. If your portfolio underperforms a benchmark, consider whether the risk you’re taking is justified by the returns." openDelay={200}>
                             <Box color="gray.400" cursor="help" _hover={{ color: 'blue.500' }}>
                                 <FiInfo size={14} />
@@ -519,7 +518,7 @@ export const AssetPerformanceComparison: React.FC<AssetPerformanceComparisonProp
                                         bg={portfolioColor}
                                         flexShrink={0}
                                     />
-                                    <Text fontSize="xs">Portfolio ROI</Text>
+                                    <Text fontSize="xs">{portfolioRoiLabel}</Text>
                                 </Badge>
                             </Popover.Trigger>
                             <Portal>

@@ -45,6 +45,8 @@ interface AllocationTreemapProps {
     onDrilldownChange?: (state: TreemapDrilldownState) => void;
     /** Per-account balance data keyed by asset ID (for accurate account grouping) */
     accountBalances?: Map<number, AccountBalanceBreakdown[]>;
+    /** Called when user double-clicks a leaf asset to navigate to asset detail */
+    onAssetNavigate?: (assetId: number, assetSymbol: string) => void;
 }
 
 type GroupBy = 'flat' | 'category' | 'account';
@@ -115,6 +117,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
     isLoading,
     onDrilldownChange,
     accountBalances,
+    onAssetNavigate,
 }) => {
     const [groupBy, setGroupBy] = useState<GroupBy>('category');
     const [sizeBy, setSizeBy] = useState<SizeBy>('market_value');
@@ -464,6 +467,37 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
         }
     };
 
+    // symbol → asset_id mapping for asset navigation
+    const symbolToAssetId = useMemo(() => {
+        const m = new Map<string, number>();
+        for (const a of assets) {
+            if (a.asset.id != null && a.asset.symbol) {
+                m.set(a.asset.symbol, a.asset.id);
+            }
+        }
+        return m;
+    }, [assets]);
+
+    // Double-click leaf → navigate to asset detail (escape hatch from treemap to L2)
+    const lastClickRef = useRef<{ id: string; time: number } | null>(null);
+    const handleNodeClickWithDoubleClick = useCallback((node: any) => {
+        const now = Date.now();
+        const last = lastClickRef.current;
+        if (last && last.id === node.id && now - last.time < 400) {
+            // Double-click detected
+            lastClickRef.current = null;
+            if (onAssetNavigate && !node.data?.children) {
+                const assetId = symbolToAssetId.get(node.id);
+                if (assetId != null) {
+                    onAssetNavigate(assetId, node.id);
+                    return;
+                }
+            }
+        }
+        lastClickRef.current = { id: node.id, time: now };
+        handleNodeClick(node);
+    }, [handleNodeClick, onAssetNavigate, symbolToAssetId]);
+
     // Reset drilldown when groupBy changes
     const handleGroupByChange = (g: GroupBy) => {
         setGroupBy(g);
@@ -634,7 +668,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                             const bg = node.color || '#CBD5E0';
                             return getContrastTextColor(bg);
                         }}
-                        onClick={handleNodeClick}
+                        onClick={handleNodeClickWithDoubleClick}
                         tooltip={(node: any) => {
                             const data = node.node?.data;
                             const value = node.node?.value || 0;

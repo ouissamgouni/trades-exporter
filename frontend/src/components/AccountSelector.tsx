@@ -202,7 +202,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                         _hover={{ bg: 'gray.100' }}
                         onClick={() => handleSelect(null)}
                         color="gray.500"
-                        fontSize="sm"
+                        fontSize="xs"
                     >
                         -- Not linked --
                     </Box>
@@ -216,7 +216,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                             bg={value === account.id ? 'blue.50' : undefined}
                             _hover={{ bg: 'blue.100' }}
                             onClick={() => handleSelect(account.id)}
-                            fontSize="sm"
+                            fontSize="xs"
                         >
                             <Flex align="center" gap={2}>
                                 <Text fontWeight="medium" flex="1">{account.name}</Text>
@@ -235,7 +235,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
 
                     {/* No results */}
                     {filteredAccounts.length === 0 && (
-                        <Box p={2} color="gray.500" fontSize="sm">
+                        <Box p={2} color="gray.500" fontSize="xs">
                             No accounts found
                         </Box>
                     )}
@@ -247,7 +247,7 @@ export const AccountSelector: React.FC<AccountSelectorProps> = ({
                         _hover={{ bg: 'green.50' }}
                         onClick={openCreateDialog}
                         color="green.600"
-                        fontSize="sm"
+                        fontSize="xs"
                         borderTop="1px solid"
                         borderColor="gray.100"
                     >

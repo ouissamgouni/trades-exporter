@@ -17,7 +17,7 @@ import {
 import { FiExternalLink, FiAlertTriangle, FiAlertCircle, FiInfo, FiPlus } from 'react-icons/fi';
 import { SlidePanel } from './SlidePanel';
 import { PnLWarningItem, WarningLevel } from './types';
-import { AddManualPriceDialog } from './AddManualPriceDialog';
+import { PriceSetterDialog } from './PriceSetterDialog';
 import { getWarningTypeConfig } from './warningStyles';
 
 interface WarningsPanelProps {
@@ -198,94 +198,94 @@ export const WarningsPanel: React.FC<WarningsPanelProps> = ({
                                     </Text>
                                 </Flex>
                             </Card.Header>
-                        <Card.Body py={2}>
-                            {items.map((warning) => {
-                                const colors = getWarningColor(warning.level);
-                                return (
-                                    <Box
-                                        key={warning.id}
-                                        p={3}
-                                        mb={2}
-                                        bg={colors.bg}
-                                        borderWidth="1px"
-                                        borderColor={colors.border}
-                                        borderRadius="md"
-                                    >
-                                        <Flex gap={3}>
-                                            <Box mt={1}>
-                                                {getWarningIcon(warning.level)}
-                                            </Box>
-                                            <Box flex="1">
-                                                <Text fontSize="sm" mb={1}>
-                                                    {warning.message}
-                                                </Text>
-                                                <Flex gap={2} wrap="wrap">
-                                                    {warning.transaction_id && onTransactionClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onTransactionClick(warning.transaction_id!)}
-                                                        >
-                                                            TX #{warning.transaction_id}
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                    {warning.unit_id && onUnitClick && (
-                                                        <Button
-                                                            size="xs"
-                                                            variant="ghost"
-                                                            onClick={() => onUnitClick(warning.unit_id!)}
-                                                        >
-                                                            Unit #{warning.unit_id}
-                                                            <FiExternalLink size={12} />
-                                                        </Button>
-                                                    )}
-                                                    {warning.action_label && warning.action_link && (
-                                                        <Button size="xs" colorPalette="blue">
-                                                            {warning.action_label}
-                                                        </Button>
-                                                    )}
-                                                    {/* Add Price button for price-related warnings */}
-                                                    {isPriceWarning(warning) && quoteAssetId && baseCurrency && (
-                                                        <Button
-                                                            size="xs"
-                                                            colorPalette="green"
-                                                            onClick={() => handleAddPriceClick(warning)}
-                                                        >
-                                                            <FiPlus size={12} />
-                                                            <Text ml={1}>Add Price</Text>
-                                                        </Button>
-                                                    )}
-                                                </Flex>
-                                            </Box>
-                                        </Flex>
-                                    </Box>
-                                );
-                            })}
-                        </Card.Body>
-                    </Card.Root>
-    );
-})
+                            <Card.Body py={2}>
+                                {items.map((warning) => {
+                                    const colors = getWarningColor(warning.level);
+                                    return (
+                                        <Box
+                                            key={warning.id}
+                                            p={3}
+                                            mb={2}
+                                            bg={colors.bg}
+                                            borderWidth="1px"
+                                            borderColor={colors.border}
+                                            borderRadius="md"
+                                        >
+                                            <Flex gap={3}>
+                                                <Box mt={1}>
+                                                    {getWarningIcon(warning.level)}
+                                                </Box>
+                                                <Box flex="1">
+                                                    <Text fontSize="sm" mb={1}>
+                                                        {warning.message}
+                                                    </Text>
+                                                    <Flex gap={2} wrap="wrap">
+                                                        {warning.transaction_id && onTransactionClick && (
+                                                            <Button
+                                                                size="xs"
+                                                                variant="ghost"
+                                                                onClick={() => onTransactionClick(warning.transaction_id!)}
+                                                            >
+                                                                TX #{warning.transaction_id}
+                                                                <FiExternalLink size={12} />
+                                                            </Button>
+                                                        )}
+                                                        {warning.unit_id && onUnitClick && (
+                                                            <Button
+                                                                size="xs"
+                                                                variant="ghost"
+                                                                onClick={() => onUnitClick(warning.unit_id!)}
+                                                            >
+                                                                Unit #{warning.unit_id}
+                                                                <FiExternalLink size={12} />
+                                                            </Button>
+                                                        )}
+                                                        {warning.action_label && warning.action_link && (
+                                                            <Button size="xs" colorPalette="blue">
+                                                                {warning.action_label}
+                                                            </Button>
+                                                        )}
+                                                        {/* Add Price button for price-related warnings */}
+                                                        {isPriceWarning(warning) && quoteAssetId && baseCurrency && (
+                                                            <Button
+                                                                size="xs"
+                                                                colorPalette="green"
+                                                                onClick={() => handleAddPriceClick(warning)}
+                                                            >
+                                                                <FiPlus size={12} />
+                                                                <Text ml={1}>Add Price</Text>
+                                                            </Button>
+                                                        )}
+                                                    </Flex>
+                                                </Box>
+                                            </Flex>
+                                        </Box>
+                                    );
+                                })}
+                            </Card.Body>
+                        </Card.Root>
+                    );
+                })
             )}
 
-{/* Manual Price Dialog */ }
-{
-    selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
-        <AddManualPriceDialog
-            isOpen={dialogOpen}
-            onClose={() => {
-                setDialogOpen(false);
-                setSelectedWarning(null);
-            }}
-            onSave={handlePriceSaved}
-            assetId={selectedWarning.asset_id}
-            assetName={getAssetName(selectedWarning.asset_id)}
-            defaultDate={getDefaultDateFromWarning(selectedWarning)}
-            quoteAssetId={quoteAssetId}
-            quoteAssetName={baseCurrency}
-        />
-    )
-}
+            {/* Manual Price Dialog */}
+            {
+                selectedWarning && selectedWarning.asset_id && quoteAssetId && baseCurrency && (
+                    <PriceSetterDialog
+                        isOpen={dialogOpen}
+                        onClose={() => {
+                            setDialogOpen(false);
+                            setSelectedWarning(null);
+                        }}
+                        onSave={handlePriceSaved}
+                        assetId={selectedWarning.asset_id}
+                        assetName={getAssetName(selectedWarning.asset_id)}
+                        defaultDate={getDefaultDateFromWarning(selectedWarning)}
+                        quoteAssetId={quoteAssetId}
+                        quoteAssetName={baseCurrency}
+                    />
+                )
+            }
         </SlidePanel >
     );
 };

@@ -481,6 +481,7 @@ function AssetDetailView({
                                 <MetricCard
                                     label="Realized P&L"
                                     value={formatQuantityWithCurrency(assetPnlRow.realized_pnl, baseCurrency)}
+                                    subValue={assetPnlRow.taxable_realized_pnl ? `Taxable: ${formatQuantityWithCurrency(assetPnlRow.taxable_realized_pnl, baseCurrency)}` : undefined}
                                     color={realizedColor}
                                     icon={assetPnlRow.realized_pnl >= 0 ?
                                         <FiTrendingUp color="green" size={14} /> :

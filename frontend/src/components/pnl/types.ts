@@ -167,6 +167,7 @@ export interface AggregatedBalanceItem {
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;
+    taxable_realized_pnl_in_base?: number;  // Taxable portion of realized P&L
     realized_event_count: number;
     warning_count: number;
     unsettled_negative_count: number;  // Count of unsettled negative lots (excluded when filter active)
@@ -219,6 +220,7 @@ export interface AssetPnLRow {
     unrealized_pnl: number;
     unrealized_pnl_pct: number;
     realized_pnl: number;
+    taxable_realized_pnl: number;  // Taxable portion of realized P&L
 
     // Fees for this asset
     total_fees: number;
@@ -268,7 +270,9 @@ export interface CostLot {
 
     // Origin traceability (Principle 3)
     acquired_at: string;
+    created_at?: string;  // When the lot record was created in the PnL engine
     origin_transaction_id?: number;
+    last_updated_by_tx_id?: number;  // Transaction that last modified this lot (consumption/settlement)
     origin_unit_id?: number;  // CalculationUnit that created this lot
     origin_unit_label?: string;  // Human-readable label of origin unit
     origin_label?: string;
@@ -1138,5 +1142,78 @@ export interface UnmappedLiveAsset {
     totalQty: number;
     /** Market value in base currency, null if no price available */
     marketValue: number | null;
+}
+
+
+// ============================================================================
+// Enriched Transaction Types (PnL Audit — Transaction-level view)
+// ============================================================================
+
+export interface EnrichedTransactionFeeDetail {
+    fee_amount: number;
+    fee_in_base: number;
+    asset?: AssetRef | null;
+}
+
+export interface CostLotEventSummaryItem {
+    event_type: string;
+    quantity_delta: number;
+    lot_id?: number | null;
+}
+
+/** Transaction extended with P&L enrichment data from the enriched-transactions endpoint. */
+export interface EnrichedTransaction {
+    // All standard Transaction fields
+    id: number;
+    source?: string;
+    source_transaction_id?: string;
+    source_transaction_type?: string;
+    source_asset_symbol?: string;
+    account_id?: number;
+    asset_id?: number;
+    price_quote_asset_id?: number;
+    fee_quote_asset_id?: number;
+    date_time?: string;
+    direction?: string;
+    transaction_type?: string;
+    quantity?: number;
+    price?: number;
+    total?: number;
+    fee?: number;
+    include_fee?: boolean;
+    from_account_id?: number;
+    to_account_id?: number;
+    network?: string;
+    network_transaction_id?: string;
+    review_status?: string;
+    taxability_status?: string;
+    tags?: Array<Record<string, unknown>>;
+    linked_asset?: AssetRef | null;
+    price_quote_asset?: AssetRef | null;
+    fee_quote_asset?: AssetRef | null;
+    account_name?: string;
+    from_account_name?: string;
+    to_account_name?: string;
+    connector_name?: string;
+
+    // P&L enrichment fields
+    unit_id?: number | null;
+    unit_pattern?: string | null;
+    unit_label?: string | null;
+    realized_entries?: RealizedEntryDetail[];
+    realized_pnl_in_base?: number | null;
+    fee_entries?: EnrichedTransactionFeeDetail[];
+    total_fees_in_base?: number | null;
+    cost_lot_event_summary?: CostLotEventSummaryItem[];
+    is_disposal_taxable?: boolean | null;
+}
+
+export interface EnrichedTransactionsFilterOptions {
+    patterns: Array<{ value: string; label?: string; count: number }>;
+    total_transactions: number;
+    has_warnings_count: number;
+    has_realized_pnl_count: number;
+    has_fees_count: number;
+    warning_types: Array<{ value: string; label?: string; count: number }>;
 }
 
