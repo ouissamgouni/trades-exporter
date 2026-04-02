@@ -1190,18 +1190,22 @@ class CalculationVersion(SQLModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     
-    # French tax tracking
+    # French tax tracking (cascade delete when version is deleted)
     french_crypto_tax_entries: List["FrenchCryptoTaxEntry"] = Relationship(
-        back_populates="calculation_version"
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     french_crypto_tax_annual_summaries: List["FrenchCryptoTaxAnnualSummary"] = Relationship(
-        back_populates="calculation_version"
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     french_securities_tax_entries: List["FrenchSecuritiesTaxEntry"] = Relationship(
-        back_populates="calculation_version"
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     french_securities_tax_annual_summaries: List["FrenchSecuritiesTaxAnnualSummary"] = Relationship(
-        back_populates="calculation_version"
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
 
