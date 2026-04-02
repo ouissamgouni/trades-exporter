@@ -1142,6 +1142,8 @@ export interface UnmappedLiveAsset {
     totalQty: number;
     /** Market value in base currency, null if no price available */
     marketValue: number | null;
+    /** Per-account/connector breakdown of this unmapped asset's live balance */
+    accounts?: { accountName: string; connectorType: string; chain: string | null; qty: number }[];
 }
 
 

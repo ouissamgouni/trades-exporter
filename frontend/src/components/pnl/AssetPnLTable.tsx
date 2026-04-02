@@ -174,7 +174,7 @@ const isPriceStale = (fetchedAt?: string): boolean => {
     return fetchedTime < oneHourAgo;
 };
 
-type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl' | 'efficiency';
+type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl' | 'total_return' | 'efficiency';
 type SortDirection = 'asc' | 'desc';
 
 // ------------------------------------------------------------------
@@ -313,7 +313,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     pnlVersionId,
 }) => {
     const assetPanelCtx = useContext(AssetDetailPanelContext);
-    const [sortField, setSortField] = useState<SortField>('market_value');
+    const [sortField, setSortField] = useState<SortField>('total_return');
     const [sortDir, setSortDir] = useState<SortDirection>('desc');
     const [expandedAssetIds, setExpandedAssetIds] = useState<Set<number>>(new Set());
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
@@ -455,28 +455,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         return row.account_ids != null && row.account_ids.length >= 1;
     };
 
-    // --- Build full asset list (include unmapped live assets as rows) ---
+    // --- Build full asset list (mapped PnL assets only — unmapped live assets surfaced in BalanceHealthCard) ---
     const allAssets = useMemo((): AssetPnLRow[] => {
-        const unmappedRows: AssetPnLRow[] = unmappedLiveAssets.map(u => ({
-            asset: { id: null, symbol: u.symbol, label: null },
-            account_ids: [],
-            category_ids: [],
-            quantity: 0,
-            market_value: u.marketValue ?? 0,
-            cost_basis: 0,
-            unrealized_pnl: 0,
-            unrealized_pnl_pct: 0,
-            realized_pnl: 0,
-            taxable_realized_pnl: 0,
-            total_fees: 0,
-            lot_count: 0,
-            realized_event_count: 0,
-            warning_count: 0,
-            has_lots: false,
-            is_unmapped: true,
-        }));
-        return [...assets, ...unmappedRows];
-    }, [assets, unmappedLiveAssets]);
+        return [...assets];
+    }, [assets]);
 
     const totalAssetCount = allAssets.length;
 
@@ -502,9 +484,6 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     if (!a.category_ids || a.category_ids.length === 0) return false;
                     if (!a.category_ids.some(id => selectedCategoryIds.includes(id))) return false;
                 }
-
-                // Exclude unmapped rows when account/category filters are active
-                if (hasAccountOrCategoryFilter && a.is_unmapped) return false;
 
                 // P&L status filter
                 if (pnlStatus === 'with_pnl' && !a.has_lots) return false;
@@ -538,6 +517,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 if (sortField === 'asset_symbol') {
                     aVal = a.asset.symbol ?? '';
                     bVal = b.asset.symbol ?? '';
+                } else if (sortField === 'total_return') {
+                    aVal = a.unrealized_pnl + a.realized_pnl;
+                    bVal = b.unrealized_pnl + b.realized_pnl;
                 } else if (sortField === 'efficiency') {
                     // Efficiency = |total return / cost basis| * 100, same as treemap
                     const atr = (a.unrealized_pnl + a.realized_pnl);
@@ -559,7 +541,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             });
 
         return { filtered: result, dustHiddenCount: dustCount };
-    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, hasAccountOrCategoryFilter]);
+    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds]);
 
     // Report filtered count to parent
     useEffect(() => {
@@ -840,16 +822,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     return (
         <Card.Root>
             <Card.Header pb={2}>
-                {/* Top row: Title + asset search */}
-                <Flex justify="space-between" align="center" mb={2} gap={3}>
-                    <Text fontWeight="bold" fontSize="lg" flexShrink={0}>
-                        {groupBy === 'asset'
-                            ? `Asset P&L (${filtered.length} assets)`
-                            : `Asset P&L (${byAccountRows.length} accounts)`
-                        }
-                    </Text>
+                {/* Top row: Search + filters header */}
+                <Flex align="center" mb={2} gap={3}>
                     {!hideFilters && (
-                        <Box position="relative" maxW="220px" w="100%">
+                        <Box position="relative" maxW="220px" w="100%" flexShrink={0}>
                             <Input
                                 placeholder="Search asset..."
                                 value={search}
@@ -893,6 +869,32 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     {activeFilterCount > 0 && (
                                         <Badge size="xs" colorPalette="blue" variant="solid">{activeFilterCount}</Badge>
                                     )}
+                                    {/* Active filter chips — inline in header */}
+                                    {!filtersExpanded && activeFilterChips.length > 0 && (
+                                        <Flex gap={1} ml={1} flexWrap="wrap" onClick={(e) => e.stopPropagation()}>
+                                            {activeFilterChips.map(chip => (
+                                                <Badge
+                                                    key={chip.id}
+                                                    size="xs"
+                                                    colorPalette={chip.color}
+                                                    display="inline-flex"
+                                                    alignItems="center"
+                                                    gap={0.5}
+                                                    px={1.5}
+                                                    borderRadius="md"
+                                                    cursor="pointer"
+                                                    transition="all 0.15s"
+                                                    _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
+                                                    onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
+                                                >
+                                                    <Text fontSize="2xs">{chip.label}</Text>
+                                                    <Box as="span" display="flex" alignItems="center">
+                                                        <FiX size={8} />
+                                                    </Box>
+                                                </Badge>
+                                            ))}
+                                        </Flex>
+                                    )}
                                 </Flex>
                                 {activeFilterCount > 0 && (
                                     <Button
@@ -907,34 +909,6 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     </Button>
                                 )}
                             </Flex>
-
-                            {/* Active filter chips — shown when filters are collapsed */}
-                            {!filtersExpanded && activeFilterChips.length > 0 && (
-                                <Flex flexWrap="wrap" gap={1.5} pt={1} pb={1}>
-                                    {activeFilterChips.map(chip => (
-                                        <Badge
-                                            key={chip.id}
-                                            size="sm"
-                                            colorPalette={chip.color}
-                                            display="inline-flex"
-                                            alignItems="center"
-                                            gap={1}
-                                            px={2}
-                                            py={0.5}
-                                            borderRadius="md"
-                                            cursor="pointer"
-                                            transition="all 0.15s"
-                                            _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
-                                            onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
-                                        >
-                                            <Text fontSize="xs">{chip.label}</Text>
-                                            <Box as="span" display="flex" alignItems="center">
-                                                <FiX size={10} />
-                                            </Box>
-                                        </Badge>
-                                    ))}
-                                </Flex>
-                            )}
 
                             <Collapsible.Content>
                                 <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={3} mt={2} pb={1}>
@@ -1128,11 +1102,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     </Collapsible.Root>
                 )}
 
-                {/* Portfolio totals summary bar (common — always visible) */}
-                {(() => {
-                    const hasAccountOrCatFilter = (selectedAccountIds?.length ?? 0) > 0 || (selectedCategoryIds?.length ?? 0) > 0;
-                    const totals = (!hasAccountOrCatFilter && backendSummary) ? backendSummary : filteredTotals;
-                    const showDustNote = !hasAccountOrCatFilter && backendSummary && dustHiddenCount > 0;
+                {/* Portfolio totals summary bar (only when list view) */}
+                {!contentHidden && (() => {
+                    const totals = filteredTotals;
+                    const showDustNote = dustHiddenCount > 0;
                     const totalReturn = totals.totalUnrealized + totals.totalRealized;
                     const roi = totals.totalCost > 0 ? (totalReturn / totals.totalCost) * 100 : 0;
                     const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
@@ -1254,6 +1227,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 display="inline-flex"
                             >
                                 {[
+                                    { value: 'total_return', label: 'Return' },
                                     { value: 'market_value', label: 'Value' },
                                     { value: 'cost_basis', label: 'Cost' },
                                     { value: 'unrealized_pnl', label: 'Unrealized' },

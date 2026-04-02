@@ -21,9 +21,18 @@ interface AssetPriceChartProps {
     gaps?: GapRange[];
     /** Mini sparkline mode — small height, no axes/tooltips/presets */
     mini?: boolean;
+    /** External zoom override — when set, internal zoom state is ignored */
+    zoom?: ZoomKey;
+    /** Callback when user changes zoom (fullscreen mode) */
+    onZoomChange?: (z: ZoomKey) => void;
+    /** Hide internal zoom preset badges */
+    hideControls?: boolean;
+    /** Custom chart height (CSS string) */
+    height?: string;
 }
 
 const ZOOM_PRESETS = {
+    '1W': { label: '1W', days: 7 },
     '1M': { label: '1M', days: 30 },
     '3M': { label: '3M', days: 90 },
     '6M': { label: '6M', days: 180 },
@@ -36,11 +45,15 @@ type ZoomKey = keyof typeof ZOOM_PRESETS;
 const CHART_HEIGHT = 180;
 const MINI_HEIGHT = 36;
 
-export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbol, gaps, mini }) => {
+export type PriceChartZoomKey = ZoomKey;
+
+export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbol, gaps, mini, zoom: externalZoom, onZoomChange, hideControls, height: heightProp }) => {
     const [points, setPoints] = useState<PriceTimeseriesPoint[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [zoom, setZoom] = useState<ZoomKey>('ALL');
+    const [internalZoom, setInternalZoom] = useState<ZoomKey>('ALL');
+    const zoom = externalZoom ?? internalZoom;
+    const setZoom = onZoomChange ?? setInternalZoom;
     const baseCurrency = useBaseCurrency();
 
     useEffect(() => {
@@ -267,33 +280,36 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     }
 
     // ── Full chart mode ──────────────────────────────────────────────────
+    const chartHeight = heightProp ? undefined : CHART_HEIGHT;
 
     return (
-        <Box>
+        <Box h={heightProp}>
             {/* Zoom presets */}
-            <Flex gap={1} mb={1} justify="flex-end">
-                {(Object.keys(ZOOM_PRESETS) as ZoomKey[]).map(k => (
-                    <Badge
-                        key={k}
-                        cursor="pointer"
-                        variant={zoom === k ? 'solid' : 'outline'}
-                        colorPalette={zoom === k ? 'blue' : 'gray'}
-                        onClick={() => setZoom(k)}
-                        size="xs"
-                        px={1.5}
-                        fontSize="9px"
-                    >
-                        {ZOOM_PRESETS[k].label}
-                    </Badge>
-                ))}
-            </Flex>
+            {!hideControls && (
+                <Flex gap={1} mb={1} justify="flex-end">
+                    {(Object.keys(ZOOM_PRESETS) as ZoomKey[]).map(k => (
+                        <Badge
+                            key={k}
+                            cursor="pointer"
+                            variant={zoom === k ? 'solid' : 'outline'}
+                            colorPalette={zoom === k ? 'blue' : 'gray'}
+                            onClick={() => setZoom(k)}
+                            size="xs"
+                            px={1.5}
+                            fontSize="9px"
+                        >
+                            {ZOOM_PRESETS[k].label}
+                        </Badge>
+                    ))}
+                </Flex>
+            )}
 
             {filteredPoints.length < 2 ? (
-                <Flex justify="center" align="center" h={CHART_HEIGHT}>
+                <Flex justify="center" align="center" h={chartHeight}>
                     <Text fontSize="xs" color="gray.400">Not enough data for selected range</Text>
                 </Flex>
             ) : (
-                <Box h={CHART_HEIGHT}>
+                <Box h={heightProp ? '100%' : CHART_HEIGHT}>
                     <ResponsiveLine
                         data={chartData}
                         animate={false}
@@ -359,17 +375,19 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
             )}
 
             {/* Summary line */}
-            <Flex justify="space-between" mt={1}>
-                <Text fontSize="9px" color="gray.400">
-                    {filteredPoints.length} data points
-                    {filteredPoints.length > 0 && ` · ${filteredPoints[0].date} → ${filteredPoints[filteredPoints.length - 1].date}`}
-                </Text>
-                {filteredPoints.length > 0 && (
-                    <Text fontSize="9px" color="gray.500" fontWeight="medium">
-                        Latest: {formatPrice(filteredPoints[filteredPoints.length - 1].price)}
+            {!hideControls && (
+                <Flex justify="space-between" mt={1}>
+                    <Text fontSize="9px" color="gray.400">
+                        {filteredPoints.length} data points
+                        {filteredPoints.length > 0 && ` · ${filteredPoints[0].date} → ${filteredPoints[filteredPoints.length - 1].date}`}
                     </Text>
-                )}
-            </Flex>
+                    {filteredPoints.length > 0 && (
+                        <Text fontSize="9px" color="gray.500" fontWeight="medium">
+                            Latest: {formatPrice(filteredPoints[filteredPoints.length - 1].price)}
+                        </Text>
+                    )}
+                </Flex>
+            )}
         </Box>
     );
 };

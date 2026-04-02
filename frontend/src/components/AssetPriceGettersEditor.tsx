@@ -88,7 +88,7 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                 const firstNonMock = data.find(g => g !== 'mock') || '';
                 setNewGetter(prev => ({ ...prev, price_getter: firstNonMock }));
             })
-            .catch(() => {});
+            .catch(() => { });
     }, []);
 
     // Auto-test all getters when asset changes
@@ -315,10 +315,13 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                             const autoResult = autoTestResults[pg.id];
                             const mockMin = pg.params?.min_price;
                             const mockMax = pg.params?.max_price;
+                            const mockPrices = pg.params?.prices as Record<string, number> | undefined;
+                            const hasConfiguredPrices = isMock && mockPrices && typeof mockPrices === 'object' && Object.keys(mockPrices).length > 0;
+                            const mockQuoteCurrency = pg.params?.quote_currency as string | undefined;
                             const paramsEntries = Object.entries(pg.params || {}).filter(
                                 ([k]) => !isMock || (k !== 'min_price' && k !== 'max_price'),
                             );
-                            const hasParams = isMock ? (mockMin != null || mockMax != null) : paramsEntries.length > 0;
+                            const hasParams = isMock ? (mockMin != null || mockMax != null || hasConfiguredPrices) : paramsEntries.length > 0;
 
                             return (
                                 <Table.Row key={pg.id}>
@@ -337,7 +340,7 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                                         )}
                                     </Table.Cell>
                                     <Table.Cell>
-                                        {isEditing && isMock ? (
+                                        {isEditing && isMock && !hasConfiguredPrices ? (
                                             (() => {
                                                 let minVal: number | string = '', maxVal: number | string = '';
                                                 try { const p = JSON.parse(editingValues.params); minVal = p.min_price ?? ''; maxVal = p.max_price ?? ''; } catch { /* */ }
@@ -355,6 +358,18 @@ export const AssetPriceGettersEditor: React.FC<AssetPriceGettersEditorProps> = (
                                             <Textarea size="sm" value={editingValues.params}
                                                 onChange={e => setEditingValues(v => ({ ...v, params: e.target.value }))}
                                                 placeholder='{"key": "value"}' fontFamily="mono" fontSize="xs" rows={2} width="150px" />
+                                        ) : isMock && hasConfiguredPrices ? (
+                                            <Tooltip content={
+                                                <Box fontFamily="mono" fontSize="xs" whiteSpace="pre">
+                                                    {Object.entries(mockPrices!).map(([k, v]) => (
+                                                        <Box key={k}>{k} → {v}</Box>
+                                                    ))}
+                                                </Box>
+                                            } showArrow>
+                                                <Text fontSize="xs" fontFamily="mono" color="orange.600" cursor="default">
+                                                    {Object.keys(mockPrices!).length} price{Object.keys(mockPrices!).length !== 1 ? 's' : ''}{mockQuoteCurrency ? ` (${mockQuoteCurrency})` : ''}
+                                                </Text>
+                                            </Tooltip>
                                         ) : isMock ? (
                                             <Text fontSize="xs" fontFamily="mono" color="orange.600">
                                                 {mockMin != null && mockMax != null ? `${mockMin} – ${mockMax}` : <Text as="span" color="gray.400">no range</Text>}

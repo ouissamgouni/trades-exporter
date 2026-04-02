@@ -1,0 +1,55 @@
+# French Tax Scenario — Deterministic Mock Prices
+# =================================================
+# Prices match the transactions in transactions.yaml so PnL calculations
+# are fully reproducible.  The "current" entry is the fallback for any
+# datetime not explicitly listed.
+#
+# Fiat cross-rates (EUR/USD) use the same mechanism: the EUR asset is
+# priced in USD (i.e. "how many USD per 1 EUR").
+
+prices:
+  # ── BTC (EUR) ──────────────────────────────────────────────
+  - asset_symbol: BTC
+    quote_currency: EUR
+    entries:
+      - at: "2025-01-15T10:00:00" # fr_tax_001 buy
+        price: "40000.00"
+      - at: "2025-06-15T10:00:00" # fr_tax_002 sell
+        price: "60000.00"
+      - at: "2025-09-01T10:00:00" # fr_tax_009 swap out
+        price: "55000.00"
+      - at: "2025-10-01T10:00:00" # fr_tax_011 transfer
+        price: "54000.00"
+      - at: current
+        price: "55000.00"
+
+  # ── ETH (EUR) ──────────────────────────────────────────────
+  - asset_symbol: ETH
+    quote_currency: EUR
+    entries:
+      - at: "2025-02-01T10:00:00" # fr_tax_003 buy
+        price: "3000.00"
+      - at: "2025-07-01T10:00:00" # fr_tax_004 sell
+        price: "2000.00"
+      - at: "2025-09-01T10:00:00" # fr_tax_010 swap in
+        price: "3666.67"
+      - at: current
+        price: "3500.00"
+
+  # ── AAPL (EUR) ─────────────────────────────────────────────
+  - asset_symbol: AAPL
+    quote_currency: EUR
+    entries:
+      - at: "2025-03-01T10:00:00" # fr_tax_005/007 buy
+        price: "180.00"
+      - at: "2025-08-01T10:00:00" # fr_tax_006/008 sell
+        price: "220.00"
+      - at: current
+        price: "215.00"
+
+  # ── EUR/USD fiat cross-rate ────────────────────────────────
+  - asset_symbol: EUR
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "1.08"

@@ -54,6 +54,9 @@ includes:
   worktree:
     taskfile: .taskfiles/worktree.yml
     dir: "{{.ROOT_DIR}}"
+  qa:
+    taskfile: .taskfiles/qa.yml
+    dir: "{{.ROOT_DIR}}"
 
 tasks:
   install:
@@ -100,6 +103,12 @@ tasks:
         echo "  task test:int:local     Integration tests (trades_db_integ)"
         echo "  task test:int:dev       Integration tests (dev)"
         echo "  task deploy:test:local  Deploy to test stack"
+        echo ""
+        echo "QA ENVIRONMENT"
+        echo "  task qa:spin -- <ref>   Build + deploy isolated QA from git ref"
+        echo "  task qa:spin:current    Build + deploy QA from working directory"
+        echo "  task qa:spin:dev        QA with local code + live reload"
+        echo "  task qa:stop            Stop + cleanup QA (containers + DB)"
         echo ""
         echo "PRODUCTION"
         echo "  task release:tag v1.0   Tag release"

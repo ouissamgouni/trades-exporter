@@ -2227,6 +2227,9 @@ const TransactionsTab: React.FC<{
         dateFrom: '',
         dateTo: '',
         nonOwned: false,
+        priceQuoteAssetIds: [],
+        feeQuoteAssetIds: [],
+        bundlePatterns: [],
         versionId: String(versionId),
         inclusionStatus: 'included',
     });
@@ -2290,6 +2293,9 @@ const TransactionsTab: React.FC<{
         versionId: String(versionId),
         inclusionStatus: view,
         nonOwned: false,
+        priceQuoteAssetIds: [],
+        feeQuoteAssetIds: [],
+        bundlePatterns: [],
     }), [versionId, view]);
 
     return (

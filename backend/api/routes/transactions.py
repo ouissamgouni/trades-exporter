@@ -43,6 +43,7 @@ from backend.db.models import (
     CostLotEvent,
     ConsumedLotSlice,
     SyncJobConnectorRun,
+    TransactionTaxOverride,
 )
 from backend.services.pipeline import (
     create_default_pipeline,
@@ -189,7 +190,7 @@ def _serialize_datetime(value):
 
 
 def _build_transaction_response(
-    tx: NormalizedTransaction, session: Session
+    tx: NormalizedTransaction, session: Session, fr_override_tx_ids: Optional[set] = None,
 ) -> TransactionResponse:
     """
     Build a TransactionResponse from a NormalizedTransaction.
@@ -284,6 +285,18 @@ def _build_transaction_response(
     tx_dict["from_account_name"] = from_account_name
     tx_dict["to_account_name"] = to_account_name
 
+    # FR tax override indicator
+    if fr_override_tx_ids is not None:
+        tx_dict["has_fr_tax_override"] = tx.id in fr_override_tx_ids
+    else:
+        # Single-transaction fetch: query directly
+        has_override = session.exec(
+            select(TransactionTaxOverride.transaction_id)
+            .where(TransactionTaxOverride.transaction_id == tx.id)
+            .where(TransactionTaxOverride.jurisdiction == "fr")
+        ).first()
+        tx_dict["has_fr_tax_override"] = has_override is not None
+
     return TransactionResponse(**tx_dict)
 
 
@@ -326,7 +339,14 @@ class FilterOptionsResponse(BaseModel):
     connector_runs: List[FilterOption]
     tags: List[FilterOption]
     networks: List[FilterOption]
+    price_quote_assets: List[FilterOption] = []
+    fee_quote_assets: List[FilterOption] = []
+    bundle_patterns: List[FilterOption] = []
     non_owned_count: int = 0
+    include_fee_count: int = 0
+    has_fee_count: int = 0
+    has_bundle_count: int = 0
+    total_count: int = 0
 
 
 @router.get("/filter-options", response_model=FilterOptionsResponse)
@@ -350,7 +370,12 @@ def get_filter_options(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     ids: Optional[str] = Query(None, description="Filter by transaction IDs (comma-separated)"),
-    has_fee: bool = Query(False, description="Filter to transactions that have a fee > 0"),
+    has_fee: Optional[bool] = Query(None, description="Filter by fee presence: true = fee > 0, false = no fee"),
+    price_quote_asset_id: Optional[str] = Query(None),
+    fee_quote_asset_id: Optional[str] = Query(None),
+    include_fee: Optional[bool] = Query(None),
+    has_bundle: Optional[bool] = Query(None),
+    bundle_pattern: Optional[str] = Query(None),
     session: Session = Depends(get_db)
 ):
     """
@@ -387,6 +412,11 @@ def get_filter_options(
         network=network,
         date_from=date_from,
         date_to=date_to,
+        price_quote_asset_id=price_quote_asset_id,
+        fee_quote_asset_id=fee_quote_asset_id,
+        include_fee=include_fee,
+        has_bundle=has_bundle,
+        bundle_pattern=bundle_pattern,
     )
 
     try:
@@ -401,10 +431,14 @@ def get_filter_options(
                     base_query = base_query.where(NormalizedTransaction.id == id_list[0])
                 else:
                     base_query = base_query.where(NormalizedTransaction.id.in_(id_list))
-        if has_fee:
+        if has_fee is True:
             base_query = base_query.where(
                 NormalizedTransaction.fee.isnot(None),
                 NormalizedTransaction.fee > 0,
+            )
+        elif has_fee is False:
+            base_query = base_query.where(
+                or_(NormalizedTransaction.fee.is_(None), NormalizedTransaction.fee == 0)
             )
 
         base_cte = base_query.cte("filtered_txs")
@@ -739,6 +773,101 @@ def get_filter_options(
             )
         ).one() or 0
 
+        # Price quote assets with counts
+        from backend.db.models import UserCalculationBundle
+        pqa_query = (
+            select(
+                Asset.asset_id,
+                Asset.symbol,
+                Asset.label,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.price_quote_asset_id == Asset.asset_id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+            .order_by(Asset.symbol)
+        )
+        pqa_results = session.exec(pqa_query).all()
+        price_quote_asset_options = [
+            FilterOption(
+                value=str(r[0]),
+                label=f"{r[1]}" + (f" ({r[2]})" if r[2] else ""),
+                count=r[3]
+            )
+            for r in pqa_results
+        ]
+
+        # Fee quote assets with counts
+        fqa_query = (
+            select(
+                Asset.asset_id,
+                Asset.symbol,
+                Asset.label,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.fee_quote_asset_id == Asset.asset_id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+            .order_by(Asset.symbol)
+        )
+        fqa_results = session.exec(fqa_query).all()
+        fee_quote_asset_options = [
+            FilterOption(
+                value=str(r[0]),
+                label=f"{r[1]}" + (f" ({r[2]})" if r[2] else ""),
+                count=r[3]
+            )
+            for r in fqa_results
+        ]
+
+        # Bundle patterns with counts
+        bundle_q = (
+            select(
+                UserCalculationBundle.pattern,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.user_calculation_unit_id == UserCalculationBundle.id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(UserCalculationBundle.pattern)
+            .order_by(UserCalculationBundle.pattern)
+        )
+        bundle_results = session.exec(bundle_q).all()
+        bundle_pattern_options = [
+            FilterOption(
+                value=r[0],
+                label=r[0].replace('_', ' ').title() if r[0] else 'Unknown',
+                count=r[1]
+            )
+            for r in bundle_results if r[0]
+        ]
+
+        # Include fee count
+        include_fee_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.include_fee == True)  # noqa: E712
+        ).one() or 0
+
+        # Has fee count (fee > 0)
+        has_fee_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.fee.isnot(None))
+            .where(NormalizedTransaction.fee > 0)
+        ).one() or 0
+
+        # Has bundle count
+        has_bundle_count = session.exec(
+            select(func.count(NormalizedTransaction.id))
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .where(NormalizedTransaction.user_calculation_unit_id.isnot(None))
+        ).one() or 0
+
+        # Total count (for computing "no" counts on frontend)
+        total_count = session.exec(
+            select(func.count(base_cte.c.id))
+        ).one() or 0
+
         return FilterOptionsResponse(
             sources=source_options,
             accounts=account_options,
@@ -755,7 +884,14 @@ def get_filter_options(
             connector_runs=connector_run_options,
             tags=tag_options,
             networks=network_options,
+            price_quote_assets=price_quote_asset_options,
+            fee_quote_assets=fee_quote_asset_options,
+            bundle_patterns=bundle_pattern_options,
             non_owned_count=non_owned_count,
+            include_fee_count=include_fee_count,
+            has_fee_count=has_fee_count,
+            has_bundle_count=has_bundle_count,
+            total_count=total_count,
         )
         
     except Exception as e:
@@ -1310,7 +1446,13 @@ def list_transactions(
     # Counterparty filter
     non_owned: bool = Query(False, description="Filter to transactions with non-owned or unmapped counterparties"),
     # Fee filter
-    has_fee: bool = Query(False, description="Filter to transactions that have a fee > 0"),
+    has_fee: Optional[bool] = Query(None, description="Filter by fee presence: true = fee > 0, false = no fee"),
+    # New filters: quote assets, include_fee, bundles
+    price_quote_asset_id: Optional[str] = Query(None, description="Filter by price quote asset IDs (comma-separated for multiple)"),
+    fee_quote_asset_id: Optional[str] = Query(None, description="Filter by fee quote asset IDs (comma-separated for multiple)"),
+    include_fee: Optional[bool] = Query(None, description="Filter by include_fee flag (true/false)"),
+    has_bundle: Optional[bool] = Query(None, description="Filter by whether transaction has a bundle assigned"),
+    bundle_pattern: Optional[str] = Query(None, description="Filter by bundle pattern (comma-separated: internal_transfer, swap, flow, split, custom, unknown)"),
     limit: int = Query(5000, ge=1, le=10000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),
     sort_by: Optional[str] = Query("date_time", description="Column to sort by (date_time, id, source, direction, transaction_type, quantity, price, total, fee, review_status, taxability_status)"),
@@ -1373,6 +1515,11 @@ def list_transactions(
             network=network,
             date_from=date_from,
             date_to=date_to,
+            price_quote_asset_id=price_quote_asset_id,
+            fee_quote_asset_id=fee_quote_asset_id,
+            include_fee=include_fee,
+            has_bundle=has_bundle,
+            bundle_pattern=bundle_pattern,
         )
         
         # Add P&L audit filters to applied_filters
@@ -1422,10 +1569,14 @@ def list_transactions(
                     statement = statement.where(NormalizedTransaction.id.in_(id_list))
 
         # Has fee filter
-        if has_fee:
+        if has_fee is True:
             statement = statement.where(
                 NormalizedTransaction.fee.isnot(None),
                 NormalizedTransaction.fee > 0,
+            )
+        elif has_fee is False:
+            statement = statement.where(
+                or_(NormalizedTransaction.fee.is_(None), NormalizedTransaction.fee == 0)
             )
 
         # P&L version inclusion/exclusion filter
@@ -1542,9 +1693,20 @@ def list_transactions(
 
         transactions = session.exec(statement).all()
 
+        # Batch-load FR tax overrides for this page of transactions
+        tx_ids = [tx.id for tx in transactions]
+        fr_override_tx_ids: set = set()
+        if tx_ids:
+            override_rows = session.exec(
+                select(TransactionTaxOverride.transaction_id)
+                .where(TransactionTaxOverride.jurisdiction == "fr")
+                .where(TransactionTaxOverride.transaction_id.in_(tx_ids))
+            ).all()
+            fr_override_tx_ids = set(override_rows)
+
         # Build response with metadata
         return TransactionListResponse(
-            results=[_build_transaction_response(tx, session) for tx in transactions],
+            results=[_build_transaction_response(tx, session, fr_override_tx_ids=fr_override_tx_ids) for tx in transactions],
             metadata=FilterMetadata(
                 applied_filters=applied_filters,
                 validation_warnings=warnings,

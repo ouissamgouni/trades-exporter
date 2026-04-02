@@ -1516,27 +1516,36 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                 non_taxable: 'unknown',
                             };
                             return (
-                                <Tooltip content={labelMap[status] || status} openDelay={200}>
-                                    <Badge
-                                        size="sm"
-                                        colorPalette={colorMap[status] || 'gray'}
-                                        cursor="pointer"
-                                        onClick={async () => {
-                                            const next = nextMap[status] || 'unknown';
-                                            try {
-                                                const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                    method: 'PATCH',
-                                                    headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({ taxability_status: next }),
-                                                });
-                                                if (!response.ok) throw new Error('Failed to update');
-                                                invalidateTransactionData();
-                                            } catch { }
-                                        }}
-                                    >
-                                        {iconMap[status] || status}
-                                    </Badge>
-                                </Tooltip>
+                                <Flex align="center" gap={1}>
+                                    <Tooltip content={labelMap[status] || status} openDelay={200}>
+                                        <Badge
+                                            size="sm"
+                                            colorPalette={colorMap[status] || 'gray'}
+                                            cursor="pointer"
+                                            onClick={async () => {
+                                                const next = nextMap[status] || 'unknown';
+                                                try {
+                                                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                        method: 'PATCH',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ taxability_status: next }),
+                                                    });
+                                                    if (!response.ok) throw new Error('Failed to update');
+                                                    invalidateTransactionData();
+                                                } catch { }
+                                            }}
+                                        >
+                                            {iconMap[status] || status}
+                                        </Badge>
+                                    </Tooltip>
+                                    {tx.has_fr_tax_override && (
+                                        <Tooltip content="FR Tax override active" openDelay={200}>
+                                            <Badge size="xs" colorPalette="blue" variant="subtle" fontSize="7px">
+                                                FR
+                                            </Badge>
+                                        </Tooltip>
+                                    )}
+                                </Flex>
                             );
                         })()}
                     </Table.Cell>

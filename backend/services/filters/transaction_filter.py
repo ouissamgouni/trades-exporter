@@ -18,7 +18,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import select
 
 from backend.api.schemas import AppliedFilters
-from backend.db.models import NormalizedTransaction, Account, AssetCategory
+from backend.db.models import NormalizedTransaction, Account, AssetCategory, UserCalculationBundle
 
 
 def build_account_filter_condition(
@@ -252,6 +252,55 @@ def build_transaction_filter_predicates(
         else:
             predicates.append(NormalizedTransaction.network.in_(filters.networks))
 
+    # Price quote asset filter
+    if filters.price_quote_asset_ids:
+        if len(filters.price_quote_asset_ids) == 1:
+            predicates.append(
+                NormalizedTransaction.price_quote_asset_id == filters.price_quote_asset_ids[0]
+            )
+        else:
+            predicates.append(
+                NormalizedTransaction.price_quote_asset_id.in_(filters.price_quote_asset_ids)
+            )
+
+    # Fee quote asset filter
+    if filters.fee_quote_asset_ids:
+        if len(filters.fee_quote_asset_ids) == 1:
+            predicates.append(
+                NormalizedTransaction.fee_quote_asset_id == filters.fee_quote_asset_ids[0]
+            )
+        else:
+            predicates.append(
+                NormalizedTransaction.fee_quote_asset_id.in_(filters.fee_quote_asset_ids)
+            )
+
+    # Include fee filter (boolean on the model)
+    if filters.include_fee is not None:
+        predicates.append(
+            NormalizedTransaction.include_fee == filters.include_fee
+        )
+
+    # Has bundle filter
+    if filters.has_bundle is not None:
+        if filters.has_bundle:
+            predicates.append(
+                NormalizedTransaction.user_calculation_unit_id.isnot(None)
+            )
+        else:
+            predicates.append(
+                NormalizedTransaction.user_calculation_unit_id.is_(None)
+            )
+
+    # Bundle pattern filter
+    if filters.bundle_patterns:
+        bundle_subquery = (
+            select(UserCalculationBundle.id)
+            .where(UserCalculationBundle.pattern.in_(filters.bundle_patterns))
+        )
+        predicates.append(
+            NormalizedTransaction.user_calculation_unit_id.in_(bundle_subquery)
+        )
+
     # Non-owned counterparty filter
     if non_owned:
         non_owned_subquery = select(Account.id).where(Account.owned == False)  # noqa: E712
@@ -319,4 +368,9 @@ def has_active_filters(
         or filters.networks
         or filters.date_from
         or filters.date_to
+        or filters.price_quote_asset_ids
+        or filters.fee_quote_asset_ids
+        or filters.include_fee is not None
+        or filters.has_bundle is not None
+        or filters.bundle_patterns
     )

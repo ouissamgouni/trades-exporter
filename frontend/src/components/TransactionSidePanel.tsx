@@ -1090,6 +1090,12 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         ]}
                         onSave={async (v) => { await saveField('taxability_status', v); }}
                     />
+                    {tx.has_fr_tax_override && (
+                        <Flex align="center" gap={2} px={2} py={1} bg="blue.50" borderRadius="md">
+                            <Badge size="xs" colorPalette="blue" variant="subtle" fontSize="7px">FR</Badge>
+                            <Text fontSize="9px" color="blue.600">French Tax override active — managed from the FR Tax tab</Text>
+                        </Flex>
+                    )}
                 </Section>
 
                 {/* ============================================================ */}

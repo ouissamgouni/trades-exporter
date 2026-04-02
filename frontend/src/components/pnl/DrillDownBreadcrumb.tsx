@@ -1,23 +1,16 @@
 /**
  * DrillDownBreadcrumb
  *
- * Renders a prominent breadcrumb bar with navigation trail, period badge,
- * and section toggle buttons (Assets / PnL Audit) right-aligned.
+ * Renders a prominent breadcrumb bar with navigation trail and period badge.
+ * Section toggles live inside ContextView.
  */
 
 import React from 'react';
-import { Badge, Button, Flex, Text } from '@chakra-ui/react';
-import { FiChevronRight, FiFileText, FiGrid } from 'react-icons/fi';
+import { Badge, Flex, Text } from '@chakra-ui/react';
+import { FiChevronRight } from 'react-icons/fi';
 import { usePnL } from './PnLContext';
 
-interface DrillDownBreadcrumbProps {
-    assetsOpen: boolean;
-    auditOpen: boolean;
-    onToggleAssets: () => void;
-    onToggleAudit: () => void;
-}
-
-export const DrillDownBreadcrumb: React.FC<DrillDownBreadcrumbProps> = ({ assetsOpen, auditOpen, onToggleAssets, onToggleAudit }) => {
+export const DrillDownBreadcrumb: React.FC = () => {
     const { state, dispatch } = usePnL();
     const { breadcrumbs, level } = state.drill;
     const timeframeRange = state.timeframeRange;
@@ -84,28 +77,6 @@ export const DrillDownBreadcrumb: React.FC<DrillDownBreadcrumbProps> = ({ assets
                     </React.Fragment>
                 );
             })}
-
-            {/* Section toggle buttons — right-aligned */}
-            <Flex gap={1} ml="auto" align="center">
-                <Button
-                    size="xs"
-                    variant={assetsOpen ? 'solid' : 'outline'}
-                    colorPalette={assetsOpen ? 'blue' : 'gray'}
-                    onClick={onToggleAssets}
-                >
-                    <FiGrid size={12} />
-                    <Text ml={1} fontSize="xs">Assets</Text>
-                </Button>
-                <Button
-                    size="xs"
-                    variant={auditOpen ? 'solid' : 'outline'}
-                    colorPalette={auditOpen ? 'blue' : 'gray'}
-                    onClick={onToggleAudit}
-                >
-                    <FiFileText size={12} />
-                    <Text ml={1} fontSize="xs">PnL Audit</Text>
-                </Button>
-            </Flex>
         </Flex>
     );
 };

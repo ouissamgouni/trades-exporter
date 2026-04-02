@@ -29,7 +29,7 @@ from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 
 from backend.config.loader import configure_logging
-from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern, ensure_utc, utc_now
+from backend.db.models import CalculationUnitLeg, CalculationVersion, CalculationUnit, NormalizedTransaction, Asset, UserCalculationBundle, PnlWarning, UnitPattern, RealizedPnl, ensure_utc, utc_now
 from backend.services.pnl.config import PnLConfig, WarningType
 from backend.services.pnl.models import (
     PnLResult,

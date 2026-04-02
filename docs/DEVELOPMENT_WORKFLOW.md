@@ -10,6 +10,7 @@ This document describes the CI/CD workflow for the trades-exporter project.
 - [Daily Development Workflow](#daily-development-workflow)
 - [Branching Strategy](#branching-strategy)
 - [Deployment](#deployment)
+- [QA Environment](#qa-environment)
 - [Testing](#testing)
 - [Task Commands Reference](#task-commands-reference)
 
@@ -56,6 +57,7 @@ task start:dev:debug
 | Environment | Purpose | Database Port | Backend Port | Frontend Port |
 |-------------|---------|---------------|--------------|---------------|
 | **Dev**     | Local development with VSCode debugging | 5432 | 8000 | 5173 |
+| **QA**      | Isolated manual testing with scenario data | 5435 | 8002 | 3002 |
 | **Test**    | Containerized staging environment | 5433 | 8001 | 3001 |
 | **Prod**    | Production (local or cloud) | 5434 | 8080 | 3000 |
 
@@ -70,6 +72,14 @@ task start:dev:debug
 - Fully containerized (Docker Compose)
 - Built from `develop` branch
 - Uses `:develop` tagged images
+
+### QA Environment
+
+- Isolated full stack for manual scenario testing
+- Can be built from any git ref, tag, or working directory
+- Supports scenario data overlays (custom YAML seed folders)
+- Two modes: **Full Docker** (containerized) or **Hybrid** (local code with live reload)
+- `task qa:stop` fully cleans up (containers + DB volume + images)
 
 ### Prod Environment
 
@@ -236,6 +246,80 @@ The project includes a `render.yaml` blueprint for automatic deployment to Rende
 
 ---
 
+## QA Environment
+
+The QA environment lets you spin up an isolated full stack from any git ref, seed it with scenario-specific test data, and manually verify features.
+
+### Scenario Folders
+
+A scenario folder contains YAML files in the same format as `backend/db/seed_data/`. Only include what you need — defaults are loaded first, then the scenario layers on top.
+
+```
+backend/db/seed_data/scenarios/fr_tax/
+├── accounts.yaml        # Optional: extra accounts (PEA, AV envelopes)
+├── assets.yaml          # Optional: extra assets
+├── bundles.yaml         # Optional: bundle overrides
+└── transactions.yaml    # The test trades
+```
+
+Seeding is idempotent: assets upsert by symbol, accounts by name, transactions by `(source, source_transaction_id)`. The scenario only needs the *extra* data specific to that test case.
+
+### Full Docker Mode
+
+Builds and deploys all services in containers — identical to test/prod deployments:
+
+```bash
+# From a branch (uses git worktree, no branch switching)
+task qa:spin -- feature/new-pnl-drilldown
+
+# From a branch with scenario data overlay
+task qa:spin -- feature/new-pnl-drilldown SEED_DIR=backend/db/seed_data/scenarios/fr_tax
+
+# From current working directory (uncommitted changes)
+task qa:spin:current
+task qa:spin:current SEED_DIR=backend/db/seed_data/scenarios/fr_tax
+```
+
+Access: <http://localhost:3002>
+
+### Hybrid Mode (Live Reload)
+
+Runs only the database in Docker; backend and frontend run locally with hot reload:
+
+```bash
+task qa:spin:dev SEED_DIR=backend/db/seed_data/scenarios/fr_tax
+```
+
+This is faster for development — code changes reflect immediately without rebuilding images.
+
+### Seeding a Running QA Environment
+
+```bash
+# Re-seed with defaults
+task qa:seed
+
+# Add scenario overlay to existing data
+task qa:seed SEED_DIR=backend/db/seed_data/scenarios/fr_tax
+
+# Full reset (truncate + reseed)
+task qa:reset
+```
+
+### Lifecycle
+
+```bash
+# Check what's running
+task qa:status
+
+# Tail logs
+task qa:logs
+
+# Stop and cleanup everything (containers + DB volume + images)
+task qa:stop
+```
+
+---
+
 ## Testing
 
 ### Unit Tests
@@ -332,6 +416,21 @@ task test:ci
 | `task release:tag v1.0.0` | Tag and build production images |
 | `task release:list` | List all version tags |
 
+### QA Environment
+
+| Command | Description |
+|---------|-------------|
+| `task qa:spin -- <ref>` | Build + deploy isolated QA from git ref |
+| `task qa:spin:current` | Build + deploy QA from working directory |
+| `task qa:spin:dev` | QA with local code + live reload |
+| `task qa:seed` | Seed QA database (default or scenario) |
+| `task qa:reset` | Reset QA database (truncate + reseed) |
+| `task qa:status` | Show QA environment status |
+| `task qa:logs` | Tail QA logs |
+| `task qa:stop` | Stop + cleanup (containers + DB + images) |
+
+All commands accept `SEED_DIR=path/to/scenario/` to overlay scenario data.
+
 ### Utilities
 
 | Command | Description |
@@ -345,12 +444,12 @@ task test:ci
 
 ## Port Reference
 
-| Service | Dev | Test | Prod |
-|---------|-----|------|------|
-| PostgreSQL | 5432 | 5433 | 5434 |
-| Backend | 8000 | 8001 | 8080 |
-| Frontend | 5173 | 3001 | 3000 |
-| Debugger | 5678 | - | - |
+| Service | Dev | QA | Test | Prod |
+|---------|-----|-----|------|------|
+| PostgreSQL | 5432 | 5435 | 5433 | 5434 |
+| Backend | 8000 | 8002 | 8001 | 8080 |
+| Frontend | 5173 | 3002 | 3001 | 3000 |
+| Debugger | 5678 | - | - | - |
 
 ---
 

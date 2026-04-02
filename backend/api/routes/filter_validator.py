@@ -14,6 +14,7 @@ from backend.api.schemas import ValidationWarning, AppliedFilters
 VALID_REVIEW_STATUSES = ["valid", "pending", "invalid"]
 VALID_TAXABILITY_STATUSES = ["taxable", "non_taxable", "unknown"]
 VALID_DIRECTIONS = ["inflow", "outflow", "internal"]
+VALID_BUNDLE_PATTERNS = ["internal_transfer", "swap", "flow", "split", "custom", "unknown"]
 
 
 class FilterValidator:
@@ -264,6 +265,11 @@ def validate_transaction_filters(
     network: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    price_quote_asset_id: Optional[str] = None,
+    fee_quote_asset_id: Optional[str] = None,
+    include_fee: Optional[bool] = None,
+    has_bundle: Optional[bool] = None,
+    bundle_pattern: Optional[str] = None,
 ) -> Tuple[AppliedFilters, List[ValidationWarning]]:
     """
     Validate all transaction filter parameters.
@@ -326,6 +332,17 @@ def validate_transaction_filters(
     validated_date_from = validator.validate_date(date_from, "date_from")
     validated_date_to = validator.validate_date(date_to, "date_to")
     
+    # Validate new filter fields
+    validated_price_quote_asset_ids = validator.validate_ids(
+        price_quote_asset_id, Asset, "asset_id", "price_quote_asset_id"
+    )
+    validated_fee_quote_asset_ids = validator.validate_ids(
+        fee_quote_asset_id, Asset, "asset_id", "fee_quote_asset_id"
+    )
+    validated_bundle_patterns = validator.validate_enum_list(
+        bundle_pattern, VALID_BUNDLE_PATTERNS, "bundle_pattern"
+    )
+    
     # Build applied filters object
     applied_filters = AppliedFilters(
         review_statuses=validated_review_statuses,
@@ -345,6 +362,11 @@ def validate_transaction_filters(
         networks=validated_networks,
         date_from=validated_date_from,
         date_to=validated_date_to,
+        price_quote_asset_ids=validated_price_quote_asset_ids,
+        fee_quote_asset_ids=validated_fee_quote_asset_ids,
+        include_fee=include_fee,
+        has_bundle=has_bundle,
+        bundle_patterns=validated_bundle_patterns,
     )
     
     return applied_filters, validator.get_warnings()

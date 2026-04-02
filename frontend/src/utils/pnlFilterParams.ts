@@ -25,6 +25,11 @@ export interface PnLFilterParams {
     date_from?: string;
     date_to?: string;
     non_owned?: string;
+    price_quote_asset_id?: string;
+    fee_quote_asset_id?: string;
+    include_fee?: string;
+    has_bundle?: string;
+    bundle_pattern?: string;
 }
 
 export function buildPnLFilterParams(
@@ -50,6 +55,11 @@ export function buildPnLFilterParams(
     if (filters.dateFrom) params.date_from = filters.dateFrom;
     if (filters.dateTo) params.date_to = filters.dateTo;
     if (effectiveNonOwned) params.non_owned = 'true';
+    if (filters.priceQuoteAssetIds.length > 0) params.price_quote_asset_id = filters.priceQuoteAssetIds.join(',');
+    if (filters.feeQuoteAssetIds.length > 0) params.fee_quote_asset_id = filters.feeQuoteAssetIds.join(',');
+    if (filters.includeFee !== undefined) params.include_fee = String(filters.includeFee);
+    if (filters.hasBundle !== undefined) params.has_bundle = String(filters.hasBundle);
+    if (filters.bundlePatterns.length > 0) params.bundle_pattern = filters.bundlePatterns.join(',');
 
     return params;
 }
@@ -78,6 +88,11 @@ export function hasActivePnLFilters(
         filters.tagKeys.length > 0 ||
         filters.networks.length > 0 ||
         !!filters.dateFrom ||
-        !!filters.dateTo
+        !!filters.dateTo ||
+        filters.priceQuoteAssetIds.length > 0 ||
+        filters.feeQuoteAssetIds.length > 0 ||
+        filters.includeFee !== undefined ||
+        filters.hasBundle !== undefined ||
+        filters.bundlePatterns.length > 0
     );
 }

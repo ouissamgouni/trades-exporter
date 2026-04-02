@@ -575,8 +575,24 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                 params.append('ids', filters.transactionIds.join(','));
             }
             // Has fees filter
-            if (filters.hasFees) {
-                params.append('has_fee', 'true');
+            if (filters.hasFees !== undefined) {
+                params.append('has_fee', String(filters.hasFees));
+            }
+            // New filters: quote assets, include_fee, bundles
+            if (filters.includeFee !== undefined) {
+                params.append('include_fee', String(filters.includeFee));
+            }
+            if (filters.hasBundle !== undefined) {
+                params.append('has_bundle', String(filters.hasBundle));
+            }
+            if (filters.priceQuoteAssetIds.length > 0) {
+                params.append('price_quote_asset_id', filters.priceQuoteAssetIds.join(','));
+            }
+            if (filters.feeQuoteAssetIds.length > 0) {
+                params.append('fee_quote_asset_id', filters.feeQuoteAssetIds.join(','));
+            }
+            if (filters.bundlePatterns.length > 0) {
+                params.append('bundle_pattern', filters.bundlePatterns.join(','));
             }
 
             // Server-side pagination

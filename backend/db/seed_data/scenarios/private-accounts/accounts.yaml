@@ -1,22 +1,10 @@
-# Account and Connector Configuration
-# ====================================
-# This file defines accounts (CEX, wallets) and their associated connectors.
-# Run: python -m backend.db.seed to seed the database with this configuration.
+# Private Accounts Scenario
+# ==========================
+# Personal accounts and connectors configuration.
+# Use with: task qa:spin:dev SEED_DIR=backend/db/seed_data/scenarios/private-accounts
 #
-# Credentials Reference Format:
-#   - env:VAR_NAME - Read from environment variable
-#   - vault:path/to/secret - (Future) Read from HashiCorp Vault
-#
-# Connector Types:
-#   CEX:
-#     - binance-transactions, binance-deposits, binance-withdrawals
-#     - coinbase-transactions, coinbase-deposits, coinbase-withdrawals
-#     - mexc-transactions, mexc-deposits, mexc-withdrawals
-#     - okx-transactions, okx-convert, okx-deposits, okx-withdrawals
-#   On-chain:
-#     - blockscout (supports: base, ethereum, bnb, polygon, arbitrum, optimism)
-#     - etherscan (supports: ethereum)
-#     - bscscan (supports: bnb)
+# This is the original personal seed data, moved to a scenario so that
+# the default seed_data/ contains only generic sample data.
 
 accounts:
   # =========================================================================

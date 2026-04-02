@@ -112,19 +112,19 @@ const StatsCard: React.FC<StatsCardProps> = ({ label, value, icon, color, detail
         onClick={onClick}
         borderWidth={isActive ? 2 : 1}
         borderColor={isActive ? `${color}.400` : 'gray.200'}
-        bg={isActive ? `${color}.50` : 'white'}
+        bg={isActive ? `${color}.50` : `${color}.50`}
         _hover={{ borderColor: `${color}.300`, shadow: 'sm' }}
         transition="all 0.15s"
         flex="1"
-        minW="120px"
+        minW="100px"
     >
-        <Card.Body p={3}>
-            <Flex align="center" gap={2}>
-                <Box color={`${color}.500`}>{icon}</Box>
-                <Box>
-                    <Text fontSize="2xs" color="gray.500" fontWeight="medium">{label}</Text>
+        <Card.Body px={2.5} py={1.5}>
+            <Flex align="center" gap={1.5}>
+                <Box color={`${color}.500`} flexShrink={0}>{icon}</Box>
+                <Box flex={1} minW={0}>
+                    <Text fontSize="2xs" color="gray.500" fontWeight="medium" lineHeight="1">{label}</Text>
                     <Flex align="baseline" gap={1}>
-                        <Text fontSize="lg" fontWeight="bold" color={`${color}.700`}>{value}</Text>
+                        <Text fontSize="md" fontWeight="bold" color={`${color}.700`} lineHeight="1.3">{value}</Text>
                         {detail && <Text fontSize="2xs" color="gray.400">{detail}</Text>}
                     </Flex>
                 </Box>
@@ -221,8 +221,8 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 bg="white"
                 borderBottomWidth={1}
                 borderColor="gray.100"
-                pb={2}
-                mb={1.5}
+                pb={1}
+                mb={1}
             >
                 <TransactionFilters
                     filters={txFilters}
@@ -232,7 +232,7 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                     onExpandedChange={setFiltersExpanded}
                     resetFilters={pnlDefaultFilters}
                     filterOptionsUrl={`${API_URL}/pnl/versions/${versionId}/filter-options`}
-                    hiddenFilters={['reviewStatus', 'taxability', 'connectorRunIds']}
+                    hiddenFilters={['reviewStatus', 'connectorRunIds']}
                 />
             </Box>
 
@@ -314,12 +314,14 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
             </Flex>
 
             {/* ── Transactions View ─────────────────────────────────────── */}
-            <PnLAuditTransactionsView
-                versionId={versionId}
-                baseCurrency={baseCurrency}
-                txFilterParams={txFilterParams}
-                onTransactionClick={onTransactionClick}
-            />
+            <Box border="2px solid" borderColor="blue.200" borderRadius="md" overflow="hidden">
+                <PnLAuditTransactionsView
+                    versionId={versionId}
+                    baseCurrency={baseCurrency}
+                    txFilterParams={txFilterParams}
+                    onTransactionClick={onTransactionClick}
+                />
+            </Box>
 
             {/* ── Slide Panels ─────────────────────────────────────────── */}
             <LotsSlidePanel
