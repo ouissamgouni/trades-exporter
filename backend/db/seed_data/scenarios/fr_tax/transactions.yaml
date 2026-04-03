@@ -1,0 +1,400 @@
+# French Tax Scenario — Multi-Year Transactions
+# ================================================
+# Tests French tax computation across 3 tax years (2023, 2024, 2025) with
+# different asset types, envelopes, gain/loss, cross-year positions, and
+# loss carryforward between years.
+#
+# All transactions tagged for identification. Uses accounts and assets
+# from the fr_tax scenario seed data.
+#
+# Year-by-year summary:
+#
+#   2023 — Initial positions + first disposals
+#     1. Buy 1 BTC @ 25k (Binance CTO)
+#     2. Buy 2 ETH @ 1.8k (Binance CTO)
+#     3. Buy 10 AAPL @ 150 (Degiro CTO)
+#     4. Buy 10 AAPL @ 150 (Degiro PEA — tax-exempt envelope)
+#     5. Sell 0.2 BTC @ 30k  → crypto gain
+#     6. Sell 0.5 ETH @ 1.6k → crypto loss
+#     7. Sell 3 AAPL @ 170 (PEA) → excluded from tax
+#
+#   2024 — Second wave disposals + rebalance
+#     8. Sell 0.5 BTC @ 35k  → crypto gain (Art. 150 VH bis)
+#     9. Sell 1 ETH @ 1.5k   → crypto loss
+#    10. Sell 5 AAPL @ 200 (CTO) → securities gain (CUMP)
+#    11. Sell 5 AAPL @ 200 (PEA) → excluded from tax
+#    12. Buy 1 BTC @ 38k     → cost basis averaging
+#
+#   2025 — Third wave + swap + transfer
+#    13. Sell 0.3 BTC @ 60k  → crypto gain (cross-year position from 2023+2024)
+#    14. Sell 0.5 ETH @ 3.5k → crypto gain (reversal from 2024 loss)
+#    15. Sell 5 AAPL @ 220 (CTO) → securities gain (CUMP updated by 2024 buy)
+#    16. BTC→ETH swap: 0.1 BTC → 1.5 ETH → taxable or not depending on config
+#    17. Internal transfer: 0.2 BTC Binance → MEXC (non-taxable)
+
+transactions:
+  # ═══════════════════════════════════════════════════════════════
+  # ▶ 2023 — Initial positions + first disposals
+  # ═══════════════════════════════════════════════════════════════
+
+  # 1. Buy 1 BTC @ 25k EUR (Binance CTO)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_001_btc_buy_2023"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "1.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2023-03-15T10:00:00"
+    price: "25000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "10.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 2. Buy 2 ETH @ 1.8k EUR (Binance CTO)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_002_eth_buy_2023"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "2.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2023-05-01T10:00:00"
+    price: "1800.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "5.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 3. Buy 10 AAPL @ 150 EUR (Degiro CTO)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_003_aapl_buy_cto_2023"
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "10.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2023-06-01T10:00:00"
+    price: "150.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 4. Buy 10 AAPL @ 150 EUR (Degiro PEA — tax-exempt)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_004_aapl_buy_pea_2023"
+    account_name: Degiro PEA
+    asset_symbol: AAPL
+    quantity: "10.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2023-06-01T10:00:00"
+    price: "150.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 5. Sell 0.2 BTC @ 30k EUR → crypto gain
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_005_btc_sell_2023"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.200000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2023-08-15T10:00:00"
+    price: "30000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 6. Sell 0.5 ETH @ 1.6k EUR → crypto loss
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_006_eth_sell_2023"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "0.500000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2023-09-15T10:00:00"
+    price: "1600.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "3.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 7. Sell 3 AAPL @ 170 EUR (Degiro PEA) → excluded from tax
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_007_aapl_sell_pea_2023"
+    account_name: Degiro PEA
+    asset_symbol: AAPL
+    quantity: "3.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2023-11-01T10:00:00"
+    price: "170.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "4.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # ═══════════════════════════════════════════════════════════════
+  # ▶ 2024 — Second wave disposals + rebalance
+  # ═══════════════════════════════════════════════════════════════
+
+  # 8. Sell 0.5 BTC @ 35k EUR → crypto gain
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_008_btc_sell_2024"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.500000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-02-15T10:00:00"
+    price: "35000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "8.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 9. Sell 1 ETH @ 1.5k EUR → crypto loss
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_009_eth_sell_2024"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "1.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-04-01T10:00:00"
+    price: "1500.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "4.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 10. Sell 5 AAPL @ 200 EUR (Degiro CTO) → securities gain
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_010_aapl_sell_cto_2024"
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "5.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-06-01T10:00:00"
+    price: "200.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 11. Sell 5 AAPL @ 200 EUR (Degiro PEA) → excluded from tax
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_011_aapl_sell_pea_2024"
+    account_name: Degiro PEA
+    asset_symbol: AAPL
+    quantity: "5.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-06-01T10:00:00"
+    price: "200.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 12. Buy 1 BTC @ 38k EUR (rebalance — affects CUMP for 2025 sells)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_012_btc_buy_2024"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "1.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-09-01T10:00:00"
+    price: "38000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "10.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # ═══════════════════════════════════════════════════════════════
+  # ▶ 2025 — Third wave disposals + swap + transfer
+  # ═══════════════════════════════════════════════════════════════
+
+  # 13. Sell 0.3 BTC @ 60k EUR → crypto gain (cross-year lots)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_013_btc_sell_2025"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.300000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-03-15T10:00:00"
+    price: "60000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "8.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 14. Sell 0.5 ETH @ 3.5k EUR → crypto gain (reversal from 2024 loss)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_014_eth_sell_2025"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "0.500000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-05-01T10:00:00"
+    price: "3500.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "4.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 15. Sell 5 AAPL @ 220 EUR (Degiro CTO) → securities gain (CUMP from 2023)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_015_aapl_sell_cto_2025"
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "5.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-07-01T10:00:00"
+    price: "220.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "6.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 16a. BTC→ETH swap: 0.1 BTC out @ 55k EUR
+  #      Taxability depends on config (crypto_swap_taxable_by_default)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_016_swap_btc_out"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.100000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-09-01T10:00:00"
+    price: "55000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+      - expanded: true
+      - leg_type: disposed
+
+  # 16b. BTC→ETH swap: 1.5 ETH in @ 3666.67 EUR
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_017_swap_eth_in"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "1.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-09-01T10:00:00"
+    price: "3666.666666666666666666"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+      - expanded: true
+      - leg_type: acquired
+
+  # 17a. Internal transfer: 0.2 BTC from Binance to MEXC (non-taxable)
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_018_transfer_out"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.200000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    date_time: "2025-10-01T10:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test
+
+  # 17b. Internal transfer: 0.2 BTC received at MEXC
+  - source: "scenario-fr-tax"
+    source_transaction_id: "fr_tax_019_transfer_in"
+    account_name: MEXC
+    asset_symbol: BTC
+    quantity: "0.200000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2025-10-01T10:15:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: fr_tax
+      - goal: test

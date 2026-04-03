@@ -126,6 +126,105 @@ function toSnapshot(d: DrillDownState | DrillSnapshot): DrillSnapshot {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Context Scope — navigation-derived scope replacing shared filter state
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type ContextLevel = 'portfolio' | 'category' | 'account' | 'asset';
+
+export interface ContextScope {
+    level: ContextLevel;
+    entityId?: number;
+    entityLabel?: string;
+    assetSymbol?: string;
+    parentScope?: ContextScope;
+    /** Derived filter arrays for backend API calls */
+    categoryIds?: number[];
+    accountIds?: number[];
+    assetIds?: number[];
+    /** Global period selection */
+    period: Range;
+    /** Computed date range from period */
+    dateFrom?: string;
+    dateTo?: string;
+}
+
+/** Build a ContextScope from the current drill state and timeframe range */
+export function computeContextScope(drill: DrillDownState, timeframeRange: Range): ContextScope {
+    const { dateFrom, dateTo } = computeDateRange(timeframeRange);
+
+    // Asset level (L2)
+    if (drill.assetId != null) {
+        const parentScope: ContextScope | undefined =
+            drill.entityType && drill.entityId != null
+                ? {
+                    level: (drill.entityType === 'category' ? 'category' : 'account') as ContextLevel,
+                    entityId: drill.entityId,
+                    entityLabel: drill.entityLabel,
+                    categoryIds: drill.entityType === 'category' ? [drill.entityId] : undefined,
+                    accountIds: drill.entityType === 'account' ? [drill.entityId] : undefined,
+                    period: timeframeRange,
+                    dateFrom,
+                    dateTo,
+                }
+                : undefined;
+
+        return {
+            level: 'asset',
+            entityId: drill.assetId,
+            entityLabel: drill.assetSymbol,
+            assetSymbol: drill.assetSymbol,
+            parentScope,
+            assetIds: [drill.assetId],
+            categoryIds: parentScope?.categoryIds,
+            accountIds: drill.accountFilter != null ? [drill.accountFilter] : parentScope?.accountIds,
+            period: timeframeRange,
+            dateFrom,
+            dateTo,
+        };
+    }
+
+    // Entity level (L1 - category or account)
+    if (drill.entityType && drill.entityId != null) {
+        return {
+            level: (drill.entityType === 'category' ? 'category' : 'account') as ContextLevel,
+            entityId: drill.entityId,
+            entityLabel: drill.entityLabel,
+            categoryIds: drill.entityType === 'category' ? [drill.entityId] : undefined,
+            accountIds: drill.entityType === 'account' ? [drill.entityId] : undefined,
+            period: timeframeRange,
+            dateFrom,
+            dateTo,
+        };
+    }
+
+    // Portfolio level (L0)
+    return {
+        level: 'portfolio',
+        period: timeframeRange,
+        dateFrom,
+        dateTo,
+    };
+}
+
+/** Extract backend-compatible filter params from a ContextScope */
+export function scopeToFilters(scope: ContextScope): {
+    assetIds?: number[];
+    accountIds?: number[];
+    categoryIds?: number[];
+    dateFrom?: string;
+    dateTo?: string;
+} {
+    return {
+        assetIds: scope.assetIds,
+        accountIds: scope.accountIds,
+        categoryIds: scope.categoryIds,
+        dateFrom: scope.dateFrom,
+        dateTo: scope.dateTo,
+    };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Status Constants — single source of truth for magic strings
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -222,6 +321,7 @@ export interface PnLState {
     auditDefaultPanel: 'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | null;
     showUnsettledNegative: boolean;
     totalUnsettledNegativeCount: number;
+    pnlActiveTab: 'portfolio' | 'tax';
 
     // ── Filters ──
     performerGroupBy: GroupBy;
@@ -315,6 +415,7 @@ export type PnLAction =
     | { type: 'SET_AUDIT_DEFAULT_PANEL'; panel: PnLState['auditDefaultPanel'] }
     | { type: 'SET_SHOW_UNSETTLED_NEGATIVE'; value: boolean }
     | { type: 'SET_TOTAL_UNSETTLED_NEGATIVE_COUNT'; count: number }
+    | { type: 'SET_PNL_ACTIVE_TAB'; tab: 'portfolio' | 'tax' }
 
     // ── Filters ──
     | { type: 'SET_PERFORMER_GROUP_BY'; groupBy: GroupBy }
@@ -415,6 +516,7 @@ export function createInitialPnLState(baseCurrency: string, baseCurrencyId: numb
         auditDefaultPanel: null,
         showUnsettledNegative: false,
         totalUnsettledNegativeCount: 0,
+        pnlActiveTab: 'portfolio',
 
         // Filters
         performerGroupBy: 'asset',
@@ -713,6 +815,10 @@ export function pnlReducer(state: PnLState, action: PnLAction): PnLState {
 
         case 'DRILL_SET_ACCOUNT_FILTER':
             return { ...state, drill: { ...state.drill, accountFilter: action.accountId } };
+
+        // ── Tabs ──
+        case 'SET_PNL_ACTIVE_TAB':
+            return { ...state, pnlActiveTab: action.tab };
 
         // ── Reset ──
         case 'RESET_RESULTS':

@@ -30,6 +30,9 @@ const EMPTY_FILTERS: TransactionFilterState = {
     dateFrom: '',
     dateTo: '',
     nonOwned: false,
+    priceQuoteAssetIds: [],
+    feeQuoteAssetIds: [],
+    bundlePatterns: [],
 };
 
 interface ViewPreset {

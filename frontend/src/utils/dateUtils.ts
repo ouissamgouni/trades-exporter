@@ -54,7 +54,7 @@ export function parseApiDate(value: string | number | Date | null | undefined): 
 // ============================================================================
 
 /**
- * Format a date for compact display (MM/DD HH:mm)
+ * Format a date for compact display (MM/DD/YY HH:mm)
  * Used in transaction tables where space is limited.
  */
 export function formatDateTimeCompact(value: string | number | Date | null | undefined): string {
@@ -63,10 +63,11 @@ export function formatDateTimeCompact(value: string | number | Date | null | und
 
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
     const hours = String(date.getHours()).padStart(2, '0');
     const mins = String(date.getMinutes()).padStart(2, '0');
 
-    return `${month}/${day} ${hours}:${mins}`;
+    return `${month}/${day}/${year} ${hours}:${mins}`;
 }
 
 /**

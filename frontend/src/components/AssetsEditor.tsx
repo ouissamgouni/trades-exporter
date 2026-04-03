@@ -1844,12 +1844,15 @@ export const AssetsEditor: React.FC = () => {
                                                         // For mock getters, show min/max params specially
                                                         const mockMin = pg.params?.min_price;
                                                         const mockMax = pg.params?.max_price;
+                                                        const mockPrices = pg.params?.prices as Record<string, number> | undefined;
+                                                        const hasConfiguredPrices = isMock && mockPrices && typeof mockPrices === 'object' && Object.keys(mockPrices).length > 0;
+                                                        const mockQuoteCurrency = pg.params?.quote_currency as string | undefined;
 
                                                         // Non-mock params display
                                                         const paramsEntries = Object.entries(pg.params || {}).filter(
                                                             ([k]) => !isMock || (k !== 'min_price' && k !== 'max_price')
                                                         );
-                                                        const hasParams = isMock ? (mockMin != null || mockMax != null) : paramsEntries.length > 0;
+                                                        const hasParams = isMock ? (mockMin != null || mockMax != null || hasConfiguredPrices) : paramsEntries.length > 0;
 
                                                         return (
                                                             <Table.Row key={pg.id}>
@@ -1873,7 +1876,7 @@ export const AssetsEditor: React.FC = () => {
                                                                     )}
                                                                 </Table.Cell>
                                                                 <Table.Cell>
-                                                                    {isEditing && isMock ? (
+                                                                    {isEditing && isMock && !hasConfiguredPrices ? (
                                                                         /* Mock getter: min/max text boxes */
                                                                         (() => {
                                                                             let minVal: number | string = '', maxVal: number | string = '';
@@ -1925,6 +1928,19 @@ export const AssetsEditor: React.FC = () => {
                                                                             rows={2}
                                                                             width="150px"
                                                                         />
+                                                                    ) : isMock && hasConfiguredPrices ? (
+                                                                        /* Mock getter: deterministic prices summary */
+                                                                        <Tooltip content={
+                                                                            <Box fontFamily="mono" fontSize="xs" whiteSpace="pre">
+                                                                                {Object.entries(mockPrices!).map(([k, v]) => (
+                                                                                    <Box key={k}>{k} → {v}</Box>
+                                                                                ))}
+                                                                            </Box>
+                                                                        } showArrow>
+                                                                            <Text fontSize="xs" fontFamily="mono" color="orange.600" cursor="default">
+                                                                                {Object.keys(mockPrices!).length} price{Object.keys(mockPrices!).length !== 1 ? 's' : ''}{mockQuoteCurrency ? ` (${mockQuoteCurrency})` : ''}
+                                                                            </Text>
+                                                                        </Tooltip>
                                                                     ) : isMock ? (
                                                                         /* Mock getter: display range */
                                                                         <Text fontSize="xs" fontFamily="mono" color="orange.600">

@@ -45,13 +45,14 @@ log = configure_logging("db_seed")
 
 # Default config paths
 SEED_DATA_DIR = Path(__file__).parent / "seed_data"
-EXPORT_DATA_DIR = Path(__file__).parent / "seed_data" / "exports"
+DEFAULT_SCENARIO_DIR = SEED_DATA_DIR / "scenarios" / "default"
+EXPORT_DATA_DIR = SEED_DATA_DIR / "exports"
 BROKER_EXPORTS_DIR = Path(__file__).parent.parent / "data" / "input" / "brokers-exports"
 DEFAULT_FILES_DIR = Path(__file__).parent.parent / "data" / "input" / "defaults"
-DEFAULT_CONFIG_PATH = SEED_DATA_DIR / "accounts.yaml"
-DEFAULT_ASSETS_PATH = SEED_DATA_DIR / "assets.yaml"
-DEFAULT_BUNDLES_PATH = SEED_DATA_DIR / "bundles.yaml"
-DEFAULT_TRANSACTIONS_PATH = SEED_DATA_DIR / "transactions.yaml"
+DEFAULT_CONFIG_PATH = DEFAULT_SCENARIO_DIR / "accounts.yaml"
+DEFAULT_ASSETS_PATH = DEFAULT_SCENARIO_DIR / "assets.yaml"
+DEFAULT_BUNDLES_PATH = DEFAULT_SCENARIO_DIR / "bundles.yaml"
+DEFAULT_TRANSACTIONS_PATH = DEFAULT_SCENARIO_DIR / "transactions.yaml"
 
 
 class DatabaseSeeder:
@@ -218,9 +219,15 @@ class DatabaseSeeder:
 
         # Create new account
         log.debug(f"➕ Creating new account: {name}")
+        account_type = data.get("account_type", "unknown")
+        # Auto-default envelope to CTO for taxable account types
+        envelope = data.get("envelope")
+        if envelope is None and account_type in ("cex", "broker", "investment"):
+            envelope = "cto"
         account = Account(
             name=name,
-            account_type=data.get("account_type", "unknown"),
+            account_type=account_type,
+            envelope=envelope,
             address_or_identifier=data.get("address_or_identifier"),
             tags=tags,
             owned=data.get("owned", True),
@@ -507,6 +514,107 @@ class DatabaseSeeder:
                     params=params,
                 )
             )
+
+    # ------------------------------------------------------------------
+    # Deterministic mock prices from YAML
+    # ------------------------------------------------------------------
+
+    def seed_prices_from_yaml(
+        self, prices_path: Optional[Path] = None
+    ) -> int:
+        """
+        Seed deterministic mock prices from prices.yaml.
+
+        Reads a prices.yaml file and upserts AssetPriceGetter rows with
+        ``price_getter="mock"``, ``enabled=True``, ``priority=0`` and a
+        ``params`` dict containing the price map.
+
+        Also enables ``AppSettings.mock_mode_enabled`` when prices are seeded.
+
+        Args:
+            prices_path: Path to prices.yaml. Skips silently if not provided
+                         or if file does not exist.
+
+        Returns:
+            Number of assets with prices configured.
+        """
+        if prices_path is None or not prices_path.exists():
+            return 0
+
+        log.info(f"📖 Loading prices from: {prices_path}")
+
+        with open(prices_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        price_entries = config.get("prices", [])
+        if not price_entries:
+            return 0
+
+        processed = 0
+        for entry in price_entries:
+            symbol = entry.get("asset_symbol")
+            if not symbol:
+                continue
+
+            asset_id = self._resolve_asset_id(symbol)
+            if asset_id is None:
+                continue
+
+            # Build the prices dict: {"2025-01-15T10:00:00": 40000.0, "current": 55000.0}
+            prices_map: Dict[str, Any] = {}
+            for price_entry in entry.get("entries", []):
+                at_key = str(price_entry.get("at", ""))
+                price_val = price_entry.get("price")
+                if at_key and price_val is not None:
+                    prices_map[at_key] = float(price_val)
+
+            if not prices_map:
+                continue
+
+            params: Dict[str, Any] = {"prices": prices_map}
+            quote_currency = entry.get("quote_currency")
+            if quote_currency:
+                params["quote_currency"] = quote_currency
+
+            # Upsert AssetPriceGetter row
+            existing = self.session.exec(
+                select(AssetPriceGetter).where(
+                    AssetPriceGetter.asset_id == asset_id,
+                    AssetPriceGetter.price_getter == "mock",
+                )
+            ).first()
+
+            if existing:
+                existing.params = params
+                existing.enabled = True
+                existing.priority = 0
+                self.session.add(existing)
+                log.debug(f"📝 Updated mock prices: {symbol}")
+            else:
+                self.session.add(
+                    AssetPriceGetter(
+                        asset_id=asset_id,
+                        price_getter="mock",
+                        priority=0,
+                        enabled=True,
+                        params=params,
+                    )
+                )
+                log.debug(f"➕ Created mock prices: {symbol}")
+            processed += 1
+
+        if processed > 0:
+            # Enable mock mode
+            settings = self.session.get(AppSettings, 1)
+            if settings:
+                settings.mock_mode_enabled = True
+                self.session.add(settings)
+            else:
+                self.session.add(AppSettings(id=1, mock_mode_enabled=True))
+            self.session.commit()
+            log.info(f"✅ Seeded prices for {processed} assets (mock_mode enabled)")
+
+        return processed
 
     def seed_assets_from_yaml(
         self, assets_path: Optional[Path] = None
@@ -843,18 +951,28 @@ class DatabaseSeeder:
         transactions = config.get("transactions", [])
         return self.seed_transactions(transactions)
 
-    def seed_all(self, config_path: Optional[Path] = None) -> Dict[str, int]:
+    def seed_all(
+        self,
+        config_path: Optional[Path] = None,
+        seed_data_dir: Optional[Path] = None,
+    ) -> Dict[str, int]:
         """
         Run all seeding operations in dependency order (idempotent).
 
         Order:
         1. Assets from assets.yaml (includes all default assets)
-        2. Accounts and connectors from accounts.yaml
-        3. Bundles from bundles.yaml
-        4. Transactions from transactions.yaml
+        2. Prices from prices.yaml (deterministic mock prices, optional)
+        3. Accounts and connectors from accounts.yaml
+        4. Bundles from bundles.yaml
+        5. Transactions from transactions.yaml
 
         Args:
             config_path: Optional path to accounts.yaml
+            seed_data_dir: Optional directory containing YAML seed files.
+                           When provided, assets.yaml / accounts.yaml / bundles.yaml /
+                           transactions.yaml are resolved from this directory instead
+                           of the default seed_data/ directory. Files that don't exist
+                           in the custom directory are silently skipped.
 
         Returns:
             Dict with counts of all seeded entities
@@ -865,22 +983,36 @@ class DatabaseSeeder:
             "connectors": 0,
             "bundles": 0,
             "transactions": 0,
+            "prices": 0,
         }
 
-        # 1. Seed all assets from assets.yaml (includes defaults like EUR, USD, BTC, etc.)
-        results["assets"] = self.seed_assets_from_yaml()
+        # Resolve paths from custom directory if provided
+        assets_path = (seed_data_dir / "assets.yaml") if seed_data_dir else None
+        accounts_path = (seed_data_dir / "accounts.yaml") if seed_data_dir else config_path
+        bundles_path = (seed_data_dir / "bundles.yaml") if seed_data_dir else None
+        transactions_path = (seed_data_dir / "transactions.yaml") if seed_data_dir else None
+        prices_path = (seed_data_dir / "prices.yaml") if seed_data_dir else None
 
-        # 2. Seed accounts/connectors from accounts.yaml (may include custom assets)
-        yaml_results = self.seed_from_yaml(config_path)
+        if seed_data_dir:
+            log.info(f"📂 Using seed data directory: {seed_data_dir}")
+
+        # 1. Seed all assets from assets.yaml (includes defaults like EUR, USD, BTC, etc.)
+        results["assets"] = self.seed_assets_from_yaml(assets_path)
+
+        # 2. Seed deterministic mock prices (if prices.yaml exists)
+        results["prices"] = self.seed_prices_from_yaml(prices_path)
+
+        # 3. Seed accounts/connectors from accounts.yaml (may include custom assets)
+        yaml_results = self.seed_from_yaml(accounts_path)
         results["accounts"] = yaml_results.get("accounts", 0)
         results["connectors"] = yaml_results.get("connectors", 0)
         results["assets"] += yaml_results.get("assets", 0)
 
-        # 3. Seed bundles from bundles.yaml
-        results["bundles"] = self.seed_bundles_from_yaml()
+        # 4. Seed bundles from bundles.yaml
+        results["bundles"] = self.seed_bundles_from_yaml(bundles_path)
 
-        # 4. Seed transactions from transactions.yaml
-        results["transactions"] = self.seed_transactions_from_yaml()
+        # 5. Seed transactions from transactions.yaml
+        results["transactions"] = self.seed_transactions_from_yaml(transactions_path)
 
         return results
 
@@ -1153,7 +1285,9 @@ def export_database_to_yaml(output_dir: Optional[str | Path] = None) -> Dict[str
 
 
 def seed_database(
-    config_path: Optional[str | Path] = None, include_defaults: bool = True
+    config_path: Optional[str | Path] = None,
+    include_defaults: bool = True,
+    seed_data_dir: Optional[str | Path] = None,
 ):
     """
     Main entry point for database seeding.
@@ -1161,31 +1295,38 @@ def seed_database(
     Args:
         config_path: Optional path to accounts.yaml configuration (str or Path)
         include_defaults: Whether to seed default assets
+        seed_data_dir: Optional directory containing YAML seed files.
+                       When provided, seed files are resolved from this directory.
 
     Usage:
         python -m backend.db.seed
+        python -m backend.db.seed --seed-dir path/to/scenario/
         # or
         from backend.db.seed import seed_database
-        seed_database()
+        seed_database(seed_data_dir="path/to/scenario/")
     """
     log.info("🌱 Starting database seeding...")
 
-    # Convert string path to Path object
+    # Convert string paths to Path objects
     if config_path and isinstance(config_path, str):
         config_path = Path(config_path)
+    if seed_data_dir and isinstance(seed_data_dir, str):
+        seed_data_dir = Path(seed_data_dir)
 
     with get_session() as session:
         seeder = DatabaseSeeder(session)
 
         # Use seed_all to seed everything: assets, accounts, bundles, and transactions
-        results = seeder.seed_all(config_path)
+        results = seeder.seed_all(config_path, seed_data_dir=seed_data_dir)
 
+        prices_count = results.get('prices', 0)
         log.info(
             f"🎉 Seeding complete: {results.get('assets', 0)} assets, "
             f"{results.get('accounts', 0)} accounts, "
             f"{results.get('connectors', 0)} connectors, "
             f"{results.get('bundles', 0)} bundles, "
             f"{results.get('transactions', 0)} transactions"
+            + (f", {prices_count} prices" if prices_count else "")
         )
 
         return results
@@ -1255,7 +1396,7 @@ if __name__ == "__main__":
 
     if not config_path.exists():
         print(f"❌ ERROR: Config file not found: {config_path}")
-        print("   Edit backend/db/seed_data/accounts.yaml to configure accounts")
+        print("   Edit backend/db/seed_data/scenarios/default/accounts.yaml to configure accounts")
         import sys
 
         sys.exit(1)

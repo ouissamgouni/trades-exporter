@@ -20,7 +20,7 @@ import {
 } from '@chakra-ui/react';
 import { FiAlertTriangle, FiActivity, FiRefreshCw } from 'react-icons/fi';
 import { Tooltip } from '../ui/tooltip';
-import { PnLSummary } from './types';
+import { PnLSummary, UnmappedLiveAsset } from './types';
 
 export interface BalanceHealthIssue {
     symbol: string;
@@ -75,99 +75,60 @@ export const RefreshPricesCard: React.FC<RefreshPricesCardProps> = ({
 
     return (
         <Box
-            p={3}
+            py={1}
+            px={2.5}
             bg="white"
             borderRadius="lg"
             border="1px solid"
             borderColor="gray.200"
             h="100%"
+            display="flex"
+            alignItems="center"
+            overflow="hidden"
         >
-            <Flex align="center" gap={2} mb={2}>
-                <FiRefreshCw size={14} color="#3182ce" />
-                <Text fontSize="xs" fontWeight="semibold" color="gray.700">Refresh Prices</Text>
+            <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+                <FiRefreshCw size={12} color="#3182ce" style={{ flexShrink: 0 }} />
+                <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Prices</Text>
                 {pnlAssetCount != null && (
-                    <Text fontSize="2xs" color="gray.400" ml="auto">{pnlAssetCount} assets</Text>
+                    <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">{pnlAssetCount}a</Text>
                 )}
-            </Flex>
-
-            <Flex align="center" gap={1.5} mb={2} wrap="wrap">
                 {priceSuccessCount > 0 && (
-                    <Badge
-                        colorPalette="green"
-                        variant="solid"
-                        size="xs"
-                        cursor="pointer"
-                        onClick={onPriceBadgeClick}
-                    >
-                        ✅ {priceSuccessCount}
-                    </Badge>
+                    <Badge colorPalette="green" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>✅{priceSuccessCount}</Badge>
                 )}
                 {priceStaleCount > 0 && (
-                    <Badge
-                        colorPalette="orange"
-                        variant="solid"
-                        size="xs"
-                        cursor="pointer"
-                        onClick={onPriceBadgeClick}
-                    >
-                        ⏳ {priceStaleCount} stale
-                    </Badge>
+                    <Badge colorPalette="orange" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⏳{priceStaleCount}</Badge>
                 )}
                 {priceErrorCount > 0 && (
-                    <Badge
-                        colorPalette="red"
-                        variant="solid"
-                        size="xs"
-                        cursor="pointer"
-                        onClick={onPriceBadgeClick}
-                    >
-                        ⚠️ {priceErrorCount}
-                    </Badge>
+                    <Badge colorPalette="red" variant="solid" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⚠️{priceErrorCount}</Badge>
                 )}
                 {priceSuccessCount === 0 && priceStaleCount === 0 && priceErrorCount === 0 && (
-                    <Text fontSize="2xs" color="gray.400">No prices loaded</Text>
+                    <Text fontSize="2xs" color="gray.400">—</Text>
                 )}
                 {naCount > 0 && (
                     <Tooltip content="Only assets with cost lots need live pricing">
-                        <Badge
-                            colorPalette="gray"
-                            variant="outline"
-                            size="xs"
-                        >
-                            {naCount} N/A
-                        </Badge>
+                        <Badge colorPalette="gray" variant="outline" size="xs">{naCount} N/A</Badge>
                     </Tooltip>
                 )}
                 {pendingCount > 0 && (
-                    <Badge
-                        colorPalette="gray"
-                        variant="outline"
-                        size="xs"
-                        cursor="pointer"
-                        onClick={onPriceBadgeClick}
-                    >
-                        ⏳ {pendingCount} pending
-                    </Badge>
+                    <Badge colorPalette="gray" variant="outline" size="xs" cursor="pointer" onClick={onPriceBadgeClick}>⏳{pendingCount}</Badge>
                 )}
                 {highErrorRate && (
-                    <Badge colorPalette="orange" variant="subtle" size="xs">
-                        ⚠️ High error rate
-                    </Badge>
+                    <Badge colorPalette="orange" variant="subtle" size="xs">⚠️</Badge>
                 )}
+                <Button
+                    onClick={onRefreshPrices}
+                    loading={isRefreshingPrices}
+                    colorPalette="blue"
+                    variant="outline"
+                    size="2xs"
+                    disabled={refreshDisabled}
+                    title="Refresh all prices"
+                    ml="auto"
+                    flexShrink={0}
+                >
+                    <FiRefreshCw size={12} />
+                </Button>
             </Flex>
-
-            <Button
-                onClick={onRefreshPrices}
-                loading={isRefreshingPrices}
-                colorPalette="blue"
-                variant="outline"
-                size="2xs"
-                width="100%"
-                disabled={refreshDisabled}
-            >
-                <FiRefreshCw size={12} />
-                <Text ml={1}>Refresh All</Text>
-            </Button>
         </Box>
     );
 };
@@ -205,49 +166,52 @@ export const WarningsCard: React.FC<WarningsCardProps> = ({
             }
         >
             <Box
-                p={3}
+                py={1}
+                px={2.5}
                 bg="white"
                 borderRadius="lg"
                 border="1px solid"
                 borderColor="gray.200"
                 h="100%"
+                display="flex"
+                alignItems="center"
                 cursor={hasWarnings && onWarningsClick ? 'pointer' : 'default'}
                 onClick={hasWarnings ? onWarningsClick : undefined}
                 _hover={hasWarnings && onWarningsClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
                 transition="all 0.15s"
+                overflow="hidden"
             >
-                <Flex align="center" gap={2} mb={2}>
-                    <FiAlertTriangle size={14} color={hasWarnings ? '#dd6b20' : '#38a169'} />
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.700">PnL Warnings</Text>
+                <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+                    <FiAlertTriangle size={12} color={hasWarnings ? '#dd6b20' : '#38a169'} style={{ flexShrink: 0 }} />
+                    <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Warnings</Text>
                     <Badge
                         colorPalette={summary.error_count > 0 ? 'red' : hasWarnings ? 'orange' : 'green'}
                         size="xs"
-                        ml="auto"
                     >
                         {hasWarnings ? summary.warning_count : '✓'}
                     </Badge>
-                </Flex>
-
-                {/* Type breakdown badges */}
-                {warningTypeCounts && Object.keys(warningTypeCounts).length > 0 ? (
-                    <Flex gap={1} wrap="wrap">
-                        {Object.entries(warningTypeCounts)
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, 4)
-                            .map(([type, count]) => (
-                                <Badge key={type} size="xs" variant="subtle" colorPalette="orange">
-                                    {type.replace(/_/g, ' ').substring(0, 18)}: {count}
+                    {/* Inline type breakdown */}
+                    {warningTypeCounts && Object.keys(warningTypeCounts).length > 0 && (
+                        <>
+                            {Object.entries(warningTypeCounts)
+                                .sort((a, b) => b[1] - a[1])
+                                .slice(0, 3)
+                                .map(([type, count]) => (
+                                    <Badge key={type} size="xs" variant="subtle" colorPalette="orange">
+                                        {type.replace(/_/g, ' ').substring(0, 12)}:{count}
+                                    </Badge>
+                                ))}
+                            {Object.keys(warningTypeCounts).length > 3 && (
+                                <Badge size="xs" variant="subtle" colorPalette="gray">
+                                    +{Object.keys(warningTypeCounts).length - 3}
                                 </Badge>
-                            ))}
-                        {Object.keys(warningTypeCounts).length > 4 && (
-                            <Badge size="xs" variant="subtle" colorPalette="gray">
-                                +{Object.keys(warningTypeCounts).length - 4} more
-                            </Badge>
-                        )}
-                    </Flex>
-                ) : !hasWarnings ? (
-                    <Text fontSize="2xs" color="green.600">All checks passed</Text>
-                ) : null}
+                            )}
+                        </>
+                    )}
+                    {!hasWarnings && !warningTypeCounts && (
+                        <Text fontSize="2xs" color="green.600">✓ ok</Text>
+                    )}
+                </Flex>
             </Box>
         </Tooltip>
     );
@@ -262,6 +226,7 @@ interface BalanceHealthCardProps {
     onBalanceHealthClick?: () => void;
     deltaThreshold?: number;
     onDeltaThresholdChange?: (value: number) => void;
+    unmappedLiveAssets?: UnmappedLiveAsset[];
 }
 
 export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
@@ -269,6 +234,7 @@ export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
     onBalanceHealthClick,
     deltaThreshold = 5,
     onDeltaThresholdChange,
+    unmappedLiveAssets = [],
 }) => {
     if (!balanceHealth) return null;
 
@@ -279,116 +245,63 @@ export const BalanceHealthCard: React.FC<BalanceHealthCardProps> = ({
     const uncovered = balanceHealth.uncoveredAssets ?? [];
 
     return (
-        <Tooltip
-            showArrow
-            content={
-                <Box p={1}>
-                    {/* Coverage */}
-                    <Text fontWeight="bold" mb={1} fontSize="xs">
-                        Coverage: {covered}/{total} assets
-                    </Text>
-                    {uncovered.length > 0 && (
-                        <Text fontSize="xs" color="gray.300" mb={1}>
-                            No live data: {uncovered.slice(0, 6).join(', ')}{uncovered.length > 6 ? ` +${uncovered.length - 6}` : ''}
-                        </Text>
-                    )}
-
-                    {/* Failed accounts */}
-                    {hasFailed && (
-                        <>
-                            <Text fontWeight="bold" mb={0.5} fontSize="xs" color="red.300">
-                                ⚠ Failed ({balanceHealth.failedAssets!.length}):
-                            </Text>
-                            {balanceHealth.failedAssets!.slice(0, 4).map((msg, i) => (
-                                <Text key={i} fontSize="xs" color="red.200">{msg}</Text>
-                            ))}
-                        </>
-                    )}
-
-                    {/* Mismatches */}
-                    {balanceHealth.issues.length > 0 ? (
-                        <>
-                            <Text fontWeight="bold" mb={0.5} mt={1} fontSize="xs">
-                                Δ &gt; {deltaThreshold}% ({balanceHealth.mismatchCount}):
-                            </Text>
-                            {balanceHealth.issues.slice(0, 8).map((issue, i) => (
-                                <Text key={i} fontSize="xs">
-                                    {issue.symbol}: {issue.pct >= 0 ? '+' : ''}{issue.pct.toFixed(1)}%
-                                </Text>
-                            ))}
-                            {balanceHealth.issues.length > 8 && (
-                                <Text fontSize="xs" color="gray.400" mt={0.5}>
-                                    …and {balanceHealth.issues.length - 8} more
-                                </Text>
-                            )}
-                        </>
-                    ) : (
-                        <Text fontSize="xs" color="gray.300" mt={1}>All deltas within {deltaThreshold}% tolerance</Text>
-                    )}
-                </Box>
-            }
+        <Box
+            py={1}
+            px={2.5}
+            bg="white"
+            borderRadius="lg"
+            border="1px solid"
+            borderColor={hasFailed ? 'red.200' : 'gray.200'}
+            h="100%"
+            display="flex"
+            alignItems="center"
+            cursor={onBalanceHealthClick ? 'pointer' : 'default'}
+            onClick={onBalanceHealthClick}
+            _hover={onBalanceHealthClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
+            transition="all 0.15s"
+            overflow="hidden"
         >
-            <Box
-                p={3}
-                bg="white"
-                borderRadius="lg"
-                border="1px solid"
-                borderColor={hasFailed ? 'red.200' : 'gray.200'}
-                h="100%"
-                cursor={hasMismatches && onBalanceHealthClick ? 'pointer' : 'default'}
-                onClick={hasMismatches ? onBalanceHealthClick : undefined}
-                _hover={hasMismatches && onBalanceHealthClick ? { borderColor: 'orange.300', shadow: 'sm' } : undefined}
-                transition="all 0.15s"
-            >
-                <Flex align="center" gap={2} mb={2}>
-                    <FiActivity size={14} color={hasFailed ? '#e53e3e' : hasMismatches ? '#dd6b20' : '#38a169'} />
-                    <Text fontSize="xs" fontWeight="semibold" color="gray.700">Live Balance</Text>
-                    <Badge
-                        colorPalette={hasMismatches ? 'orange' : 'green'}
-                        size="xs"
-                        ml="auto"
-                    >
-                        {covered}/{total}
-                    </Badge>
+            <Flex align="center" gap={1.5} flex={1} wrap="nowrap" overflow="hidden">
+                <FiActivity size={12} color={hasFailed ? '#e53e3e' : hasMismatches ? '#dd6b20' : '#38a169'} style={{ flexShrink: 0 }} />
+                <Text fontSize="2xs" fontWeight="semibold" color="gray.700" whiteSpace="nowrap">Balance</Text>
+                <Badge colorPalette={hasMismatches ? 'orange' : 'green'} size="xs">
+                    {covered}/{total}
+                </Badge>
+                {hasMismatches && (
+                    <Badge size="xs" colorPalette="orange">{balanceHealth.mismatchCount}Δ</Badge>
+                )}
+                {hasFailed && (
+                    <Badge size="xs" colorPalette="red">⚠{balanceHealth.failedAssets!.length}</Badge>
+                )}
+                {!hasMismatches && !hasFailed && (
+                    <Badge size="xs" colorPalette="green">✓</Badge>
+                )}
+                {unmappedLiveAssets.length > 0 && (
+                    <Badge size="xs" colorPalette="purple">📦{unmappedLiveAssets.length}</Badge>
+                )}
+                {/* Inline tolerance slider */}
+                <Flex align="center" gap={1} ml="auto" flexShrink={0} onClick={(e) => e.stopPropagation()}>
+                    <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">{deltaThreshold}%</Text>
+                    <Box w="50px">
+                        <Slider.Root
+                            size="sm"
+                            min={0}
+                            max={50}
+                            step={1}
+                            value={[deltaThreshold]}
+                            onValueChange={(details) => onDeltaThresholdChange?.(details.value[0])}
+                        >
+                            <Slider.Control>
+                                <Slider.Track>
+                                    <Slider.Range />
+                                </Slider.Track>
+                                <Slider.Thumb index={0} />
+                            </Slider.Control>
+                        </Slider.Root>
+                    </Box>
                 </Flex>
-
-                {/* Status badges row */}
-                <Flex gap={1} mb={2} wrap="wrap">
-                    {hasMismatches && (
-                        <Badge size="xs" colorPalette="orange">{balanceHealth.mismatchCount} mismatch</Badge>
-                    )}
-                    {hasFailed && (
-                        <Badge size="xs" colorPalette="red">⚠ {balanceHealth.failedAssets!.length} failed</Badge>
-                    )}
-                    {!hasMismatches && !hasFailed && (
-                        <Badge size="xs" colorPalette="green">✓ all matched</Badge>
-                    )}
-                </Flex>
-
-                {/* Threshold slider */}
-                <Box onClick={(e) => e.stopPropagation()}>
-                    <Flex justify="space-between" mb={0}>
-                        <Text fontSize="2xs" color="gray.400">Tolerance</Text>
-                        <Text fontSize="2xs" color="gray.500" fontWeight="medium">{deltaThreshold}%</Text>
-                    </Flex>
-                    <Slider.Root
-                        size="sm"
-                        min={0}
-                        max={50}
-                        step={1}
-                        value={[deltaThreshold]}
-                        onValueChange={(details) => onDeltaThresholdChange?.(details.value[0])}
-                    >
-                        <Slider.Control>
-                            <Slider.Track>
-                                <Slider.Range />
-                            </Slider.Track>
-                            <Slider.Thumb index={0} />
-                        </Slider.Control>
-                    </Slider.Root>
-                </Box>
-            </Box>
-        </Tooltip>
+            </Flex>
+        </Box>
     );
 };
 

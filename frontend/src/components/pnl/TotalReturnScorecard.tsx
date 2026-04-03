@@ -124,7 +124,8 @@ export function computeMetricsForRange(
     let filteredPoints = points;
     const selectedRange = RANGES.find(r => r.key === rangeKey);
     if (selectedRange?.days) {
-        const cutoff = new Date();
+        const lastDate = new Date(points[points.length - 1].date + 'T00:00:00');
+        const cutoff = new Date(lastDate);
         cutoff.setDate(cutoff.getDate() - selectedRange.days);
         const cutoffStr = cutoff.toISOString().split('T')[0];
         filteredPoints = points.filter(p => p.date >= cutoffStr);
@@ -223,6 +224,18 @@ interface TimeframeIndicatorsProps {
     versionId?: number | null;
     /** Assets for fullscreen performance chart */
     assets?: AssetPnLRow[];
+    /** When true, period selector cards are hidden (rendered externally e.g. in breadcrumb row) */
+    hidePeriodCards?: boolean;
+    /** When true, best/worst performers and period chart are hidden (e.g. asset-level view) */
+    hidePerformers?: boolean;
+    /** Optional replacement content shown where performers normally appear */
+    performerSlot?: React.ReactNode;
+    /** Context label (e.g. asset symbol, category name) shown in chart legends */
+    contextLabel?: string;
+    /** Asset ID — enables Price chart tab in PeriodChartPanel */
+    assetId?: number;
+    /** Asset symbol — label for price chart series */
+    assetSymbol?: string;
 }
 
 interface PerformerItem {
@@ -278,6 +291,12 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     onPerformerClick,
     versionId,
     assets: assetsProp,
+    hidePeriodCards = false,
+    hidePerformers = false,
+    performerSlot,
+    contextLabel,
+    assetId,
+    assetSymbol,
 }) => {
     const [performerCount, setPerformerCount] = useState(7);
     const [displayFormat, setDisplayFormat] = useState<PerformerDisplay>('$');
@@ -405,41 +424,43 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
             border="1px solid"
             borderColor="gray.200"
         >
-            {/* Timeframe selector cards */}
-            <Flex gap={1.5} mb={2} overflowX="auto">
-                {RANGES.map(r => {
-                    const roi = allRangeRois[r.key];
-                    const isActive = range === r.key;
-                    return (
-                        <Card.Root
-                            key={r.key}
-                            cursor="pointer"
-                            onClick={() => onRangeChange(r.key)}
-                            minW="70px"
-                            flex="1"
-                            variant={isActive ? 'elevated' : 'outline'}
-                            borderWidth="2px"
-                            borderColor={isActive ? 'blue.500' : 'gray.200'}
-                            bg={isActive ? 'blue.50' : 'white'}
-                            _hover={{ borderColor: isActive ? 'blue.500' : 'gray.300', shadow: 'sm' }}
-                            transition="all 0.15s"
-                        >
-                            <Card.Body py={1.5} px={2} textAlign="center">
-                                <Text fontSize="2xs" fontWeight="bold" color={isActive ? 'blue.700' : 'gray.500'}>
-                                    {r.label}
-                                </Text>
-                                {roi !== null ? (
-                                    <Text fontSize="xs" fontWeight="bold" color={roi >= 0 ? 'green.600' : 'red.600'}>
-                                        {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
+            {/* Timeframe selector cards (hidden when rendered externally) */}
+            {!hidePeriodCards && (
+                <Flex gap={1.5} mb={2} overflowX="auto">
+                    {RANGES.map(r => {
+                        const roi = allRangeRois[r.key];
+                        const isActive = range === r.key;
+                        return (
+                            <Card.Root
+                                key={r.key}
+                                cursor="pointer"
+                                onClick={() => onRangeChange(r.key)}
+                                minW="70px"
+                                flex="1"
+                                variant={isActive ? 'elevated' : 'outline'}
+                                borderWidth="2px"
+                                borderColor={isActive ? 'blue.500' : 'gray.200'}
+                                bg={isActive ? 'blue.50' : 'white'}
+                                _hover={{ borderColor: isActive ? 'blue.500' : 'gray.300', shadow: 'sm' }}
+                                transition="all 0.15s"
+                            >
+                                <Card.Body py={1.5} px={2} textAlign="center">
+                                    <Text fontSize="2xs" fontWeight="bold" color={isActive ? 'blue.700' : 'gray.500'}>
+                                        {r.label}
                                     </Text>
-                                ) : (
-                                    <Text fontSize="xs" color="gray.300">—</Text>
-                                )}
-                            </Card.Body>
-                        </Card.Root>
-                    );
-                })}
-            </Flex>
+                                    {roi !== null ? (
+                                        <Text fontSize="xs" fontWeight="bold" color={roi >= 0 ? 'green.600' : 'red.600'}>
+                                            {roi >= 0 ? '+' : ''}{roi.toFixed(2)}%
+                                        </Text>
+                                    ) : (
+                                        <Text fontSize="xs" color="gray.300">—</Text>
+                                    )}
+                                </Card.Body>
+                            </Card.Root>
+                        );
+                    })}
+                </Flex>
+            )}
 
             {isLoading ? (
                 <Text fontSize="xs" color="gray.400">Loading...</Text>
@@ -528,189 +549,215 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                         </HeroMetricsBar>
                     </Box>
 
-                    {/* Performers — full width below */}
-                    <Box>
-                        {/* Best/Worst + Period Chart — side by side */}
-                        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={3} alignItems="start">
-                            {/* Left half: Best & Worst */}
-                            {isPerformersLoading ? (
-                                <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
-                                    <Text fontSize="xs" color="gray.400">Loading performers...</Text>
+                    {/* Performers / custom slot — full width below */}
+                    {hidePerformers ? (
+                        <Box>
+                            {/* Custom slot + Period Chart — side by side */}
+                            <Box display="grid" gridTemplateColumns={performerSlot ? '1fr 1fr' : '1fr'} gap={3} alignItems="start">
+                                {performerSlot && <Box>{performerSlot}</Box>}
+                                {/* Period chart */}
+                                <Box p={2} borderRadius="md" border="1px solid" borderColor="blue.200" bg="white">
+                                    <PeriodChartPanel
+                                        points={points}
+                                        baseCurrency={baseCurrency}
+                                        range={range}
+                                        isLoading={isLoading}
+                                        versionId={versionId}
+                                        assets={assetsProp}
+                                        contextLabel={contextLabel}
+                                        assetId={assetId}
+                                        assetSymbol={assetSymbol}
+                                    />
                                 </Box>
-                            ) : (
-                                <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
-                                    {/* Controls row: badges left, $/%+slider right */}
-                                    <Flex justify="space-between" align="center" mb={1.5} gap={2}>
-                                        {/* Left: Asset/Account/Category + sort metric badges */}
-                                        <Flex gap={0.5} flexWrap="wrap" align="center">
-                                            <Badge
-                                                cursor="pointer"
-                                                variant={groupBy === 'asset' ? 'solid' : 'outline'}
-                                                colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
-                                                size="xs"
-                                                px={1.5}
-                                                onClick={() => onGroupByChange?.('asset')}
-                                            >
-                                                Asset
-                                            </Badge>
-                                            <Badge
-                                                cursor="pointer"
-                                                variant={groupBy === 'account' ? 'solid' : 'outline'}
-                                                colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
-                                                size="xs"
-                                                px={1.5}
-                                                onClick={() => onGroupByChange?.('account')}
-                                            >
-                                                Account
-                                            </Badge>
-                                            {dimensions.map(dim => (
+                            </Box>
+                        </Box>
+                    ) : (
+                        <Box>
+                            {/* Best/Worst + Period Chart — side by side */}
+                            <Box display="grid" gridTemplateColumns="1fr 1fr" gap={3} alignItems="start">
+                                {/* Left half: Best & Worst */}
+                                {isPerformersLoading ? (
+                                    <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
+                                        <Text fontSize="xs" color="gray.400">Loading performers...</Text>
+                                    </Box>
+                                ) : (
+                                    <Box p={2} borderRadius="md" border="1px solid" borderColor="purple.200" bg="white">
+                                        {/* Controls row: badges left, $/%+slider right */}
+                                        <Flex justify="space-between" align="center" mb={1.5} gap={2}>
+                                            {/* Left: Asset/Account/Category + sort metric badges */}
+                                            <Flex gap={0.5} flexWrap="wrap" align="center">
                                                 <Badge
-                                                    key={dim.id}
                                                     cursor="pointer"
-                                                    variant={groupBy === 'category' && selectedDimensionId === dim.id ? 'solid' : 'outline'}
-                                                    colorPalette={groupBy === 'category' && selectedDimensionId === dim.id ? 'teal' : 'gray'}
+                                                    variant={groupBy === 'asset' ? 'solid' : 'outline'}
+                                                    colorPalette={groupBy === 'asset' ? 'blue' : 'gray'}
                                                     size="xs"
                                                     px={1.5}
-                                                    onClick={() => {
-                                                        onGroupByChange?.('category');
-                                                        onDimensionChange?.(dim.id);
-                                                    }}
+                                                    onClick={() => onGroupByChange?.('asset')}
                                                 >
-                                                    {dim.label}
+                                                    Asset
                                                 </Badge>
-                                            ))}
-                                            <Box w="1px" h="14px" bg="gray.300" mx={1} flexShrink={0} />
-                                            {([['TR', 'Total Return'], ['U', 'Unrealized P&L'], ['MV', 'Market Value'], ['Eff', 'Efficiency']] as [PerformerMetric, string][]).map(([key, tip]) => (
-                                                <Tooltip key={key} content={tip} openDelay={400}>
+                                                <Badge
+                                                    cursor="pointer"
+                                                    variant={groupBy === 'account' ? 'solid' : 'outline'}
+                                                    colorPalette={groupBy === 'account' ? 'blue' : 'gray'}
+                                                    size="xs"
+                                                    px={1.5}
+                                                    onClick={() => onGroupByChange?.('account')}
+                                                >
+                                                    Account
+                                                </Badge>
+                                                {dimensions.map(dim => (
                                                     <Badge
+                                                        key={dim.id}
                                                         cursor="pointer"
-                                                        variant={sortMetric === key ? 'solid' : 'outline'}
-                                                        colorPalette={sortMetric === key ? 'teal' : 'gray'}
+                                                        variant={groupBy === 'category' && selectedDimensionId === dim.id ? 'solid' : 'outline'}
+                                                        colorPalette={groupBy === 'category' && selectedDimensionId === dim.id ? 'teal' : 'gray'}
                                                         size="xs"
-                                                        px={1}
-                                                        onClick={() => setSortMetric(key)}
+                                                        px={1.5}
+                                                        onClick={() => {
+                                                            onGroupByChange?.('category');
+                                                            onDimensionChange?.(dim.id);
+                                                        }}
                                                     >
-                                                        {key}
+                                                        {dim.label}
                                                     </Badge>
-                                                </Tooltip>
-                                            ))}
-                                        </Flex>
-
-                                        {/* Right: $/%  + count slider */}
-                                        <Flex align="center" gap={1.5} flexShrink={0}>
-                                            <Flex gap={0.5}>
-                                                {([['$', 'Dollar values'], ['%', 'Percentages']] as [PerformerDisplay, string][]).map(([key, tip]) => (
+                                                ))}
+                                                <Box w="1px" h="14px" bg="gray.300" mx={1} flexShrink={0} />
+                                                {([['TR', 'Total Return'], ['U', 'Unrealized P&L'], ['MV', 'Market Value'], ['Eff', 'Efficiency']] as [PerformerMetric, string][]).map(([key, tip]) => (
                                                     <Tooltip key={key} content={tip} openDelay={400}>
                                                         <Badge
                                                             cursor="pointer"
-                                                            variant={displayFormat === key ? 'solid' : 'outline'}
-                                                            colorPalette={displayFormat === key ? 'purple' : 'gray'}
+                                                            variant={sortMetric === key ? 'solid' : 'outline'}
+                                                            colorPalette={sortMetric === key ? 'teal' : 'gray'}
                                                             size="xs"
                                                             px={1}
-                                                            onClick={() => setDisplayFormat(key)}
+                                                            onClick={() => setSortMetric(key)}
                                                         >
                                                             {key}
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
                                             </Flex>
-                                            <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">
-                                                {performerCount}
-                                            </Text>
-                                            <Slider.Root
-                                                size="sm"
-                                                min={3}
-                                                max={Math.max(maxPerformerCount, 5)}
-                                                step={1}
-                                                value={[performerCount]}
-                                                onValueChange={(d) => setPerformerCount(d.value[0])}
-                                                width="60px"
-                                            >
-                                                <Slider.Control>
-                                                    <Slider.Track><Slider.Range /></Slider.Track>
-                                                    <Slider.Thumb index={0} />
-                                                </Slider.Control>
-                                            </Slider.Root>
+
+                                            {/* Right: $/%  + count slider */}
+                                            <Flex align="center" gap={1.5} flexShrink={0}>
+                                                <Flex gap={0.5}>
+                                                    {([['$', 'Dollar values'], ['%', 'Percentages']] as [PerformerDisplay, string][]).map(([key, tip]) => (
+                                                        <Tooltip key={key} content={tip} openDelay={400}>
+                                                            <Badge
+                                                                cursor="pointer"
+                                                                variant={displayFormat === key ? 'solid' : 'outline'}
+                                                                colorPalette={displayFormat === key ? 'purple' : 'gray'}
+                                                                size="xs"
+                                                                px={1}
+                                                                onClick={() => setDisplayFormat(key)}
+                                                            >
+                                                                {key}
+                                                            </Badge>
+                                                        </Tooltip>
+                                                    ))}
+                                                </Flex>
+                                                <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap">
+                                                    {performerCount}
+                                                </Text>
+                                                <Slider.Root
+                                                    size="sm"
+                                                    min={3}
+                                                    max={Math.max(maxPerformerCount, 5)}
+                                                    step={1}
+                                                    value={[performerCount]}
+                                                    onValueChange={(d) => setPerformerCount(d.value[0])}
+                                                    width="60px"
+                                                >
+                                                    <Slider.Control>
+                                                        <Slider.Track><Slider.Range /></Slider.Track>
+                                                        <Slider.Thumb index={0} />
+                                                    </Slider.Control>
+                                                </Slider.Root>
+                                            </Flex>
                                         </Flex>
-                                    </Flex>
 
-                                    <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
-                                        {/* Best */}
-                                        <Box>
-                                            <Flex align="center" gap={1} mb={1}>
-                                                <FiTrendingUp size={11} color="var(--chakra-colors-green-500)" />
-                                                <Text fontSize="2xs" fontWeight="semibold" color="green.600">Best</Text>
-                                            </Flex>
-                                            {visibleTop.length === 0 ? (
-                                                <Text fontSize="2xs" color="gray.400">No positive returns</Text>
-                                            ) : (
-                                                <Box maxH="200px" overflowY="auto">
-                                                    <Flex direction="column" gap={0.5}>
-                                                        {visibleTop.map((p, i) => (
-                                                            <PerformerMiniRow
-                                                                key={p.id}
-                                                                rank={i + 1}
-                                                                item={p}
-                                                                maxAbs={maxAbsReturn}
-                                                                baseCurrency={baseCurrency}
-                                                                isPositive
-                                                                sortBy={performerSort}
-                                                                display={displayFormat}
-                                                                onClick={() => handlePerformerClick(p)}
-                                                                onInfoClick={handleInfoClick}
-                                                            />
-                                                        ))}
-                                                    </Flex>
-                                                </Box>
-                                            )}
-                                        </Box>
+                                        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
+                                            {/* Best */}
+                                            <Box>
+                                                <Flex align="center" gap={1} mb={1}>
+                                                    <FiTrendingUp size={11} color="var(--chakra-colors-green-500)" />
+                                                    <Text fontSize="2xs" fontWeight="semibold" color="green.600">Best</Text>
+                                                </Flex>
+                                                {visibleTop.length === 0 ? (
+                                                    <Text fontSize="2xs" color="gray.400">No positive returns</Text>
+                                                ) : (
+                                                    <Box maxH="200px" overflowY="auto">
+                                                        <Flex direction="column" gap={0.5}>
+                                                            {visibleTop.map((p, i) => (
+                                                                <PerformerMiniRow
+                                                                    key={p.id}
+                                                                    rank={i + 1}
+                                                                    item={p}
+                                                                    maxAbs={maxAbsReturn}
+                                                                    baseCurrency={baseCurrency}
+                                                                    isPositive
+                                                                    sortBy={performerSort}
+                                                                    display={displayFormat}
+                                                                    onClick={() => handlePerformerClick(p)}
+                                                                    onInfoClick={handleInfoClick}
+                                                                />
+                                                            ))}
+                                                        </Flex>
+                                                    </Box>
+                                                )}
+                                            </Box>
 
-                                        {/* Worst */}
-                                        <Box>
-                                            <Flex align="center" gap={1} mb={1}>
-                                                <FiTrendingDown size={11} color="var(--chakra-colors-red-500)" />
-                                                <Text fontSize="2xs" fontWeight="semibold" color="red.600">Worst</Text>
-                                            </Flex>
-                                            {visibleFlop.length === 0 ? (
-                                                <Text fontSize="2xs" color="gray.400">No negative returns</Text>
-                                            ) : (
-                                                <Box maxH="200px" overflowY="auto">
-                                                    <Flex direction="column" gap={0.5}>
-                                                        {visibleFlop.map((p, i) => (
-                                                            <PerformerMiniRow
-                                                                key={p.id}
-                                                                rank={i + 1}
-                                                                item={p}
-                                                                maxAbs={maxAbsReturn}
-                                                                baseCurrency={baseCurrency}
-                                                                isPositive={false}
-                                                                sortBy={performerSort}
-                                                                display={displayFormat}
-                                                                onClick={() => handlePerformerClick(p)}
-                                                                onInfoClick={handleInfoClick}
-                                                            />
-                                                        ))}
-                                                    </Flex>
-                                                </Box>
-                                            )}
+                                            {/* Worst */}
+                                            <Box>
+                                                <Flex align="center" gap={1} mb={1}>
+                                                    <FiTrendingDown size={11} color="var(--chakra-colors-red-500)" />
+                                                    <Text fontSize="2xs" fontWeight="semibold" color="red.600">Worst</Text>
+                                                </Flex>
+                                                {visibleFlop.length === 0 ? (
+                                                    <Text fontSize="2xs" color="gray.400">No negative returns</Text>
+                                                ) : (
+                                                    <Box maxH="200px" overflowY="auto">
+                                                        <Flex direction="column" gap={0.5}>
+                                                            {visibleFlop.map((p, i) => (
+                                                                <PerformerMiniRow
+                                                                    key={p.id}
+                                                                    rank={i + 1}
+                                                                    item={p}
+                                                                    maxAbs={maxAbsReturn}
+                                                                    baseCurrency={baseCurrency}
+                                                                    isPositive={false}
+                                                                    sortBy={performerSort}
+                                                                    display={displayFormat}
+                                                                    onClick={() => handlePerformerClick(p)}
+                                                                    onInfoClick={handleInfoClick}
+                                                                />
+                                                            ))}
+                                                        </Flex>
+                                                    </Box>
+                                                )}
+                                            </Box>
                                         </Box>
                                     </Box>
-                                </Box>
-                            )}
+                                )}
 
-                            {/* Right half: Period chart */}
-                            <Box p={2} borderRadius="md" border="1px solid" borderColor="blue.200" bg="white">
-                                <PeriodChartPanel
-                                    points={points}
-                                    baseCurrency={baseCurrency}
-                                    range={range}
-                                    isLoading={isLoading}
-                                    versionId={versionId}
-                                    assets={assetsProp}
-                                />
+                                {/* Right half: Period chart */}
+                                <Box p={2} borderRadius="md" border="1px solid" borderColor="blue.200" bg="white">
+                                    <PeriodChartPanel
+                                        points={points}
+                                        baseCurrency={baseCurrency}
+                                        range={range}
+                                        isLoading={isLoading}
+                                        versionId={versionId}
+                                        assets={assetsProp}
+                                        contextLabel={contextLabel}
+                                        assetId={assetId}
+                                        assetSymbol={assetSymbol}
+                                    />
+                                </Box>
                             </Box>
                         </Box>
-                    </Box>
+                    )}
                 </>
             ) : (
                 <Text fontSize="xs" color="gray.400">No data for this period</Text>
@@ -896,21 +943,23 @@ export const MetricItem: React.FC<{
     icon?: React.ReactNode;
     bg?: string;
     onClick?: () => void;
-}> = ({ label, value, color, subValue, icon, bg, onClick }) => (
+    compact?: boolean;
+}> = ({ label, value, color, subValue, icon, bg, onClick, compact }) => (
     <Flex
         align="center"
-        gap={1.5}
+        gap={1}
         cursor={onClick ? 'pointer' : 'default'}
         onClick={onClick}
         _hover={onClick ? { opacity: 0.85 } : undefined}
         borderRadius="md"
-        px={2}
-        py={2}
+        px={compact ? 1.5 : 2}
+        py={compact ? 0.5 : 2}
         bg={bg ?? 'transparent'}
-        flexShrink={0}
+        flex={1}
+        minW={0}
     >
         {icon && <Box color={color} flexShrink={0}>{icon}</Box>}
-        <Text fontSize="xs" color="gray.500" fontWeight="medium" whiteSpace="nowrap">{label}</Text>
-        <Text fontSize="sm" fontWeight="bold" color={color} whiteSpace="nowrap">{value}</Text>
+        <Text fontSize={compact ? '2xs' : 'xs'} color="gray.500" fontWeight="medium" whiteSpace="nowrap">{label}</Text>
+        <Text fontSize={compact ? 'xs' : 'sm'} fontWeight="bold" color={color} whiteSpace="nowrap">{value}</Text>
     </Flex>
 );

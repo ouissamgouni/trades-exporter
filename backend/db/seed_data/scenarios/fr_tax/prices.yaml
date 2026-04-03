@@ -1,0 +1,79 @@
+# French Tax Scenario — Deterministic Mock Prices (Multi-Year)
+# ==============================================================
+# Prices match the transactions in transactions.yaml across 2023–2025
+# so PnL calculations are fully reproducible.  Each entry is dated to
+# the exact transaction timestamp.  The "current" entry is the fallback
+# for any datetime not explicitly listed.
+#
+# Fiat cross-rates (EUR/USD) use the same mechanism: the EUR asset is
+# priced in USD (i.e. "how many USD per 1 EUR").
+
+prices:
+  # ── BTC (EUR) ──────────────────────────────────────────────
+  - asset_symbol: BTC
+    quote_currency: EUR
+    entries:
+      # 2023
+      - at: "2023-03-15T10:00:00" # fr_tax_001 buy 1 BTC @ 25k
+        price: "25000.00"
+      - at: "2023-08-15T10:00:00" # fr_tax_005 sell 0.2 BTC @ 30k
+        price: "30000.00"
+      # 2024
+      - at: "2024-02-15T10:00:00" # fr_tax_008 sell 0.5 BTC @ 35k
+        price: "35000.00"
+      - at: "2024-09-01T10:00:00" # fr_tax_012 buy 1 BTC @ 38k
+        price: "38000.00"
+      # 2025
+      - at: "2025-03-15T10:00:00" # fr_tax_013 sell 0.3 BTC @ 60k
+        price: "60000.00"
+      - at: "2025-09-01T10:00:00" # fr_tax_016 swap out 0.1 BTC @ 55k
+        price: "55000.00"
+      - at: "2025-10-01T10:00:00" # fr_tax_018 transfer 0.2 BTC
+        price: "54000.00"
+      - at: current
+        price: "55000.00"
+
+  # ── ETH (EUR) ──────────────────────────────────────────────
+  - asset_symbol: ETH
+    quote_currency: EUR
+    entries:
+      # 2023
+      - at: "2023-05-01T10:00:00" # fr_tax_002 buy 2 ETH @ 1.8k
+        price: "1800.00"
+      - at: "2023-09-15T10:00:00" # fr_tax_006 sell 0.5 ETH @ 1.6k
+        price: "1600.00"
+      # 2024
+      - at: "2024-04-01T10:00:00" # fr_tax_009 sell 1 ETH @ 1.5k
+        price: "1500.00"
+      # 2025
+      - at: "2025-05-01T10:00:00" # fr_tax_014 sell 0.5 ETH @ 3.5k
+        price: "3500.00"
+      - at: "2025-09-01T10:00:00" # fr_tax_017 swap in 1.5 ETH @ 3666.67
+        price: "3666.67"
+      - at: current
+        price: "3500.00"
+
+  # ── AAPL (EUR) ─────────────────────────────────────────────
+  - asset_symbol: AAPL
+    quote_currency: EUR
+    entries:
+      # 2023
+      - at: "2023-06-01T10:00:00" # fr_tax_003/004 buy 10 AAPL @ 150
+        price: "150.00"
+      - at: "2023-11-01T10:00:00" # fr_tax_007 sell 3 AAPL PEA @ 170
+        price: "170.00"
+      # 2024
+      - at: "2024-06-01T10:00:00" # fr_tax_010/011 sell 5 AAPL @ 200
+        price: "200.00"
+      # 2025
+      - at: "2025-07-01T10:00:00" # fr_tax_015 sell 5 AAPL @ 220
+        price: "220.00"
+      - at: current
+        price: "215.00"
+
+  # ── EUR/USD fiat cross-rate ────────────────────────────────
+  - asset_symbol: EUR
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "1.08"

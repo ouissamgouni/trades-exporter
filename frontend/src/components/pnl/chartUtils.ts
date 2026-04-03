@@ -61,13 +61,14 @@ export interface HasDate {
     date: string;
 }
 
-/** Filter points by a ZoomPreset, falling back to all points if <2 remain. */
+/** Filter points by a ZoomPreset, anchored to the last data point's date.
+ *  This ensures correct filtering even when data doesn't extend to today. */
 export function filterPointsByZoom<T extends HasDate>(points: T[], zoom: ZoomPreset): T[] {
     const preset = ZOOM_PRESETS[zoom];
     if (!preset.days || !points.length) return points;
-    const cutoff = new Date();
+    const lastDate = new Date(points[points.length - 1].date + 'T00:00:00');
+    const cutoff = new Date(lastDate);
     cutoff.setDate(cutoff.getDate() - preset.days);
     const cutoffStr = cutoff.toISOString().split('T')[0];
-    const filtered = points.filter(p => p.date >= cutoffStr);
-    return filtered.length >= 1 ? filtered : points;
+    return points.filter(p => p.date >= cutoffStr);
 }

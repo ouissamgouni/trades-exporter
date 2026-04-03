@@ -19,6 +19,8 @@ interface PnLStatusBadgeProps {
     currentVersionId?: number | null;
     errorMessage?: string | null;
     size?: 'sm' | 'md';
+    /** When true and status is 'completed', hide the "Up to date" label */
+    compactWhenCompleted?: boolean;
 }
 
 const STATUS_CONFIG: Record<PnLCalcStatus, {
@@ -56,6 +58,7 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
     currentVersionId,
     errorMessage,
     size = 'sm',
+    compactWhenCompleted = false,
 }) => {
     const config = STATUS_CONFIG[status];
 
@@ -87,7 +90,9 @@ export const PnLStatusBadge: React.FC<PnLStatusBadgeProps> = ({
                 ) : config.icon ? (
                     <Text as="span" fontSize="xs">{config.icon}</Text>
                 ) : null}
-                <Text as="span">{config.label}</Text>
+                {!(compactWhenCompleted && status === 'completed') && (
+                    <Text as="span">{config.label}</Text>
+                )}
                 {inlineDetail && (
                     <Text as="span" fontSize="2xs" opacity={0.7}>· {inlineDetail}</Text>
                 )}

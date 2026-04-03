@@ -1,0 +1,6 @@
+# Default Bundle Seed Data
+# =========================
+# Bundles group related transactions (e.g., internal transfers).
+# Empty by default. Scenarios add bundles as needed.
+
+bundles: []

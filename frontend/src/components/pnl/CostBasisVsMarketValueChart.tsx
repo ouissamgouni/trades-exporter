@@ -51,7 +51,7 @@ export const CostBasisVsMarketValueChart: React.FC<CostBasisVsMarketValueChartPr
     const filteredPoints = useMemo(() => filterPointsByZoom(points, zoom), [points, zoom]);
 
     const lineData = useMemo(() => {
-        if (!filteredPoints.length) return [];
+        if (filteredPoints.length < 2) return [];
         return [
             { id: 'Market Value', data: filteredPoints.map(p => ({ x: p.date, y: p.total_value_in_base })) },
             { id: 'Cost Basis', data: filteredPoints.map(p => ({ x: p.date, y: p.cost_basis_in_base })) },
@@ -91,6 +91,10 @@ export const CostBasisVsMarketValueChart: React.FC<CostBasisVsMarketValueChartPr
             {isLoading ? (
                 <Box h={height} display="flex" alignItems="center" justifyContent="center">
                     <Text fontSize="sm" color="gray.400">Loading...</Text>
+                </Box>
+            ) : lineData.length === 0 ? (
+                <Box h={height} display="flex" alignItems="center" justifyContent="center">
+                    <Text fontSize="xs" color="gray.400">Not enough data</Text>
                 </Box>
             ) : (
                 <Box h={height}>

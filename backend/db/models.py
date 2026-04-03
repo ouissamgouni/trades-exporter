@@ -240,6 +240,20 @@ class AccountType(str, Enum):
     INVESTMENT = "investment"
 
 
+class AccountEnvelope(str, Enum):
+    """Tax envelope for investment/broker accounts (French tax law).
+    
+    Values:
+    - CTO: Compte-Titres Ordinaire — standard taxable brokerage account
+    - PEA: Plan d'Épargne en Actions — tax-advantaged equity savings plan
+    - AV: Assurance Vie — tax-advantaged life insurance wrapper
+    """
+
+    CTO = "cto"
+    PEA = "pea"
+    AV = "av"
+
+
 class ConnectorCategory(str, Enum):
     """Connector category for data sources.
     
@@ -310,6 +324,7 @@ class Account(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(nullable=False, index=True)
     account_type: str = Field(nullable=False, index=True)  # 'cex', 'dex', 'broker', 'wallet', 'bank', 'investment'
+    envelope: Optional[str] = Field(default=None, index=True)  # Tax envelope: 'cto', 'pea', 'av' (see AccountEnvelope)
     address_or_identifier: Optional[str] = Field(default=None, index=True)
     group: Optional[str] = Field(default=None, index=True)  # Grouping label (e.g. 'Tangem EVM', 'Trading')
     tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
@@ -326,6 +341,15 @@ class Account(SQLModel, table=True):
         sa_relationship_kwargs={"foreign_keys": "[NormalizedTransaction.account_id]"},
     )
     cost_lots: List["CostLot"] = Relationship(back_populates="account")
+    french_crypto_tax_entries: List["FrenchCryptoTaxEntry"] = Relationship(
+        back_populates="account_rel"
+    )
+    french_crypto_tax_annual_summaries: List["FrenchCryptoTaxAnnualSummary"] = Relationship(
+        back_populates="account_rel"
+    )
+    tax_loss_carryforwards: List["TaxLossCarryforward"] = Relationship(
+        back_populates="account_rel"
+    )
 
 
 class AccountConnector(SQLModel, table=True):
@@ -954,6 +978,13 @@ class NormalizedTransaction(SQLModel, table=True):
         back_populates="triggered_by_transaction",
         sa_relationship_kwargs={"cascade": "save-update, merge"}
     )
+    tax_overrides: List["TransactionTaxOverride"] = Relationship(
+        back_populates="transaction",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[TransactionTaxOverride.transaction_id]",
+        },
+    )
 
     # Derivative positions linked to this transaction (viewonly - managed by pipeline stage)
     derivative_positions_opened: List["DerivativePosition"] = Relationship(
@@ -1156,6 +1187,24 @@ class CalculationVersion(SQLModel, table=True):
     # All other children (cost_lots, realized_pnl, etc.) are owned by CalculationUnit
     calculation_units: List["CalculationUnit"] = Relationship(
         back_populates="version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    
+    # French tax tracking (cascade delete when version is deleted)
+    french_crypto_tax_entries: List["FrenchCryptoTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    french_crypto_tax_annual_summaries: List["FrenchCryptoTaxAnnualSummary"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    french_securities_tax_entries: List["FrenchSecuritiesTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    french_securities_tax_annual_summaries: List["FrenchSecuritiesTaxAnnualSummary"] = Relationship(
+        back_populates="calculation_version",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
@@ -2274,4 +2323,374 @@ class DerivativePosition(SQLModel, table=True):
         sa_relationship_kwargs={
             "foreign_keys": "[DerivativePosition.open_transaction_id]",
         },
+    )
+
+
+# ============================================================================
+# French Tax Models
+# ============================================================================
+
+
+class FrenchCryptoTaxEntry(SQLModel, table=True):
+    """
+    Individual crypto transaction tax calculation record (French Article 150 VH bis CGI).
+    
+    Stores line-item tax data for each dispositive transaction (crypto→fiat conversion).
+    Used for reconstructing the Cerfa 2086 tax form submission.
+    """
+
+    __tablename__ = "french_crypto_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Link to calculation and version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    
+    # Transaction reference
+    realized_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+    
+    # Tax year (fiscal year)
+    fiscal_year: int = Field(index=True)  # 2024, 2025, etc.
+    
+    # Disposal transaction details
+    cession_date: datetime = Field(index=True)  # Date of crypto→fiat conversion
+    asset_symbol: str = Field(index=True)  # "BTC", "ETH", etc.
+    
+    # French formula components (Article 150 VH bis CGI)
+    # PV = Prix_cession − (Prix_total_acquisition × Prix_cession / Valeur_globale_portefeuille)
+    proceeds: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_cession
+    
+    cost_basis: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_acquisition for this lot
+    
+    portfolio_value_at_cession: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Valeur_globale_portefeuille
+    
+    total_acquisition_cost: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Prix_total_acquisition
+    
+    # Calculated gain/loss
+    taxable_gain: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Can be negative (loss)
+    
+    # Tax at 30% PFU (12.8% income + 17.2% social)
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # taxable_gain * 0.30
+    
+    # Metadata
+    note: Optional[str] = Field(default=None)  # e.g., "CEX withdrawal", "P2P sale"
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_crypto_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchCryptoTaxEntry.account_id]"}
+    )
+
+
+class FrenchCryptoTaxAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of French crypto taxes (Article 150 VH bis CGI).
+    
+    Summarizes all dispositions for a fiscal year and tracks annual netting.
+    Used for summary reporting in tax filings and UI display.
+    """
+
+    __tablename__ = "french_crypto_tax_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Link to calculation and version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    
+    # Tax year
+    fiscal_year: int = Field(index=True)  # 2024, 2025, etc.
+    
+    # Annual aggregates
+    total_gains: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Sum of all positive gains (before netting)
+    
+    total_losses: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Sum of all losses (absolute value)
+    
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # total_gains - total_losses (capped at 0 if negative)
+    
+    # Annual tax
+    tax_before_carryforward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # net_taxable * 0.30
+    
+    # Loss carryforward (pre-2025: no carryforward, always 0)
+    loss_carryforward_used: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Losses applied from prior years
+    
+    loss_carried_forward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Unnet loss this year (post-2025 only)
+    
+    # Final tax
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # tax_before_carryforward (after carryforward, always >= 0)
+    
+    # Transaction count
+    transaction_count: int = Field(default=0)
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_crypto_tax_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchCryptoTaxAnnualSummary.account_id]"}
+    )
+
+
+class TaxLossCarryforward(SQLModel, table=True):
+    """
+    Tracks loss carryforward for French securities tax (Article 150-0 A CGI).
+    
+    Securities losses can be carried forward 10 years against future gains.
+    This model tracks carryforward history per account per fiscal year.
+    """
+
+    __tablename__ = "tax_loss_carryforwards"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Link to account
+    account_id: int = Field(
+        foreign_key="accounts.id", index=True
+    )
+    
+    # Historical data
+    loss_fiscal_year: int = Field(index=True)  # Year loss occurred (e.g., 2020)
+    current_fiscal_year: int = Field(index=True)  # Current year evaluating carryforward
+    
+    # Carryforward tracking
+    loss_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Original loss from loss_fiscal_year
+    
+    used_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )  # Amount used in current_fiscal_year
+    
+    remaining_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # loss_amount - used_amount
+    
+    # Carryforward window (10 years for securities)
+    carryforward_expires: int = Field(
+        default=0
+    )  # loss_fiscal_year + 10
+    
+    is_expired: bool = Field(
+        default=False, index=True
+    )  # True if current_fiscal_year > carryforward_expires
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    # Relationships
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[TaxLossCarryforward.account_id]"}
+    )
+
+
+class FrenchSecuritiesTaxEntry(SQLModel, table=True):
+    """
+    Individual securities transaction tax calculation record (French Article 150-0 A CGI).
+    
+    Stores line-item tax data for each securities disposal using CUMP method.
+    Used for reconstructing the Form 2074 tax form submission.
+    """
+
+    __tablename__ = "french_securities_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Link to calculation version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    
+    # Transaction reference
+    realized_pnl_id: Optional[int] = Field(
+        default=None, foreign_key="realized_pnl.pnl_id", index=True
+    )
+    
+    # Tax year (fiscal year)
+    fiscal_year: int = Field(index=True)
+    
+    # Trade details
+    trade_date: datetime = Field(index=True)
+    asset_symbol: str = Field(index=True)
+    direction: str = Field(default="sell")  # "buy" or "sell"
+    qty: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+    
+    # CUMP method fields
+    proceeds_per_unit: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # Sale price per unit
+    cump_at_time: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False)
+    )  # CUMP (Coût Unitaire Moyen Pondéré) at time of trade
+    
+    # Calculated gain/loss: qty × (proceeds_per_unit - cump_at_time) for sells
+    gain_loss: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    
+    # Tax at 30% PFU
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    
+    # Metadata
+    note: Optional[str] = Field(default=None)
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_securities_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchSecuritiesTaxEntry.account_id]"}
+    )
+
+
+class FrenchSecuritiesTaxAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of French securities taxes (Article 150-0 A CGI).
+    
+    Summarizes all dispositions for a fiscal year with CUMP-based gains/losses
+    and 10-year loss carryforward tracking.
+    """
+
+    __tablename__ = "french_securities_tax_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Link to calculation version
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    
+    # Tax year
+    fiscal_year: int = Field(index=True)
+    
+    # Annual aggregates
+    total_gains: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_losses: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    
+    # Loss carryforward
+    loss_carryforward_used: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    loss_carried_forward: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    
+    # Final tax
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    
+    # Transaction count
+    transaction_count: int = Field(default=0)
+    
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="french_securities_tax_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[FrenchSecuritiesTaxAnnualSummary.account_id]"}
+    )
+
+
+class TransactionTaxOverride(SQLModel, table=True):
+    """
+    Per-transaction, per-jurisdiction tax override.
+
+    Stores user overrides of computed taxability for specific tax jurisdictions.
+    Only stores exceptions — absence of a row means "use computed disposal_taxable".
+
+    PK: (transaction_id, jurisdiction)
+    """
+
+    __tablename__ = "transaction_tax_overrides"
+
+    transaction_id: int = Field(
+        foreign_key="normalized_transactions.id",
+        primary_key=True,
+        nullable=False,
+    )
+    jurisdiction: str = Field(
+        max_length=10,
+        primary_key=True,
+        nullable=False,
+    )
+    is_taxable: bool = Field(nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    transaction: Optional["NormalizedTransaction"] = Relationship(
+        back_populates="tax_overrides",
+        sa_relationship_kwargs={"foreign_keys": "[TransactionTaxOverride.transaction_id]"},
     )

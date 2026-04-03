@@ -35,6 +35,7 @@ from backend.services.pnl.models import (
 )
 from backend.db.models import CostLot, ConsumedLotSlice, RealizedPnl, LotSettlement, CalculationUnit, PnlWarning
 from backend.services.pnl.lot_manager import LotManager
+from backend.services.pnl.tax_models import TaxLineItem, TaxSummary, TaxReport
 
 __all__ = [
     # Config
@@ -53,6 +54,10 @@ __all__ = [
     "PnLResult",
     "RuntimeCalculationUnit",  # Backward compat alias
     "RuntimeUnitType",
+    # Tax models
+    "TaxLineItem",
+    "TaxSummary",
+    "TaxReport",
     # Components
     "LotManager",
 ]

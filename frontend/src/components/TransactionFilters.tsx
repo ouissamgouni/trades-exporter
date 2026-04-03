@@ -55,8 +55,15 @@ export interface FilterOptions {
     connector_runs: FilterOption[];
     tags: FilterOption[];
     networks: FilterOption[];
+    price_quote_assets: FilterOption[];
+    fee_quote_assets: FilterOption[];
+    bundle_patterns: FilterOption[];
     // P&L context extras
     non_owned_count?: number;
+    include_fee_count?: number;
+    has_fee_count?: number;
+    has_bundle_count?: number;
+    total_count?: number;
 }
 
 // Current filter state
@@ -82,6 +89,16 @@ export interface TransactionFilterState {
     nonOwned: boolean;
     /** Has fees filter: show only transactions that have a fee > 0 */
     hasFees?: boolean;
+    /** Include fee filter: show only transactions where include_fee is true/false */
+    includeFee?: boolean;
+    /** Has bundle filter: show only transactions assigned to a bundle */
+    hasBundle?: boolean;
+    /** Price quote asset filter */
+    priceQuoteAssetIds: string[];
+    /** Fee quote asset filter */
+    feeQuoteAssetIds: string[];
+    /** Bundle pattern filter */
+    bundlePatterns: string[];
     // P&L audit filters (hidden from UI, locked to version context)
     versionId?: string;
     inclusionStatus?: 'included' | 'excluded';
@@ -114,6 +131,11 @@ export const defaultFilterState: TransactionFilterState = {
     dateTo: '',
     nonOwned: false,
     hasFees: undefined,
+    includeFee: undefined,
+    hasBundle: undefined,
+    priceQuoteAssetIds: [],
+    feeQuoteAssetIds: [],
+    bundlePatterns: [],
     transactionIds: undefined,
     connectorRunOutcome: undefined,
 };
@@ -179,6 +201,8 @@ const FILTER_DEFS: FilterDef[] = [
     { key: 'tagKeys', label: 'Tags', icon: '🏷️', type: 'multi', optionsKey: 'tags', color: 'purple', isDropdown: true },
     { key: 'categoryIds', label: 'Category', icon: '📁', type: 'multi', optionsKey: 'categories_by_dimension', color: 'pink', isDropdown: true },
     { key: 'connectorRunIds', label: 'Connector Run', icon: '🔄', type: 'multi', optionsKey: 'connector_runs', color: 'indigo', isDropdown: true },
+    { key: 'priceQuoteAssetIds', label: 'Price Quote Asset', icon: '💱', type: 'multi', optionsKey: 'price_quote_assets', color: 'purple', isDropdown: true },
+    { key: 'feeQuoteAssetIds', label: 'Fee Quote Asset', icon: '💱', type: 'multi', optionsKey: 'fee_quote_assets', color: 'orange', isDropdown: true },
 ];
 
 // Filter Card Component - shows all options as toggleable chips (OPEN)
@@ -977,7 +1001,12 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if (filters.dateFrom) params.append('date_from', filters.dateFrom);
         if (filters.dateTo) params.append('date_to', filters.dateTo);
         if (filters.transactionIds?.length) params.append('ids', filters.transactionIds.join(','));
-        if (filters.hasFees) params.append('has_fee', 'true');
+        if (filters.hasFees !== undefined) params.append('has_fee', String(filters.hasFees));
+        if (filters.includeFee !== undefined) params.append('include_fee', String(filters.includeFee));
+        if (filters.hasBundle !== undefined) params.append('has_bundle', String(filters.hasBundle));
+        if (filters.priceQuoteAssetIds.length > 0) params.append('price_quote_asset_id', filters.priceQuoteAssetIds.join(','));
+        if (filters.feeQuoteAssetIds.length > 0) params.append('fee_quote_asset_id', filters.feeQuoteAssetIds.join(','));
+        if (filters.bundlePatterns.length > 0) params.append('bundle_pattern', filters.bundlePatterns.join(','));
         return params;
     }, [filters]);
 
@@ -1046,7 +1075,9 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         if ((localFilters.dateFrom || localFilters.dateTo) &&
             (localFilters.dateFrom !== resetDates.dateFrom || localFilters.dateTo !== resetDates.dateTo)) count++;
         if (localFilters.nonOwned && !effectiveResetState.nonOwned) count++;
-        if (localFilters.hasFees && !effectiveResetState.hasFees) count++;
+        if (localFilters.hasFees !== undefined && localFilters.hasFees !== effectiveResetState.hasFees) count++;
+        if (localFilters.includeFee !== undefined && localFilters.includeFee !== effectiveResetState.includeFee) count++;
+        if (localFilters.hasBundle !== undefined && localFilters.hasBundle !== effectiveResetState.hasBundle) count++;
         if (localFilters.transactionIds?.length) count++;
         FILTER_DEFS.forEach(def => {
             const values = localFilters[def.key];
@@ -1092,6 +1123,13 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
     // Get options for a filter
     const getOptionsForFilter = (def: FilterDef): FilterOption[] => {
         if (!filterOptions || !def.optionsKey) return [];
+        // categories_by_dimension is DimensionWithCategories[], not FilterOption[] —
+        // flatten it so chip display and label resolution work correctly.
+        if (def.optionsKey === 'categories_by_dimension') {
+            return (filterOptions.categories_by_dimension || []).flatMap(dim =>
+                dim.categories.map(cat => ({ value: cat.value, label: cat.label, count: undefined }))
+            );
+        }
         return (filterOptions[def.optionsKey] as FilterOption[]) || [];
     };
 
@@ -1162,14 +1200,38 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
         }
 
         // Has fees chip
-        if (localFilters.hasFees) {
+        if (localFilters.hasFees !== undefined) {
             chips.push({
                 id: 'has-fees',
-                label: 'Has Fees',
+                label: localFilters.hasFees ? 'Has Fees' : 'No Fees',
                 filterKey: 'hasFees' as keyof TransactionFilterState,
-                value: 'true',
+                value: String(localFilters.hasFees),
                 category: 'Fee',
                 color: 'orange',
+            });
+        }
+
+        // Include fee chip
+        if (localFilters.includeFee !== undefined) {
+            chips.push({
+                id: 'include-fee',
+                label: localFilters.includeFee ? 'Fee in Cost Basis' : 'Fee Not in Cost Basis',
+                filterKey: 'includeFee' as keyof TransactionFilterState,
+                value: String(localFilters.includeFee),
+                category: 'Fee',
+                color: 'orange',
+            });
+        }
+
+        // Has bundle chip
+        if (localFilters.hasBundle !== undefined) {
+            chips.push({
+                id: 'has-bundle',
+                label: localFilters.hasBundle ? 'Has Bundle' : 'No Bundle',
+                filterKey: 'hasBundle' as keyof TransactionFilterState,
+                value: String(localFilters.hasBundle),
+                category: 'Bundle',
+                color: 'teal',
             });
         }
 
@@ -1279,6 +1341,14 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
             const newFilters = { ...localFilters, hasFees: undefined };
             setLocalFilters(newFilters);
             onChange(newFilters);
+        } else if (chip.filterKey === 'includeFee') {
+            const newFilters = { ...localFilters, includeFee: undefined };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
+        } else if (chip.filterKey === 'hasBundle') {
+            const newFilters = { ...localFilters, hasBundle: undefined };
+            setLocalFilters(newFilters);
+            onChange(newFilters);
         } else if (chip.filterKey === 'transactionIds') {
             const newFilters = { ...localFilters, transactionIds: undefined };
             setLocalFilters(newFilters);
@@ -1348,14 +1418,13 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                     align="center"
                     justify="space-between"
                     p={3}
-                    pb={hasActiveFilters ? 2 : 3}
                     cursor="pointer"
                     transition="background 0.15s"
                     _hover={{ bg: 'gray.100' }}
                     onClick={() => onExpandedChange?.(!expanded)}
                     borderRadius="md"
                 >
-                    <Flex align="center" gap={1.5}>
+                    <Flex align="center" gap={1.5} flex={1} minW={0} flexWrap="wrap">
                         <Box transition="transform 0.2s" transform={expanded ? 'rotate(0deg)' : 'rotate(-90deg)'}>
                             <LuChevronDown size={14} />
                         </Box>
@@ -1364,8 +1433,19 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                         {activeFilterCount > 0 && (
                             <Badge size="xs" colorPalette="blue">{activeFilterCount} active</Badge>
                         )}
+                        {/* Inline filter chips */}
+                        {hasActiveFilters && !expanded && visibleChips.map(chip => (
+                            <Box key={chip.id} onClick={(e) => e.stopPropagation()}>
+                                <FilterChip chip={chip} onRemove={handleRemoveChip} />
+                            </Box>
+                        ))}
+                        {hasActiveFilters && !expanded && hiddenChipCount > 0 && (
+                            <Badge size="sm" colorPalette="gray" variant="outline">
+                                +{hiddenChipCount}
+                            </Badge>
+                        )}
                     </Flex>
-                    <Flex gap={1.5} onClick={(e) => e.stopPropagation()}>
+                    <Flex gap={1.5} flexShrink={0} onClick={(e) => e.stopPropagation()}>
                         {canReset && (
                             <Button
                                 size="xs"
@@ -1391,12 +1471,12 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                     </Flex>
                 </Flex>
 
-                {/* Chip Summary Row */}
-                {hasActiveFilters && (
+                {/* Chip Summary Row — only when expanded */}
+                {hasActiveFilters && expanded && (
                     <Box
                         ref={chipContainerRef}
                         px={3}
-                        pb={expanded ? 2 : 3}
+                        pb={2}
                         pt={0}
                     >
                         <Flex flexWrap="wrap" gap={1.5} align="center">
@@ -1430,14 +1510,6 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                 ))}
                             </Box>
                         )}
-                    </Box>
-                )}
-
-                {!hasActiveFilters && !expanded && (
-                    <Box px={3} pb={3} pt={0}>
-                        <Text fontSize="xs" color="gray.500" fontStyle="italic">
-                            No filters applied
-                        </Text>
                     </Box>
                 )}
 
@@ -1682,12 +1754,12 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                 </Box>
                             )}
 
-                            {/* Has Fees filter card */}
+                            {/* Fees filter card (Has Fees + Include Fee) */}
                             {!hiddenSet.has('hasFees') && (
                                 <Box
                                     bg="white"
                                     border="1px solid"
-                                    borderColor={localFilters.hasFees ? 'orange.200' : 'gray.200'}
+                                    borderColor={localFilters.hasFees !== undefined || localFilters.includeFee !== undefined ? 'orange.200' : 'gray.200'}
                                     borderRadius="md"
                                     p={2}
                                     minH="70px"
@@ -1699,7 +1771,7 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                                 Fees
                                             </Text>
                                         </Flex>
-                                        {localFilters.hasFees && (
+                                        {(localFilters.hasFees !== undefined || localFilters.includeFee !== undefined) && (
                                             <Badge size="xs" colorPalette="orange">active</Badge>
                                         )}
                                     </Flex>
@@ -1713,12 +1785,44 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                             onClick={() => updateLocalFilter('hasFees', localFilters.hasFees ? undefined : true)}
                                             _hover={{ opacity: 0.8 }}
                                         >
-                                            💸 Has Fees
+                                            Has Fees{filterOptions?.has_fee_count != null ? ` (${filterOptions.has_fee_count})` : ''}
+                                        </Badge>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.hasFees === false ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.hasFees === false ? 'red' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            onClick={() => updateLocalFilter('hasFees', localFilters.hasFees === false ? undefined : false)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            No Fees{filterOptions?.total_count != null && filterOptions?.has_fee_count != null ? ` (${filterOptions.total_count - filterOptions.has_fee_count})` : ''}
+                                        </Badge>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.includeFee === true ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.includeFee === true ? 'green' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            title="Fee included in P&L cost basis calculation"
+                                            onClick={() => updateLocalFilter('includeFee', localFilters.includeFee === true ? undefined : true)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            Fee in Cost Basis{filterOptions?.include_fee_count != null ? ` (${filterOptions.include_fee_count})` : ''}
+                                        </Badge>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.includeFee === false ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.includeFee === false ? 'red' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            title="Fee excluded from P&L cost basis calculation"
+                                            onClick={() => updateLocalFilter('includeFee', localFilters.includeFee === false ? undefined : false)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            Fee Not in Cost Basis{filterOptions?.total_count != null && filterOptions?.include_fee_count != null ? ` (${filterOptions.total_count - filterOptions.include_fee_count})` : ''}
                                         </Badge>
                                     </Flex>
-                                    <Text fontSize="2xs" color="gray.400" mt={1.5}>
-                                        Only transactions with fee &gt; 0
-                                    </Text>
                                 </Box>
                             )}
 
@@ -1729,6 +1833,101 @@ export const TransactionFilters: React.FC<TransactionFiltersProps> = ({
                                     onToggle={(v) => updateLocalFilter('nonOwned', v)}
                                     nonOwnedCount={filterOptions.non_owned_count}
                                 />
+                            )}
+
+                            {/* Bundle filter card (Has Bundle toggle + Pattern chips) */}
+                            {!hiddenSet.has('hasBundle') && (
+                                <Box
+                                    bg="white"
+                                    border="1px solid"
+                                    borderColor={localFilters.hasBundle !== undefined || (localFilters.bundlePatterns?.length ?? 0) > 0 ? 'teal.200' : 'gray.200'}
+                                    borderRadius="md"
+                                    p={2}
+                                    minH="70px"
+                                >
+                                    <Flex align="center" justify="space-between" mb={1.5}>
+                                        <Flex align="center" gap={1}>
+                                            <Text fontSize="xs">📦</Text>
+                                            <Text fontSize="2xs" fontWeight="semibold" color="gray.600" textTransform="uppercase">
+                                                Bundle
+                                            </Text>
+                                        </Flex>
+                                        {(localFilters.hasBundle !== undefined || (localFilters.bundlePatterns?.length ?? 0) > 0) && (
+                                            <Badge size="xs" colorPalette="teal">active</Badge>
+                                        )}
+                                    </Flex>
+                                    <Flex flexWrap="wrap" gap={1.5}>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.hasBundle === true ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.hasBundle === true ? 'teal' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            onClick={() => updateLocalFilter('hasBundle', localFilters.hasBundle === true ? undefined : true)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            Has Bundle{filterOptions?.has_bundle_count != null ? ` (${filterOptions.has_bundle_count})` : ''}
+                                        </Badge>
+                                        <Badge
+                                            size="sm"
+                                            variant={localFilters.hasBundle === false ? 'solid' : 'outline'}
+                                            colorPalette={localFilters.hasBundle === false ? 'red' : 'gray'}
+                                            cursor="pointer"
+                                            userSelect="none"
+                                            onClick={() => updateLocalFilter('hasBundle', localFilters.hasBundle === false ? undefined : false)}
+                                            _hover={{ opacity: 0.8 }}
+                                        >
+                                            No Bundle{filterOptions?.total_count != null && filterOptions?.has_bundle_count != null ? ` (${filterOptions.total_count - filterOptions.has_bundle_count})` : ''}
+                                        </Badge>
+                                    </Flex>
+                                    {/* Bundle Pattern chips */}
+                                    {(filterOptions?.bundle_patterns?.length ?? 0) > 0 && (
+                                        <Flex flexWrap="wrap" gap={1} mt={2}>
+                                            {(filterOptions?.bundle_patterns || []).map((opt) => {
+                                                const isSelected = (localFilters.bundlePatterns || []).includes(opt.value);
+                                                return (
+                                                    <Box
+                                                        key={opt.value}
+                                                        as="button"
+                                                        px={1.5}
+                                                        py={0.5}
+                                                        borderRadius="sm"
+                                                        fontSize="2xs"
+                                                        fontWeight="medium"
+                                                        cursor="pointer"
+                                                        transition="all 0.15s"
+                                                        bg={isSelected ? 'teal.100' : 'gray.50'}
+                                                        color={isSelected ? 'teal.700' : 'gray.600'}
+                                                        border="1px solid"
+                                                        borderColor={isSelected ? 'teal.300' : 'gray.200'}
+                                                        _hover={{
+                                                            bg: isSelected ? 'teal.200' : 'gray.100',
+                                                            borderColor: isSelected ? 'teal.400' : 'gray.300',
+                                                        }}
+                                                        onClick={() => {
+                                                            const current = localFilters.bundlePatterns || [];
+                                                            const next = isSelected
+                                                                ? current.filter(v => v !== opt.value)
+                                                                : [...current, opt.value];
+                                                            updateLocalFilter('bundlePatterns', next);
+                                                        }}
+                                                        display="inline-flex"
+                                                        alignItems="center"
+                                                        gap={0.5}
+                                                    >
+                                                        {isSelected && <LuCheck size={8} />}
+                                                        {opt.label}
+                                                        {opt.count !== undefined && (
+                                                            <Text as="span" fontSize="2xs" color={isSelected ? 'teal.500' : 'gray.400'}>
+                                                                ({opt.count})
+                                                            </Text>
+                                                        )}
+                                                    </Box>
+                                                );
+                                            })}
+                                        </Flex>
+                                    )}
+                                </Box>
                             )}
 
                             {/* Extra filter cards from parent */}

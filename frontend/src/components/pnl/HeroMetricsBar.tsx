@@ -70,7 +70,7 @@ export const HeroMetricsBar: React.FC<HeroMetricsBarProps> = ({
 
         {/* RIGHT: Metrics row + PnL bar underneath */}
         <Box flex="1" minW={0}>
-            <Flex gap={1} align="stretch" flexWrap="wrap" mb={1}>
+            <Flex gap={1} align="stretch" mb={1}>
                 {children}
             </Flex>
             <PnLBreakdownBar

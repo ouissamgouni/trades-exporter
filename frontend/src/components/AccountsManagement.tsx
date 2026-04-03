@@ -366,6 +366,16 @@ const AccountsManagement: React.FC = () => {
                                                 <Text fontSize="2xs" color={`${meta?.color || 'gray'}.400`} fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
                                                     {meta?.label || account.account_type}
                                                 </Text>
+                                                {account.envelope && (
+                                                    <Badge
+                                                        size="xs"
+                                                        variant="subtle"
+                                                        fontSize="2xs"
+                                                        colorPalette={account.envelope === 'pea' ? 'green' : account.envelope === 'av' ? 'blue' : 'gray'}
+                                                    >
+                                                        {account.envelope.toUpperCase()}
+                                                    </Badge>
+                                                )}
                                                 {account.group && (
                                                     <>
                                                         <Text fontSize="2xs" color="gray.300">/</Text>

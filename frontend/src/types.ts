@@ -80,6 +80,7 @@ export interface Account {
     id: number;
     name: string;
     account_type: `${AccountType}`;
+    envelope?: string | null;
     address_or_identifier?: string;
     group?: string;
     tags: Record<string, any>[];
@@ -187,6 +188,8 @@ export interface Transaction {
     sync_connector_run_id?: number | null;
     connector_name?: string | null;
     run_datetime?: string | null;
+    // FR tax override indicator
+    has_fr_tax_override?: boolean;
 }
 
 // V2 Architecture: Calculation Unit patterns (unified concept for grouping transactions)
@@ -401,6 +404,7 @@ export interface PriceHealthRow {
     status: 'healthy' | 'warning' | 'stale' | 'no_transactions';
     has_transactions: boolean;
     sparkline: number[];
+    quote_currencies: Array<{ asset_id: number; symbol: string }>;
 }
 
 export interface PriceHealthResponse {

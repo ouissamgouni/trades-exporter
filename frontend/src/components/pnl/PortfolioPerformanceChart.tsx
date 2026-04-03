@@ -10,7 +10,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Badge, Box, Flex, Text } from '@chakra-ui/react';
-import { ResponsiveLine } from '@nivo/line';
+import { ResponsiveLine, type CustomLayerProps } from '@nivo/line';
 import {
     useMultiBenchmarkSeries,
     type TimelinePoint,
@@ -27,8 +27,38 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-const PORTFOLIO_COLOR = '#3182CE'; // blue
-const BENCHMARK_COLOR = '#D69E2E'; // yellow/gold
+const PORTFOLIO_COLOR = '#3182CE';
+const BENCHMARK_COLOR = '#d4b872'; // muted gold
+
+// ---------------------------------------------------------------------------
+// Custom line layer: strong portfolio line, thin dashed benchmark
+// ---------------------------------------------------------------------------
+
+const CustomLineLayer = ({ series, lineGenerator, xScale, yScale }: CustomLayerProps) => {
+    return (
+        <>
+            {series.map((s) => {
+                const isBenchmark = s.id === 'S&P 500';
+                const lineData = s.data.filter(d => d.data.x != null && d.data.y != null);
+                if (!lineData.length) return null;
+                lineGenerator.x((d: any) => (xScale as any)(d.data.x));
+                lineGenerator.y((d: any) => (yScale as any)(d.data.y));
+                const path = lineGenerator(lineData as any) || '';
+                return (
+                    <path
+                        key={s.id}
+                        d={path}
+                        fill="none"
+                        stroke={s.color}
+                        strokeWidth={isBenchmark ? 1.5 : 2.5}
+                        strokeDasharray={isBenchmark ? '6,3' : undefined}
+                        strokeOpacity={isBenchmark ? 0.7 : 1}
+                    />
+                );
+            })}
+        </>
+    );
+};
 
 // ---------------------------------------------------------------------------
 // Props
@@ -189,7 +219,8 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
                         enablePoints={false}
                         useMesh={true}
                         colors={(d) => colorMap[d.id] ?? '#999'}
-                        lineWidth={2}
+                        lineWidth={2.5}
+                        layers={['grid', 'markers', 'axes', 'areas', CustomLineLayer, 'crosshair', 'slices', 'mesh', 'legends']}
                         curve="monotoneX"
                         enableSlices="x"
                         sliceTooltip={({ slice }) => (

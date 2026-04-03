@@ -1,0 +1,47 @@
+# French Tax Scenario — Accounts
+# ================================
+# CTO accounts for taxable trading, PEA/AV for tax-advantaged envelopes,
+# plus a second CEX for testing internal transfers.
+
+accounts:
+  # Main crypto exchange (CTO taxable context)
+  - name: "Binance"
+    account_type: "cex"
+    owned: true
+    group: "Crypto"
+    color: "#F0B90B"
+    address_or_identifier: "binance_fr"
+
+  # Broker for stocks (CTO — taxable)
+  - name: "Degiro"
+    account_type: "broker"
+    owned: true
+    group: "Investing"
+    color: "#0066CC"
+    address_or_identifier: "degiro_cto"
+
+  # PEA account at Degiro (tax-exempt for securities)
+  - name: "Degiro PEA"
+    account_type: "broker"
+    owned: true
+    group: "Investing"
+    color: "#4CAF50"
+    address_or_identifier: "degiro_pea"
+    envelope: "pea"
+
+  # Assurance Vie account (tax-advantaged)
+  - name: "Boursorama AV"
+    account_type: "investment"
+    owned: true
+    group: "Investing"
+    color: "#9C27B0"
+    address_or_identifier: "boursorama_av"
+    envelope: "av"
+
+  # Second CEX for internal transfer testing
+  - name: "MEXC"
+    account_type: "cex"
+    owned: true
+    group: "Crypto"
+    color: "#2CA58D"
+    address_or_identifier: "mexc_fr"

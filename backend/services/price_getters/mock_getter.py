@@ -1,18 +1,22 @@
 """Mock Price Getter for Testing.
 
-Returns random prices within configurable ranges per asset type.
+Returns deterministic prices from config when available, otherwise random
+prices within configurable ranges per asset type.
 Enabled/disabled via the mock_mode_enabled DB setting (UI toggle).
 
 Features:
-- Per-asset-type price ranges (crypto, stock, fiat)
+- Deterministic prices via params: {"prices": {"2025-01-15T10:00:00": 40000, "current": 55000}}
+- Per-asset-type random ranges (crypto, stock, fiat) as fallback
 - Per-asset range overrides via params: {"min_price": X, "max_price": Y}
+- Optional quote_currency override via params: {"quote_currency": "EUR"}
 
 Usage:
     # Enable per-asset via the UI mock pricing toggle in Assets Editor
+    # Configure deterministic prices via prices.yaml in scenario seed data
 """
 
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 
 from backend.config.loader import configure_logging
@@ -39,6 +43,9 @@ PRICE_RANGES: Dict[str, Tuple[float, float]] = {
 
 # Default range for unknown asset types
 DEFAULT_RANGE: Tuple[float, float] = (1.0, 1000.0)
+
+# Tolerance for matching historical datetime keys (±15 min, same as PriceCache)
+PRICE_MATCH_TOLERANCE = timedelta(minutes=15)
 
 
 class MockPriceGetter(BasePriceGetter):
@@ -85,31 +92,87 @@ class MockPriceGetter(BasePriceGetter):
         min_price, max_price = self._get_price_range(asset, config)
         return random.uniform(min_price, max_price)
 
+    def _get_configured_prices(
+        self, config: Optional[PriceGetterConfig]
+    ) -> Optional[Dict[str, float]]:
+        """Return the prices dict from config.extra, or None."""
+        if config and config.extra:
+            prices = config.extra.get("prices")
+            if isinstance(prices, dict) and prices:
+                return prices
+        return None
+
+    def _get_quote_currency(self, config: Optional[PriceGetterConfig]) -> str:
+        """Return quote_currency from config.extra, defaulting to USD."""
+        if config and config.extra:
+            return config.extra.get("quote_currency", "USD")
+        return "USD"
+
+    def _lookup_historical_price(
+        self, prices: Dict[str, float], dt: datetime
+    ) -> Optional[float]:
+        """
+        Find the closest price entry within ±15 min of `dt`.
+
+        Falls back to the "current" key if no datetime key matches.
+        Returns None if nothing matches.
+        """
+        best_price: Optional[float] = None
+        best_delta: Optional[timedelta] = None
+
+        for key, value in prices.items():
+            if key == "current":
+                continue
+            try:
+                key_dt = datetime.fromisoformat(key)
+                delta = abs(dt - key_dt)
+                if delta <= PRICE_MATCH_TOLERANCE:
+                    if best_delta is None or delta < best_delta:
+                        best_price = float(value)
+                        best_delta = delta
+            except (ValueError, TypeError):
+                continue
+
+        if best_price is not None:
+            return best_price
+
+        # Fall back to "current"
+        if "current" in prices:
+            return float(prices["current"])
+
+        return None
+
     def get_current_price(
         self,
         asset: Asset,
         config: Optional[PriceGetterConfig] = None,
     ) -> PriceResult:
         """
-        Return a random current price for the asset.
-        
-        Args:
-            asset: Asset to get price for
-            config: Optional configuration with min_price/max_price overrides
-            
-        Returns:
-            PriceResult with random price
+        Return a current price for the asset.
+
+        Uses the "current" key from configured prices if available,
+        otherwise falls back to a random price.
         """
-        price = self._generate_price(asset, config)
-        
-        log.debug(
-            f"[MockPriceGetter] Generated price for {asset.symbol}: "
-            f"{price:.2f} USD (type={asset.price_type})"
-        )
-        
+        prices = self._get_configured_prices(config)
+        quote_currency = self._get_quote_currency(config)
+
+        if prices and "current" in prices:
+            price = float(prices["current"])
+            log.debug(
+                f"[MockPriceGetter] Configured price for {asset.symbol}: "
+                f"{price:.2f} {quote_currency}"
+            )
+        else:
+            price = self._generate_price(asset, config)
+            quote_currency = "USD"
+            log.debug(
+                f"[MockPriceGetter] Random price for {asset.symbol}: "
+                f"{price:.2f} {quote_currency} (type={asset.price_type})"
+            )
+
         return PriceResult(
             price=price,
-            quote_currency="USD",
+            quote_currency=quote_currency,
             source="mock",
             timestamp=datetime.now(),
             ticker_used=asset.symbol,
@@ -122,23 +185,36 @@ class MockPriceGetter(BasePriceGetter):
         config: Optional[PriceGetterConfig] = None,
     ) -> PriceResult:
         """
-        Return a random historical price for the asset.
-        
-        Args:
-            asset: Asset to get price for
-            dt: Historical datetime
-            config: Optional configuration with min_price/max_price overrides
-            
-        Returns:
-            PriceResult with random price
+        Return a historical price for the asset.
+
+        Looks up the closest datetime key within ±15 min, then falls back
+        to "current", then falls back to random.
         """
+        prices = self._get_configured_prices(config)
+        quote_currency = self._get_quote_currency(config)
+
+        if prices:
+            looked_up = self._lookup_historical_price(prices, dt)
+            if looked_up is not None:
+                log.debug(
+                    f"[MockPriceGetter] Configured historical price for "
+                    f"{asset.symbol} at {dt}: {looked_up:.2f} {quote_currency}"
+                )
+                return PriceResult(
+                    price=looked_up,
+                    quote_currency=quote_currency,
+                    source="mock",
+                    timestamp=dt,
+                    ticker_used=asset.symbol,
+                )
+
+        # Fallback to random
         price = self._generate_price(asset, config)
-        
         log.debug(
-            f"[MockPriceGetter] Generated historical price for {asset.symbol} "
+            f"[MockPriceGetter] Random historical price for {asset.symbol} "
             f"at {dt}: {price:.2f} USD (type={asset.price_type})"
         )
-        
+
         return PriceResult(
             price=price,
             quote_currency="USD",

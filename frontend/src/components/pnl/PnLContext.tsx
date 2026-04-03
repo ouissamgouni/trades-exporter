@@ -92,6 +92,7 @@ export interface PnLContextValue {
     // Live balance data (from useBalance hook)
     liveBalanceMap: Map<string, number>;                     // symbol → total live qty
     liveAccountBalanceMap: Map<string, Map<number, number>>; // symbol → accountId → live qty
+    liveAccountBalances: AccountBalance[];
     liveFetchedAccountIds: Set<number>;
     liveAccountErrors: Map<number, string[]>;
     liveBalanceLoading: boolean;
@@ -414,11 +415,27 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         const unmapped: UnmappedLiveAsset[] = [];
         for (const [sym, qty] of liveBalanceMap) {
             if (!pnlSymbols.has(sym)) {
-                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null });
+                // Build per-account breakdown from raw account balances
+                const accounts: { accountName: string; connectorType: string; chain: string | null; qty: number }[] = [];
+                for (const ab of liveAccountBalancesRaw) {
+                    for (const cb of ab.connector_balances) {
+                        for (const entry of cb.entries) {
+                            if (entry.asset_symbol.toUpperCase() === sym) {
+                                accounts.push({
+                                    accountName: ab.account_name,
+                                    connectorType: cb.connector_type,
+                                    chain: entry.chain ?? cb.chain,
+                                    qty: parseFloat(entry.total) || 0,
+                                });
+                            }
+                        }
+                    }
+                }
+                unmapped.push({ symbol: sym, totalQty: qty, marketValue: null, accounts });
             }
         }
         return unmapped.sort((a, b) => b.totalQty - a.totalQty);
-    }, [liveBalanceMap, assets]);
+    }, [liveBalanceMap, assets, liveAccountBalancesRaw]);
 
     // ── Derived: available account/category IDs ──
     const availableAccountIds = useMemo(() => {
@@ -455,6 +472,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         queryClient,
         liveBalanceMap,
         liveAccountBalanceMap,
+        liveAccountBalances: liveAccountBalancesRaw,
         liveFetchedAccountIds,
         liveAccountErrors,
         liveBalanceLoading,
@@ -488,6 +506,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         queryClient,
         liveBalanceMap,
         liveAccountBalanceMap,
+        liveAccountBalancesRaw,
         liveFetchedAccountIds,
         liveAccountErrors,
         liveBalanceLoading,
