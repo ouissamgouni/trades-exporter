@@ -6609,8 +6609,9 @@ def export_fr_crypto_tax_csv(
     summaries = session.exec(summary_q).all()
 
     csv_content = export_cerfa_2086_csv(entries, summaries)
-    year_suffix = f"_{fiscal_year}" if fiscal_year else ""
-    filename = f"cerfa_2086_version_{version_id}{year_suffix}.csv"
+    year_label = str(fiscal_year) if fiscal_year else "all"
+    ts = version.created_at.strftime("%Y%m%d_%H%M") if version.created_at else "unknown"
+    filename = f"cerfa_2086_v{version_id}_{year_label}_{ts}.csv"
 
     return Response(
         content=csv_content.encode("utf-8-sig"),
@@ -6756,8 +6757,9 @@ def export_fr_securities_tax_csv(
     entries = session.exec(entry_q.order_by(FrenchSecuritiesTaxEntry.trade_date)).all()
 
     csv_content = export_form_2074_csv(entries)
-    year_suffix = f"_{fiscal_year}" if fiscal_year else ""
-    filename = f"form_2074_version_{version_id}{year_suffix}.csv"
+    year_label = str(fiscal_year) if fiscal_year else "all"
+    ts = version.created_at.strftime("%Y%m%d_%H%M") if version.created_at else "unknown"
+    filename = f"form_2074_v{version_id}_{year_label}_{ts}.csv"
 
     return Response(
         content=csv_content.encode("utf-8-sig"),

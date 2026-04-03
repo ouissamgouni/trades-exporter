@@ -26,7 +26,7 @@ import {
     Text,
 } from '@chakra-ui/react';
 import { FiDownload, FiChevronsLeft, FiChevronLeft, FiChevronRight, FiChevronsRight } from 'react-icons/fi';
-import { LuRefreshCw, LuCircleAlert, LuCircleCheck, LuFilter, LuChevronDown, LuRotateCcw } from 'react-icons/lu';
+import { LuRefreshCw, LuCircleAlert, LuCircleCheck, LuFilter, LuChevronDown, LuRotateCcw, LuEye, LuArrowLeft } from 'react-icons/lu';
 import { API_URL } from '../../types';
 import { useLazyPaginatedQuery } from '../../hooks/useLazyPaginatedQuery';
 import { ValueDisplay } from '../ValueDisplay';
@@ -120,6 +120,7 @@ const GainBadge: React.FC<{ value: number; currency: string }> = ({ value, curre
 );
 
 type TaxCategory = 'crypto' | 'securities';
+type TaxView = { type: 'year'; year: number } | { type: 'all' };
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -298,23 +299,37 @@ const TaxContent: React.FC<{
     onTransactionClick, onUnitClick, onAssetClick,
 }) => {
         const [activeCategory, setActiveCategory] = useState<TaxCategory>(hasCrypto ? 'crypto' : 'securities');
-        const [selectedYear, setSelectedYear] = useState<number | null>(null);
+        const [view, setView] = useState<TaxView>({ type: 'year', year: 0 }); // will be set in effect
+
+        // Derive all available years from both reports
+        const allYears = useMemo(() => {
+            const yearSet = new Set<number>();
+            cryptoReport?.annual_summaries?.forEach(s => yearSet.add(s.fiscal_year));
+            securitiesReport?.annual_summaries?.forEach(s => yearSet.add(s.fiscal_year));
+            return [...yearSet].sort((a, b) => b - a); // descending
+        }, [cryptoReport, securitiesReport]);
+
+        const last3Years = useMemo(() => allYears.slice(0, 3), [allYears]);
+
+        // Auto-select most recent year on mount / when data changes
+        const allYearsKey = allYears.join(',');
+        useEffect(() => {
+            if (allYears.length > 0 && view.type === 'year' && view.year === 0) {
+                setView({ type: 'year', year: allYears[0] });
+            }
+        }, [allYearsKey]);
+
+        // selectedYear for filtering (null = all years)
+        const selectedYear = view.type === 'year' ? view.year : null;
+        const isOlderYear = view.type === 'year' && view.year !== 0 && !last3Years.includes(view.year);
+
+        // Palette: always gray for year-level wrapper (professional neutral)
+        const wrapperPalette = 'gray';
 
         const activeReport = activeCategory === 'crypto' ? cryptoReport : securitiesReport;
         const summaries = activeReport?.annual_summaries ?? [];
         const exportPath = activeCategory === 'crypto' ? 'fr-crypto-tax' : 'fr-securities-tax';
         const exportLabel = activeCategory === 'crypto' ? 'Cerfa 2086' : 'Form 2074';
-
-        // Auto-select most recent year when switching category or on mount
-        const summariesKey = summaries.map(s => s.fiscal_year).sort().join(',');
-        useEffect(() => {
-            if (summaries.length > 0) {
-                const years = summaries.map(s => s.fiscal_year);
-                setSelectedYear(Math.max(...years));
-            } else {
-                setSelectedYear(null);
-            }
-        }, [activeCategory, summariesKey]);
 
         // Handler for when an override changes in any DisposalTable
         const handleOverrideChange = useCallback(() => {
@@ -324,175 +339,260 @@ const TaxContent: React.FC<{
                 .catch(() => { });
         }, [versionId, onRefreshTaxData]);
 
-        // Compute totals per category for cards
-        const cryptoTotals = useMemo(() => computeCardTotals(cryptoReport), [cryptoReport]);
-        const securitiesTotals = useMemo(() => computeCardTotals(securitiesReport), [securitiesReport]);
+        // Compute totals for category cards based on view
+        const cryptoTotals = useMemo(() =>
+            view.type === 'year' && view.year !== 0
+                ? computeCardTotalsForYear(cryptoReport, view.year)
+                : computeCardTotals(cryptoReport),
+            [cryptoReport, view],
+        );
+        const securitiesTotals = useMemo(() =>
+            view.type === 'year' && view.year !== 0
+                ? computeCardTotalsForYear(securitiesReport, view.year)
+                : computeCardTotals(securitiesReport),
+            [securitiesReport, view],
+        );
+
+        // Compute combined totals per year for year metric cards
+        const yearCardTotals = useMemo(() => {
+            const map = new Map<number, CardTotals>();
+            for (const year of last3Years) {
+                map.set(year, computeCombinedTotalsForYear(cryptoReport, securitiesReport, year));
+            }
+            return map;
+        }, [cryptoReport, securitiesReport, last3Years]);
+
+        // All-years combined totals for "ALL" card
+        const allTotals = useMemo<CardTotals>(() => {
+            const c = computeCardTotals(cryptoReport);
+            const s = computeCardTotals(securitiesReport);
+            return {
+                totalTax: c.totalTax + s.totalTax,
+                taxableDisposals: c.taxableDisposals + s.taxableDisposals,
+                totalGains: c.totalGains + s.totalGains,
+                totalLosses: c.totalLosses + s.totalLosses,
+            };
+        }, [cryptoReport, securitiesReport]);
+
+        // Combined annual summaries for ALL view (merge crypto + securities per year)
+        const combinedSummaries = useMemo<FrenchTaxAnnualSummary[]>(() => {
+            const byYear = new Map<number, FrenchTaxAnnualSummary>();
+            const merge = (summaries: FrenchTaxAnnualSummary[] | undefined) => {
+                summaries?.forEach(s => {
+                    const existing = byYear.get(s.fiscal_year);
+                    if (existing) {
+                        existing.total_gains += s.total_gains;
+                        existing.total_losses += s.total_losses;
+                        existing.net_taxable += s.net_taxable;
+                        existing.tax_before_carryforward += s.tax_before_carryforward;
+                        existing.loss_carryforward_used += s.loss_carryforward_used;
+                        existing.loss_carried_forward += s.loss_carried_forward;
+                        existing.tax_total += s.tax_total;
+                        existing.transaction_count += s.transaction_count;
+                    } else {
+                        byYear.set(s.fiscal_year, { ...s });
+                    }
+                });
+            };
+            merge(cryptoReport?.annual_summaries);
+            merge(securitiesReport?.annual_summaries);
+            return [...byYear.values()];
+        }, [cryptoReport, securitiesReport]);
 
         const handleExport = () => {
             const yearParam = selectedYear ? `?fiscal_year=${selectedYear}` : '';
             window.open(`${API_URL}/pnl/versions/${versionId}/${exportPath}/export${yearParam}`, '_blank');
         };
 
+        const handleExportAll = (path: string) => {
+            window.open(`${API_URL}/pnl/versions/${versionId}/${path}/export`, '_blank');
+        };
+
         return (
             <Box>
-                {/* Recompute row */}
-                <Flex justify="flex-end" mb={3} px={1}>
-                    <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={onRecompute}
-                        loading={isComputing}
-                        colorPalette="gray"
-                    >
-                        <LuRefreshCw size={12} />
-                        <Text ml={1}>Recompute</Text>
-                    </Button>
-                </Flex>
-
-                {/* Global total summary */}
+                {/* ═══ Year Tab Bar — single wrapper (Approach B) ═══ */}
                 <Box
-                    p={3}
-                    mb={3}
-                    bg="gray.50"
                     border="1px solid"
-                    borderColor="gray.200"
-                    borderRadius="md"
+                    borderColor={`${wrapperPalette}.200`}
+                    borderRadius="lg"
+                    overflow="hidden"
+                    transition="border-color 0.15s"
+                    mb={0}
                 >
-                    <Flex justify="space-between" align="center">
-                        <Text fontWeight="700" fontSize="sm" color="gray.700">Tax Total</Text>
-                        <Text fontWeight="bold" fontSize="lg" color={(cryptoTotals.totalTax + securitiesTotals.totalTax) > 0 ? 'red.600' : 'gray.500'}>
-                            {formatCurrency(cryptoTotals.totalTax + securitiesTotals.totalTax, baseCurrency)}
-                        </Text>
-                    </Flex>
-                    <Flex gap={6} mt={1}>
-                        <Box>
-                            <Text fontSize="2xs" color="gray.400">Total Disposals</Text>
-                            <Text fontWeight="600" fontSize="sm">{cryptoTotals.taxableDisposals + securitiesTotals.taxableDisposals}</Text>
-                        </Box>
-                        <Box>
-                            <Text fontSize="2xs" color="gray.400">Gains</Text>
-                            <Text fontWeight="600" fontSize="sm" color="green.600">
-                                +{formatCurrency(cryptoTotals.totalGains + securitiesTotals.totalGains, baseCurrency)}
-                            </Text>
-                        </Box>
-                        <Box>
-                            <Text fontSize="2xs" color="gray.400">Losses</Text>
-                            <Text fontWeight="600" fontSize="sm" color="red.600">
-                                {(cryptoTotals.totalLosses + securitiesTotals.totalLosses) > 0
-                                    ? `-${formatCurrency(cryptoTotals.totalLosses + securitiesTotals.totalLosses, baseCurrency)}`
-                                    : formatCurrency(0, baseCurrency)}
-                            </Text>
-                        </Box>
-                    </Flex>
-                </Box>
-
-                {/* Tab-style category cards + content */}
-                {(() => {
-                    const palette = activeCategory === 'crypto' ? 'blue' : 'purple';
-                    const contentBg = activeCategory === 'crypto' ? 'blue.50/40' : 'purple.50/40';
-                    return (
-                        <Box>
-                            {/* Tab headers */}
-                            <Flex gap={0} mb={0}>
-                                {hasCrypto && (
-                                    <SummaryCard
-                                        label="Crypto"
-                                        subtitle="Art. 150 VH bis"
-                                        palette="blue"
-                                        totals={cryptoTotals}
-                                        baseCurrency={baseCurrency}
-                                        active={activeCategory === 'crypto'}
-                                        onClick={() => setActiveCategory('crypto')}
-                                    />
-                                )}
-                                {hasSecurities && (
-                                    <SummaryCard
-                                        label="Securities"
-                                        subtitle="Art. 150-0 A"
-                                        palette="purple"
-                                        totals={securitiesTotals}
-                                        baseCurrency={baseCurrency}
-                                        active={activeCategory === 'securities'}
-                                        onClick={() => setActiveCategory('securities')}
-                                    />
-                                )}
-                            </Flex>
-
-                            {/* Content area — border merges with active tab */}
-                            <Box
-                                bg={contentBg}
-                                border="1px solid"
-                                borderColor={`${palette}.200`}
-                                borderTop="none"
-                                borderRadius="0 0 lg lg"
-                                p={4}
-                                transition="all 0.15s"
-                            >
-
-                                {/* Year selector + export */}
-                                {summaries.length > 0 && (
-                                    <Flex justify="space-between" align="center" mb={3}>
-                                        <Flex gap={2} align="center" wrap="wrap">
-                                            <Text fontSize="xs" color="gray.500" mr={1}>Fiscal Year:</Text>
-                                            <Button
-                                                size="xs"
-                                                variant={selectedYear === null ? 'solid' : 'outline'}
-                                                colorPalette="gray"
-                                                onClick={() => setSelectedYear(null)}
-                                            >
-                                                All Years
-                                            </Button>
-                                            {[...summaries].sort((a, b) => b.fiscal_year - a.fiscal_year).map(s => {
-                                                const isSelected = selectedYear === s.fiscal_year;
-                                                const palette = s.tax_total > 0 ? 'red' : 'green';
-                                                return (
-                                                    <Button
-                                                        key={s.fiscal_year}
-                                                        size="xs"
-                                                        variant={isSelected ? 'subtle' : 'outline'}
-                                                        colorPalette={isSelected ? palette : 'gray'}
-                                                        onClick={() => setSelectedYear(s.fiscal_year)}
-                                                    >
-                                                        {s.fiscal_year}
-                                                        <Badge ml={1} size="xs" variant="plain"
-                                                            color={isSelected ? `${palette}.700` : undefined}
-                                                        >{formatCurrency(s.tax_total, baseCurrency)}</Badge>
-                                                    </Button>
-                                                );
-                                            })}
-                                        </Flex>
-                                        <Button size="sm" variant="outline" colorPalette={activeCategory === 'crypto' ? 'blue' : 'purple'} onClick={handleExport}>
-                                            <FiDownload />
-                                            <Text ml={1}>Export {exportLabel}</Text>
-                                        </Button>
-                                    </Flex>
-                                )}
-
-                                {/* Annual summary table */}
-                                {summaries.length > 0 && (
-                                    <AnnualSummaryTable
-                                        summaries={summaries}
-                                        selectedYear={selectedYear}
-                                        onSelectYear={setSelectedYear}
-                                        baseCurrency={baseCurrency}
-                                    />
-                                )}
-
-                                {/* Disposal line items (server-paginated from /realized-pnl) */}
-                                <DisposalTable
-                                    versionId={versionId}
+                    {/* Card row */}
+                    <Flex>
+                        {last3Years.map((year, idx) => {
+                            const isActive = view.type === 'year' && view.year === year;
+                            const totals = yearCardTotals.get(year) ?? { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 };
+                            return (
+                                <YearMetricCard
+                                    key={year}
+                                    label={String(year)}
+                                    totals={totals}
+                                    active={isActive}
                                     baseCurrency={baseCurrency}
-                                    selectedYear={selectedYear}
-                                    frTaxCategory={activeCategory}
-                                    onTransactionClick={onTransactionClick}
-                                    onUnitClick={onUnitClick}
-                                    onAssetClick={onAssetClick}
-                                    onOverrideChange={handleOverrideChange}
+                                    onClick={() => setView({ type: 'year', year })}
+                                    activePalette={wrapperPalette}
+                                    onRecompute={onRecompute}
+                                    isComputing={isComputing}
                                 />
-                            </Box>
-                        </Box>
-                    );
-                })()}
+                            );
+                        })}
+                        <YearMetricCard
+                            label="ALL"
+                            totals={allTotals}
+                            active={view.type === 'all'}
+                            baseCurrency={baseCurrency}
+                            onClick={() => setView({ type: 'all' })}
+                            isLast
+                            activePalette="blue"
+                        />
+                    </Flex>
+
+                    {/* Older year breadcrumb */}
+                    {isOlderYear && (
+                        <Flex
+                            align="center"
+                            gap={1}
+                            px={3}
+                            py={1.5}
+                            bg={`${wrapperPalette}.50/40`}
+                            borderBottom="1px solid"
+                            borderBottomColor={`${wrapperPalette}.100`}
+                            cursor="pointer"
+                            onClick={() => setView({ type: 'all' })}
+                            _hover={{ bg: `${wrapperPalette}.50` }}
+                            transition="all 0.15s"
+                        >
+                            <LuArrowLeft size={12} />
+                            <Text fontSize="xs" fontWeight="600" color={`${wrapperPalette}.700`}>
+                                Viewing {view.type === 'year' ? view.year : ''}
+                            </Text>
+                        </Flex>
+                    )}
+
+                    {/* Content area */}
+                    <Box bg={`${wrapperPalette}.100`} p={4} transition="background 0.15s">
+
+                        {view.type === 'all' ? (
+                            /* ── ALL view: combined annual summary, no category sub-cards ── */
+                            <>
+                                <Flex justify="space-between" align="center" mb={3}>
+                                    <Button
+                                        size="xs"
+                                        variant="outline"
+                                        colorPalette="blue"
+                                        onClick={onRecompute}
+                                        loading={isComputing}
+                                    >
+                                        <LuRefreshCw size={12} />
+                                        <Text ml={1}>Recalc All</Text>
+                                    </Button>
+                                    <Flex gap={2}>
+                                        {hasCrypto && (
+                                            <Button size="xs" variant="outline" colorPalette="blue" onClick={() => handleExportAll('fr-crypto-tax')}>
+                                                <FiDownload size={12} />
+                                                <Text ml={1}>Export All Cerfa 2086</Text>
+                                            </Button>
+                                        )}
+                                        {hasSecurities && (
+                                            <Button size="xs" variant="outline" colorPalette="purple" onClick={() => handleExportAll('fr-securities-tax')}>
+                                                <FiDownload size={12} />
+                                                <Text ml={1}>Export All Form 2074</Text>
+                                            </Button>
+                                        )}
+                                    </Flex>
+                                </Flex>
+
+                                {combinedSummaries.length > 0 && (
+                                    <AnnualSummaryTable
+                                        summaries={combinedSummaries}
+                                        selectedYear={null}
+                                        onSelectYear={() => { }}
+                                        baseCurrency={baseCurrency}
+                                        onViewYear={(year) => setView({ type: 'year', year })}
+                                    />
+                                )}
+                            </>
+                        ) : (
+                            /* ── Year view: Crypto / Securities sub-cards ── */
+                            <>
+                                {/* Category sub-cards — Approach A */}
+                                <Flex gap={0} mb={0}>
+                                    {hasCrypto && (
+                                        <SummaryCard
+                                            label="Crypto"
+                                            subtitle="Art. 150 VH bis"
+                                            palette="blue"
+                                            totals={cryptoTotals}
+                                            baseCurrency={baseCurrency}
+                                            active={activeCategory === 'crypto'}
+                                            onClick={() => setActiveCategory('crypto')}
+                                        />
+                                    )}
+                                    {hasSecurities && (
+                                        <SummaryCard
+                                            label="Securities"
+                                            subtitle="Art. 150-0 A"
+                                            palette="purple"
+                                            totals={securitiesTotals}
+                                            baseCurrency={baseCurrency}
+                                            active={activeCategory === 'securities'}
+                                            onClick={() => setActiveCategory('securities')}
+                                        />
+                                    )}
+                                </Flex>
+
+                                {/* Category content area — border merges with active sub-card tab */}
+                                {(() => {
+                                    const palette = activeCategory === 'crypto' ? 'blue' : 'purple';
+                                    const contentBg = activeCategory === 'crypto' ? 'blue.50/60' : 'purple.50/60';
+                                    return (
+                                        <Box
+                                            bg={contentBg}
+                                            border="1px solid"
+                                            borderColor={`${palette}.200`}
+                                            borderTop="none"
+                                            borderRadius="0 0 lg lg"
+                                            p={4}
+                                            transition="all 0.15s"
+                                        >
+                                            {/* Export button */}
+                                            <Flex justify="flex-end" mb={3}>
+                                                <Button size="xs" variant="outline" colorPalette={palette} onClick={handleExport}>
+                                                    <FiDownload size={12} />
+                                                    <Text ml={1}>Export {exportLabel}</Text>
+                                                </Button>
+                                            </Flex>
+
+                                            {/* Annual summary table */}
+                                            {summaries.length > 0 && (
+                                                <AnnualSummaryTable
+                                                    summaries={summaries.filter(s => s.fiscal_year === selectedYear)}
+                                                    selectedYear={selectedYear}
+                                                    onSelectYear={() => { }}
+                                                    baseCurrency={baseCurrency}
+                                                />
+                                            )}
+
+                                            {/* Disposal line items (server-paginated from /realized-pnl) */}
+                                            <DisposalTable
+                                                versionId={versionId}
+                                                baseCurrency={baseCurrency}
+                                                selectedYear={selectedYear}
+                                                frTaxCategory={activeCategory}
+                                                onTransactionClick={onTransactionClick}
+                                                onUnitClick={onUnitClick}
+                                                onAssetClick={onAssetClick}
+                                                onOverrideChange={handleOverrideChange}
+                                            />
+                                        </Box>
+                                    );
+                                })()}
+                            </>
+                        )}
+                    </Box>
+                </Box>
             </Box>
         );
     };
@@ -521,6 +621,38 @@ function computeCardTotals(report: FrenchTaxReport | FrenchSecuritiesTaxReport |
     );
 }
 
+function computeCardTotalsForYear(report: FrenchTaxReport | FrenchSecuritiesTaxReport | null, year: number): CardTotals {
+    if (!report || !report.annual_summaries) {
+        return { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 };
+    }
+    const filtered = report.annual_summaries.filter(s => s.fiscal_year === year);
+    return filtered.reduce(
+        (acc, s) => ({
+            totalTax: acc.totalTax + s.tax_total,
+            taxableDisposals: acc.taxableDisposals + s.transaction_count,
+            totalGains: acc.totalGains + s.total_gains,
+            totalLosses: acc.totalLosses + s.total_losses,
+        }),
+        { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 },
+    );
+}
+
+/** Combine totals from both crypto and securities for a given year */
+function computeCombinedTotalsForYear(
+    cryptoReport: FrenchTaxReport | null,
+    securitiesReport: FrenchSecuritiesTaxReport | null,
+    year: number,
+): CardTotals {
+    const c = computeCardTotalsForYear(cryptoReport, year);
+    const s = computeCardTotalsForYear(securitiesReport, year);
+    return {
+        totalTax: c.totalTax + s.totalTax,
+        taxableDisposals: c.taxableDisposals + s.taxableDisposals,
+        totalGains: c.totalGains + s.totalGains,
+        totalLosses: c.totalLosses + s.totalLosses,
+    };
+}
+
 const SummaryCard: React.FC<{
     label: string;
     subtitle: string;
@@ -532,12 +664,13 @@ const SummaryCard: React.FC<{
 }> = ({ label, subtitle, palette, totals, baseCurrency, active, onClick }) => (
     <Box
         flex={1}
-        p={4}
-        bg={active ? `${palette}.50/40` : 'white'}
+        px={3}
+        py={2}
+        bg={active ? `${palette}.50` : `${palette}.50/60`}
         border="1px solid"
-        borderColor={active ? `${palette}.200` : 'gray.200'}
-        borderBottom={active ? 'none' : '1px solid'}
-        borderBottomColor={active ? 'transparent' : 'gray.200'}
+        borderColor={active ? `${palette}.200` : `${palette}.100`}
+        borderBottom="2px solid"
+        borderBottomColor={active ? `${palette}.50` : `${palette}.100`}
         borderRadius={active ? 'lg lg 0 0' : 'lg'}
         cursor="pointer"
         onClick={onClick}
@@ -545,36 +678,89 @@ const SummaryCard: React.FC<{
         position="relative"
         zIndex={active ? 1 : 0}
         mb={active ? '-1px' : '0'}
-        _hover={{ borderColor: `${palette}.300`, bg: active ? `${palette}.50/40` : 'gray.50' }}
+        _hover={{ borderColor: `${palette}.300`, bg: active ? `${palette}.50` : `${palette}.100/50` }}
     >
-        <Flex justify="space-between" align="start" mb={2}>
-            <Box>
+        <Flex justify="space-between" align="center">
+            <Flex align="baseline" gap={2}>
                 <Text fontWeight="700" fontSize="sm" color={active ? `${palette}.700` : 'gray.700'}>
                     {label}
                 </Text>
                 <Text fontSize="2xs" color="gray.400">{subtitle}</Text>
-            </Box>
-            <Text fontWeight="bold" fontSize="lg" color={totals.totalTax > 0 ? 'red.600' : 'gray.500'}>
+            </Flex>
+            <Flex align="center" gap={4}>
+                <Text fontSize="2xs" color="gray.500">{totals.taxableDisposals} disposals</Text>
+                <Text fontWeight="600" fontSize="xs" color="green.600">+{formatCurrency(totals.totalGains, baseCurrency)}</Text>
+                <Text fontWeight="600" fontSize="xs" color="red.600">{totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}</Text>
+                <Text fontWeight="bold" fontSize="sm" color={totals.totalTax > 0 ? 'red.600' : 'gray.500'}>
+                    Tax: {formatCurrency(totals.totalTax, baseCurrency)}
+                </Text>
+            </Flex>
+        </Flex>
+    </Box>
+);
+
+// ─── Year Metric Card (tab header inside single wrapper) ────────────────────
+
+const YearMetricCard: React.FC<{
+    label: string;
+    totals: CardTotals;
+    active: boolean;
+    baseCurrency: string;
+    onClick: () => void;
+    isLast?: boolean;
+    activePalette: string;
+    onRecompute?: () => void;
+    isComputing?: boolean;
+}> = ({ label, totals, active, baseCurrency, onClick, isLast, activePalette, onRecompute, isComputing }) => (
+    <Box
+        flex={1}
+        p={3}
+        bg={active ? `${activePalette}.100` : `${activePalette}.50/60`}
+        borderRight={isLast ? 'none' : '1px solid'}
+        borderRightColor={`${activePalette}.200`}
+        borderBottom="2px solid"
+        borderBottomColor={active ? `${activePalette}.100` : `${activePalette}.200`}
+        cursor="pointer"
+        onClick={onClick}
+        transition="all 0.15s"
+        _hover={active ? {} : { bg: `${activePalette}.100/50` }}
+    >
+        <Flex justify="space-between" align="start" mb={1}>
+            <Badge
+                variant={active ? 'solid' : 'subtle'}
+                colorPalette={activePalette}
+                size="sm"
+                fontWeight="800"
+                fontSize="sm"
+            >
+                {label}
+            </Badge>
+            <Text fontWeight="bold" fontSize="lg" color="gray.700">
                 {formatCurrency(totals.totalTax, baseCurrency)}
             </Text>
         </Flex>
-        <Flex gap={4}>
-            <Box>
-                <Text fontSize="2xs" color="gray.400">Taxable Disposals</Text>
-                <Text fontWeight="600" fontSize="sm">{totals.taxableDisposals}</Text>
-            </Box>
-            <Box>
-                <Text fontSize="2xs" color="gray.400">Gains</Text>
-                <Text fontWeight="600" fontSize="sm" color="green.600">
+        <Flex justify="space-between" align="end">
+            <Flex gap={3} align="center">
+                <Text fontSize="2xs" color="gray.500">{totals.taxableDisposals} disposals</Text>
+                <Text fontWeight="600" fontSize="xs" color="green.600">
                     +{formatCurrency(totals.totalGains, baseCurrency)}
                 </Text>
-            </Box>
-            <Box>
-                <Text fontSize="2xs" color="gray.400">Losses</Text>
-                <Text fontWeight="600" fontSize="sm" color="red.600">
+                <Text fontWeight="600" fontSize="xs" color="red.600">
                     {totals.totalLosses > 0 ? `-${formatCurrency(totals.totalLosses, baseCurrency)}` : formatCurrency(0, baseCurrency)}
                 </Text>
-            </Box>
+            </Flex>
+            {active && onRecompute && (
+                <Button
+                    size="2xs"
+                    variant="ghost"
+                    colorPalette="gray"
+                    onClick={(e) => { e.stopPropagation(); onRecompute(); }}
+                    loading={isComputing}
+                    title={`Recalculate ${label}`}
+                >
+                    <LuRefreshCw size={11} />
+                </Button>
+            )}
         </Flex>
     </Box>
 );
@@ -586,7 +772,8 @@ const AnnualSummaryTable: React.FC<{
     selectedYear: number | null;
     onSelectYear: (y: number | null) => void;
     baseCurrency: string;
-}> = ({ summaries, selectedYear, onSelectYear, baseCurrency }) => (
+    onViewYear?: (year: number) => void;
+}> = ({ summaries, selectedYear, onSelectYear, baseCurrency, onViewYear }) => (
     <Box mb={5}>
         <Heading size="xs" mb={2} color="gray.600">Annual Summary</Heading>
         <Box overflowX="auto">
@@ -600,6 +787,7 @@ const AnnualSummaryTable: React.FC<{
                         <Table.ColumnHeader textAlign="right" fontSize="xs">Tax</Table.ColumnHeader>
                         <Table.ColumnHeader textAlign="right" fontSize="xs">Carryforward</Table.ColumnHeader>
                         <Table.ColumnHeader textAlign="right" fontSize="xs">Taxable Disposals</Table.ColumnHeader>
+                        {onViewYear && <Table.ColumnHeader textAlign="center" fontSize="xs" width="40px"></Table.ColumnHeader>}
                     </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -623,6 +811,24 @@ const AnnualSummaryTable: React.FC<{
                                 {s.loss_carried_forward < 0 ? formatCurrency(s.loss_carried_forward, baseCurrency) : '—'}
                             </Table.Cell>
                             <Table.Cell textAlign="right" fontSize="xs">{s.transaction_count}</Table.Cell>
+                            {onViewYear && (
+                                <Table.Cell textAlign="center">
+                                    <Box
+                                        as="button"
+                                        display="inline-flex"
+                                        alignItems="center"
+                                        justifyContent="center"
+                                        w="22px" h="22px"
+                                        borderRadius="md"
+                                        color="blue.500"
+                                        _hover={{ bg: 'blue.50', color: 'blue.700' }}
+                                        transition="all 0.15s"
+                                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); onViewYear(s.fiscal_year); }}
+                                    >
+                                        <LuEye size={13} />
+                                    </Box>
+                                </Table.Cell>
+                            )}
                         </Table.Row>
                     ))}
                 </Table.Body>
