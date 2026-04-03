@@ -12,9 +12,11 @@ import { LuReceipt } from 'react-icons/lu';
 
 import { useLatestPnLVersion } from '../hooks/useLatestPnLVersion';
 import { useVersionMetrics, usePortfolioTimeline } from '../hooks/useChartData';
+import { usePriceGapsSummary } from '../hooks/usePriceGaps';
 import { MetricItem, fmtCurrency, fmtCurrencySigned } from './pnl/TotalReturnScorecard';
 import { HeroMetricsBar } from './pnl/HeroMetricsBar';
 import { PeriodChartPanel } from './pnl/PeriodChartPanel';
+import { GapFixPanel } from './GapFixPanel';
 import { AccountBadge } from './AccountBadge';
 import { formatQuantity } from '../utils/numberUtils';
 import { API_URL } from '../types';
@@ -81,6 +83,8 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
     const metrics = useVersionMetrics(versionId, { assetIds: [assetId] }, !!versionId);
     const timeline = usePortfolioTimeline(versionId, { assetIds: [assetId], granularity: 'daily' }, !!versionId);
     const { breakdowns: accountBreakdowns } = useAccountBalances(versionId, assetId);
+    const gapSummary = usePriceGapsSummary([assetId], !!assetId);
+    const hasGaps = (gapSummary.data?.items ?? []).some(a => a.gap_count > 0);
 
     // Map range data → HeroMetricsBar props (same mapping as PnLDetailPanel)
     const rangeData = metrics.data?.ranges?.all;
@@ -229,10 +233,20 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
                     baseCurrency={baseCurrency}
                     range="all"
                     isLoading={timeline.isLoading}
+                    error={timeline.error}
                     versionId={versionId}
                     contextLabel={assetSymbol}
+                    assetId={assetId}
+                    assetSymbol={assetSymbol}
                 />
             </Box>
+
+            {/* Price gap fix panel (when gaps detected) */}
+            {hasGaps && assetSymbol && (
+                <Box mt={3}>
+                    <GapFixPanel assetId={assetId} symbol={assetSymbol} />
+                </Box>
+            )}
         </Box>
     );
 };

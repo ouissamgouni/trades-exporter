@@ -31,7 +31,7 @@ import {
     Table,
     Text,
 } from '@chakra-ui/react';
-import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck, FiDollarSign, FiTrendingUp, FiTrendingDown } from 'react-icons/fi';
+import { FiChevronRight, FiChevronDown, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiSearch, FiAlertCircle, FiGrid, FiFilter, FiX, FiList, FiCheck, FiDollarSign, FiTrendingUp, FiTrendingDown, FiColumns } from 'react-icons/fi';
 import { LuInfo, LuReceipt } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { AssetPnLCard } from './AssetPnLCard';
@@ -174,8 +174,14 @@ const isPriceStale = (fetchedAt?: string): boolean => {
     return fetchedTime < oneHourAgo;
 };
 
-type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl' | 'efficiency';
+type SortField = 'asset_symbol' | 'quantity' | 'market_value' | 'cost_basis' | 'unrealized_pnl' | 'realized_pnl' | 'total_return' | 'efficiency';
 type SortDirection = 'asc' | 'desc';
+
+const SORT_FIELD_LABELS: Record<SortField, string> = {
+    total_return: 'Return', market_value: 'Value', cost_basis: 'Cost',
+    unrealized_pnl: 'Unrealized', realized_pnl: 'Realized', efficiency: 'Efficiency',
+    asset_symbol: 'Symbol', quantity: 'Qty',
+};
 
 // ------------------------------------------------------------------
 // Render helpers (combined columns)
@@ -313,12 +319,17 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     pnlVersionId,
 }) => {
     const assetPanelCtx = useContext(AssetDetailPanelContext);
-    const [sortField, setSortField] = useState<SortField>('market_value');
+    const [sortField, setSortField] = useState<SortField>('total_return');
     const [sortDir, setSortDir] = useState<SortDirection>('desc');
     const [expandedAssetIds, setExpandedAssetIds] = useState<Set<number>>(new Set());
     const [expandedAccountIds, setExpandedAccountIds] = useState<Set<number>>(new Set());
     const [groupBy, setGroupBy] = useState<GroupBy>('asset');
     const [displayMode, setDisplayMode] = useState<DisplayMode>('cards');
+    const [splitView, setSplitView] = useState(true);
+    const [splitLeftPage, setSplitLeftPage] = useState(0);
+    const [splitRightPage, setSplitRightPage] = useState(0);
+    const [splitLeftPageSize, setSplitLeftPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+    const [splitRightPageSize, setSplitRightPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
     // --- Unified filter state (internal fallback when not controlled) ---
     const [_search, _setSearch] = useState('');
@@ -455,28 +466,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         return row.account_ids != null && row.account_ids.length >= 1;
     };
 
-    // --- Build full asset list (include unmapped live assets as rows) ---
+    // --- Build full asset list (mapped PnL assets only — unmapped live assets surfaced in BalanceHealthCard) ---
     const allAssets = useMemo((): AssetPnLRow[] => {
-        const unmappedRows: AssetPnLRow[] = unmappedLiveAssets.map(u => ({
-            asset: { id: null, symbol: u.symbol, label: null },
-            account_ids: [],
-            category_ids: [],
-            quantity: 0,
-            market_value: u.marketValue ?? 0,
-            cost_basis: 0,
-            unrealized_pnl: 0,
-            unrealized_pnl_pct: 0,
-            realized_pnl: 0,
-            taxable_realized_pnl: 0,
-            total_fees: 0,
-            lot_count: 0,
-            realized_event_count: 0,
-            warning_count: 0,
-            has_lots: false,
-            is_unmapped: true,
-        }));
-        return [...assets, ...unmappedRows];
-    }, [assets, unmappedLiveAssets]);
+        return [...assets];
+    }, [assets]);
 
     const totalAssetCount = allAssets.length;
 
@@ -502,9 +495,6 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     if (!a.category_ids || a.category_ids.length === 0) return false;
                     if (!a.category_ids.some(id => selectedCategoryIds.includes(id))) return false;
                 }
-
-                // Exclude unmapped rows when account/category filters are active
-                if (hasAccountOrCategoryFilter && a.is_unmapped) return false;
 
                 // P&L status filter
                 if (pnlStatus === 'with_pnl' && !a.has_lots) return false;
@@ -538,6 +528,9 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                 if (sortField === 'asset_symbol') {
                     aVal = a.asset.symbol ?? '';
                     bVal = b.asset.symbol ?? '';
+                } else if (sortField === 'total_return') {
+                    aVal = a.unrealized_pnl + a.realized_pnl;
+                    bVal = b.unrealized_pnl + b.realized_pnl;
                 } else if (sortField === 'efficiency') {
                     // Efficiency = |total return / cost basis| * 100, same as treemap
                     const atr = (a.unrealized_pnl + a.realized_pnl);
@@ -559,7 +552,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
             });
 
         return { filtered: result, dustHiddenCount: dustCount };
-    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, hasAccountOrCategoryFilter]);
+    }, [allAssets, search, sortField, sortDir, minMarketValue, liveBalances, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds]);
 
     // Report filtered count to parent
     useEffect(() => {
@@ -704,6 +697,26 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
         return byAccountRows.slice(start, start + pageSize);
     }, [byAccountRows, safePage, pageSize]);
 
+    // --- Split view data ---
+    // Split filtered array at midpoint: top half stays desc, bottom half reversed to asc
+    const splitMid = Math.ceil(filtered.length / 2);
+    const topHalf = useMemo(() => filtered.slice(0, splitMid), [filtered, splitMid]);
+    const bottomHalf = useMemo(() => filtered.slice(splitMid).reverse(), [filtered, splitMid]);
+
+    const splitLeftPageCount = Math.max(1, Math.ceil(topHalf.length / splitLeftPageSize));
+    const safeSplitLeftPage = Math.min(splitLeftPage, splitLeftPageCount - 1);
+    const paginatedTopPerformers = useMemo(() => {
+        const start = safeSplitLeftPage * splitLeftPageSize;
+        return topHalf.slice(start, start + splitLeftPageSize);
+    }, [topHalf, safeSplitLeftPage, splitLeftPageSize]);
+
+    const splitRightPageCount = Math.max(1, Math.ceil(bottomHalf.length / splitRightPageSize));
+    const safeSplitRightPage = Math.min(splitRightPage, splitRightPageCount - 1);
+    const paginatedBottomPerformers = useMemo(() => {
+        const start = safeSplitRightPage * splitRightPageSize;
+        return bottomHalf.slice(start, start + splitRightPageSize);
+    }, [bottomHalf, safeSplitRightPage, splitRightPageSize]);
+
     // Compute per-account aggregated live balance value (for card mode)
     const accountLiveBalanceValues = useMemo((): Map<number, number> => {
         if (!liveAccountBalances) return new Map();
@@ -725,7 +738,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     }, [liveAccountBalances, allAssets]);
 
     // Reset page when filters/sort/grouping change
-    useEffect(() => { resetPage(); }, [search, minMarketValue, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, sortField, sortDir, groupBy, displayMode, resetPage]);
+    useEffect(() => { resetPage(); setSplitLeftPage(0); setSplitRightPage(0); }, [search, minMarketValue, pnlStatus, balanceStatus, selectedAccountIds, selectedCategoryIds, sortField, sortDir, groupBy, displayMode, resetPage]);
 
     // Trigger load of per-account data when switching to "by account" mode
     const handleGroupByChange = (newGroupBy: GroupBy) => {
@@ -790,49 +803,164 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     );
 
     // ── Pagination bar (reusable for top + bottom) ──
-    const paginationBar = totalRows > PAGE_SIZE_OPTIONS[0] ? (
-        <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
-            <Flex align="center" gap={2}>
-                <Text fontSize="2xs" color="gray.500">Rows:</Text>
-                <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
-                    {PAGE_SIZE_OPTIONS.map((size) => (
-                        <Button
-                            key={size}
-                            size="2xs"
-                            variant={pageSize === size ? 'subtle' : 'ghost'}
-                            colorPalette={pageSize === size ? 'blue' : 'gray'}
-                            borderRadius="0"
-                            onClick={() => { setPageSize(size); setPage(0); }}
-                            px={2}
-                            fontSize="xs"
-                        >
-                            {size}
-                        </Button>
-                    ))}
+    const renderPaginationBar = (
+        pPage: number, setPPage: (v: number | ((p: number) => number)) => void,
+        pPageSize: number, setPPageSize: (v: number) => void,
+        pTotalRows: number,
+    ) => {
+        const pPageCount = Math.max(1, Math.ceil(pTotalRows / pPageSize));
+        const pSafePage = Math.min(pPage, pPageCount - 1);
+        if (pTotalRows <= PAGE_SIZE_OPTIONS[0]) return null;
+        return (
+            <Flex justify="space-between" align="center" width="100%" py={2} px={3}>
+                <Flex align="center" gap={2}>
+                    <Text fontSize="2xs" color="gray.500">Rows:</Text>
+                    <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                            <Button
+                                key={size}
+                                size="2xs"
+                                variant={pPageSize === size ? 'subtle' : 'ghost'}
+                                colorPalette={pPageSize === size ? 'blue' : 'gray'}
+                                borderRadius="0"
+                                onClick={() => { setPPageSize(size); setPPage(0); }}
+                                px={2}
+                                fontSize="xs"
+                            >
+                                {size}
+                            </Button>
+                        ))}
+                    </Flex>
+                </Flex>
+                <Text fontSize="2xs" color="gray.500">
+                    {pSafePage * pPageSize + 1}–{Math.min((pSafePage + 1) * pPageSize, pTotalRows)} of {pTotalRows}
+                </Text>
+                <Flex align="center" gap={1}>
+                    <Button size="2xs" variant="ghost" onClick={() => setPPage(0)} disabled={pSafePage === 0} px={1}>
+                        <FiChevronsLeft size={12} />
+                    </Button>
+                    <Button size="2xs" variant="ghost" onClick={() => setPPage((p: number) => Math.max(0, p - 1))} disabled={pSafePage === 0} px={1}>
+                        <FiChevronLeft size={14} />
+                    </Button>
+                    <Text fontSize="xs" color="gray.600" mx={1}>
+                        {pSafePage + 1} / {pPageCount}
+                    </Text>
+                    <Button size="2xs" variant="ghost" onClick={() => setPPage((p: number) => Math.min(pPageCount - 1, p + 1))} disabled={pSafePage >= pPageCount - 1} px={1}>
+                        <FiChevronRight size={14} />
+                    </Button>
+                    <Button size="2xs" variant="ghost" onClick={() => setPPage(pPageCount - 1)} disabled={pSafePage >= pPageCount - 1} px={1}>
+                        <FiChevronsRight size={12} />
+                    </Button>
                 </Flex>
             </Flex>
-            <Text fontSize="2xs" color="gray.500">
-                {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, totalRows)} of {totalRows}
-            </Text>
-            <Flex align="center" gap={1}>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(0)} disabled={safePage === 0} px={1}>
-                    <FiChevronsLeft size={12} />
-                </Button>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} px={1}>
-                    <FiChevronLeft size={14} />
-                </Button>
-                <Text fontSize="xs" color="gray.600" mx={1}>
-                    {safePage + 1} / {pageCount}
-                </Text>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safePage >= pageCount - 1} px={1}>
-                    <FiChevronRight size={14} />
-                </Button>
-                <Button size="2xs" variant="ghost" onClick={() => setPage(pageCount - 1)} disabled={safePage >= pageCount - 1} px={1}>
-                    <FiChevronsRight size={12} />
-                </Button>
-            </Flex>
-        </Flex>
-    ) : null;
+        );
+    };
+
+    const paginationBar = renderPaginationBar(safePage, setPage, pageSize, setPageSize, totalRows);
+
+    // ── Helper: render a grid of asset cards from an array ──
+    const renderAssetCardGrid = (rows: AssetPnLRow[], columns?: Record<string, number>) => (
+        <SimpleGrid columns={columns ?? { base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
+            {rows.map((assetpnlrow) => {
+                const assetId = assetpnlrow.asset.id;
+                const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
+                const liveQty = liveBalances?.get(sym);
+                const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
+                const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
+                    ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
+                    : [];
+                const isUnmapped = !!assetpnlrow.is_unmapped;
+                const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+                return (
+                    <AssetPnLCard
+                        key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}
+                        row={assetpnlrow}
+                        baseCurrency={baseCurrency}
+                        onAssetClick={onAssetClick}
+                        onAccountClick={onAccountClick}
+                        isExpanded={assetId != null && expandedAssetIds.has(assetId)}
+                        onToggleExpand={toggleExpanded}
+                        accountBalances={assetId != null ? accountBalances?.get(assetId) : undefined}
+                        accounts={accounts}
+                        liveQty={liveQty}
+                        deltaInfo={deltaInfo}
+                        liveBalanceLoading={liveBalanceLoading}
+                        liveAccountBalanceMap={liveAccountBalances?.get(sym)}
+                        liveAccountErrors={liveAccountErrors}
+                        assetErrorAccounts={assetErrorAccounts}
+                        hasLiveErrors={!!hasLiveErrors}
+                        unrealizedPnlRange={unrealizedPnlRange}
+                        periodDelta={assetId != null ? periodDeltaMap?.get(assetId) : undefined}
+                        periodLabel={periodLabel}
+                        pnlVersionId={pnlVersionId}
+                    />
+                );
+            })}
+        </SimpleGrid>
+    );
+
+    // ── Helper: render asset table rows from an array ──
+    const renderAssetTableRows = (rows: AssetPnLRow[]) => (
+        <>
+            {rows.map((assetpnlrow) => {
+                const assetId = assetpnlrow.asset.id;
+                const isNoPnl = !assetpnlrow.has_lots;
+                const isUnmapped = !!assetpnlrow.is_unmapped;
+                const isExpandable = !isNoPnl && hasAccountData(assetpnlrow);
+                const isExpanded = assetId != null && expandedAssetIds.has(assetId);
+                const assetAccountBalances = assetId != null ? accountBalances?.get(assetId) : undefined;
+                const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
+                const liveQty = liveBalances?.get(sym);
+                const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
+                const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
+                    ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
+                    : [];
+                const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
+                return (
+                    <Fragment key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}>
+                        <Table.Row
+                            cursor={isNoPnl ? 'default' : 'pointer'}
+                            _hover={{ bg: isNoPnl ? 'gray.100' : 'blue.50' }}
+                            onClick={isNoPnl ? undefined : () => onAssetClick(assetpnlrow.asset.id)}
+                            bg={isExpanded ? 'blue.50' : isNoPnl ? 'gray.50' : undefined}
+                            css={{ '& td': { py: '2px', px: '4px' } }}
+                            opacity={isUnmapped ? 0.6 : undefined}
+                        >
+                            <Table.Cell>
+                                <Flex align="center" gap={1}>
+                                    {isExpandable ? (
+                                        <Box as="button" onClick={(e: React.MouseEvent) => assetId != null && toggleExpanded(assetId, e)} p={0.5} borderRadius="sm" _hover={{ bg: 'gray.200' }}>
+                                            {isExpanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+                                        </Box>
+                                    ) : <Box w="18px" />}
+                                    <Tooltip content={assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : (assetpnlrow.asset.symbol || '')} openDelay={300}>
+                                        <Badge size="xs" colorPalette={isUnmapped ? 'gray' : 'blue'} variant={isUnmapped ? 'outline' : 'solid'} fontWeight="bold" maxW="120px" truncate>
+                                            {assetpnlrow.asset.label ? `${assetpnlrow.asset.label} (${assetpnlrow.asset.symbol})` : assetpnlrow.asset.symbol}
+                                        </Badge>
+                                    </Tooltip>
+                                </Flex>
+                            </Table.Cell>
+                            <Table.Cell>{isNoPnl ? <Text {...XS} color="gray.400">—</Text> : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>}</Table.Cell>
+                            <Table.Cell>{renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency)}</Table.Cell>
+                            <Table.Cell>{renderValue(assetpnlrow, baseCurrency)}</Table.Cell>
+                            <Table.Cell>
+                                {isNoPnl ? <Text {...XS} color="gray.400">N/A</Text>
+                                    : assetpnlrow.unit_value == null ? <Text {...XS} color="gray.400">—</Text>
+                                        : <Text {...XS} fontWeight="medium" color={assetpnlrow.unrealized_pnl >= 0 ? 'green.600' : 'red.600'}><ValueDisplay value={assetpnlrow.unrealized_pnl} currency={baseCurrency} /></Text>}
+                            </Table.Cell>
+                            <Table.Cell>
+                                {isNoPnl ? <Text {...XS} color="gray.400">N/A</Text>
+                                    : <Text {...XS} fontWeight="medium" color={assetpnlrow.realized_pnl >= 0 ? 'green.600' : 'red.600'}><ValueDisplay value={assetpnlrow.realized_pnl} currency={baseCurrency} /></Text>}
+                            </Table.Cell>
+                        </Table.Row>
+                    </Fragment>
+                );
+            })}
+        </>
+    );
+
+    // ── Split view metric label ──
+    const splitMetricLabel = SORT_FIELD_LABELS[sortField];
 
     // ── When contentHidden, render only filters + injected content (no card wrapper) ──
     // (contentHidden path removed — unified into main return below)
@@ -840,16 +968,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
     return (
         <Card.Root>
             <Card.Header pb={2}>
-                {/* Top row: Title + asset search */}
-                <Flex justify="space-between" align="center" mb={2} gap={3}>
-                    <Text fontWeight="bold" fontSize="lg" flexShrink={0}>
-                        {groupBy === 'asset'
-                            ? `Asset P&L (${filtered.length} assets)`
-                            : `Asset P&L (${byAccountRows.length} accounts)`
-                        }
-                    </Text>
+                {/* Top row: Search + filters header */}
+                <Flex align="center" mb={2} gap={3}>
                     {!hideFilters && (
-                        <Box position="relative" maxW="220px" w="100%">
+                        <Box position="relative" maxW="220px" w="100%" flexShrink={0}>
                             <Input
                                 placeholder="Search asset..."
                                 value={search}
@@ -893,6 +1015,32 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     {activeFilterCount > 0 && (
                                         <Badge size="xs" colorPalette="blue" variant="solid">{activeFilterCount}</Badge>
                                     )}
+                                    {/* Active filter chips — inline in header */}
+                                    {!filtersExpanded && activeFilterChips.length > 0 && (
+                                        <Flex gap={1} ml={1} flexWrap="wrap" onClick={(e) => e.stopPropagation()}>
+                                            {activeFilterChips.map(chip => (
+                                                <Badge
+                                                    key={chip.id}
+                                                    size="xs"
+                                                    colorPalette={chip.color}
+                                                    display="inline-flex"
+                                                    alignItems="center"
+                                                    gap={0.5}
+                                                    px={1.5}
+                                                    borderRadius="md"
+                                                    cursor="pointer"
+                                                    transition="all 0.15s"
+                                                    _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
+                                                    onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
+                                                >
+                                                    <Text fontSize="2xs">{chip.label}</Text>
+                                                    <Box as="span" display="flex" alignItems="center">
+                                                        <FiX size={8} />
+                                                    </Box>
+                                                </Badge>
+                                            ))}
+                                        </Flex>
+                                    )}
                                 </Flex>
                                 {activeFilterCount > 0 && (
                                     <Button
@@ -907,34 +1055,6 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                     </Button>
                                 )}
                             </Flex>
-
-                            {/* Active filter chips — shown when filters are collapsed */}
-                            {!filtersExpanded && activeFilterChips.length > 0 && (
-                                <Flex flexWrap="wrap" gap={1.5} pt={1} pb={1}>
-                                    {activeFilterChips.map(chip => (
-                                        <Badge
-                                            key={chip.id}
-                                            size="sm"
-                                            colorPalette={chip.color}
-                                            display="inline-flex"
-                                            alignItems="center"
-                                            gap={1}
-                                            px={2}
-                                            py={0.5}
-                                            borderRadius="md"
-                                            cursor="pointer"
-                                            transition="all 0.15s"
-                                            _hover={{ transform: 'scale(0.95)', opacity: 0.8 }}
-                                            onClick={(e) => { e.stopPropagation(); chip.onRemove(); }}
-                                        >
-                                            <Text fontSize="xs">{chip.label}</Text>
-                                            <Box as="span" display="flex" alignItems="center">
-                                                <FiX size={10} />
-                                            </Box>
-                                        </Badge>
-                                    ))}
-                                </Flex>
-                            )}
 
                             <Collapsible.Content>
                                 <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={3} mt={2} pb={1}>
@@ -1128,11 +1248,10 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     </Collapsible.Root>
                 )}
 
-                {/* Portfolio totals summary bar (common — always visible) */}
-                {(() => {
-                    const hasAccountOrCatFilter = (selectedAccountIds?.length ?? 0) > 0 || (selectedCategoryIds?.length ?? 0) > 0;
-                    const totals = (!hasAccountOrCatFilter && backendSummary) ? backendSummary : filteredTotals;
-                    const showDustNote = !hasAccountOrCatFilter && backendSummary && dustHiddenCount > 0;
+                {/* Portfolio totals summary bar (only when list view) */}
+                {!contentHidden && (() => {
+                    const totals = filteredTotals;
+                    const showDustNote = dustHiddenCount > 0;
                     const totalReturn = totals.totalUnrealized + totals.totalRealized;
                     const roi = totals.totalCost > 0 ? (totalReturn / totals.totalCost) * 100 : 0;
                     const colorFn = (v: number) => (v >= 0 ? 'green.600' : 'red.600');
@@ -1209,6 +1328,25 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                             </Flex>
                         </Flex>
 
+                        {/* Split view toggle (only for by-asset) */}
+                        {groupBy === 'asset' && (
+                            <Flex align="center" gap={1}>
+                                <Button
+                                    size="2xs"
+                                    variant={splitView ? 'subtle' : 'ghost'}
+                                    colorPalette={splitView ? 'blue' : 'gray'}
+                                    borderRadius="md"
+                                    onClick={() => setSplitView(v => !v)}
+                                    px={2}
+                                    title="Split view: top vs bottom performers"
+                                    gap={1}
+                                >
+                                    <FiColumns size={12} />
+                                    <Text fontSize="xs">Split</Text>
+                                </Button>
+                            </Flex>
+                        )}
+
                         {/* Group by toggle */}
                         <Flex align="center" gap={1}>
                             <Text fontSize="2xs" fontWeight="medium" color="gray.500">Group</Text>
@@ -1254,6 +1392,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 display="inline-flex"
                             >
                                 {[
+                                    { value: 'total_return', label: 'Return' },
                                     { value: 'market_value', label: 'Value' },
                                     { value: 'cost_basis', label: 'Cost' },
                                     { value: 'unrealized_pnl', label: 'Unrealized' },
@@ -1281,7 +1420,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                     </Flex>
 
                     {/* Top pagination */}
-                    {paginationBar && (
+                    {/* Top pagination (hidden in split mode — each half has its own) */}
+                    {!splitView && paginationBar && (
                         <Box borderBottom="1px solid" borderColor="gray.100">
                             {paginationBar}
                         </Box>
@@ -1323,51 +1463,110 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                         ))}
                                     </SimpleGrid>
                                 )
-                            ) : (
+                            ) : splitView ? (
+                                /* ── Split card view: desc (left) vs asc (right) ── */
                                 filtered.length === 0 ? (
                                     <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
                                 ) : (
-                                    <SimpleGrid columns={{ base: 1, sm: 1, md: 2, lg: 5, xl: 5 }} gap={3}>
-                                        {paginatedFiltered.map((assetpnlrow) => {
-                                            const assetId = assetpnlrow.asset.id;
-                                            const sym = assetpnlrow.asset.symbol?.toUpperCase() ?? '';
-                                            const liveQty = liveBalances?.get(sym);
-                                            const deltaInfo = computeDelta(assetpnlrow.quantity, liveQty);
-                                            const assetErrorAccounts = liveAccountErrors && assetpnlrow.account_ids.length > 0
-                                                ? assetpnlrow.account_ids.filter(id => liveAccountErrors.has(id))
-                                                : [];
-                                            const isUnmapped = !!assetpnlrow.is_unmapped;
-                                            const hasLiveErrors = assetErrorAccounts.length > 0 || (isUnmapped && liveAccountErrors && liveAccountErrors.size > 0);
-
-                                            return (
-                                                <AssetPnLCard
-                                                    key={assetpnlrow.asset.id ?? `nopnl-${assetpnlrow.asset.symbol}`}
-                                                    row={assetpnlrow}
-                                                    baseCurrency={baseCurrency}
-                                                    onAssetClick={onAssetClick}
-                                                    onAccountClick={onAccountClick}
-                                                    isExpanded={assetId != null && expandedAssetIds.has(assetId)}
-                                                    onToggleExpand={toggleExpanded}
-                                                    accountBalances={assetId != null ? accountBalances?.get(assetId) : undefined}
-                                                    accounts={accounts}
-                                                    liveQty={liveQty}
-                                                    deltaInfo={deltaInfo}
-                                                    liveBalanceLoading={liveBalanceLoading}
-                                                    liveAccountBalanceMap={liveAccountBalances?.get(sym)}
-                                                    liveAccountErrors={liveAccountErrors}
-                                                    assetErrorAccounts={assetErrorAccounts}
-                                                    hasLiveErrors={!!hasLiveErrors}
-                                                    unrealizedPnlRange={unrealizedPnlRange}
-                                                    periodDelta={assetId != null ? periodDeltaMap?.get(assetId) : undefined}
-                                                    periodLabel={periodLabel}
-                                                    pnlVersionId={pnlVersionId}
-                                                />
-                                            );
-                                        })}
-                                    </SimpleGrid>
+                                    <Flex direction={{ base: 'column', md: 'row' }} gap={3}>
+                                        {/* Left: sorted desc */}
+                                        <Box flex="1" minW="0" borderRight={{ base: 'none', md: '1px solid' }} borderBottom={{ base: '1px solid', md: 'none' }} borderColor="gray.200" pr={{ base: 0, md: 3 }} pb={{ base: 3, md: 0 }}>
+                                            <Flex align="center" gap={2} mb={2}>
+                                                <Text fontSize="sm" fontWeight="semibold" color="green.700">↓ {splitMetricLabel}</Text>
+                                                <Badge size="xs" colorPalette="gray" variant="subtle">{topHalf.length}</Badge>
+                                            </Flex>
+                                            {renderAssetCardGrid(paginatedTopPerformers, { base: 1, sm: 1, md: 1, lg: 2, xl: 3 })}
+                                            {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length) && (
+                                                <Box mt={2}>{renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length)}</Box>
+                                            )}
+                                        </Box>
+                                        {/* Right: sorted asc */}
+                                        <Box flex="1" minW="0" pl={{ base: 0, md: 3 }}>
+                                            <Flex align="center" gap={2} mb={2}>
+                                                <Text fontSize="sm" fontWeight="semibold" color="red.700">↑ {splitMetricLabel}</Text>
+                                                <Badge size="xs" colorPalette="gray" variant="subtle">{bottomHalf.length}</Badge>
+                                            </Flex>
+                                            {renderAssetCardGrid(paginatedBottomPerformers, { base: 1, sm: 1, md: 1, lg: 2, xl: 3 })}
+                                            {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length) && (
+                                                <Box mt={2}>{renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length)}</Box>
+                                            )}
+                                        </Box>
+                                    </Flex>
                                 )
+                            ) : (
+                                filtered.length === 0 ? (
+                                    <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                                ) : renderAssetCardGrid(paginatedFiltered)
                             )}
                         </Box>
+                    ) : splitView && groupBy === 'asset' ? (
+                        /* ── Split table mode ── */
+                        filtered.length === 0 ? (
+                            <Box p={3}>
+                                <Text textAlign="center" py={8} color="gray.500">No assets match your criteria</Text>
+                            </Box>
+                        ) : (
+                            <Flex direction={{ base: 'column', md: 'row' }} gap={0}>
+                                {/* Left: sorted desc */}
+                                <Box flex="1" minW="0" borderRight={{ base: 'none', md: '1px solid' }} borderBottom={{ base: '1px solid', md: 'none' }} borderColor="gray.200">
+                                    <Flex align="center" gap={2} px={3} py={2} bg="green.50" borderBottom="1px solid" borderColor="gray.100">
+                                        <Text fontSize="sm" fontWeight="semibold" color="green.700">↓ {splitMetricLabel}</Text>
+                                        <Badge size="xs" colorPalette="gray" variant="subtle">{topHalf.length}</Badge>
+                                    </Flex>
+                                    <Box overflowX="auto">
+                                        <Table.Root size="sm">
+                                            <Table.Header>
+                                                <Table.Row>
+                                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Qty</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Cost</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Value</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Realized</Table.ColumnHeader>
+                                                </Table.Row>
+                                            </Table.Header>
+                                            <Table.Body>
+                                                {renderAssetTableRows(paginatedTopPerformers)}
+                                            </Table.Body>
+                                        </Table.Root>
+                                    </Box>
+                                    {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length) && (
+                                        <Box borderTop="1px solid" borderColor="gray.100">
+                                            {renderPaginationBar(safeSplitLeftPage, setSplitLeftPage, splitLeftPageSize, setSplitLeftPageSize, topHalf.length)}
+                                        </Box>
+                                    )}
+                                </Box>
+                                {/* Right: sorted asc */}
+                                <Box flex="1" minW="0">
+                                    <Flex align="center" gap={2} px={3} py={2} bg="red.50" borderBottom="1px solid" borderColor="gray.100">
+                                        <Text fontSize="sm" fontWeight="semibold" color="red.700">↑ {splitMetricLabel}</Text>
+                                        <Badge size="xs" colorPalette="gray" variant="subtle">{bottomHalf.length}</Badge>
+                                    </Flex>
+                                    <Box overflowX="auto">
+                                        <Table.Root size="sm">
+                                            <Table.Header>
+                                                <Table.Row>
+                                                    <Table.ColumnHeader>Asset</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Qty</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Cost</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Value</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Unrealized</Table.ColumnHeader>
+                                                    <Table.ColumnHeader>Realized</Table.ColumnHeader>
+                                                </Table.Row>
+                                            </Table.Header>
+                                            <Table.Body>
+                                                {renderAssetTableRows(paginatedBottomPerformers)}
+                                            </Table.Body>
+                                        </Table.Root>
+                                    </Box>
+                                    {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length) && (
+                                        <Box borderTop="1px solid" borderColor="gray.100">
+                                            {renderPaginationBar(safeSplitRightPage, setSplitRightPage, splitRightPageSize, setSplitRightPageSize, bottomHalf.length)}
+                                        </Box>
+                                    )}
+                                </Box>
+                            </Flex>
+                        )
                     ) : (
                         /* ── Table mode (original) ── */
                         <Box overflowX="auto">
@@ -1896,8 +2095,8 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                         </Box>
                     )}
 
-                    {/* Bottom pagination */}
-                    {paginationBar && (
+                    {/* Bottom pagination (hidden in split mode) */}
+                    {!splitView && paginationBar && (
                         <Box borderTop="1px solid" borderColor="gray.100">
                             {paginationBar}
                         </Box>

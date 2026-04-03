@@ -84,6 +84,7 @@ def mock_version():
     version.trigger = None
     version.allow_negative_balances = True
     version.residual_tolerance_pct = Decimal("0.05")
+    version.tax_jurisdiction = "standard"
     return version
 
 
@@ -198,6 +199,7 @@ def mock_realized_pnl():
     entry.transaction.account_id = 1
     entry.transaction.account_rel = MagicMock()
     entry.transaction.account_rel.name = "TestAccount"
+    entry.transaction.account_rel.envelope = None
     
     return entry
 
@@ -306,10 +308,15 @@ class TestGetVersionRealizedPnl:
         from backend.api.routes.pnl import get_version_realized_pnl
         
         mock_session.get.return_value = mock_version
-        mock_exec_result = MagicMock()
-        mock_exec_result.all.return_value = [mock_realized_pnl]
-        mock_exec_result.one.return_value = 1  # total count
-        mock_session.exec.return_value = mock_exec_result
+
+        # session.exec() is called 4 times: count, entries, fee-linked ids, FR overrides
+        count_result = MagicMock()
+        count_result.one.return_value = 1
+        entries_result = MagicMock()
+        entries_result.all.return_value = [mock_realized_pnl]
+        empty_result = MagicMock()
+        empty_result.all.return_value = []
+        mock_session.exec.side_effect = [count_result, entries_result, empty_result, empty_result]
         
         result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
         
@@ -321,6 +328,30 @@ class TestGetVersionRealizedPnl:
         assert entry.pnl_in_base == 1000.0
         assert entry.taxable is True
         assert entry.holding_period_days == 400
+
+    @pytest.mark.parametrize("category", ["crypto", "securities", None])
+    def test_get_realized_pnl_accepts_fr_tax_category(self, mock_session, mock_version, mock_realized_pnl, no_filters, category):
+        """Test that fr_tax_category param is accepted for all valid values."""
+        from backend.api.routes.pnl import get_version_realized_pnl
+
+        mock_session.get.return_value = mock_version
+
+        count_result = MagicMock()
+        count_result.one.return_value = 1
+        entries_result = MagicMock()
+        entries_result.all.return_value = [mock_realized_pnl]
+        empty_result_1 = MagicMock()
+        empty_result_1.all.return_value = []
+        empty_result_2 = MagicMock()
+        empty_result_2.all.return_value = []
+        mock_session.exec.side_effect = [count_result, entries_result, empty_result_1, empty_result_2]
+
+        result = get_version_realized_pnl(
+            version_id=1, fr_tax_category=category, tx_filters=no_filters, session=mock_session
+        )
+
+        assert "items" in result
+        assert "total" in result
 
 
 class TestCommitVersion:
@@ -543,3 +574,307 @@ class TestRefreshPnl:
 # Note: TestPersistResultsSavesBalances was removed because AssetBalance is no longer
 # a separate persisted entity. Balances are now calculated on-the-fly by aggregating
 # CostLot records in the get_version_balances endpoint.
+
+
+# =============================================================================
+# TransactionTaxOverride — PATCH endpoint
+# =============================================================================
+
+
+class TestOverrideFrTax:
+    """Tests for PATCH /versions/{id}/realized-pnl/{id}/fr-tax-override."""
+
+    @pytest.fixture
+    def mock_rpnl(self):
+        """Minimal realized P&L mock for override tests."""
+        rpnl = MagicMock()
+        rpnl.pnl_id = 10
+        rpnl.origin_unit_id = 1
+        rpnl.transaction_id = 100
+        rpnl.disposal_taxable = True
+        return rpnl
+
+    @pytest.fixture
+    def mock_unit(self):
+        unit = MagicMock()
+        unit.version_id = 1
+        return unit
+
+    def _make_body(self, is_taxable):
+        from backend.api.routes.pnl import FrTaxOverrideRequest
+        return FrTaxOverrideRequest(is_taxable=is_taxable)
+
+    # --- SET override (true / false) ---
+
+    def test_set_override_creates_new_row(self, mock_session, mock_rpnl, mock_unit):
+        """Setting is_taxable=False on a taxable entry creates a TransactionTaxOverride row."""
+        from backend.api.routes.pnl import override_fr_tax
+
+        # exec().first() call 1: find rpnl  →  call 2: find existing override (none)
+        first_results = iter([mock_rpnl, None])
+        mock_exec = MagicMock()
+        mock_exec.first.side_effect = lambda: next(first_results)
+        mock_session.exec.return_value = mock_exec
+        mock_session.get.return_value = mock_unit
+
+        result = override_fr_tax(
+            version_id=1, pnl_id=10,
+            body=self._make_body(is_taxable=False),
+            session=mock_session,
+        )
+
+        assert result.pnl_id == 10
+        assert result.fr_tax_effective is False
+        mock_session.add.assert_called_once()
+        added = mock_session.add.call_args[0][0]
+        assert added.transaction_id == 100
+        assert added.jurisdiction == "fr"
+        assert added.is_taxable is False
+        mock_session.commit.assert_called_once()
+
+    def test_set_override_updates_existing_row(self, mock_session, mock_rpnl, mock_unit):
+        """Changing override updates the existing TransactionTaxOverride row in place."""
+        from backend.api.routes.pnl import override_fr_tax
+
+        existing_override = MagicMock()
+        existing_override.is_taxable = False
+
+        first_results = iter([mock_rpnl, existing_override])
+        mock_exec = MagicMock()
+        mock_exec.first.side_effect = lambda: next(first_results)
+        mock_session.exec.return_value = mock_exec
+        mock_session.get.return_value = mock_unit
+
+        result = override_fr_tax(
+            version_id=1, pnl_id=10,
+            body=self._make_body(is_taxable=True),
+            session=mock_session,
+        )
+
+        assert result.fr_tax_effective is True
+        assert existing_override.is_taxable is True
+        mock_session.add.assert_not_called()  # updated in-place, not added
+        mock_session.commit.assert_called_once()
+
+    # --- CLEAR override (null) ---
+
+    def test_clear_override_deletes_existing_row(self, mock_session, mock_rpnl, mock_unit):
+        """Sending is_taxable=null deletes the override row and returns computed default."""
+        from backend.api.routes.pnl import override_fr_tax
+
+        existing_override = MagicMock()
+
+        first_results = iter([mock_rpnl, existing_override])
+        mock_exec = MagicMock()
+        mock_exec.first.side_effect = lambda: next(first_results)
+        mock_session.exec.return_value = mock_exec
+        mock_session.get.return_value = mock_unit
+
+        result = override_fr_tax(
+            version_id=1, pnl_id=10,
+            body=self._make_body(is_taxable=None),
+            session=mock_session,
+        )
+
+        assert result.fr_tax_effective is True  # falls back to disposal_taxable
+        mock_session.delete.assert_called_once_with(existing_override)
+        mock_session.commit.assert_called_once()
+
+    def test_clear_override_noop_when_no_existing(self, mock_session, mock_rpnl, mock_unit):
+        """Clearing when no override exists is a no-op (no error, no delete)."""
+        from backend.api.routes.pnl import override_fr_tax
+
+        first_results = iter([mock_rpnl, None])
+        mock_exec = MagicMock()
+        mock_exec.first.side_effect = lambda: next(first_results)
+        mock_session.exec.return_value = mock_exec
+        mock_session.get.return_value = mock_unit
+
+        result = override_fr_tax(
+            version_id=1, pnl_id=10,
+            body=self._make_body(is_taxable=None),
+            session=mock_session,
+        )
+
+        assert result.fr_tax_effective is True
+        mock_session.delete.assert_not_called()
+        mock_session.commit.assert_called_once()
+
+    # --- Error cases ---
+
+    def test_override_rpnl_not_found_returns_404(self, mock_session):
+        """PATCH returns 404 when pnl_id doesn't exist."""
+        from backend.api.routes.pnl import override_fr_tax
+        from fastapi import HTTPException
+
+        mock_exec = MagicMock()
+        mock_exec.first.return_value = None
+        mock_session.exec.return_value = mock_exec
+
+        with pytest.raises(HTTPException) as exc:
+            override_fr_tax(
+                version_id=1, pnl_id=999,
+                body=self._make_body(is_taxable=False),
+                session=mock_session,
+            )
+        assert exc.value.status_code == 404
+
+    def test_override_wrong_version_returns_404(self, mock_session, mock_rpnl):
+        """PATCH returns 404 when pnl_id belongs to a different version."""
+        from backend.api.routes.pnl import override_fr_tax
+        from fastapi import HTTPException
+
+        mock_exec = MagicMock()
+        mock_exec.first.return_value = mock_rpnl
+        mock_session.exec.return_value = mock_exec
+
+        wrong_unit = MagicMock()
+        wrong_unit.version_id = 999  # different version
+        mock_session.get.return_value = wrong_unit
+
+        with pytest.raises(HTTPException) as exc:
+            override_fr_tax(
+                version_id=1, pnl_id=10,
+                body=self._make_body(is_taxable=False),
+                session=mock_session,
+            )
+        assert exc.value.status_code == 404
+
+    def test_override_no_transaction_returns_400(self, mock_session, mock_unit):
+        """PATCH returns 400 when rpnl has no linked transaction."""
+        from backend.api.routes.pnl import override_fr_tax
+        from fastapi import HTTPException
+
+        rpnl_no_tx = MagicMock()
+        rpnl_no_tx.pnl_id = 10
+        rpnl_no_tx.origin_unit_id = 1
+        rpnl_no_tx.transaction_id = None
+
+        mock_exec = MagicMock()
+        mock_exec.first.return_value = rpnl_no_tx
+        mock_session.exec.return_value = mock_exec
+        mock_session.get.return_value = mock_unit
+
+        with pytest.raises(HTTPException) as exc:
+            override_fr_tax(
+                version_id=1, pnl_id=10,
+                body=self._make_body(is_taxable=True),
+                session=mock_session,
+            )
+        assert exc.value.status_code == 400
+        assert "no transaction" in str(exc.value.detail).lower()
+
+
+# =============================================================================
+# FR Tax effective taxability in response mapping
+# =============================================================================
+
+
+class TestFrTaxEffectiveInResponse:
+    """Verify fr_tax_effective resolves from override > disposal_taxable."""
+
+    def test_no_override_uses_disposal_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+        """When no FR override exists, fr_tax_effective == disposal_taxable."""
+        from backend.api.routes.pnl import get_version_realized_pnl
+
+        mock_realized_pnl.disposal_taxable = True
+        mock_session.get.return_value = mock_version
+
+        count_r = MagicMock(); count_r.one.return_value = 1
+        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock(); fee_r.all.return_value = []
+        override_r = MagicMock(); override_r.all.return_value = []  # no overrides
+        mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
+
+        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        entry = result["items"][0]
+        assert entry.fr_tax_effective is True
+        assert entry.taxable is True
+
+    def test_override_false_overrides_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+        """FR override is_taxable=False overrides disposal_taxable=True."""
+        from backend.api.routes.pnl import get_version_realized_pnl
+
+        mock_realized_pnl.disposal_taxable = True
+        mock_realized_pnl.transaction_id = 100
+        mock_session.get.return_value = mock_version
+
+        count_r = MagicMock(); count_r.one.return_value = 1
+        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock(); fee_r.all.return_value = []
+        # Override: tx 100 → not taxable for FR
+        override_r = MagicMock(); override_r.all.return_value = [(100, False)]
+        mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
+
+        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        entry = result["items"][0]
+        assert entry.taxable is True   # raw disposal_taxable unchanged
+        assert entry.fr_tax_effective is False  # overridden for FR
+
+    def test_override_true_overrides_non_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+        """FR override is_taxable=True overrides disposal_taxable=False."""
+        from backend.api.routes.pnl import get_version_realized_pnl
+
+        mock_realized_pnl.disposal_taxable = False
+        mock_realized_pnl.transaction_id = 100
+        mock_session.get.return_value = mock_version
+
+        count_r = MagicMock(); count_r.one.return_value = 1
+        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock(); fee_r.all.return_value = []
+        override_r = MagicMock(); override_r.all.return_value = [(100, True)]
+        mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
+
+        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        entry = result["items"][0]
+        assert entry.taxable is False   # raw unchanged
+        assert entry.fr_tax_effective is True  # overridden
+
+    def test_override_only_applies_to_matching_transaction(self, mock_session, mock_version, no_filters):
+        """Override for tx 200 doesn't affect tx 100."""
+        from backend.api.routes.pnl import get_version_realized_pnl
+
+        entry1 = MagicMock()
+        entry1.pnl_id = 1; entry1.asset_id = 2; entry1.transaction_id = 100
+        entry1.qty = Decimal("1"); entry1.proceeds_in_base = Decimal("2000")
+        entry1.cost_basis_in_base = Decimal("1000"); entry1.pnl_in_base = Decimal("1000")
+        entry1.disposal_taxable = True; entry1.origin_unit_id = 1
+        entry1.realized_at = datetime.utcnow(); entry1.holding_period_days = 10
+        entry1.proceeds_source = None; entry1.proceeds_price = None
+        entry1.proceeds_price_source = None; entry1.proceeds_price_timestamp = None
+        entry1.related_asset_symbol = None
+        entry1.asset = MagicMock(); entry1.asset.asset_id = 2
+        entry1.asset.symbol = "BTC"; entry1.asset.label = "Bitcoin"
+        entry1.transaction = MagicMock(); entry1.transaction.account_id = 1
+        entry1.transaction.account_rel = MagicMock(); entry1.transaction.account_rel.name = "Acc"
+
+        entry2 = MagicMock()
+        entry2.pnl_id = 2; entry2.asset_id = 2; entry2.transaction_id = 200
+        entry2.qty = Decimal("2"); entry2.proceeds_in_base = Decimal("4000")
+        entry2.cost_basis_in_base = Decimal("2000"); entry2.pnl_in_base = Decimal("2000")
+        entry2.disposal_taxable = True; entry2.origin_unit_id = 1
+        entry2.realized_at = datetime.utcnow(); entry2.holding_period_days = 20
+        entry2.proceeds_source = None; entry2.proceeds_price = None
+        entry2.proceeds_price_source = None; entry2.proceeds_price_timestamp = None
+        entry2.related_asset_symbol = None
+        entry2.asset = MagicMock(); entry2.asset.asset_id = 2
+        entry2.asset.symbol = "BTC"; entry2.asset.label = "Bitcoin"
+        entry2.transaction = MagicMock(); entry2.transaction.account_id = 1
+        entry2.transaction.account_rel = MagicMock(); entry2.transaction.account_rel.name = "Acc"
+
+        mock_session.get.return_value = mock_version
+
+        count_r = MagicMock(); count_r.one.return_value = 2
+        entries_r = MagicMock(); entries_r.all.return_value = [entry1, entry2]
+        fee_r = MagicMock(); fee_r.all.return_value = []
+        # Only tx 200 has an override
+        override_r = MagicMock(); override_r.all.return_value = [(200, False)]
+        mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
+
+        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        items = result["items"]
+
+        # entry1 (tx 100): no override → fr_tax_effective = disposal_taxable = True
+        assert items[0].fr_tax_effective is True
+        # entry2 (tx 200): override False → fr_tax_effective = False
+        assert items[1].fr_tax_effective is False

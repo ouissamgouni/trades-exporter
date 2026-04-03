@@ -1,0 +1,12 @@
+# French Tax Scenario — Bundles
+# ===============================
+# Bundle with a manual taxability override to test Rule 1 of the taxability chain.
+# The swap BTC→ETH (transactions fr_tax_009/010) is placed in a bundle with
+# taxability overridden to "non_taxable", regardless of config default.
+
+bundles:
+  - name: "Non-taxable swap override"
+    taxability_override: "non_taxable"
+    source_transaction_ids:
+      - "fr_tax_009_swap_btc_out"
+      - "fr_tax_010_swap_eth_in"

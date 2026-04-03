@@ -305,6 +305,7 @@ class ConnectorPolymarket(BaseConnector):
                 source_to_account=to_account,
                 network=normalize_network("polygon"),
                 tags=[tags],
+                taxability_status="non_taxable",
             )
 
             return normalized

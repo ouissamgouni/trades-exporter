@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { API_URL, PriceResponse } from '../types';
 import type { BalanceEntry } from '../types';
 import { toaster } from '../components/ui/toaster';
@@ -18,6 +19,7 @@ import { buildPriceMap, applyPricesToAssets, computeSummaryTotals } from '../com
 export function usePnLPrices() {
     const { state, dispatch, assets, versionMetrics } = usePnL();
     const { config, prices, loadingPriceAssetIds } = state;
+    const queryClient = useQueryClient();
 
     // Ref for loadingPriceAssetIds read inside async closures.
     const loadingIdsRef = useRef(state.loadingPriceAssetIds);
@@ -164,8 +166,9 @@ export function usePnLPrices() {
             }));
             await fetchPrices(balanceEntries, config.base_currency_symbol);
             versionMetrics.refetch();
+            queryClient.invalidateQueries({ queryKey: ['portfolio-timeline'] });
         }
-    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics]);
+    }, [assets, config.base_currency_symbol, fetchPrices, versionMetrics, queryClient]);
 
     // Retry only failed prices, then trigger the same post-refresh logic
     const retryFailedPrices = useCallback(async () => {

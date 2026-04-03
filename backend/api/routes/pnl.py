@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from sqlalchemy import func, not_, or_, case, cast, String as SAString
+from sqlalchemy import and_, func, not_, or_, case, cast, String as SAString
 from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_session_dependency
@@ -24,7 +24,9 @@ from backend.db.models import (
     Asset, NormalizedTransaction, CalculationUnit,
     CalculationVersion, CostLot, RealizedPnl, PnlWarning, LotSettlement, ConsumedLotSlice, CostLotEvent, FeeEntry, CalculationUnitLeg,
     AssetCategory, Category, Dimension, UnitPattern, Account, SyncJobConnectorRun, AppSettings,
-    PriceSnapshot,
+    PriceSnapshot, FrenchCryptoTaxEntry, FrenchCryptoTaxAnnualSummary,
+    FrenchSecuritiesTaxEntry, FrenchSecuritiesTaxAnnualSummary,
+    UserCalculationBundle, TransactionTaxOverride,
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
@@ -273,6 +275,7 @@ class RealizedPnLResponse(BaseModel):
     cost_basis_in_base: float
     pnl_in_base: float
     taxable: bool
+    fr_tax_effective: bool = True  # Resolved French taxability from TransactionTaxOverride
     is_fee: bool = False  # True if this entry originated from a fee leg
     transaction_id: Optional[int] = None
     unit_id: Optional[int] = None
@@ -1246,7 +1249,7 @@ def calculate_pnl(
             allow_negative_balances=request.allow_negative_balances,
             compute_residuals=request.compute_residuals,
             crypto_swap_taxable_by_default=request.crypto_swap_taxable_by_default,
-            fee_taxable_by_default=request.fee_taxable_by_default,  
+            fee_taxable_by_default=request.fee_taxable_by_default,
         )
 
         # Create engine 
@@ -2229,6 +2232,7 @@ def get_version_realized_pnl(
     date_from: Optional[str] = None,           # ISO date string
     date_to: Optional[str] = None,             # ISO date string
     min_abs_pnl: Optional[float] = None,       # Minimum absolute P&L value to include
+    fr_tax_category: Optional[str] = None,     # "crypto", "securities", "excluded"
     sort_by: Optional[str] = None,             # "pnl" or "holding_period" or "date" (default)
     order: Optional[str] = None,               # "asc" or "desc"
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
@@ -2262,7 +2266,23 @@ def get_version_realized_pnl(
         base_query = base_query.where(RealizedPnl.asset_id == asset_id)
 
     if is_taxable is not None:
-        base_query = base_query.where(RealizedPnl.disposal_taxable == is_taxable)
+        if fr_tax_category:
+            # FR tax context: filter by effective taxability (override > disposal_taxable)
+            _fr_override_sq = (
+                select(TransactionTaxOverride.transaction_id, TransactionTaxOverride.is_taxable)
+                .where(TransactionTaxOverride.jurisdiction == "fr")
+                .subquery()
+            )
+            base_query = base_query.outerjoin(
+                _fr_override_sq,
+                RealizedPnl.transaction_id == _fr_override_sq.c.transaction_id,
+            )
+            _effective_taxable = func.coalesce(
+                _fr_override_sq.c.is_taxable, RealizedPnl.disposal_taxable
+            )
+            base_query = base_query.where(_effective_taxable == is_taxable)
+        else:
+            base_query = base_query.where(RealizedPnl.disposal_taxable == is_taxable)
 
     if pnl_sign == "gain":
         base_query = base_query.where(RealizedPnl.pnl_in_base > 0)
@@ -2310,6 +2330,24 @@ def get_version_realized_pnl(
     if min_abs_pnl is not None and min_abs_pnl > 0:
         base_query = base_query.where(func.abs(RealizedPnl.pnl_in_base) >= min_abs_pnl)
 
+    # Filter by French tax category (asset type only — no envelope exclusion)
+    if fr_tax_category:
+        if fr_tax_category == "crypto":
+            _crypto_asset_sq = select(Asset.asset_id).where(Asset.price_type == "crypto")
+            base_query = base_query.where(
+                RealizedPnl.asset_id.in_(_crypto_asset_sq),
+            )
+        elif fr_tax_category == "securities":
+            _sec_asset_sq = select(Asset.asset_id).where(
+                or_(
+                    ~Asset.price_type.in_(["crypto", "fiat"]),
+                    Asset.price_type == None,
+                )
+            )
+            base_query = base_query.where(
+                RealizedPnl.asset_id.in_(_sec_asset_sq),
+            )
+
     # Get total count
     count_query = select(func.count()).select_from(base_query.subquery())
     total = session.exec(count_query).one()
@@ -2345,7 +2383,18 @@ def get_version_realized_pnl(
             select(FeeEntry.realized_pnl_id).where(FeeEntry.realized_pnl_id.in_(entry_ids))
         ).all()
         fee_linked_ids = set(fee_linked_rows)
-    
+
+    # Batch-load FR tax overrides for entries on this page
+    tx_ids = [e.transaction_id for e in entries if e.transaction_id]
+    fr_overrides: Dict[int, bool] = {}
+    if tx_ids:
+        override_rows = session.exec(
+            select(TransactionTaxOverride.transaction_id, TransactionTaxOverride.is_taxable)
+            .where(TransactionTaxOverride.jurisdiction == "fr")
+            .where(TransactionTaxOverride.transaction_id.in_(tx_ids))
+        ).all()
+        fr_overrides = {tid: val for tid, val in override_rows}
+
     items = [
         RealizedPnLResponse(
             pnl_id=e.pnl_id,
@@ -2359,6 +2408,7 @@ def get_version_realized_pnl(
             cost_basis_in_base=float(e.cost_basis_in_base),
             pnl_in_base=float(e.pnl_in_base),
             taxable=e.disposal_taxable,
+            fr_tax_effective=fr_overrides.get(e.transaction_id, e.disposal_taxable),
             is_fee=e.pnl_id in fee_linked_ids,
             transaction_id=e.transaction_id,
             unit_id=e.origin_unit_id,
@@ -2382,6 +2432,9 @@ def get_version_realized_pnl(
 @router.get("/versions/{version_id}/realized-pnl/filter-options", response_model=RealizedPnLFilterOptionsResponse)
 def get_realized_pnl_filter_options(
     version_id: int,
+    fr_tax_category: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     tx_filters: PnLTransactionFilters = Depends(get_pnl_transaction_filters),
     session: Session = Depends(get_session_dependency),
 ):
@@ -2396,6 +2449,31 @@ def get_realized_pnl_filter_options(
         .where(CalculationUnit.version_id == version_id)
     )
     base_q, _ = _apply_unit_filter(base_q, tx_filters, version_id, session, unit_column=RealizedPnl.origin_unit_id)
+
+    # Apply date range
+    if date_from:
+        base_q = base_q.where(RealizedPnl.realized_at >= datetime.fromisoformat(date_from))
+    if date_to:
+        base_q = base_q.where(RealizedPnl.realized_at <= datetime.fromisoformat(date_to))
+
+    # Apply fr_tax_category scoping (asset type only — no envelope exclusion)
+    if fr_tax_category:
+        if fr_tax_category == "crypto":
+            _crypto_asset_sq = select(Asset.asset_id).where(Asset.price_type == "crypto")
+            base_q = base_q.where(
+                RealizedPnl.asset_id.in_(_crypto_asset_sq),
+            )
+        elif fr_tax_category == "securities":
+            _sec_asset_sq = select(Asset.asset_id).where(
+                or_(
+                    ~Asset.price_type.in_(["crypto", "fiat"]),
+                    Asset.price_type == None,
+                )
+            )
+            base_q = base_q.where(
+                RealizedPnl.asset_id.in_(_sec_asset_sq),
+            )
+
     scoped_sq = base_q.subquery()
 
     # Assets
@@ -2411,13 +2489,30 @@ def get_realized_pnl_filter_options(
               for aid, sym, lbl, c in asset_rows]
 
     # Taxable / non-taxable counts
-    tax_q = (
-        select(
-            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == True),
-            func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == False),
+    if fr_tax_category:
+        # FR tax context: count by effective taxability (override > disposal_taxable)
+        _fr_ov_sq = (
+            select(TransactionTaxOverride.transaction_id, TransactionTaxOverride.is_taxable)
+            .where(TransactionTaxOverride.jurisdiction == "fr")
+            .subquery()
         )
-        .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
-    )
+        _eff = func.coalesce(_fr_ov_sq.c.is_taxable, RealizedPnl.disposal_taxable)
+        tax_q = (
+            select(
+                func.count(RealizedPnl.pnl_id).filter(_eff == True),
+                func.count(RealizedPnl.pnl_id).filter(_eff == False),
+            )
+            .outerjoin(_fr_ov_sq, RealizedPnl.transaction_id == _fr_ov_sq.c.transaction_id)
+            .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+        )
+    else:
+        tax_q = (
+            select(
+                func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == True),
+                func.count(RealizedPnl.pnl_id).filter(RealizedPnl.disposal_taxable == False),
+            )
+            .where(RealizedPnl.pnl_id.in_(select(scoped_sq)))
+        )
     taxable_count, non_taxable_count = session.exec(tax_q).one()
 
     # Gain / loss counts
@@ -2681,6 +2776,98 @@ def override_realized_pnl_fmv(
         price=float(snapshot.price),
         snapshot_time=snapshot.snapshot_time.isoformat(),
         recalculation_started=started,
+    )
+
+
+# =============================================================================
+# Override French tax taxability for a realized P&L entry
+# =============================================================================
+
+class FrTaxOverrideRequest(BaseModel):
+    """Request body for overriding French tax taxability."""
+    is_taxable: Optional[bool] = Field(
+        None, description='true/false to set override, null to clear (reset to computed default)'
+    )
+
+
+class FrTaxOverrideResponse(BaseModel):
+    """Response after updating French tax override."""
+    pnl_id: int
+    fr_tax_effective: bool  # Resolved value for French tax purposes
+
+
+@router.patch(
+    "/versions/{version_id}/realized-pnl/{pnl_id}/fr-tax-override",
+    response_model=FrTaxOverrideResponse,
+)
+def override_fr_tax(
+    version_id: int,
+    pnl_id: int,
+    body: FrTaxOverrideRequest,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Override French tax taxability for a single realized P&L entry.
+
+    Writes to TransactionTaxOverride so the override survives PnL recalculations.
+    - null: clear override (use computed disposal_taxable)
+    - true/false: set override for French tax jurisdiction
+    """
+    rpnl = session.exec(
+        select(RealizedPnl).where(RealizedPnl.pnl_id == pnl_id)
+    ).first()
+    if not rpnl:
+        raise HTTPException(status_code=404, detail=f"Realized P&L entry {pnl_id} not found")
+
+    unit = session.get(CalculationUnit, rpnl.origin_unit_id)
+    if not unit or unit.version_id != version_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Realized P&L {pnl_id} not found in version {version_id}",
+        )
+
+    if not rpnl.transaction_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Realized P&L {pnl_id} has no transaction — cannot set tax override",
+        )
+
+    if body.is_taxable is None:
+        # Clear override: delete the row
+        existing = session.exec(
+            select(TransactionTaxOverride).where(
+                TransactionTaxOverride.transaction_id == rpnl.transaction_id,
+                TransactionTaxOverride.jurisdiction == "fr",
+            )
+        ).first()
+        if existing:
+            session.delete(existing)
+        session.commit()
+        effective = rpnl.disposal_taxable
+    else:
+        # Upsert override
+        existing = session.exec(
+            select(TransactionTaxOverride).where(
+                TransactionTaxOverride.transaction_id == rpnl.transaction_id,
+                TransactionTaxOverride.jurisdiction == "fr",
+            )
+        ).first()
+        if existing:
+            existing.is_taxable = body.is_taxable
+            existing.updated_at = datetime.now()
+        else:
+            override = TransactionTaxOverride(
+                transaction_id=rpnl.transaction_id,
+                jurisdiction="fr",
+                is_taxable=body.is_taxable,
+            )
+            session.add(override)
+        session.commit()
+        effective = body.is_taxable
+
+    return FrTaxOverrideResponse(
+        pnl_id=pnl_id,
+        fr_tax_effective=effective,
     )
 
 
@@ -3776,7 +3963,14 @@ class PnLFilterOptionsResponse(BaseModel):
     connector_runs: List[PnLFilterOption]
     tags: List[PnLFilterOption]
     networks: List[PnLFilterOption]
+    price_quote_assets: List[PnLFilterOption] = []
+    fee_quote_assets: List[PnLFilterOption] = []
+    bundle_patterns: List[PnLFilterOption] = []
     non_owned_count: int = 0
+    include_fee_count: int = 0
+    has_fee_count: int = 0
+    has_bundle_count: int = 0
+    total_count: int = 0
 
 
 @router.get("/versions/{version_id}/filter-options", response_model=PnLFilterOptionsResponse)
@@ -4099,6 +4293,98 @@ def get_pnl_filter_options(
     ]
 
     # ------------------------------------------------------------------
+    # Price quote assets
+    # ------------------------------------------------------------------
+    pqa_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.price_quote_asset_id == Asset.asset_id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(Asset.symbol)
+    )
+    price_quote_asset_options = [
+        PnLFilterOption(
+            value=str(a[0]),
+            label=f"{a[1]}" + (f" ({a[2]})" if a[2] else ""),
+            count=a[3],
+        )
+        for a in session.exec(pqa_q).all()
+    ]
+
+    # ------------------------------------------------------------------
+    # Fee quote assets
+    # ------------------------------------------------------------------
+    fqa_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.fee_quote_asset_id == Asset.asset_id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(Asset.symbol)
+    )
+    fee_quote_asset_options = [
+        PnLFilterOption(
+            value=str(a[0]),
+            label=f"{a[1]}" + (f" ({a[2]})" if a[2] else ""),
+            count=a[3],
+        )
+        for a in session.exec(fqa_q).all()
+    ]
+
+    # ------------------------------------------------------------------
+    # Bundle patterns
+    # ------------------------------------------------------------------
+    bundle_q = (
+        select(UserCalculationBundle.pattern, func.count(version_txs.c.id).label("cnt"))
+        .join(NormalizedTransaction, NormalizedTransaction.user_calculation_unit_id == UserCalculationBundle.id)
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .group_by(UserCalculationBundle.pattern)
+        .order_by(UserCalculationBundle.pattern)
+    )
+    bundle_pattern_options = [
+        PnLFilterOption(
+            value=r[0],
+            label=r[0].replace('_', ' ').title() if r[0] else 'Unknown',
+            count=r[1],
+        )
+        for r in session.exec(bundle_q).all() if r[0]
+    ]
+
+    # ------------------------------------------------------------------
+    # Include fee count
+    # ------------------------------------------------------------------
+    include_fee_count = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.include_fee == True)  # noqa: E712
+    ).one() or 0
+
+    # ------------------------------------------------------------------
+    # Has fee count (fee > 0)
+    # ------------------------------------------------------------------
+    has_fee_count = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.fee.isnot(None))
+        .where(NormalizedTransaction.fee > 0)
+    ).one() or 0
+
+    # ------------------------------------------------------------------
+    # Has bundle count
+    # ------------------------------------------------------------------
+    has_bundle_count = session.exec(
+        select(func.count(NormalizedTransaction.id))
+        .join(version_txs, NormalizedTransaction.id == version_txs.c.id)
+        .where(NormalizedTransaction.user_calculation_unit_id.isnot(None))
+    ).one() or 0
+
+    # ------------------------------------------------------------------
+    # Total count
+    # ------------------------------------------------------------------
+    total_count = session.exec(
+        select(func.count(version_txs.c.id))
+    ).one() or 0
+
+    # ------------------------------------------------------------------
     # Build response
     # ------------------------------------------------------------------
     return PnLFilterOptionsResponse(
@@ -4117,7 +4403,14 @@ def get_pnl_filter_options(
         connector_runs=connector_run_options,
         tags=tag_options,
         networks=network_options,
+        price_quote_assets=price_quote_asset_options,
+        fee_quote_assets=fee_quote_asset_options,
+        bundle_patterns=bundle_pattern_options,
         non_owned_count=non_owned_count,
+        include_fee_count=include_fee_count,
+        has_fee_count=has_fee_count,
+        has_bundle_count=has_bundle_count,
+        total_count=total_count,
     )
 
 
@@ -6118,3 +6411,359 @@ def get_enriched_transactions_filter_options(
         has_fees_count=has_fees_count,
         warning_types=warning_types,
     )
+
+
+# =============================================================================
+# =============================================================================
+# French Tax — On-Demand Compute & Status
+# =============================================================================
+
+
+@router.post("/versions/{version_id}/compute-tax")
+def compute_tax(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Compute French tax for an existing PnL version (on-demand).
+    
+    Idempotent: re-running will delete previous results and recompute.
+    Runs BOTH crypto (Art. 150 VH bis) and securities (Art. 150-0 A, CUMP).
+    """
+    from backend.services.french_tax_service import FrenchTaxService
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    try:
+        service = FrenchTaxService(session)
+        result = service.compute_for_version(version_id)
+        return result
+    except Exception as e:
+        log.exception("compute_tax_failed", version_id=version_id)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/versions/{version_id}/tax-status")
+def get_tax_status(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Check whether French tax results exist for a version.
+    """
+    from backend.services.french_tax_service import FrenchTaxService
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    service = FrenchTaxService(session)
+    return service.get_tax_status(version_id)
+
+
+# =============================================================================
+# French Tax Endpoints
+# =============================================================================
+
+
+class FrenchTaxEntryResponse(BaseModel):
+    """Single French crypto tax line item for a disposal."""
+    id: int
+    realized_pnl_id: Optional[int]
+    fiscal_year: int
+    cession_date: Optional[datetime]
+    asset_symbol: str
+    proceeds: float
+    cost_basis: float
+    taxable_gain: float
+    tax_amount: float
+    note: Optional[str] = None
+
+
+class FrenchTaxAnnualSummaryResponse(BaseModel):
+    """Annual aggregated French crypto tax summary."""
+    id: int
+    fiscal_year: int
+    total_gains: float
+    total_losses: float
+    net_taxable: float
+    tax_before_carryforward: float
+    loss_carryforward_used: float
+    loss_carried_forward: float
+    tax_total: float
+    transaction_count: int
+
+
+class FrenchTaxReportResponse(BaseModel):
+    """Complete French tax report for a calculation version."""
+    version_id: int
+    tax_jurisdiction: Optional[str]
+    total_tax: float
+    annual_summaries: List[FrenchTaxAnnualSummaryResponse]
+    entries: List[FrenchTaxEntryResponse]
+
+
+@router.get("/versions/{version_id}/fr-crypto-tax", response_model=FrenchTaxReportResponse)
+def get_fr_crypto_tax(
+    version_id: int,
+    fiscal_year: Optional[int] = Query(None, description="Filter by fiscal year"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Return French crypto tax results (Art. 150 VH bis CGI) for a calculation version.
+    
+    Returns line-item entries and per-year summaries.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Query annual summaries
+    summary_q = select(FrenchCryptoTaxAnnualSummary).where(
+        FrenchCryptoTaxAnnualSummary.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        summary_q = summary_q.where(FrenchCryptoTaxAnnualSummary.fiscal_year == fiscal_year)
+    summaries = session.exec(summary_q.order_by(FrenchCryptoTaxAnnualSummary.fiscal_year)).all()
+
+    # Query line entries
+    entry_q = select(FrenchCryptoTaxEntry).where(
+        FrenchCryptoTaxEntry.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        entry_q = entry_q.where(FrenchCryptoTaxEntry.fiscal_year == fiscal_year)
+    entries = session.exec(entry_q.order_by(FrenchCryptoTaxEntry.cession_date)).all()
+
+    total_tax = sum(float(s.tax_total) for s in summaries)
+
+    return FrenchTaxReportResponse(
+        version_id=version_id,
+        tax_jurisdiction="fr",
+        total_tax=total_tax,
+        annual_summaries=[
+            FrenchTaxAnnualSummaryResponse(
+                id=s.id,
+                fiscal_year=s.fiscal_year,
+                total_gains=float(s.total_gains),
+                total_losses=float(s.total_losses),
+                net_taxable=float(s.net_taxable),
+                tax_before_carryforward=float(s.tax_before_carryforward),
+                loss_carryforward_used=float(s.loss_carryforward_used),
+                loss_carried_forward=float(s.loss_carried_forward),
+                tax_total=float(s.tax_total),
+                transaction_count=s.transaction_count,
+            )
+            for s in summaries
+        ],
+        entries=[
+            FrenchTaxEntryResponse(
+                id=e.id,
+                realized_pnl_id=e.realized_pnl_id,
+                fiscal_year=e.fiscal_year,
+                cession_date=e.cession_date,
+                asset_symbol=e.asset_symbol,
+                proceeds=float(e.proceeds),
+                cost_basis=float(e.cost_basis),
+                taxable_gain=float(e.taxable_gain),
+                tax_amount=float(e.tax_amount),
+                note=e.note,
+            )
+            for e in entries
+        ],
+    )
+
+
+@router.get("/versions/{version_id}/fr-crypto-tax/export")
+def export_fr_crypto_tax_csv(
+    version_id: int,
+    fiscal_year: Optional[int] = Query(None, description="Limit export to this fiscal year"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Download a Cerfa 2086-compatible CSV export for French crypto taxes.
+    
+    Returns a UTF-8 CSV (with BOM for Excel) containing all disposal line items
+    and annual totals. Suitable for direct import into tax preparation software.
+    """
+    from fastapi.responses import Response
+    from backend.services.pnl.tax_export import export_cerfa_2086_csv
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    entry_q = select(FrenchCryptoTaxEntry).where(
+        FrenchCryptoTaxEntry.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        entry_q = entry_q.where(FrenchCryptoTaxEntry.fiscal_year == fiscal_year)
+    entries = session.exec(entry_q.order_by(FrenchCryptoTaxEntry.cession_date)).all()
+
+    summary_q = select(FrenchCryptoTaxAnnualSummary).where(
+        FrenchCryptoTaxAnnualSummary.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        summary_q = summary_q.where(FrenchCryptoTaxAnnualSummary.fiscal_year == fiscal_year)
+    summaries = session.exec(summary_q).all()
+
+    csv_content = export_cerfa_2086_csv(entries, summaries)
+    year_label = str(fiscal_year) if fiscal_year else "all"
+    ts = version.created_at.strftime("%Y%m%d_%H%M") if version.created_at else "unknown"
+    filename = f"cerfa_2086_v{version_id}_{year_label}_{ts}.csv"
+
+    return Response(
+        content=csv_content.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class FrenchSecuritiesTaxEntryResponse(BaseModel):
+    """Single French securities tax line item."""
+    id: int
+    realized_pnl_id: Optional[int]
+    fiscal_year: int
+    trade_date: Optional[datetime]
+    asset_symbol: str
+    direction: str
+    qty: float
+    proceeds_per_unit: float
+    cump_at_time: float
+    gain_loss: float
+    tax_amount: float
+    note: Optional[str] = None
+
+
+class FrenchSecuritiesTaxAnnualSummaryResponse(BaseModel):
+    """Annual summary for French securities tax."""
+    id: int
+    fiscal_year: int
+    total_gains: float
+    total_losses: float
+    net_taxable: float
+    loss_carryforward_used: float
+    loss_carried_forward: float
+    tax_total: float
+    transaction_count: int
+
+
+class FrenchSecuritiesTaxReportResponse(BaseModel):
+    """Complete French securities tax report for a calculation version."""
+    version_id: int
+    tax_jurisdiction: Optional[str]
+    total_tax: float
+    annual_summaries: List[FrenchSecuritiesTaxAnnualSummaryResponse]
+    entries: List[FrenchSecuritiesTaxEntryResponse]
+
+
+@router.get("/versions/{version_id}/fr-securities-tax", response_model=FrenchSecuritiesTaxReportResponse)
+def get_fr_securities_tax(
+    version_id: int,
+    fiscal_year: Optional[int] = Query(None, description="Filter by fiscal year"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Return French securities tax results (Art. 150-0 A CGI) for a calculation version.
+
+    Returns line-item entries and per-year summaries. Requires the calculation to have
+    been run with tax_jurisdiction='fr'.
+    """
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Query annual summaries
+    summary_q = select(FrenchSecuritiesTaxAnnualSummary).where(
+        FrenchSecuritiesTaxAnnualSummary.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        summary_q = summary_q.where(FrenchSecuritiesTaxAnnualSummary.fiscal_year == fiscal_year)
+    summaries = session.exec(summary_q.order_by(FrenchSecuritiesTaxAnnualSummary.fiscal_year)).all()
+
+    # Query line entries
+    entry_q = select(FrenchSecuritiesTaxEntry).where(
+        FrenchSecuritiesTaxEntry.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        entry_q = entry_q.where(FrenchSecuritiesTaxEntry.fiscal_year == fiscal_year)
+    entries = session.exec(entry_q.order_by(FrenchSecuritiesTaxEntry.trade_date)).all()
+
+    total_tax = sum(float(s.tax_total) for s in summaries)
+
+    return FrenchSecuritiesTaxReportResponse(
+        version_id=version_id,
+        tax_jurisdiction="fr",
+        total_tax=total_tax,
+        annual_summaries=[
+            FrenchSecuritiesTaxAnnualSummaryResponse(
+                id=s.id,
+                fiscal_year=s.fiscal_year,
+                total_gains=float(s.total_gains),
+                total_losses=float(s.total_losses),
+                net_taxable=float(s.net_taxable),
+                loss_carryforward_used=float(s.loss_carryforward_used),
+                loss_carried_forward=float(s.loss_carried_forward),
+                tax_total=float(s.tax_total),
+                transaction_count=s.transaction_count,
+            )
+            for s in summaries
+        ],
+        entries=[
+            FrenchSecuritiesTaxEntryResponse(
+                id=e.id,
+                realized_pnl_id=e.realized_pnl_id,
+                fiscal_year=e.fiscal_year,
+                trade_date=e.trade_date,
+                asset_symbol=e.asset_symbol,
+                direction=e.direction,
+                qty=float(e.qty),
+                proceeds_per_unit=float(e.proceeds_per_unit),
+                cump_at_time=float(e.cump_at_time),
+                gain_loss=float(e.gain_loss),
+                tax_amount=float(e.tax_amount),
+                note=e.note,
+            )
+            for e in entries
+        ],
+    )
+
+
+@router.get("/versions/{version_id}/fr-securities-tax/export")
+def export_fr_securities_tax_csv(
+    version_id: int,
+    fiscal_year: Optional[int] = Query(None, description="Limit export to this fiscal year"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Download a Form 2074-compatible CSV export for French securities capital gains.
+    
+    Returns a UTF-8 CSV (with BOM for Excel) compatible with the Form 2074
+    for declaring securities capital gains under Article 150-0 A CGI.
+    """
+    from fastapi.responses import Response
+    from backend.services.pnl.tax_export import export_form_2074_csv
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    entry_q = select(FrenchSecuritiesTaxEntry).where(
+        FrenchSecuritiesTaxEntry.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        entry_q = entry_q.where(FrenchSecuritiesTaxEntry.fiscal_year == fiscal_year)
+    entries = session.exec(entry_q.order_by(FrenchSecuritiesTaxEntry.trade_date)).all()
+
+    csv_content = export_form_2074_csv(entries)
+    year_label = str(fiscal_year) if fiscal_year else "all"
+    ts = version.created_at.strftime("%Y%m%d_%H%M") if version.created_at else "unknown"
+    filename = f"form_2074_v{version_id}_{year_label}_{ts}.csv"
+
+    return Response(
+        content=csv_content.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+

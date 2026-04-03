@@ -291,12 +291,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     if (isDrilled) {
         return (
             <>
-                <DrillDownBreadcrumb
-                    assetsOpen={assetsOpen}
-                    auditOpen={auditOpen}
-                    onToggleAssets={() => setAssetsOpen(v => !v)}
-                    onToggleAudit={() => setAuditOpen(v => !v)}
-                />
+                <DrillDownBreadcrumb />
                 <PnLDetailPanel
                     drill={drill}
                     assetsOpen={assetsOpen}
@@ -318,12 +313,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     // =====================================================================
     return (
         <>
-            <DrillDownBreadcrumb
-                assetsOpen={assetsOpen}
-                auditOpen={auditOpen}
-                onToggleAssets={() => setAssetsOpen(v => !v)}
-                onToggleAudit={() => setAuditOpen(v => !v)}
-            />
+            <DrillDownBreadcrumb />
 
             {showMismatchedOnly && (
                 <Flex align="center" gap={2} mb={3} px={1}>

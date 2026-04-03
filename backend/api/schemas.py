@@ -114,6 +114,11 @@ class AppliedFilters(BaseModel):
     networks: List[str] = Field(default_factory=list)
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+    price_quote_asset_ids: List[int] = Field(default_factory=list)
+    fee_quote_asset_ids: List[int] = Field(default_factory=list)
+    include_fee: Optional[bool] = None  # None=all, True=included, False=not included
+    has_bundle: Optional[bool] = None  # None=all, True=has bundle, False=no bundle
+    bundle_patterns: List[str] = Field(default_factory=list)
     pnl_cal_version: Optional[int] = None
     pnl_cal_inclusions_status: Optional[str] = None
 
@@ -337,6 +342,9 @@ class TransactionResponse(BaseModel):
     account_name: Optional[str] = None
     from_account_name: Optional[str] = None
     to_account_name: Optional[str] = None
+
+    # FR tax override indicator
+    has_fr_tax_override: Optional[bool] = None
 
 
 # =============================================================================

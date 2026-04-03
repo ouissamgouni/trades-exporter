@@ -1,0 +1,35 @@
+# Default Scenario — Deterministic Mock Prices
+# ===============================================
+# Basic prices for the default seed data. The "current" entry is used as
+# a catch-all for any datetime not explicitly listed.
+#
+# EUR/USD cross-rate is included so fiat conversions work in mock mode.
+
+prices:
+  # ── BTC (USD) ──────────────────────────────────────────────
+  - asset_symbol: BTC
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "62000.00"
+
+  # ── ETH (USD) ──────────────────────────────────────────────
+  - asset_symbol: ETH
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "3400.00"
+
+  # ── USDT (USD) ─────────────────────────────────────────────
+  - asset_symbol: USDT
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "1.00"
+
+  # ── EUR/USD fiat cross-rate ────────────────────────────────
+  - asset_symbol: EUR
+    quote_currency: USD
+    entries:
+      - at: current
+        price: "1.08"

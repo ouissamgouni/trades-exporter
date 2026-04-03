@@ -12,11 +12,12 @@ import {
     Flex,
     Heading,
     HStack,
+    Switch,
     Text,
     VStack,
-    Badge,
     Spinner,
 } from '@chakra-ui/react';
+import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { API_URL, Asset } from '../types';
 
@@ -156,7 +157,8 @@ export const PnLDefaultsEditor: React.FC = () => {
     }
 
     return (
-        <VStack align="stretch" gap={6}>
+        <VStack align="stretch" gap={4}>
+            {/* Header */}
             <Flex justify="space-between" align="center">
                 <Box>
                     <Heading size="md">P&L Calculation Defaults</Heading>
@@ -166,12 +168,13 @@ export const PnLDefaultsEditor: React.FC = () => {
                 </Box>
                 {hasChanges && (
                     <HStack>
-                        <Button size="sm" variant="ghost" onClick={handleReset}>
+                        <Button size="sm" variant="ghost" borderRadius={0} onClick={handleReset}>
                             Cancel
                         </Button>
                         <Button
                             size="sm"
                             colorPalette="blue"
+                            borderRadius={0}
                             onClick={handleSave}
                             loading={isSaving}
                         >
@@ -181,203 +184,211 @@ export const PnLDefaultsEditor: React.FC = () => {
                 )}
             </Flex>
 
-            {/* Base Currency */}
-            <Box>
-                <Text fontWeight="semibold" fontSize="sm" mb={2}>Base Currency</Text>
-                <Text fontSize="xs" color="gray.500" mb={2}>
-                    All P&L gains/losses and cost basis are reported in this currency.
-                </Text>
-                <HStack gap={2} flexWrap="wrap">
-                    {fiatAssets.length > 0 ? (
-                        fiatAssets.map((asset) => (
-                            <Box
-                                key={asset.asset_id}
-                                px={4}
-                                py={2}
-                                borderRadius="md"
-                                cursor="pointer"
-                                borderWidth={1}
-                                borderColor={defaults.base_currency === asset.symbol ? 'blue.400' : 'gray.200'}
-                                bg={defaults.base_currency === asset.symbol ? 'blue.50' : 'white'}
-                                _hover={{ borderColor: 'blue.300' }}
-                                onClick={() => updateField('base_currency', asset.symbol)}
-                            >
-                                <Text fontWeight="semibold" fontSize="sm">{asset.symbol}</Text>
-                                {asset.label && <Text fontSize="xs" color="gray.500">{asset.label}</Text>}
-                            </Box>
-                        ))
-                    ) : (
-                        ['EUR', 'USD', 'GBP', 'CHF'].map((sym) => (
-                            <Box
-                                key={sym}
-                                px={4}
-                                py={2}
-                                borderRadius="md"
-                                cursor="pointer"
-                                borderWidth={1}
-                                borderColor={defaults.base_currency === sym ? 'blue.400' : 'gray.200'}
-                                bg={defaults.base_currency === sym ? 'blue.50' : 'white'}
-                                _hover={{ borderColor: 'blue.300' }}
-                                onClick={() => updateField('base_currency', sym)}
-                            >
-                                <Text fontWeight="semibold" fontSize="sm">{sym}</Text>
-                            </Box>
-                        ))
-                    )}
-                </HStack>
-            </Box>
+            {/* 3-Column Grid */}
+            <Flex borderWidth={1} borderColor="gray.200" borderRadius={0}>
+                {/* Column 1 — Core */}
+                <Box flex={1} p={4} borderRightWidth={1} borderColor="gray.200">
+                    <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={4}>Core</Text>
 
-            {/* Cost Method */}
-            <Box>
-                <Text fontWeight="semibold" fontSize="sm" mb={2}>Cost Method</Text>
-                <HStack gap={2}>
-                    {LOT_METHODS.map((method) => (
-                        <Box
-                            key={method.value}
-                            px={4}
-                            py={2}
-                            borderRadius="md"
-                            cursor="pointer"
-                            borderWidth={1}
-                            borderColor={defaults.pnl_lot_method === method.value ? 'blue.400' : 'gray.200'}
-                            bg={defaults.pnl_lot_method === method.value ? 'blue.50' : 'white'}
-                            _hover={{ borderColor: 'blue.300' }}
-                            onClick={() => updateField('pnl_lot_method', method.value)}
-                        >
-                            <Text fontWeight="semibold" fontSize="sm">{method.label}</Text>
-                            <Text fontSize="xs" color="gray.500">{method.description}</Text>
-                        </Box>
-                    ))}
-                </HStack>
-            </Box>
+                    {/* Base Currency */}
+                    <Box mb={4}>
+                        <Text fontSize="xs" color="gray.500" mb={1.5}>Base Currency</Text>
+                        <HStack gap={0}>
+                            {fiatAssets.length > 0 ? (
+                                fiatAssets.map((asset) => (
+                                    <Tooltip key={asset.asset_id} content={asset.label || asset.symbol}>
+                                        <Box
+                                            px={3}
+                                            py={1.5}
+                                            cursor="pointer"
+                                            borderRadius={0}
+                                            bg={defaults.base_currency === asset.symbol ? 'gray.800' : 'gray.100'}
+                                            color={defaults.base_currency === asset.symbol ? 'white' : 'gray.600'}
+                                            _hover={{ bg: defaults.base_currency === asset.symbol ? 'gray.800' : 'gray.200' }}
+                                            onClick={() => updateField('base_currency', asset.symbol)}
+                                            transition="all 0.15s"
+                                        >
+                                            <Text fontWeight="semibold" fontSize="xs">{asset.symbol}</Text>
+                                        </Box>
+                                    </Tooltip>
+                                ))
+                            ) : (
+                                ['EUR', 'USD', 'GBP', 'CHF'].map((sym) => (
+                                    <Box
+                                        key={sym}
+                                        px={3}
+                                        py={1.5}
+                                        cursor="pointer"
+                                        borderRadius={0}
+                                        bg={defaults.base_currency === sym ? 'gray.800' : 'gray.100'}
+                                        color={defaults.base_currency === sym ? 'white' : 'gray.600'}
+                                        _hover={{ bg: defaults.base_currency === sym ? 'gray.800' : 'gray.200' }}
+                                        onClick={() => updateField('base_currency', sym)}
+                                        transition="all 0.15s"
+                                    >
+                                        <Text fontWeight="semibold" fontSize="xs">{sym}</Text>
+                                    </Box>
+                                ))
+                            )}
+                        </HStack>
+                    </Box>
 
-            {/* Lot Mode */}
-            <Box>
-                <Text fontWeight="semibold" fontSize="sm" mb={2}>Lot Mode</Text>
-                <HStack gap={2}>
-                    {LOT_MODES.map((mode) => (
-                        <Box
-                            key={mode.value}
-                            px={4}
-                            py={2}
-                            borderRadius="md"
-                            cursor="pointer"
-                            borderWidth={1}
-                            borderColor={defaults.pnl_lot_mode === mode.value ? 'blue.400' : 'gray.200'}
-                            bg={defaults.pnl_lot_mode === mode.value ? 'blue.50' : 'white'}
-                            _hover={{ borderColor: 'blue.300' }}
-                            onClick={() => updateField('pnl_lot_mode', mode.value)}
-                        >
-                            <Text fontWeight="semibold" fontSize="sm">{mode.label}</Text>
-                            <Text fontSize="xs" color="gray.500">{mode.description}</Text>
-                        </Box>
-                    ))}
-                </HStack>
-            </Box>
+                    {/* Cost Method */}
+                    <Box mb={4}>
+                        <Text fontSize="xs" color="gray.500" mb={1.5}>Cost Method</Text>
+                        <HStack gap={0}>
+                            {LOT_METHODS.map((method) => (
+                                <Tooltip key={method.value} content={method.description}>
+                                    <Box
+                                        px={3}
+                                        py={1.5}
+                                        cursor="pointer"
+                                        borderRadius={0}
+                                        bg={defaults.pnl_lot_method === method.value ? 'gray.800' : 'gray.100'}
+                                        color={defaults.pnl_lot_method === method.value ? 'white' : 'gray.600'}
+                                        _hover={{ bg: defaults.pnl_lot_method === method.value ? 'gray.800' : 'gray.200' }}
+                                        onClick={() => updateField('pnl_lot_method', method.value)}
+                                        transition="all 0.15s"
+                                    >
+                                        <Text fontWeight="semibold" fontSize="xs">{method.label}</Text>
+                                    </Box>
+                                </Tooltip>
+                            ))}
+                        </HStack>
+                    </Box>
 
-            {/* Boolean Options */}
-            <Box>
-                <Text fontWeight="semibold" fontSize="sm" mb={3}>Options</Text>
-                <VStack align="stretch" gap={3}>
-                    {[
-                        { field: 'pnl_allow_negative_balances' as const, label: 'Allow Negative Balances', description: 'Continue calculation even if asset balance goes negative' },
-                        { field: 'pnl_crypto_swap_taxable' as const, label: 'Crypto Swaps Taxable', description: 'Treat crypto-to-crypto swaps as taxable events' },
-                        { field: 'pnl_fee_taxable' as const, label: 'Fees Taxable', description: 'Treat fee disposals as taxable events' },
-                        { field: 'pnl_use_price_fallback' as const, label: 'Use Price Fallback', description: 'Fall back to latest known price when fetch fails' },
-                    ].map(({ field, label, description }) => (
-                        <Flex
-                            key={field}
-                            justify="space-between"
-                            align="center"
-                            p={3}
-                            borderWidth={1}
-                            borderRadius="md"
-                            borderColor="gray.200"
-                        >
-                            <Box>
-                                <Text fontSize="sm" fontWeight="medium">{label}</Text>
-                                <Text fontSize="xs" color="gray.500">{description}</Text>
-                            </Box>
-                            <Box
-                                px={3}
-                                py={1}
-                                borderRadius="full"
-                                cursor="pointer"
-                                bg={defaults[field] ? 'blue.500' : 'gray.200'}
-                                color={defaults[field] ? 'white' : 'gray.600'}
-                                fontSize="xs"
-                                fontWeight="semibold"
-                                onClick={() => updateField(field, !defaults[field])}
-                                _hover={{ opacity: 0.8 }}
-                                transition="all 0.2s"
-                            >
-                                {defaults[field] ? 'ON' : 'OFF'}
-                            </Box>
-                        </Flex>
-                    ))}
-                </VStack>
-            </Box>
-
-            {/* Numeric Options */}
-            <Flex gap={6} flexWrap="wrap">
-                <Box>
-                    <Text fontWeight="semibold" fontSize="sm" mb={2}>Residual Tolerance (%)</Text>
-                    <HStack gap={1}>
-                        {[0, 0.01, 0.05, 0.1, 0.5, 1.0].map((val) => (
-                            <Box
-                                key={val}
-                                px={3}
-                                py={1}
-                                borderRadius="md"
-                                cursor="pointer"
-                                borderWidth={1}
-                                borderColor={defaults.pnl_residual_tolerance_pct === val ? 'blue.400' : 'gray.200'}
-                                bg={defaults.pnl_residual_tolerance_pct === val ? 'blue.50' : 'white'}
-                                fontSize="xs"
-                                fontWeight="medium"
-                                _hover={{ borderColor: 'blue.300' }}
-                                onClick={() => updateField('pnl_residual_tolerance_pct', val)}
-                            >
-                                {val === 0 ? 'OFF' : `${val}%`}
-                            </Box>
-                        ))}
-                    </HStack>
+                    {/* Lot Mode */}
+                    <Box>
+                        <Text fontSize="xs" color="gray.500" mb={1.5}>Lot Mode</Text>
+                        <HStack gap={0}>
+                            {LOT_MODES.map((mode) => (
+                                <Tooltip key={mode.value} content={mode.description}>
+                                    <Box
+                                        px={3}
+                                        py={1.5}
+                                        cursor="pointer"
+                                        borderRadius={0}
+                                        bg={defaults.pnl_lot_mode === mode.value ? 'gray.800' : 'gray.100'}
+                                        color={defaults.pnl_lot_mode === mode.value ? 'white' : 'gray.600'}
+                                        _hover={{ bg: defaults.pnl_lot_mode === mode.value ? 'gray.800' : 'gray.200' }}
+                                        onClick={() => updateField('pnl_lot_mode', mode.value)}
+                                        transition="all 0.15s"
+                                    >
+                                        <Text fontWeight="semibold" fontSize="xs">{mode.label}</Text>
+                                    </Box>
+                                </Tooltip>
+                            ))}
+                        </HStack>
+                    </Box>
                 </Box>
 
-                <Box>
-                    <Text fontWeight="semibold" fontSize="sm" mb={2}>Price Staleness Window (days)</Text>
-                    <HStack gap={1}>
-                        {[1, 3, 7, 14, 30].map((val) => (
-                            <Box
-                                key={val}
-                                px={3}
-                                py={1}
-                                borderRadius="md"
-                                cursor="pointer"
-                                borderWidth={1}
-                                borderColor={defaults.pnl_price_staleness_days === val ? 'blue.400' : 'gray.200'}
-                                bg={defaults.pnl_price_staleness_days === val ? 'blue.50' : 'white'}
-                                fontSize="xs"
-                                fontWeight="medium"
-                                _hover={{ borderColor: 'blue.300' }}
-                                onClick={() => updateField('pnl_price_staleness_days', val)}
-                            >
-                                {val}d
-                            </Box>
+                {/* Column 2 — Tax & Compliance */}
+                <Box flex={1} p={4} borderRightWidth={1} borderColor="gray.200">
+                    <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={4}>Tax & Compliance</Text>
+
+                    {/* Toggle rows */}
+                    <VStack align="stretch" gap={2.5}>
+                        {[
+                            { field: 'pnl_allow_negative_balances' as const, label: 'Negative Balances', description: 'Continue calculation even if asset balance goes negative' },
+                            { field: 'pnl_crypto_swap_taxable' as const, label: 'Swaps Taxable', description: 'Treat crypto-to-crypto swaps as taxable events' },
+                            { field: 'pnl_fee_taxable' as const, label: 'Fees Taxable', description: 'Treat fee disposals as taxable events' },
+                        ].map(({ field, label, description }) => (
+                            <Tooltip key={field} content={description}>
+                                <Flex justify="space-between" align="center">
+                                    <Text fontSize="sm" color="gray.700">{label}</Text>
+                                    <Switch.Root
+                                        size="sm"
+                                        checked={defaults[field]}
+                                        onCheckedChange={() => updateField(field, !defaults[field])}
+                                    >
+                                        <Switch.HiddenInput />
+                                        <Switch.Control borderRadius={0} />
+                                    </Switch.Root>
+                                </Flex>
+                            </Tooltip>
                         ))}
-                    </HStack>
+                    </VStack>
+                </Box>
+
+                {/* Column 3 — Advanced */}
+                <Box flex={1} p={4}>
+                    <Text fontSize="xs" fontWeight="bold" color="gray.400" textTransform="uppercase" letterSpacing="wider" mb={4}>Advanced</Text>
+
+                    {/* Price Fallback */}
+                    <Tooltip content="Fall back to latest known price when fetch fails">
+                        <Flex justify="space-between" align="center" mb={4}>
+                            <Text fontSize="sm" color="gray.700">Price Fallback</Text>
+                            <Switch.Root
+                                size="sm"
+                                checked={defaults.pnl_use_price_fallback}
+                                onCheckedChange={() => updateField('pnl_use_price_fallback', !defaults.pnl_use_price_fallback)}
+                            >
+                                <Switch.HiddenInput />
+                                <Switch.Control borderRadius={0} />
+                            </Switch.Root>
+                        </Flex>
+                    </Tooltip>
+
+                    {/* Residual Tolerance */}
+                    <Box mb={4}>
+                        <Text fontSize="xs" color="gray.500" mb={1.5}>Residual Tolerance</Text>
+                        <HStack gap={0}>
+                            {[0, 0.01, 0.05, 0.1, 0.5, 1.0].map((val) => (
+                                <Box
+                                    key={val}
+                                    px={2.5}
+                                    py={1}
+                                    cursor="pointer"
+                                    borderRadius={0}
+                                    bg={defaults.pnl_residual_tolerance_pct === val ? 'gray.800' : 'gray.100'}
+                                    color={defaults.pnl_residual_tolerance_pct === val ? 'white' : 'gray.600'}
+                                    fontSize="xs"
+                                    fontWeight="medium"
+                                    _hover={{ bg: defaults.pnl_residual_tolerance_pct === val ? 'gray.800' : 'gray.200' }}
+                                    onClick={() => updateField('pnl_residual_tolerance_pct', val)}
+                                    transition="all 0.15s"
+                                >
+                                    {val === 0 ? 'OFF' : `${val}%`}
+                                </Box>
+                            ))}
+                        </HStack>
+                    </Box>
+
+                    {/* Price Staleness */}
+                    <Box>
+                        <Text fontSize="xs" color="gray.500" mb={1.5}>Staleness Window</Text>
+                        <HStack gap={0}>
+                            {[1, 3, 7, 14, 30].map((val) => (
+                                <Box
+                                    key={val}
+                                    px={2.5}
+                                    py={1}
+                                    cursor="pointer"
+                                    borderRadius={0}
+                                    bg={defaults.pnl_price_staleness_days === val ? 'gray.800' : 'gray.100'}
+                                    color={defaults.pnl_price_staleness_days === val ? 'white' : 'gray.600'}
+                                    fontSize="xs"
+                                    fontWeight="medium"
+                                    _hover={{ bg: defaults.pnl_price_staleness_days === val ? 'gray.800' : 'gray.200' }}
+                                    onClick={() => updateField('pnl_price_staleness_days', val)}
+                                    transition="all 0.15s"
+                                >
+                                    {val}d
+                                </Box>
+                            ))}
+                        </HStack>
+                    </Box>
                 </Box>
             </Flex>
 
-            {/* Current Status Summary */}
-            <Box p={3} bg="gray.50" borderRadius="md">
+            {/* Status Summary */}
+            <Box px={3} py={2} bg="gray.50" borderRadius={0}>
                 <Text fontSize="xs" color="gray.500">
-                    Base currency: {defaults.base_currency} ·
-                    Current defaults: {defaults.pnl_lot_method} / {defaults.pnl_lot_mode} ·
-                    Tolerance: {defaults.pnl_residual_tolerance_pct === 0 ? 'OFF' : `${defaults.pnl_residual_tolerance_pct}%`} ·
-                    Negative balances: {defaults.pnl_allow_negative_balances ? 'allowed' : 'blocked'} ·
-                    Swaps taxable: {defaults.pnl_crypto_swap_taxable ? 'yes' : 'no'} ·
-                    Fees taxable: {defaults.pnl_fee_taxable ? 'yes' : 'no'}
+                    {defaults.base_currency} · {defaults.pnl_lot_method} / {defaults.pnl_lot_mode === 'LOT_TRAVEL' ? 'Lot Travel' : 'Mega Wallet'} ·
+                    {' '}Tolerance: {defaults.pnl_residual_tolerance_pct === 0 ? 'OFF' : `${defaults.pnl_residual_tolerance_pct}%`} ·
+                    {' '}Neg. balances: {defaults.pnl_allow_negative_balances ? 'yes' : 'no'} ·
+                    {' '}Swaps: {defaults.pnl_crypto_swap_taxable ? 'taxable' : 'no'} ·
+                    {' '}Fees: {defaults.pnl_fee_taxable ? 'taxable' : 'no'}
                 </Text>
             </Box>
         </VStack>

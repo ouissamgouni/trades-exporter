@@ -1,0 +1,434 @@
+version: "3"
+
+vars:
+  DOCKER_COMPOSE: infra/docker/docker-compose.unified.yml
+  QA_PROJECT: trades-exporter-qa
+  LOG_LEVEL: '{{.LOG_LEVEL | default "INFO"}}'
+
+tasks:
+  # ════════════════════════════════════════════════════════════════
+  # Full Docker Mode: Build + Deploy + Seed from any git ref
+  # ════════════════════════════════════════════════════════════════
+
+  spin:
+    desc: "Build from git ref and spin up isolated QA stack (e.g., task qa:spin -- feature/my-branch)"
+    dotenv: [.env, .env.qa]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      SEED_DIR: "{{.SEED_DIR}}"
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task qa:spin -- feature/my-branch"
+          echo "   task qa:spin -- feature/my-branch SEED_DIR=backend/db/seed_data/scenarios/fr_tax"
+          echo "   task qa:spin REF=v1.2.0"
+          exit 1
+        fi
+      # Build images from ref (reuses build:ref with worktree)
+      - task: build:ref
+        vars: { REF: "{{.REF}}" }
+      # Tag as :qa for compose
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        TAG="ref-$SHA"
+        docker tag trades-exporter-backend:$TAG trades-exporter-backend:qa
+        docker tag trades-exporter-frontend:$TAG trades-exporter-frontend:qa
+      # Tear down previous QA stack (containers + volume)
+      - |
+        echo "Cleaning up previous QA environment..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} down -v 2>/dev/null || true
+      # Start QA stack
+      - |
+        echo "Starting QA stack..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} up -d
+      # Wait for healthy backend
+      - task: _wait_healthy
+      # Create tables from models + stamp migrations
+      - |
+        echo "Creating tables from models..."
+        docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+      - |
+        echo "Stamping database to current migration..."
+        docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m alembic stamp head
+      # Seed data
+      - |
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        if [ -n "$SEED_DIR" ]; then
+          if [ "$WITH_DEFAULTS" = "1" ]; then
+            echo "Seeding default data first (WITH_DEFAULTS=1)..."
+            docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+          fi
+          echo "Seeding scenario from $SEED_DIR..."
+          docker cp "$SEED_DIR/." trades_backend_qa:/tmp/scenario/
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+        else
+          echo "Seeding default data..."
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+        fi
+      # Summary
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        SEED_DIR="{{.SEED_DIR}}"
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ QA environment ready"
+        echo ""
+        echo "   Source:   $REF ($SHA)"
+        if [ -n "$SEED_DIR" ]; then
+          echo "   Scenario: $SEED_DIR"
+        fi
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo ""
+        echo "Commands:"
+        echo "   task qa:logs             → Tail logs"
+        echo "   task qa:status           → Check status"
+        echo "   task qa:seed             → Re-seed with defaults"
+        echo "   task qa:seed SEED_DIR=.. → Seed scenario overlay"
+        echo "   task qa:stop             → Stop + cleanup everything"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  spin:current:
+    desc: "Build from working directory and spin up QA stack"
+    dotenv: [.env, .env.qa]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+    cmds:
+      # Build images from working directory
+      - task: build:current
+      # Tag latest current-* image as :qa
+      - |
+        LATEST_TAG=$(docker images trades-exporter-backend --format '{{`{{.Tag}}`}}' | grep '^current-' | head -1)
+        if [ -z "$LATEST_TAG" ]; then
+          echo "❌ No current-* image found. build:current may have failed."
+          exit 1
+        fi
+        docker tag trades-exporter-backend:$LATEST_TAG trades-exporter-backend:qa
+        docker tag trades-exporter-frontend:$LATEST_TAG trades-exporter-frontend:qa
+      # Tear down previous QA
+      - |
+        echo "Cleaning up previous QA environment..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} down -v 2>/dev/null || true
+      # Start QA stack
+      - |
+        echo "Starting QA stack..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} up -d
+      # Wait for healthy backend
+      - task: _wait_healthy
+      # Create tables from models + stamp migrations
+      - |
+        echo "Creating tables from models..."
+        docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+      - |
+        echo "Stamping database to current migration..."
+        docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m alembic stamp head
+      # Seed data
+      - |
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        if [ -n "$SEED_DIR" ]; then
+          if [ "$WITH_DEFAULTS" = "1" ]; then
+            echo "Seeding default data first (WITH_DEFAULTS=1)..."
+            docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+          fi
+          echo "Seeding scenario from $SEED_DIR..."
+          docker cp "$SEED_DIR/." trades_backend_qa:/tmp/scenario/
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+        else
+          echo "Seeding default data..."
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+        fi
+      # Summary
+      - |
+        SEED_DIR="{{.SEED_DIR}}"
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ QA environment ready (from working directory)"
+        echo ""
+        echo "   ⚠️  Built from uncommitted changes"
+        if [ -n "$SEED_DIR" ]; then
+          echo "   Scenario: $SEED_DIR"
+        fi
+        echo ""
+        echo "   Frontend: http://localhost:${FRONTEND_PORT}"
+        echo "   Backend:  http://localhost:${BACKEND_PORT}"
+        echo "   Database: localhost:${POSTGRES_PORT}"
+        echo ""
+        echo "   task qa:stop → Stop + cleanup"
+        echo "═══════════════════════════════════════════════════════════════"
+
+  # ════════════════════════════════════════════════════════════════
+  # Hybrid Mode: DB in Docker, code runs locally with live reload
+  # ════════════════════════════════════════════════════════════════
+
+  spin:dev:
+    desc: "Start QA with local code (DB Docker, backend+frontend local, live reload)"
+    dotenv: [.env, .env.qa]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+    cmds:
+      # Start QA database only
+      - |
+        echo "Starting QA database..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} up -d postgres
+      - task: _wait_db_healthy
+      # Ensure QA database exists (postgres only auto-creates on fresh volume)
+      - |
+        echo "Ensuring database $POSTGRES_DB exists..."
+        PGPASSWORD=$POSTGRES_PASSWORD docker exec trades_db_qa \
+          psql -U $POSTGRES_USER -d postgres -tc \
+          "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'" | grep -q 1 || \
+        PGPASSWORD=$POSTGRES_PASSWORD docker exec trades_db_qa \
+          psql -U $POSTGRES_USER -d postgres -c "CREATE DATABASE $POSTGRES_DB"
+      # Create tables from models + stamp migrations locally
+      - |
+        echo "Creating tables from models..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+      - |
+        echo "Stamping database to current migration..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
+      # Seed data
+      - |
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        if [ -n "$SEED_DIR" ]; then
+          if [ "$WITH_DEFAULTS" = "1" ]; then
+            echo "Seeding default data first (WITH_DEFAULTS=1)..."
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+          fi
+          echo "Seeding scenario from $SEED_DIR..."
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
+        else
+          echo "Seeding default data..."
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+        fi
+      # Start backend + frontend with live reload
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Starting QA dev mode with live reload"
+        echo ""
+        echo "   [DB]  QA Database on localhost:$POSTGRES_PORT"
+        echo "   [API] Backend on localhost:$BACKEND_PORT"
+        echo "   [WEB] Frontend on localhost:$FRONTEND_PORT"
+        echo ""
+        echo "Press Ctrl+C to stop backend + frontend (DB stays running)"
+        echo "Run 'task qa:stop' to stop everything including DB"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+      - |
+        npx concurrently \
+          --names "API,WEB" \
+          --prefix-colors "yellow.bold,green.bold" \
+          --prefix "[{name}] " \
+          --kill-others-on-fail \
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app --reload --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
+
+  # ════════════════════════════════════════════════════════════════
+  # Seeding (into running QA environment)
+  # ════════════════════════════════════════════════════════════════
+
+  seed:
+    desc: "Seed QA database (scenario-only by default, WITH_DEFAULTS=1 to include defaults)"
+    dotenv: [.env, .env.qa]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+    cmds:
+      - |
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        # Detect if running in Docker mode or hybrid mode
+        if docker ps --filter "name=trades_backend_qa" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q trades_backend_qa; then
+          if [ -n "$SEED_DIR" ]; then
+            if [ "$WITH_DEFAULTS" = "1" ]; then
+              echo "Seeding default data first (WITH_DEFAULTS=1)..."
+              docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+            fi
+            echo "Seeding scenario from $SEED_DIR..."
+            docker cp "$SEED_DIR/." trades_backend_qa:/tmp/scenario/
+            docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+          else
+            echo "Seeding default data..."
+            docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+          fi
+        else
+          if [ -n "$SEED_DIR" ]; then
+            if [ "$WITH_DEFAULTS" = "1" ]; then
+              echo "Seeding default data first (WITH_DEFAULTS=1)..."
+              PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+                {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+            fi
+            echo "Seeding scenario from $SEED_DIR..."
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
+          else
+            echo "Seeding default data..."
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+          fi
+        fi
+      - echo "✅ QA database seeded"
+
+  reset:
+    desc: "Reset QA database (truncate all tables + reseed)"
+    dotenv: [.env, .env.qa]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+    cmds:
+      - |
+        if docker ps --filter "name=trades_backend_qa" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q trades_backend_qa; then
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend sh -c 'echo "y" | python -m backend.scripts.reset'
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec backend python -m backend.scripts.seed
+        else
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+            echo "y" | {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.reset
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+        fi
+      - echo "✅ QA database reset and seeded"
+
+  # ════════════════════════════════════════════════════════════════
+  # Lifecycle
+  # ════════════════════════════════════════════════════════════════
+
+  stop:
+    desc: "Stop QA stack and cleanup everything (containers + DB volume + images)"
+    dotenv: [.env, .env.qa]
+    cmds:
+      - |
+        echo "Stopping QA environment..."
+        ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} down -v 2>/dev/null || true
+      - |
+        echo "Removing QA images..."
+        docker rmi trades-exporter-backend:qa trades-exporter-frontend:qa 2>/dev/null || true
+      - |
+        # Also kill local processes if hybrid mode was used
+        pkill -f "uvicorn.*--port ${BACKEND_PORT}" 2>/dev/null || true
+        pkill -f "vite.*--port ${FRONTEND_PORT}" 2>/dev/null || true
+      - |
+        echo ""
+        echo "✅ QA environment stopped and cleaned up"
+        echo "   Containers: removed"
+        echo "   DB volume:  removed"
+        echo "   Images:     removed (:qa tags)"
+        echo "   Ports:      ${POSTGRES_PORT}, ${BACKEND_PORT}, ${FRONTEND_PORT} freed"
+
+  status:
+    desc: "Show QA environment status"
+    dotenv: [.env, .env.qa]
+    cmds:
+      - |
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "  QA Environment Status"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+
+        # Check Docker containers
+        DB_RUNNING=$(docker ps --filter "name=trades_db_qa" --filter "status=running" --format '{{`{{.Names}}`}}' 2>/dev/null)
+        BE_RUNNING=$(docker ps --filter "name=trades_backend_qa" --filter "status=running" --format '{{`{{.Names}}`}}' 2>/dev/null)
+        FE_RUNNING=$(docker ps --filter "name=trades_frontend_qa" --filter "status=running" --format '{{`{{.Names}}`}}' 2>/dev/null)
+
+        # Check local processes
+        LOCAL_BE=$(pgrep -f "uvicorn.*--port ${BACKEND_PORT}" 2>/dev/null || true)
+        LOCAL_FE=$(pgrep -f "vite.*--port ${FRONTEND_PORT}" 2>/dev/null || true)
+
+        if [ -n "$DB_RUNNING" ]; then
+          echo "   [DB]  ✅ Running (Docker: localhost:${POSTGRES_PORT})"
+        else
+          echo "   [DB]  ❌ Not running"
+        fi
+
+        if [ -n "$BE_RUNNING" ]; then
+          echo "   [API] ✅ Running (Docker: localhost:${BACKEND_PORT})"
+        elif [ -n "$LOCAL_BE" ]; then
+          echo "   [API] ✅ Running (Local: localhost:${BACKEND_PORT})"
+        else
+          echo "   [API] ❌ Not running"
+        fi
+
+        if [ -n "$FE_RUNNING" ]; then
+          echo "   [WEB] ✅ Running (Docker: localhost:${FRONTEND_PORT})"
+        elif [ -n "$LOCAL_FE" ]; then
+          echo "   [WEB] ✅ Running (Local: localhost:${FRONTEND_PORT})"
+        else
+          echo "   [WEB] ❌ Not running"
+        fi
+
+        echo ""
+
+        # Show QA images
+        QA_IMAGES=$(docker images trades-exporter-*:qa --format "   {{`{{.Repository}}`}}:{{`{{.Tag}}`}} ({{`{{.Size}}`}})" 2>/dev/null)
+        if [ -n "$QA_IMAGES" ]; then
+          echo "   Images:"
+          echo "$QA_IMAGES"
+        fi
+
+  logs:
+    desc: "Tail QA logs"
+    dotenv: [.env, .env.qa]
+    cmds:
+      - ENV_NAME=qa IMAGE_TAG=qa docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} logs -f --tail 50
+
+  # ════════════════════════════════════════════════════════════════
+  # Internal helpers
+  # ════════════════════════════════════════════════════════════════
+
+  _wait_healthy:
+    internal: true
+    dotenv: [.env, .env.qa]
+    cmds:
+      - |
+        echo "Waiting for backend to be healthy..."
+        RETRIES=30
+        while [ $RETRIES -gt 0 ]; do
+          if docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" 2>/dev/null; then
+            echo "✅ Backend healthy"
+            break
+          fi
+          RETRIES=$((RETRIES - 1))
+          echo "   Waiting... ($RETRIES retries left)"
+          sleep 3
+        done
+        if [ $RETRIES -eq 0 ]; then
+          echo "❌ Backend failed to become healthy"
+          docker compose -f {{.DOCKER_COMPOSE}} -p {{.QA_PROJECT}} logs backend --tail 20
+          exit 1
+        fi
+
+  _wait_db_healthy:
+    internal: true
+    dotenv: [.env, .env.qa]
+    cmds:
+      - |
+        echo "Waiting for QA database..."
+        RETRIES=15
+        while [ $RETRIES -gt 0 ]; do
+          if docker ps --filter "name=trades_db_qa" --filter "health=healthy" --format '{{`{{.Names}}`}}' | grep -q trades_db_qa; then
+            echo "✅ QA database healthy"
+            break
+          fi
+          RETRIES=$((RETRIES - 1))
+          echo "   Waiting... ($RETRIES retries left)"
+          sleep 2
+        done
+        if [ $RETRIES -eq 0 ]; then
+          echo "❌ QA database failed to become healthy"
+          exit 1
+        fi

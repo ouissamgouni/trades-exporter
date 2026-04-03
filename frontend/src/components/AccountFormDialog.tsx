@@ -38,6 +38,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
     const [formData, setFormData] = useState({
         name: '',
         account_type: 'cex' as 'cex' | 'dex' | 'broker' | 'wallet' | 'bank' | 'investment',
+        envelope: '' as '' | 'cto' | 'pea' | 'av',
         address_or_identifier: '',
         group: '',
         tags: [] as Record<string, any>[],
@@ -88,6 +89,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
             setFormData({
                 name: account.name,
                 account_type: account.account_type,
+                envelope: (account.envelope as '' | 'cto' | 'pea' | 'av') || '',
                 address_or_identifier: account.address_or_identifier || '',
                 group: account.group || '',
                 tags: account.tags || [],
@@ -103,6 +105,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
             setFormData({
                 name: prefill.name || '',
                 account_type: prefill.account_type || 'cex',
+                envelope: '',
                 address_or_identifier: prefill.address_or_identifier || '',
                 group: prefill.group || '',
                 tags: [],
@@ -115,6 +118,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
             setFormData({
                 name: '',
                 account_type: 'cex',
+                envelope: '',
                 address_or_identifier: '',
                 group: '',
                 tags: [],
@@ -160,6 +164,7 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
             const payload = {
                 ...formData,
                 tags,
+                envelope: formData.envelope || null,
                 address_or_identifier: formData.address_or_identifier || null,
                 group: formData.group || null,
                 color: formData.color || null,
@@ -257,6 +262,31 @@ const AccountFormDialog: React.FC<AccountFormDialogProps> = ({
                                             </NativeSelect.Field>
                                         </NativeSelect.Root>
                                     </Box>
+
+                                    {(formData.account_type === 'broker' || formData.account_type === 'investment') && (
+                                        <Box>
+                                            <Text fontWeight="medium" mb={1}>Tax Envelope</Text>
+                                            <NativeSelect.Root>
+                                                <NativeSelect.Field
+                                                    value={formData.envelope}
+                                                    onChange={(e) =>
+                                                        setFormData({
+                                                            ...formData,
+                                                            envelope: e.target.value as '' | 'cto' | 'pea' | 'av',
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="">None (standard taxable)</option>
+                                                    <option value="cto">CTO (Compte-Titres Ordinaire)</option>
+                                                    <option value="pea">PEA (Plan d'Épargne en Actions)</option>
+                                                    <option value="av">AV (Assurance Vie)</option>
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
+                                            <Text fontSize="sm" color="gray.500" mt={1}>
+                                                French tax envelope. PEA and AV are tax-advantaged and excluded from standard tax reporting.
+                                            </Text>
+                                        </Box>
+                                    )}
 
                                     <Box>
                                         <Text fontWeight="medium" mb={1}>Address or Identifier</Text>

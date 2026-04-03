@@ -7,7 +7,7 @@ from decimal import Decimal
 from collections import defaultdict
 from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from pydantic import BaseModel
 from sqlmodel import Session, select, func, col, text
 
@@ -712,6 +712,7 @@ class PriceHealthRow(BaseModel):
     status: str  # "healthy", "warning", "stale", "no_transactions"
     has_transactions: bool = True
     sparkline: List[float] = []
+    quote_currencies: List[Dict[str, Any]] = []  # [{asset_id, symbol}]
 
 
 class PriceHealthResponse(BaseModel):
@@ -850,6 +851,24 @@ def get_price_health(
             if rows:
                 sparkline_lookup[aid] = [float(r[1]) for r in reversed(rows)]
 
+        # 3c) Quote currencies per asset: distinct quote_asset_ids with symbols
+        quote_currencies_lookup: Dict[int, List[Dict[str, Any]]] = {}
+        for aid in asset_ids:
+            qc_stmt = (
+                select(PriceSnapshot.quote_asset_id)
+                .where(PriceSnapshot.asset_id == aid)
+                .where(PriceSnapshot.quote_asset_id.isnot(None))
+                .distinct()
+            )
+            qc_rows = session.exec(qc_stmt).all()
+            quotes = []
+            for qr in qc_rows:
+                qid = qr[0] if isinstance(qr, tuple) else qr
+                if qid is not None:
+                    q_asset = session.get(Asset, qid)
+                    quotes.append({"asset_id": qid, "symbol": q_asset.symbol if q_asset else f"ID:{qid}"})
+            quote_currencies_lookup[aid] = quotes
+
         # 4) Build asset info lookup
         asset_lookup: Dict[int, Asset] = {}
         for aid in asset_ids:
@@ -907,6 +926,7 @@ def get_price_health(
                 status=status,
                 has_transactions=has_tx,
                 sparkline=sparkline_lookup.get(aid, []),
+                quote_currencies=quote_currencies_lookup.get(aid, []),
             ))
 
         # Sort by days_stale descending (worst offenders first)

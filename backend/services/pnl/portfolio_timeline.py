@@ -86,8 +86,8 @@ def _generate_date_buckets(
         current = _next_bucket(current, granularity)
 
     # Always include the end date if the last bucket is before it
-    if buckets and buckets[-1] < end_date:
-        buckets.append(end_date)
+    if buckets and buckets[-1].date() < end_date.date():
+        buckets.append(_truncate_date(end_date, granularity))
 
     return buckets
 
@@ -190,11 +190,16 @@ def compute_portfolio_timeline(
     start = date_from if date_from else min_date
     end = date_to if date_to else max_date
 
-    # Ensure timezone awareness
+    # Ensure timezone awareness (must happen before any comparisons)
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
+
+    # Extend to today so static holdings still get current-day data points
+    now = datetime.now(timezone.utc)
+    if date_to is None and end < now:
+        end = now
 
     # Generate date buckets
     buckets = _generate_date_buckets(start, end, granularity)

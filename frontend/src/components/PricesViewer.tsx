@@ -16,6 +16,10 @@ import { usePagination, DEFAULT_PAGE_SIZE } from '../hooks/usePagination';
 import { TablePagination } from './TablePagination';
 import { PriceHealthCards } from './PriceHealthCards';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
+import { GapFixPanel } from './GapFixPanel';
+import { useBaseCurrency } from '../hooks/useBaseCurrency';
+import { FiArrowLeft } from 'react-icons/fi';
+import { usePriceHealth } from '../hooks/usePriceHealth';
 
 type PriceViewMode = 'health' | 'table';
 
@@ -43,6 +47,27 @@ export const PricesViewer: React.FC = () => {
     const pagination = usePagination({ storageKey: 'prices', initialPageSize: DEFAULT_PAGE_SIZE });
 
     const deleteConfirm = useConfirmDialog<PriceSnapshot>();
+    const baseCurrency = useBaseCurrency();
+    const { data: healthData } = usePriceHealth();
+
+    // When an asset is selected, compute which quote currencies are available for it
+    const filteredQuoteAssets = useMemo(() => {
+        if (!assetIdFilter || !healthData?.items) return assets;
+        const row = healthData.items.find(r => r.asset_id === assetIdFilter);
+        if (!row?.quote_currencies?.length) return assets;
+        const quoteIds = new Set(row.quote_currencies.map(q => q.asset_id));
+        return assets.filter(a => a.asset_id != null && quoteIds.has(a.asset_id));
+    }, [assetIdFilter, healthData?.items, assets]);
+
+    const handleViewTable = (assetId: number) => {
+        setAssetIdFilter(assetId);
+        // Default quote filter to base currency
+        if (baseCurrency.assetId) {
+            setQuoteAssetIdFilter(baseCurrency.assetId);
+        }
+        setViewMode('table');
+        pagination.firstPage();
+    };
 
     // Calculate pagination offset for server-side pagination
     const offset = (pagination.page - 1) * pagination.pageSize;
@@ -264,7 +289,7 @@ export const PricesViewer: React.FC = () => {
 
             {/* === HEALTH VIEW === */}
             {viewMode === 'health' && (
-                <PriceHealthCards />
+                <PriceHealthCards onViewTable={handleViewTable} />
             )}
 
             {/* === TABLE VIEW === */}
@@ -282,6 +307,28 @@ export const PricesViewer: React.FC = () => {
             )}
 
             {viewMode === 'table' && !loading && !error && <>
+                {/* Asset detail header with Back + GapFixPanel */}
+                {assetIdFilter && (
+                    <Box mb={4}>
+                        <Flex align="center" gap={2} mb={3}>
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => { setAssetIdFilter(null); setQuoteAssetIdFilter(null); setViewMode('health'); }}
+                            >
+                                <FiArrowLeft /> Back to Health
+                            </Button>
+                            <Heading as="h3" size="sm">
+                                {getAssetSymbol(assetIdFilter)} — Prices
+                            </Heading>
+                        </Flex>
+                        <GapFixPanel
+                            assetId={assetIdFilter}
+                            symbol={getAssetSymbol(assetIdFilter)}
+                            onOpenPriceSetter={() => { setCreateAssetId(assetIdFilter); setShowCreateDialog(true); }}
+                        />
+                    </Box>
+                )}
                 <Flex gap={4} mb={6} align="center" flexWrap="wrap">
                     <Flex align="center" gap={2}>
                         <Text fontWeight="medium" fontSize="sm">Asset:</Text>
@@ -301,7 +348,7 @@ export const PricesViewer: React.FC = () => {
                             <AssetSelector
                                 value={quoteAssetIdFilter}
                                 onChange={(id) => { setQuoteAssetIdFilter(id); pagination.firstPage(); }}
-                                assets={assets}
+                                assets={filteredQuoteAssets}
                                 placeholder="All Quote Assets"
                                 size="sm"
                             />

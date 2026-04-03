@@ -27,6 +27,7 @@ class AccountCreate(BaseModel):
 
     name: str
     account_type: str
+    envelope: Optional[str] = None
     address_or_identifier: Optional[str] = None
     group: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
@@ -40,6 +41,7 @@ class AccountUpdate(BaseModel):
 
     name: Optional[str] = None
     account_type: Optional[str] = None
+    envelope: Optional[str] = None
     address_or_identifier: Optional[str] = None
     group: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
@@ -54,6 +56,7 @@ class AccountResponse(BaseModel):
     id: int
     name: str
     account_type: str
+    envelope: Optional[str]
     address_or_identifier: Optional[str]
     group: Optional[str]
     tags: Optional[List[Dict[str, Any]]]
@@ -107,6 +110,7 @@ def list_accounts(
             id=acc.id,
             name=acc.name,
             account_type=acc.account_type,
+            envelope=acc.envelope,
             address_or_identifier=acc.address_or_identifier,
             group=acc.group,
             tags=acc.tags or [],
@@ -245,6 +249,7 @@ def get_account(account_id: int, session: Session = Depends(get_session_dependen
         id=account.id,
         name=account.name,
         account_type=account.account_type,
+        envelope=account.envelope,
         address_or_identifier=account.address_or_identifier,
         group=account.group,
         tags=account.tags or [],
@@ -288,9 +293,23 @@ def create_account(
             detail=f"Account with name '{account_data.name}' already exists",
         )
 
+    # Validate envelope if provided
+    valid_envelopes = ["cto", "pea", "av"]
+    if account_data.envelope is not None and account_data.envelope not in valid_envelopes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid envelope. Must be one of: {', '.join(valid_envelopes)}",
+        )
+
+    # Auto-default envelope to CTO for taxable account types
+    resolved_envelope = account_data.envelope
+    if resolved_envelope is None and account_data.account_type in ("cex", "broker", "investment"):
+        resolved_envelope = "cto"
+
     account = Account(
         name=account_data.name,
         account_type=account_data.account_type,
+        envelope=resolved_envelope,
         address_or_identifier=account_data.address_or_identifier,
         group=account_data.group,
         tags=account_data.tags or [],
@@ -307,6 +326,7 @@ def create_account(
         id=account.id,
         name=account.name,
         account_type=account.account_type,
+        envelope=account.envelope,
         address_or_identifier=account.address_or_identifier,
         group=account.group,
         tags=account.tags or [],
@@ -358,11 +378,22 @@ def update_account(
                 detail=f"Account with name '{account_data.name}' already exists",
             )
 
+    # Validate envelope if provided
+    if account_data.envelope is not None:
+        valid_envelopes = ["cto", "pea", "av"]
+        if account_data.envelope not in valid_envelopes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid envelope. Must be one of: {', '.join(valid_envelopes)}",
+            )
+
     # Update fields
     if account_data.name is not None:
         account.name = account_data.name
     if account_data.account_type is not None:
         account.account_type = account_data.account_type
+    if account_data.envelope is not None:
+        account.envelope = account_data.envelope
     if account_data.address_or_identifier is not None:
         account.address_or_identifier = account_data.address_or_identifier
     if account_data.tags is not None:
@@ -384,6 +415,7 @@ def update_account(
         id=account.id,
         name=account.name,
         account_type=account.account_type,
+        envelope=account.envelope,
         address_or_identifier=account.address_or_identifier,
         group=account.group,
         tags=account.tags or [],

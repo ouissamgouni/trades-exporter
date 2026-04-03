@@ -15,7 +15,7 @@ import {
 import {
     FiInfo, FiSearch, FiRefreshCw, FiX,
     FiChevronLeft, FiChevronRight, FiChevronsLeft, FiChevronsRight,
-    FiChevronDown, FiEdit3,
+    FiChevronDown, FiEdit3, FiList,
 } from 'react-icons/fi';
 import { usePriceHealth } from '../hooks/usePriceHealth';
 import { usePriceGapsSummary, PRICE_GAPS_QUERY_KEY, PRICE_GAPS_SUMMARY_QUERY_KEY } from '../hooks/usePriceGaps';
@@ -111,7 +111,7 @@ const DEFAULT_PAGE_SIZE = 25;
 // Component
 // ---------------------------------------------------------------------------
 
-export const PriceHealthCards: React.FC = () => {
+export const PriceHealthCards: React.FC<{ onViewTable?: (assetId: number) => void }> = ({ onViewTable }) => {
     const { data, isLoading, error, refetch } = usePriceHealth();
     const [search, setSearch] = useState('');
     const [filter, setFilter] = useState<StatusFilter>('all');
@@ -321,6 +321,7 @@ export const PriceHealthCards: React.FC = () => {
                             onToggleExpand={() => setExpandedId(prev => prev === row.asset_id ? null : row.asset_id)}
                             onOpenPanel={() => openAssetPanel(row.asset_id)}
                             onRefresh={handleCardRefresh}
+                            onViewTable={onViewTable}
                         />
                     ))}
                 </Flex>
@@ -347,9 +348,10 @@ interface HealthCardProps {
     onToggleExpand: () => void;
     onOpenPanel: () => void;
     onRefresh: () => void;
+    onViewTable?: (assetId: number) => void;
 }
 
-const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel, onRefresh }) => {
+const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggleExpand, onOpenPanel, onRefresh, onViewTable }) => {
     const cfg = STATUS_CONFIG[row.status] ?? STATUS_CONFIG.healthy;
     const hasGaps = gapDays != null && gapDays > 0;
     const noTx = row.status === 'no_transactions';
@@ -376,6 +378,20 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                 <Text fontSize="xs" fontWeight="bold" truncate flex={1}>
                     {row.symbol}
                 </Text>
+                {onViewTable && (
+                    <Tooltip content="View price table">
+                        <Box
+                            as="button"
+                            color="gray.400"
+                            _hover={{ color: 'blue.500' }}
+                            cursor="pointer"
+                            onClick={e => { e.stopPropagation(); onViewTable(row.asset_id); }}
+                            flexShrink={0}
+                        >
+                            <FiList size={12} />
+                        </Box>
+                    </Tooltip>
+                )}
                 <Tooltip content="Open details">
                     <Box
                         as="button"
@@ -471,6 +487,11 @@ const HealthCard: React.FC<HealthCardProps> = ({ row, gapDays, expanded, onToggl
                         {gapDays}d gaps
                     </Badge>
                 )}
+                {row.quote_currencies && row.quote_currencies.length > 0 && row.quote_currencies.map(q => (
+                    <Badge key={q.asset_id} size="xs" colorPalette="purple" variant="subtle" fontSize="8px">
+                        {q.symbol}
+                    </Badge>
+                ))}
             </Flex>
 
             {/* Row 3: price, age, source */}
