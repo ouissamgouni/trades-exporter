@@ -164,6 +164,15 @@ class ParallelPipelineProcessor:
                             self.items_failed += 1
                             for error in result.errors:
                                 log.error(f"❌ Worker {worker_id}: {error}")
+                            
+                            # Report failure to progress tracker so error_count is updated
+                            if self.progress_callback:
+                                with self.progress_lock:
+                                    self.progress_callback(
+                                        connector_id=connector_id,
+                                        result=result,
+                                        context=context,
+                                    )
                 
                 except Exception as e:
                     self.items_failed += 1

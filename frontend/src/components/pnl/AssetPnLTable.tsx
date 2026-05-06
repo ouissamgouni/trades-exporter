@@ -187,32 +187,43 @@ const SORT_FIELD_LABELS: Record<SortField, string> = {
 // Render helpers (combined columns)
 // ------------------------------------------------------------------
 
-/** Combined "Cost" cell: cost basis (primary) + unit cost on hover */
+/** Combined "Cost" cell: cost basis (primary) + total acquired & unit cost on hover */
 const renderCost = (
     costBasis: number,
     unitCost: number | undefined | null,
     baseCurrency: string,
-) => (
-    <Tooltip
-        content={
-            <Box p={1} fontSize="xs">
-                <Flex justify="space-between" gap={3}>
-                    <Text color="gray.400">Unit cost</Text>
-                    <Text fontWeight="medium">
-                        {unitCost != null
-                            ? <ValueDisplay value={unitCost} currency={baseCurrency} />
-                            : '—'}
+    totalInvested?: number,
+) => {
+    const showInvested = totalInvested != null && Math.abs(totalInvested - costBasis) > 0.01;
+    return (
+        <Tooltip
+            content={
+                <Box p={1} fontSize="xs">
+                    <Flex justify="space-between" gap={3}>
+                        <Text color="gray.400">Unit cost</Text>
+                        <Text fontWeight="medium">
+                            {unitCost != null
+                                ? <ValueDisplay value={unitCost} currency={baseCurrency} />
+                                : '—'}
+                        </Text>
+                    </Flex>
+                </Box>
+            }
+            openDelay={200}
+        >
+            <Box cursor="help">
+                <Text {...XS}>
+                    <ValueDisplay value={costBasis} currency={baseCurrency} />
+                </Text>
+                {showInvested && (
+                    <Text fontSize="2xs" color="gray.400" lineHeight="1">
+                        invested <ValueDisplay value={totalInvested} currency={baseCurrency} />
                     </Text>
-                </Flex>
+                )}
             </Box>
-        }
-        openDelay={200}
-    >
-        <Text {...XS} cursor="help">
-            <ValueDisplay value={costBasis} currency={baseCurrency} />
-        </Text>
-    </Tooltip>
-);
+        </Tooltip>
+    );
+};
 
 /** Combined "Value" cell: market value (primary) + unit value / price info on hover */
 const renderValue = (
@@ -333,7 +344,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
 
     // --- Unified filter state (internal fallback when not controlled) ---
     const [_search, _setSearch] = useState('');
-    const [_minMarketValue, _setMinMarketValue] = useState(5);
+    const [_minMarketValue, _setMinMarketValue] = useState(0);
     const [_pnlStatus, _setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [_balanceStatus, _setBalanceStatus] = useState<BalanceStatusFilter>('all');
     const [_selectedAccountIds, _setSelectedAccountIds] = useState<number[]>([]);
@@ -941,7 +952,7 @@ export const AssetPnLTable: React.FC<AssetPnLTableProps> = ({
                                 </Flex>
                             </Table.Cell>
                             <Table.Cell>{isNoPnl ? <Text {...XS} color="gray.400">—</Text> : <Text {...XS}><ValueDisplay value={assetpnlrow.quantity} /></Text>}</Table.Cell>
-                            <Table.Cell>{renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency)}</Table.Cell>
+                            <Table.Cell>{renderCost(assetpnlrow.cost_basis, assetpnlrow.unit_cost, baseCurrency, assetpnlrow.total_invested)}</Table.Cell>
                             <Table.Cell>{renderValue(assetpnlrow, baseCurrency)}</Table.Cell>
                             <Table.Cell>
                                 {isNoPnl ? <Text {...XS} color="gray.400">N/A</Text>

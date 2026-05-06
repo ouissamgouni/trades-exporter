@@ -9,5 +9,6 @@ from .binance_loader import load_binance_file
 from .manual_loader import load_manual_file
 from .asset_csv_loader import AssetCSVLoader
 from .trades_csv_loader import TradesCSVLoader
+from .degiro_loader import load_degiro_file
 
-__all__ = ["load_mexc_file", "load_mexc_deposits_file", "load_mexc_withdrawals_file", "load_binance_file", "load_manual_file", "AssetCSVLoader", "TradesCSVLoader"]
+__all__ = ["load_mexc_file", "load_mexc_deposits_file", "load_mexc_withdrawals_file", "load_binance_file", "load_manual_file", "AssetCSVLoader", "TradesCSVLoader", "load_degiro_file"]

@@ -1,55 +1,13 @@
 version: "3"
 
-includes:
-  build: build.yml
-  worktree: worktree.yml
-
 tasks:
-  prepare:
-    desc: Create release PR (develop → main)
-    deps: [worktree:setup]
+  default:
+    desc: "Tag + deploy to prod (e.g., task release -- v1.2.0)"
+    aliases: [release]
+    vars:
+      VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
     cmds:
-      - |
-        echo "Updating develop worktree..."
-        cd {{.WORKTREE_DEVELOP}} && git pull origin develop
-      - |
-        cd {{.WORKTREE_DEVELOP}}
-        gh pr create --base main --head develop --title "Release $(date +%Y-%m-%d)" --body "Release candidate from develop branch"
-        echo "✅ Release PR created. Review and merge when ready."
-
-  tag:
-    desc: Tag a release and build images (e.g., task release:tag v1.2.0)
-    deps: [worktree:setup]
-    prompt: |
-      Tag and build release: {{.CLI_ARGS}}
-
-      This will:
-        • Tag main branch with {{.CLI_ARGS}}
-        • Push tag to origin
-        • Build production Docker images
-
-      Continue?
-    cmds:
-      - |
-        VERSION={{.CLI_ARGS}}
-        if [ -z "$VERSION" ]; then
-          echo "❌ Usage: task release:tag v1.2.0"
-          exit 1
-        fi
-      - |
-        VERSION={{.CLI_ARGS}}
-        echo "Updating main worktree..."
-        cd {{.WORKTREE_MAIN}} && git pull origin main
-      - |
-        VERSION={{.CLI_ARGS}}
-        cd {{.WORKTREE_MAIN}}
-        git tag -a $VERSION -m "Release $VERSION"
-        git push origin $VERSION
-        echo "✅ Tagged $VERSION"
-      - task: build:prod
-        vars: { CLI_ARGS: "{{.CLI_ARGS}}" }
-
-  list:
-    desc: List all release tags
-    cmds:
-      - git tag -l "v*" --sort=-version:refname
+      - task: ":git:release:tag"
+        vars: { VERSION: "{{.VERSION}}" }
+      - task: ":deploy:prod"
+        vars: { CLI_ARGS: "{{.VERSION}}" }

@@ -61,8 +61,9 @@ class TestNearNativeTxns:
         assert transfers[0].direction == "outflow"
         assert transfers[0].quantity == Decimal(2)
         assert len(fees) == 1
-        assert fees[0].fee > 0
-        assert fees[0].include_fee is True
+        assert fees[0].quantity > 0  # New COST format: fee amount in qty
+        assert fees[0].price == Decimal(1)
+        assert fees[0].include_fee is False
 
     def test_failed_tx_skipped(self):
         """Failed transactions must produce zero normalized output."""

@@ -164,6 +164,7 @@ export interface AggregatedBalanceItem {
     account_ids: number[];  // All account IDs holding this asset (for filtering)
     qty: number;
     cost_basis_in_base: number;
+    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;
@@ -215,6 +216,7 @@ export interface AssetPnLRow {
     quantity: number;
     market_value: number;
     cost_basis: number;
+    total_invested?: number;  // Cash actually spent (excludes spinoffs/transfers)
 
     // P&L
     unrealized_pnl: number;
@@ -398,6 +400,9 @@ export interface RealizedPnLRow {
 
     // Notes
     notes?: string;
+
+    // Attributed asset - underlying asset for derivative settlements
+    attributed_asset?: AssetRef;
 }
 
 // ============================================================================
@@ -482,6 +487,8 @@ export interface FeeEntry {
     // Used for linking fee P&L to asset-level P&L summary
     related_asset_id?: number;
     related_asset_symbol?: string;
+    // Attributed asset - the underlying asset for derivative settlements
+    attributed_asset?: AssetRef;
 }
 
 export interface FeeSummary {
@@ -999,6 +1006,79 @@ export function aggregateMarketValueByCategory(
     return result;
 }
 
+// Currency color palette for "group by currency" views
+const CURRENCY_COLORS: Record<string, string> = {
+    USD: '#22C55E',  // Green
+    EUR: '#3B82F6',  // Blue
+    GBP: '#A855F7',  // Purple
+    JPY: '#EF4444',  // Red
+    CHF: '#F97316',  // Orange
+    CAD: '#EC4899',  // Pink
+    AUD: '#14B8A6',  // Teal
+    CNY: '#EAB308',  // Yellow
+};
+
+/**
+ * Aggregates market value by denomination currency.
+ *
+ * @param assets - Array of AssetPnLRow with market_value
+ * @param assetCurrencyMap - Map of asset_id → currency symbol (from denomination_currency)
+ * @returns Array of PieChartDataPoint sorted by value descending
+ */
+export function aggregateMarketValueByCurrency(
+    assets: AssetPnLRow[],
+    assetCurrencyMap: Record<number, string>,
+): PieChartDataPoint[] {
+    const currencyBuckets = new Map<string, { value: number; assetIds: Set<number> }>();
+    let unknownValue = 0;
+    const unknownAssetIds = new Set<number>();
+
+    for (const row of assets) {
+        const assetId = row.asset.id;
+        const ccy = assetId != null ? assetCurrencyMap[assetId] : undefined;
+
+        if (ccy) {
+            const bucket = currencyBuckets.get(ccy) || { value: 0, assetIds: new Set() };
+            bucket.value += row.market_value;
+            if (assetId != null) bucket.assetIds.add(assetId);
+            currencyBuckets.set(ccy, bucket);
+        } else {
+            unknownValue += row.market_value;
+            if (assetId != null) unknownAssetIds.add(assetId);
+        }
+    }
+
+    const totalValue = assets.reduce((s, a) => s + a.market_value, 0);
+    const result: PieChartDataPoint[] = [];
+
+    for (const [ccy, bucket] of currencyBuckets.entries()) {
+        if (bucket.value > 0) {
+            result.push({
+                categoryId: null,
+                label: ccy,
+                color: CURRENCY_COLORS[ccy] || '#6B7280',
+                value: bucket.value,
+                percentage: totalValue > 0 ? (bucket.value / totalValue) * 100 : 0,
+                assetCount: bucket.assetIds.size,
+            });
+        }
+    }
+
+    if (unknownValue > 0) {
+        result.push({
+            categoryId: null,
+            label: 'Unknown',
+            color: '#9CA3AF',
+            value: unknownValue,
+            percentage: totalValue > 0 ? (unknownValue / totalValue) * 100 : 0,
+            assetCount: unknownAssetIds.size,
+        });
+    }
+
+    result.sort((a, b) => b.value - a.value);
+    return result;
+}
+
 /**
  * Backend response model for processed calculation units (NEW refactored structure).
  * Matches ProcessedUnitResponse from backend/api/routes/pnl.py
@@ -1119,6 +1199,7 @@ export interface PerAccountBalanceItem {
     account_name: string;
     qty: number;
     cost_basis_in_base: number;
+    total_invested_in_base?: number;  // Cash actually spent (excludes spinoffs/transfers)
     avg_unit_cost_in_base: number;
     lot_count: number;
     realized_pnl_in_base: number;

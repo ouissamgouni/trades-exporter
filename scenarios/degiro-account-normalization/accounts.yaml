@@ -1,0 +1,17 @@
+# DeGiro Account Normalization Scenario — Accounts
+# ==================================================
+# One DeGiro broker account with a degiro-account-file connector.
+
+accounts:
+  - name: "DeGiro Account QA"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_account_qa"
+    connectors:
+      - connector_type: "degiro-account-file"
+        color: "#C56A00"
+        enabled: true
+        sync_priority: 10
+        config: {}

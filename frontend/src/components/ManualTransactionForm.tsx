@@ -278,6 +278,15 @@ export const ManualTransactionForm: React.FC<ManualTransactionFormProps> = ({
                 }
             }
 
+            // Auto-compute price when total changes (reverse: price = total / quantity)
+            if (field === 'total') {
+                const total = parseFloat(value as string);
+                const quantity = parseFloat(prev.quantity);
+                if (!isNaN(total) && !isNaN(quantity) && total > 0 && quantity > 0) {
+                    updated.price = (total / quantity).toFixed(8);
+                }
+            }
+
             return updated;
         });
         setError(null);

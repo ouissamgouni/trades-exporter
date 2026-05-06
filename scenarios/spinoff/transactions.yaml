@@ -1,0 +1,293 @@
+# Corporate Spin-Off Scenario — Transactions
+# ==============================================
+# Two groups of transactions to test both pre-existing and manually-created spinoff bundles.
+#
+# ═══════════════════════════════════════════════════════════════════
+# GROUP A: GE → GEV — Pre-seeded spinoff bundle (Interactive Brokers)
+# ═══════════════════════════════════════════════════════════════════
+#   2024-01-15  Buy 40 GE @ €160 on IBKR          (establishes parent position)
+#   2024-04-02  Spinoff: receive 10 GEV on IBKR    (linked to pre-seeded bundle id=1)
+#   2024-10-01  Sell 5 GEV @ €150 on IBKR          (tests realized PnL with inherited cost)
+#
+#   GE cost = 40 × €160 = €6,400
+#   After 12% spinoff allocation:
+#     GE retained: 40 × €140.80 = €5,632 (88%)
+#     GEV inherited: 10 × €76.80 = €768 (12%)
+#     Total preserved: €5,632 + €768 = €6,400 ✓
+#   Selling 5 GEV @ €150:
+#     Proceeds = 5 × €150 = €750
+#     Cost = 5 × €76.80 = €384
+#     Realized PnL = €750 - €384 = +€366 (gain)
+#
+# ═══════════════════════════════════════════════════════════════════
+# GROUP B: APTV → VRSG — Manual bundle creation (DEGIRO CTO)
+# ═══════════════════════════════════════════════════════════════════
+#   2024-03-10  Buy 60 APTV @ €50 on DEGIRO         (lot 1)
+#   2024-06-20  Buy 40 APTV @ €48 on DEGIRO         (lot 2)
+#   2025-05-01  Spinoff: receive 20 VRSG on DEGIRO   (NO bundle — user creates it manually)
+#   2025-05-01  Cash-in-lieu: €9.30 on DEGIRO        (fractional share settlement)
+#   2025-08-15  Sell 10 VRSG @ €12 on DEGIRO         (test realized PnL after manual bundle)
+#
+#   BEFORE bundle creation:
+#     APTV cost = 60×€50 + 40×€48 = €4,920
+#     VRSG has no cost lots (appears as unexplained deposit)
+#     Selling VRSG shows full proceeds as gain (no cost basis)
+#
+#   AFTER user creates bundle (15% allocation):
+#     APTV Lot 1: 60 × €42.50 = €2,550  (50 × 0.85)
+#     APTV Lot 2: 40 × €40.80 = €1,632  (48 × 0.85)
+#     VRSG Lot A: 12 × €37.50 = €450    (from lot 1)
+#     VRSG Lot B:  8 × €36.00 = €288    (from lot 2)
+#     Total = €4,920 ✓
+#   Selling 10 VRSG @ €12 (FIFO from Lot A):
+#     Proceeds = €120, Cost = €375, Realized PnL = -€255 (loss)
+
+transactions:
+  # ═══════════════════════════════════════════════════════════════
+  # GROUP A: GE → GEV (Pre-seeded spinoff, Interactive Brokers)
+  # ═══════════════════════════════════════════════════════════════
+
+  # ── A1: Buy 40 GE @ €160 on IBKR ─────────────────────────────
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_a01_buy_ge"
+    account_name: "Interactive Brokers"
+    asset_symbol: GE
+    quantity: "40.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-01-15T10:00:00"
+    price: "160.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: A
+      - step: "A1"
+      - goal: "Establish GE parent position on IBKR"
+
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_a01b_buy_ge_outflow"
+    account_name: "Interactive Brokers"
+    asset_symbol: EUR
+    quantity: "6400.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-01-15T10:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: A
+      - step: "A1"
+      - leg_type: disposed
+      - expanded: true
+
+  # ── A2: Spinoff — receive 10 GEV on IBKR (linked to bundle 1) ─
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_a02_gev_inflow"
+    account_name: "Interactive Brokers"
+    asset_symbol: GEV
+    quantity: "10.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2024-04-02T00:00:00"
+    price: "0.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: non_taxable
+    bundle_id: 1
+    tags:
+      - scenario: spinoff
+      - group: A
+      - step: "A2"
+      - goal: "Pre-seeded spinoff inflow — bundle already exists"
+
+  # ── A3: Sell 5 GEV @ €150 on IBKR ────────────────────────────
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_a03_sell_gev"
+    account_name: "Interactive Brokers"
+    asset_symbol: GEV
+    quantity: "5.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-10-01T10:00:00"
+    price: "150.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: A
+      - step: "A3"
+      - goal: "Sell GEV to test realized PnL with inherited cost"
+
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_a03b_sell_gev_inflow"
+    account_name: "Interactive Brokers"
+    asset_symbol: EUR
+    quantity: "750.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-10-01T10:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: A
+      - step: "A3"
+      - leg_type: acquired
+      - expanded: true
+
+  # ═══════════════════════════════════════════════════════════════
+  # GROUP B: APTV → VRSG (Manual bundle creation, DEGIRO CTO)
+  # ═══════════════════════════════════════════════════════════════
+
+  # ── B1: Buy 60 APTV @ €50 on DEGIRO CTO ──────────────────────
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b01_buy_aptv_lot1"
+    account_name: "DEGIRO CTO"
+    asset_symbol: APTV
+    quantity: "60.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-03-10T10:00:00"
+    price: "50.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B1"
+      - goal: "Establish first Aptiv lot"
+
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b01b_buy_aptv_lot1_outflow"
+    account_name: "DEGIRO CTO"
+    asset_symbol: EUR
+    quantity: "3000.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-03-10T10:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B1"
+      - leg_type: disposed
+      - expanded: true
+
+  # ── B2: Buy 40 APTV @ €48 on DEGIRO CTO ──────────────────────
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b02_buy_aptv_lot2"
+    account_name: "DEGIRO CTO"
+    asset_symbol: APTV
+    quantity: "40.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-06-20T14:00:00"
+    price: "48.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B2"
+      - goal: "Establish second Aptiv lot at different cost"
+
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b02b_buy_aptv_lot2_outflow"
+    account_name: "DEGIRO CTO"
+    asset_symbol: EUR
+    quantity: "1920.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-06-20T14:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B2"
+      - leg_type: disposed
+      - expanded: true
+
+  # ── B3: Spinoff — receive 20 VRSG on DEGIRO CTO (NO BUNDLE) ──
+  # ⚠️ This transaction is NOT linked to any bundle.
+  # The QA tester will create the spinoff bundle manually via the UI.
+  # Before bundle creation, this appears as an unexplained deposit.
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b03_vrsg_inflow"
+    account_name: "DEGIRO CTO"
+    asset_symbol: VRSG
+    quantity: "20.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2025-05-01T00:00:00"
+    price: "0.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B3"
+      - goal: "Spinoff inflow — NO bundle yet, user creates it manually"
+
+  # ── B4: Cash-in-lieu for fractional shares ─────────────────────
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b04_cash_in_lieu"
+    account_name: "DEGIRO CTO"
+    asset_symbol: EUR
+    quantity: "9.300000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2025-05-01T00:01:00"
+    review_status: valid
+    taxability_status: taxable
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B4"
+      - goal: "Cash-in-lieu for fractional Versigent shares"
+
+  # ── B5: Sell 10 VRSG @ €12 on DEGIRO CTO ─────────────────────
+  # Before bundle: realized PnL = €120 (full proceeds, no cost basis)
+  # After bundle (15%): realized PnL = €120 - €375 = -€255
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b05_sell_vrsg"
+    account_name: "DEGIRO CTO"
+    asset_symbol: VRSG
+    quantity: "10.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-08-15T10:00:00"
+    price: "12.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B5"
+      - goal: "Post-spinoff sale — verify PnL changes after bundle creation"
+
+  - source: "scenario-spinoff"
+    source_transaction_id: "spinoff_b05b_sell_vrsg_inflow"
+    account_name: "DEGIRO CTO"
+    asset_symbol: EUR
+    quantity: "120.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-08-15T10:00:00"
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: spinoff
+      - group: B
+      - step: "B5"
+      - leg_type: acquired
+      - expanded: true

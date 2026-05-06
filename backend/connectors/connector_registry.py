@@ -296,6 +296,32 @@ class ConnectorRegistry:
 
         self._register(
             ConnectorInfo(
+                type="degiro-file",
+                category="cex",
+                display_name="DeGiro Transactions (File)",
+                required_config=[],
+                optional_config=["file_path"],
+                supports_incremental_sync=False,
+                connector_family="degiro",
+                is_file_connector=True,
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
+                type="degiro-account-file",
+                category="cex",
+                display_name="DeGiro Account (File)",
+                required_config=[],
+                optional_config=["file_path"],
+                supports_incremental_sync=False,
+                connector_family="degiro",
+                is_file_connector=True,
+            )
+        )
+
+        self._register(
+            ConnectorInfo(
                 type="coinbase-transactions",
                 category="cex",
                 display_name="Coinbase Transactions",
@@ -532,7 +558,7 @@ class ConnectorRegistry:
                 hub_key="on-chain",
                 supported_chains=["polygon"],
                 required_config=["address"],
-                optional_config=[],
+                optional_config=["clob_api_key", "clob_api_secret", "clob_passphrase", "signer_address"],
                 supports_incremental_sync=True,
                 supports_balance=True,
             )
@@ -680,7 +706,7 @@ class ConnectorRegistry:
         self._chain_configs["polymarket"] = {
             "polygon": ChainConfig(
                 explorer_type="polymarket",
-                base_url="https://data-api.polymarket.com",
+                base_url="https://clob.polymarket.com",
                 chain_id=137,
                 native_currency="USDC",
                 native_token_decimals=6,
@@ -710,6 +736,8 @@ class ConnectorRegistry:
         from backend.connectors.cex.connector_okx_deposits import OKXDepositsConnector
         from backend.connectors.cex.connector_okx_withdrawals import OKXWithdrawalsConnector
         from backend.connectors.cex.connector_okx_file import OKXFileConnector
+        from backend.connectors.cex.connector_degiro_file import DeGiroFileConnector
+        from backend.connectors.cex.connector_degiro_account_file import DeGiroAccountFileConnector
         from backend.connectors.cex.connector_coinbase_trx import ConnectorCoinbaseTrx
         from backend.connectors.cex.connector_coinbase_deposits import (
             ConnectorCoinbaseDeposits,
@@ -784,6 +812,8 @@ class ConnectorRegistry:
             "okx-deposits": OKXDepositsConnector,
             "okx-withdrawals": OKXWithdrawalsConnector,
             "okx-file": OKXFileConnector,
+            "degiro-file": DeGiroFileConnector,
+            "degiro-account-file": DeGiroAccountFileConnector,
             "coinbase-transactions": ConnectorCoinbaseTrx,
             "coinbase-deposits": ConnectorCoinbaseDeposits,
             "coinbase-withdrawals": ConnectorCoinbaseWithdrawals,

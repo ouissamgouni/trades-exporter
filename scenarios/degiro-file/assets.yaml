@@ -1,0 +1,33 @@
+# DeGiro File Connector Scenario — Assets
+# ==========================================
+# EUR as quote currency + 4 stocks traded on DeGiro.
+# ISIN and denomination_currency set to match the connector output.
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: RGTI
+    label: Rigetti Computing Inc
+    price_type: stock
+    isin: US76655K1034
+    denomination_currency: USD
+
+  - symbol: ASML
+    label: ASML Holding
+    price_type: stock
+    isin: NL0010273215
+    denomination_currency: EUR
+
+  - symbol: RR
+    label: Rolls-Royce Holdings
+    price_type: stock
+    isin: GB00B63H8491
+    denomination_currency: GBP
+
+  - symbol: AMZN
+    label: Amazon.com Inc
+    price_type: stock
+    isin: US0231351067
+    denomination_currency: USD

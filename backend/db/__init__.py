@@ -36,7 +36,7 @@ from backend.db.repositories import (
 log = configure_logging("db_init")
 
 
-def init_db(test_mode: bool = None):
+def init_db():
     """
     Initialize the PostgreSQL database: create tables only.
 
@@ -44,9 +44,6 @@ def init_db(test_mode: bool = None):
     - `task db:seed:dev` for development
     - `task db:seed:test` for testing
     - `python scripts/seed.py` manually
-
-    Args:
-        test_mode: Deprecated - use DATABASE_URL environment variable instead.
     """
     import os
     from backend.db.database import init_db as _init_db, get_database_url

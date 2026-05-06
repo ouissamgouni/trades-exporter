@@ -1,0 +1,17 @@
+# DeGiro File Connector Scenario — Accounts
+# ============================================
+# One DeGiro broker account with a degiro-file connector attached.
+
+accounts:
+  - name: "DeGiro"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_file_qa"
+    connectors:
+      - connector_type: "degiro-file"
+        color: "#C56A00"
+        enabled: true
+        sync_priority: 10
+        config: {}

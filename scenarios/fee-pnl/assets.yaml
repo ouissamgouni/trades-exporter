@@ -1,0 +1,26 @@
+# Fee PnL Scenario — Assets
+# ==========================
+# Base currency: EUR
+# Crypto: ETH, BTC, USDC
+# Stock: APTIV (for ADR custody fee attribution)
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: ETH
+    label: Ethereum
+    price_type: crypto
+
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  - symbol: "APTIV PLC (JE00BTDN8H13)"
+    label: "Aptiv PLC"
+    price_type: stock

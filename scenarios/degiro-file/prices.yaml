@@ -1,0 +1,5 @@
+# DeGiro File Connector Scenario — Prices
+# ==========================================
+# No pre-seeded prices needed. Prices come from the price getter after import.
+
+prices: []

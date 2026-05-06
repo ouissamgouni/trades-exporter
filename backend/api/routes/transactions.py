@@ -72,6 +72,12 @@ class BulkUpdateRequest(BaseModel):
     include_fee: Optional[bool] = Field(
         None, description="Include fee in cost basis/proceeds"
     )
+    clear_from_account: Optional[bool] = Field(
+        None, description="Clear from_account_id (set to null)"
+    )
+    clear_to_account: Optional[bool] = Field(
+        None, description="Clear to_account_id (set to null)"
+    )
 
 
 class BulkStatusUpdate(BaseModel):
@@ -175,6 +181,9 @@ class TransactionCreate(BaseModel):
         description="Review status",
     )
     review_notes: Optional[str] = Field(None, description="Notes")
+    taxability_status: Optional[str] = Field(
+        "unknown", description="Taxability status (taxable, non_taxable, unknown)"
+    )
     tags: Optional[List[Dict[str, Any]]] = Field(
         None, description="Tags as list of {key: value} pairs"
     )
@@ -217,6 +226,12 @@ def _build_transaction_response(
         symbol=tx.fee_quote_asset.symbol,
         label=tx.fee_quote_asset.label
     ) if tx.fee_quote_asset else None
+
+    attributed_asset = AssetRef(
+        asset_id=tx.attributed_asset.asset_id,
+        symbol=tx.attributed_asset.symbol,
+        label=tx.attributed_asset.label
+    ) if tx.attributed_asset else None
 
     # Backward-compatible flat symbol fields
     linked_asset_symbol = tx.asset.symbol if tx.asset else None
@@ -275,6 +290,7 @@ def _build_transaction_response(
     tx_dict["linked_asset"] = linked_asset
     tx_dict["price_quote_asset"] = price_quote_asset
     tx_dict["fee_quote_asset"] = fee_quote_asset
+    tx_dict["attributed_asset"] = attributed_asset
     
     # Backward-compatible flat fields
     tx_dict["linked_asset_symbol"] = linked_asset_symbol
@@ -341,6 +357,7 @@ class FilterOptionsResponse(BaseModel):
     networks: List[FilterOption]
     price_quote_assets: List[FilterOption] = []
     fee_quote_assets: List[FilterOption] = []
+    attributed_assets: List[FilterOption] = []
     bundle_patterns: List[FilterOption] = []
     non_owned_count: int = 0
     include_fee_count: int = 0
@@ -373,6 +390,7 @@ def get_filter_options(
     has_fee: Optional[bool] = Query(None, description="Filter by fee presence: true = fee > 0, false = no fee"),
     price_quote_asset_id: Optional[str] = Query(None),
     fee_quote_asset_id: Optional[str] = Query(None),
+    attributed_asset_id: Optional[str] = Query(None),
     include_fee: Optional[bool] = Query(None),
     has_bundle: Optional[bool] = Query(None),
     bundle_pattern: Optional[str] = Query(None),
@@ -414,6 +432,7 @@ def get_filter_options(
         date_to=date_to,
         price_quote_asset_id=price_quote_asset_id,
         fee_quote_asset_id=fee_quote_asset_id,
+        attributed_asset_id=attributed_asset_id,
         include_fee=include_fee,
         has_bundle=has_bundle,
         bundle_pattern=bundle_pattern,
@@ -820,6 +839,29 @@ def get_filter_options(
             for r in fqa_results
         ]
 
+        # Attributed asset options
+        attr_query = (
+            select(
+                Asset.asset_id,
+                Asset.symbol,
+                Asset.label,
+                func.count(base_cte.c.id).label('count')
+            )
+            .join(NormalizedTransaction, NormalizedTransaction.attributed_asset_id == Asset.asset_id)
+            .join(base_cte, NormalizedTransaction.id == base_cte.c.id)
+            .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+            .order_by(Asset.symbol)
+        )
+        attr_results = session.exec(attr_query).all()
+        attributed_asset_options = [
+            FilterOption(
+                value=str(r[0]),
+                label=f"{r[1]}" + (f" ({r[2]})" if r[2] else ""),
+                count=r[3]
+            )
+            for r in attr_results
+        ]
+
         # Bundle patterns with counts
         bundle_q = (
             select(
@@ -886,6 +928,7 @@ def get_filter_options(
             networks=network_options,
             price_quote_assets=price_quote_asset_options,
             fee_quote_assets=fee_quote_asset_options,
+            attributed_assets=attributed_asset_options,
             bundle_patterns=bundle_pattern_options,
             non_owned_count=non_owned_count,
             include_fee_count=include_fee_count,
@@ -1450,6 +1493,7 @@ def list_transactions(
     # New filters: quote assets, include_fee, bundles
     price_quote_asset_id: Optional[str] = Query(None, description="Filter by price quote asset IDs (comma-separated for multiple)"),
     fee_quote_asset_id: Optional[str] = Query(None, description="Filter by fee quote asset IDs (comma-separated for multiple)"),
+    attributed_asset_id: Optional[str] = Query(None, description="Filter by attributed asset IDs (comma-separated for multiple)"),
     include_fee: Optional[bool] = Query(None, description="Filter by include_fee flag (true/false)"),
     has_bundle: Optional[bool] = Query(None, description="Filter by whether transaction has a bundle assigned"),
     bundle_pattern: Optional[str] = Query(None, description="Filter by bundle pattern (comma-separated: internal_transfer, swap, flow, split, custom, unknown)"),
@@ -1517,6 +1561,7 @@ def list_transactions(
             date_to=date_to,
             price_quote_asset_id=price_quote_asset_id,
             fee_quote_asset_id=fee_quote_asset_id,
+            attributed_asset_id=attributed_asset_id,
             include_fee=include_fee,
             has_bundle=has_bundle,
             bundle_pattern=bundle_pattern,
@@ -1541,6 +1586,7 @@ def list_transactions(
             joinedload(NormalizedTransaction.asset),
             joinedload(NormalizedTransaction.price_quote_asset),
             joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
             joinedload(NormalizedTransaction.account_rel),
             joinedload(NormalizedTransaction.from_account),
             joinedload(NormalizedTransaction.to_account),
@@ -1743,6 +1789,7 @@ def get_inbox(
                 joinedload(NormalizedTransaction.asset),
                 joinedload(NormalizedTransaction.price_quote_asset),
                 joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
                 joinedload(NormalizedTransaction.account_rel),
                 joinedload(NormalizedTransaction.from_account),
                 joinedload(NormalizedTransaction.to_account),
@@ -1797,6 +1844,7 @@ def get_reviewed_transactions(
                 joinedload(NormalizedTransaction.asset),
                 joinedload(NormalizedTransaction.price_quote_asset),
                 joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
                 joinedload(NormalizedTransaction.account_rel),
                 joinedload(NormalizedTransaction.from_account),
                 joinedload(NormalizedTransaction.to_account),
@@ -1877,6 +1925,7 @@ def get_inbox(
             joinedload(NormalizedTransaction.asset),
             joinedload(NormalizedTransaction.price_quote_asset),
             joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
             joinedload(NormalizedTransaction.account_rel),
             joinedload(NormalizedTransaction.from_account),
             joinedload(NormalizedTransaction.to_account),
@@ -1908,6 +1957,7 @@ def get_reviewed(
             joinedload(NormalizedTransaction.asset),
             joinedload(NormalizedTransaction.price_quote_asset),
             joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
             joinedload(NormalizedTransaction.account_rel),
             joinedload(NormalizedTransaction.from_account),
             joinedload(NormalizedTransaction.to_account),
@@ -1975,6 +2025,7 @@ def get_transaction(
                 joinedload(NormalizedTransaction.asset),
                 joinedload(NormalizedTransaction.price_quote_asset),
                 joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
                 joinedload(NormalizedTransaction.account_rel),
                 joinedload(NormalizedTransaction.from_account),
                 joinedload(NormalizedTransaction.to_account),
@@ -2065,6 +2116,7 @@ def update_transaction(
                     joinedload(NormalizedTransaction.asset),
                     joinedload(NormalizedTransaction.price_quote_asset),
                     joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
                     joinedload(NormalizedTransaction.account_rel),
                     joinedload(NormalizedTransaction.from_account),
                     joinedload(NormalizedTransaction.to_account),
@@ -2196,6 +2248,7 @@ def create_transaction(
                     joinedload(NormalizedTransaction.asset),
                     joinedload(NormalizedTransaction.price_quote_asset),
                     joinedload(NormalizedTransaction.fee_quote_asset),
+            joinedload(NormalizedTransaction.attributed_asset),
                     joinedload(NormalizedTransaction.account_rel),
                     joinedload(NormalizedTransaction.from_account),
                     joinedload(NormalizedTransaction.to_account),
@@ -2260,6 +2313,8 @@ def bulk_update_transactions(
         or request.transaction_type is not None
         or request.taxability_status is not None
         or request.include_fee is not None
+        or request.clear_from_account is True
+        or request.clear_to_account is True
     )
     if not has_update:
         raise HTTPException(
@@ -2285,6 +2340,10 @@ def bulk_update_transactions(
                 tx.taxability_status = request.taxability_status.value
             if request.include_fee is not None:
                 tx.include_fee = request.include_fee
+            if request.clear_from_account:
+                tx.from_account_id = None
+            if request.clear_to_account:
+                tx.to_account_id = None
 
             session.add(tx)
             updated_count += 1

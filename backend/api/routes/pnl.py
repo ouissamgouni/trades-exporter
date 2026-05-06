@@ -27,6 +27,7 @@ from backend.db.models import (
     PriceSnapshot, FrenchCryptoTaxEntry, FrenchCryptoTaxAnnualSummary,
     FrenchSecuritiesTaxEntry, FrenchSecuritiesTaxAnnualSummary,
     UserCalculationBundle, TransactionTaxOverride,
+    IncomeEvent,
 )
 from backend.services.pnl.engine import PnLEngine
 from backend.services.pnl.config import PnLConfig, CostMethod, LotMode
@@ -288,7 +289,7 @@ class RealizedPnLResponse(BaseModel):
     proceeds_price: Optional[float] = None
     proceeds_price_source: Optional[str] = None
     proceeds_price_timestamp: Optional[datetime] = None
-    related_asset_symbol: Optional[str] = None
+    attributed_asset: Optional[AssetRef] = None
 
 
 class FeeEntryResponse(BaseModel):
@@ -652,6 +653,7 @@ class BalanceResponse(BaseModel):
     account_ids: List[int] = []  # All account IDs holding this asset (for filtering)
     qty: float  # Consistent with other responses
     cost_basis_in_base: float
+    total_invested_in_base: float = 0.0  # Cash actually spent on lots (excludes spinoffs/transfers)
     avg_unit_cost_in_base: float  # Consistent naming
     lot_count: int
     # Aggregated P&L data (populated when group_by_asset=true)
@@ -661,6 +663,9 @@ class BalanceResponse(BaseModel):
     warning_count: int = 0
     # Fee tracking (populated when group_by_asset=true)
     total_fees_in_base: float = 0.0  # Total fees at FMV (proceeds from fee disposals)
+    # Income tracking (populated when group_by_asset=true)
+    income_total_in_base: float = 0.0  # Gross income from dividends/interest
+    income_event_count: int = 0  # Number of income events for this asset
     # Unsettled negative lot tracking (for filter indicator)
     unsettled_negative_count: int = 0  # Number of unsettled negative lots excluded/included
     # Category IDs for client-side filtering (populated when group_by_asset=true)
@@ -2263,7 +2268,9 @@ def get_version_realized_pnl(
     base_query, _ = _apply_unit_filter(base_query, tx_filters, version_id, session, unit_column=RealizedPnl.origin_unit_id)
     
     if asset_id:
-        base_query = base_query.where(RealizedPnl.asset_id == asset_id)
+        base_query = base_query.where(
+            func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id) == asset_id
+        )
 
     if is_taxable is not None:
         if fr_tax_category:
@@ -2366,6 +2373,7 @@ def get_version_realized_pnl(
     query = (
         base_query.options(
             selectinload(RealizedPnl.asset),
+            selectinload(RealizedPnl.attributed_asset),
             selectinload(RealizedPnl.transaction).selectinload(NormalizedTransaction.account_rel),
         )
         .order_by(order_func)
@@ -2421,7 +2429,11 @@ def get_version_realized_pnl(
             proceeds_price=float(e.proceeds_price) if e.proceeds_price else None,
             proceeds_price_source=e.proceeds_price_source,
             proceeds_price_timestamp=e.proceeds_price_timestamp,
-            related_asset_symbol=e.related_asset_symbol,
+            attributed_asset=AssetRef(
+                id=e.attributed_asset.asset_id,
+                symbol=e.attributed_asset.symbol,
+                label=e.attributed_asset.label,
+            ) if e.attributed_asset else None,
         )
         for e in entries
     ]
@@ -2598,6 +2610,201 @@ def get_realized_pnl_filter_options(
     )
 
 
+# =============================================================================
+# Income Events
+# =============================================================================
+
+
+@router.get("/versions/{version_id}/income-events")
+def get_version_income_events(
+    version_id: int,
+    asset_id: Optional[int] = None,
+    income_type: Optional[str] = None,
+    account_id: Optional[int] = None,
+    jurisdiction: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    sort_by: Optional[str] = None,       # "date" (default), "amount"
+    order: Optional[str] = None,         # "asc" or "desc"
+    page: int = 1,
+    limit: int = 100,
+    session: Session = Depends(get_session_dependency),
+):
+    """Get income events (dividends, interest, etc.) for a version."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    base_query = (
+        select(IncomeEvent)
+        .where(IncomeEvent.version_id == version_id)
+    )
+
+    if asset_id:
+        base_query = base_query.where(
+            or_(IncomeEvent.asset_id == asset_id, IncomeEvent.attributed_asset_id == asset_id)
+        )
+    if income_type:
+        types = [t.strip() for t in income_type.split(",") if t.strip()]
+        if types:
+            base_query = base_query.where(IncomeEvent.income_type.in_(types))
+    if jurisdiction:
+        base_query = base_query.where(IncomeEvent.withholding_jurisdiction == jurisdiction)
+    if date_from:
+        base_query = base_query.where(IncomeEvent.income_at >= datetime.fromisoformat(date_from))
+    if date_to:
+        base_query = base_query.where(IncomeEvent.income_at <= datetime.fromisoformat(date_to))
+
+    # Account filter via transaction
+    if account_id is not None:
+        base_query = base_query.join(
+            NormalizedTransaction, IncomeEvent.transaction_id == NormalizedTransaction.id
+        ).where(NormalizedTransaction.account_id == account_id)
+
+    # Count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = session.exec(count_query).one()
+
+    # Sorting
+    if sort_by == "amount":
+        sort_col = IncomeEvent.gross_amount_in_base
+    else:
+        sort_col = IncomeEvent.income_at
+    if order == "asc":
+        sort_col = sort_col.asc()
+    else:
+        sort_col = sort_col.desc()
+
+    offset = (page - 1) * limit
+    query = (
+        base_query.options(
+            selectinload(IncomeEvent.asset),
+            selectinload(IncomeEvent.attributed_asset),
+            selectinload(IncomeEvent.transaction).selectinload(NormalizedTransaction.account_rel),
+        )
+        .order_by(sort_col)
+        .offset(offset)
+        .limit(limit)
+    )
+    events = session.exec(query).all()
+
+    items = []
+    for e in events:
+        tx = e.transaction
+        account = tx.account_rel if tx else None
+        gross = float(e.gross_amount_in_base or 0)
+        wht = float(e.withholding_amount_in_base or 0)
+        items.append({
+            "id": e.id,
+            "income_type": e.income_type,
+            "asset": {
+                "id": e.asset.asset_id if e.asset else e.asset_id,
+                "symbol": e.asset.symbol if e.asset else None,
+                "label": e.asset.label if e.asset else None,
+            },
+            "attributed_asset": {
+                "id": e.attributed_asset.asset_id,
+                "symbol": e.attributed_asset.symbol,
+                "label": e.attributed_asset.label,
+            } if e.attributed_asset else None,
+            "gross_amount_in_base": gross,
+            "withholding_amount_in_base": wht,
+            "net_amount_in_base": round(gross - wht, 2),
+            "withholding_jurisdiction": e.withholding_jurisdiction,
+            "withholding_rate": float(e.withholding_rate) if e.withholding_rate else None,
+            "income_at": e.income_at.isoformat() if e.income_at else None,
+            "notes": e.notes,
+            "transaction_id": e.transaction_id,
+            "unit_id": e.unit_id,
+            "account_id": account.id if account else None,
+            "account_name": account.name if account else None,
+        })
+
+    return {"items": items, "total": total, "page": page, "limit": limit}
+
+
+@router.get("/versions/{version_id}/income-events/filter-options")
+def get_income_events_filter_options(
+    version_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """Return available filter values for the income events list."""
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    base_sq = (
+        select(IncomeEvent.id)
+        .where(IncomeEvent.version_id == version_id)
+        .subquery()
+    )
+
+    # Assets (attributed_asset = stock paying dividend)
+    attr_asset_q = (
+        select(Asset.asset_id, Asset.symbol, Asset.label, func.count(IncomeEvent.id))
+        .join(IncomeEvent, IncomeEvent.attributed_asset_id == Asset.asset_id)
+        .where(IncomeEvent.id.in_(select(base_sq)))
+        .group_by(Asset.asset_id, Asset.symbol, Asset.label)
+        .order_by(func.count(IncomeEvent.id).desc())
+    )
+    asset_rows = session.exec(attr_asset_q).all()
+    assets = [
+        {"value": str(aid), "label": sym or lbl or str(aid), "count": c}
+        for aid, sym, lbl, c in asset_rows
+    ]
+
+    # Income types
+    type_q = (
+        select(IncomeEvent.income_type, func.count(IncomeEvent.id))
+        .where(IncomeEvent.id.in_(select(base_sq)))
+        .group_by(IncomeEvent.income_type)
+        .order_by(func.count(IncomeEvent.id).desc())
+    )
+    type_rows = session.exec(type_q).all()
+    income_types = [{"value": t, "label": t.capitalize(), "count": c} for t, c in type_rows]
+
+    # Jurisdictions
+    jur_q = (
+        select(IncomeEvent.withholding_jurisdiction, func.count(IncomeEvent.id))
+        .where(IncomeEvent.id.in_(select(base_sq)))
+        .where(IncomeEvent.withholding_jurisdiction.isnot(None))
+        .group_by(IncomeEvent.withholding_jurisdiction)
+        .order_by(func.count(IncomeEvent.id).desc())
+    )
+    jur_rows = session.exec(jur_q).all()
+    jurisdictions = [{"value": j, "label": j, "count": c} for j, c in jur_rows]
+
+    # Accounts (via transaction)
+    acct_q = (
+        select(Account.id, Account.name, func.count(IncomeEvent.id))
+        .join(NormalizedTransaction, NormalizedTransaction.account_id == Account.id)
+        .join(IncomeEvent, IncomeEvent.transaction_id == NormalizedTransaction.id)
+        .where(IncomeEvent.id.in_(select(base_sq)))
+        .group_by(Account.id, Account.name)
+        .order_by(func.count(IncomeEvent.id).desc())
+    )
+    acct_rows = session.exec(acct_q).all()
+    accounts = [{"value": str(aid), "label": name or str(aid), "count": c} for aid, name, c in acct_rows]
+
+    # Date range
+    date_q = (
+        select(func.min(IncomeEvent.income_at), func.max(IncomeEvent.income_at))
+        .where(IncomeEvent.id.in_(select(base_sq)))
+    )
+    date_min, date_max = session.exec(date_q).one()
+    date_range = None
+    if date_min and date_max:
+        date_range = {"min": date_min.isoformat(), "max": date_max.isoformat()}
+
+    return {
+        "assets": assets,
+        "income_types": income_types,
+        "jurisdictions": jurisdictions,
+        "accounts": accounts,
+        "date_range": date_range,
+    }
+
+
 @router.get("/versions/{version_id}/realized-pnl/{pnl_id}/lineage", response_model=RealizedPnlLineageResponse)
 def get_realized_pnl_lineage(
     version_id: int,
@@ -2613,7 +2820,10 @@ def get_realized_pnl_lineage(
     rpnl = session.exec(
         select(RealizedPnl)
         .where(RealizedPnl.pnl_id == pnl_id)
-        .options(selectinload(RealizedPnl.asset))
+        .options(
+            selectinload(RealizedPnl.asset),
+            selectinload(RealizedPnl.attributed_asset),
+        )
     ).first()
     if not rpnl:
         raise HTTPException(status_code=404, detail=f"Realized P&L entry {pnl_id} not found")
@@ -2643,7 +2853,11 @@ def get_realized_pnl_lineage(
         proceeds_price=float(rpnl.proceeds_price) if rpnl.proceeds_price else None,
         proceeds_price_source=rpnl.proceeds_price_source,
         proceeds_price_timestamp=rpnl.proceeds_price_timestamp,
-        related_asset_symbol=rpnl.related_asset_symbol,
+        attributed_asset=AssetRef(
+            id=rpnl.attributed_asset.asset_id,
+            symbol=rpnl.attributed_asset.symbol,
+            label=rpnl.attributed_asset.label,
+        ) if rpnl.attributed_asset else None,
     )
 
     # Consumed slices for this PnL entry (bridge to source lots)
@@ -3194,11 +3408,11 @@ def get_version_balances(
             non_owned=tx_filters.non_owned,
         )
 
-    # Query cost lots with remaining qty, eager load asset and account
+    # Query cost lots with remaining qty, eager load asset, account, and unit
     query = (
         select(CostLot)
         .join(CostLot.unit)  # join the related CalculationUnit
-        .options(selectinload(CostLot.asset), selectinload(CostLot.account))
+        .options(selectinload(CostLot.asset), selectinload(CostLot.account), selectinload(CostLot.unit))
         .where(CalculationUnit.version_id == version_id)
         #.where(CostLot.qty_remaining > 0)
     )
@@ -3217,12 +3431,19 @@ def get_version_balances(
                 continue  # Skip unsettled negative lots
         filtered_lots.append(lot)
     
+    # Patterns representing real cash expenditure (swap, flow, unknown/None)
+    _INVESTMENT_PATTERNS = {"swap", "flow"}
+    def _is_investment_lot(lot):
+        p = lot.unit.pattern if lot.unit else None
+        return p in _INVESTMENT_PATTERNS or p is None
+
     # Determine aggregation key based on group_by_asset
     if group_by_asset:
         # Aggregate by asset_id only
         balance_map = defaultdict(lambda: {
             "qty": Decimal(0), 
             "cost": Decimal(0), 
+            "total_invested": Decimal(0),
             "lots": 0,
             "asset": None,
             "account_ids": set(),  # Track all account IDs holding this asset
@@ -3232,88 +3453,47 @@ def get_version_balances(
             key = lot.asset_id
             balance_map[key]["qty"] += lot.qty_remaining
             balance_map[key]["cost"] += lot.qty_remaining * lot.unit_cost
+            if _is_investment_lot(lot):
+                balance_map[key]["total_invested"] += lot.qty * lot.unit_cost
             balance_map[key]["lots"] += 1
             if lot.account_id:
                 balance_map[key]["account_ids"].add(lot.account_id)
             if balance_map[key]["asset"] is None:
                 balance_map[key]["asset"] = lot.asset
         
-        # Query realized P&L aggregated by asset
-        # Exclude derivative settlements (redirected to underlying below)
+        # Query realized P&L aggregated by effective asset (attributed_asset_id when set, else asset_id)
+        effective_asset = func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).label("effective_asset_id")
         realized_query = (
             select(
-                RealizedPnl.asset_id,
+                effective_asset,
                 func.sum(RealizedPnl.pnl_in_base).label("total_pnl"),
                 func.count(RealizedPnl.pnl_id).label("event_count")
             )
             .join(RealizedPnl.origin_unit)
             .where(CalculationUnit.version_id == version_id)
-            .where(RealizedPnl.related_asset_symbol.is_(None))
-            .group_by(RealizedPnl.asset_id)
+            .group_by(effective_asset)
         )
         if filtered_unit_ids is not None:
             realized_query = realized_query.where(RealizedPnl.origin_unit_id.in_(filtered_unit_ids))
         realized_results = session.exec(realized_query).all()
-        realized_map = {r.asset_id: {"pnl": float(r.total_pnl or 0), "count": r.event_count} for r in realized_results}
+        realized_map = {r.effective_asset_id: {"pnl": float(r.total_pnl or 0), "count": r.event_count} for r in realized_results}
 
-        # Query taxable realized P&L aggregated by asset
+        # Query taxable realized P&L aggregated by effective asset
+        taxable_effective_asset = func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).label("effective_asset_id")
         taxable_rpnl_query = (
             select(
-                RealizedPnl.asset_id,
+                taxable_effective_asset,
                 func.sum(RealizedPnl.pnl_in_base).label("total_pnl"),
             )
             .join(RealizedPnl.origin_unit)
             .where(CalculationUnit.version_id == version_id)
-            .where(RealizedPnl.related_asset_symbol.is_(None))
             .where(RealizedPnl.disposal_taxable == True)
-            .group_by(RealizedPnl.asset_id)
+            .group_by(taxable_effective_asset)
         )
         if filtered_unit_ids is not None:
             taxable_rpnl_query = taxable_rpnl_query.where(RealizedPnl.origin_unit_id.in_(filtered_unit_ids))
         taxable_rpnl_results = session.exec(taxable_rpnl_query).all()
-        taxable_rpnl_map = {r.asset_id: float(r.total_pnl or 0) for r in taxable_rpnl_results}
-
-        # Redirect derivative taxable P&L to the underlying asset
-        taxable_deriv_query = (
-            select(
-                Asset.asset_id,
-                func.sum(RealizedPnl.pnl_in_base).label("total_pnl"),
-            )
-            .join(RealizedPnl.origin_unit)
-            .join(Asset, Asset.symbol == RealizedPnl.related_asset_symbol)
-            .where(CalculationUnit.version_id == version_id)
-            .where(RealizedPnl.related_asset_symbol.isnot(None))
-            .where(RealizedPnl.disposal_taxable == True)
-            .group_by(Asset.asset_id)
-        )
-        if filtered_unit_ids is not None:
-            taxable_deriv_query = taxable_deriv_query.where(RealizedPnl.origin_unit_id.in_(filtered_unit_ids))
-        taxable_deriv_results = session.exec(taxable_deriv_query).all()
-        for r in taxable_deriv_results:
-            taxable_rpnl_map[r.asset_id] = taxable_rpnl_map.get(r.asset_id, 0.0) + float(r.total_pnl or 0)
-
-        # Redirect derivative P&L to the underlying asset via related_asset_symbol
-        deriv_query = (
-            select(
-                Asset.asset_id,
-                func.sum(RealizedPnl.pnl_in_base).label("total_pnl"),
-                func.count(RealizedPnl.pnl_id).label("event_count")
-            )
-            .join(RealizedPnl.origin_unit)
-            .join(Asset, Asset.symbol == RealizedPnl.related_asset_symbol)
-            .where(CalculationUnit.version_id == version_id)
-            .where(RealizedPnl.related_asset_symbol.isnot(None))
-            .group_by(Asset.asset_id)
-        )
-        if filtered_unit_ids is not None:
-            deriv_query = deriv_query.where(RealizedPnl.origin_unit_id.in_(filtered_unit_ids))
-        deriv_results = session.exec(deriv_query).all()
-        for r in deriv_results:
-            if r.asset_id in realized_map:
-                realized_map[r.asset_id]["pnl"] += float(r.total_pnl or 0)
-                realized_map[r.asset_id]["count"] += r.event_count
-            else:
-                realized_map[r.asset_id] = {"pnl": float(r.total_pnl or 0), "count": r.event_count}
+        taxable_rpnl_map = {r.effective_asset_id: float(r.total_pnl or 0) for r in taxable_rpnl_results}
         
         # Query warnings aggregated by asset
         warning_query = (
@@ -3349,6 +3529,51 @@ def get_version_balances(
         fee_results = session.exec(fee_query).all()
         fee_map = {r.related_asset_id: float(r.total_fees_fmv or 0) for r in fee_results}
         
+        # Query income events aggregated by attributed_asset_id
+        income_query = (
+            select(
+                IncomeEvent.attributed_asset_id,
+                func.sum(IncomeEvent.gross_amount_in_base).label("total_income"),
+                func.count(IncomeEvent.id).label("event_count"),
+            )
+            .where(IncomeEvent.version_id == version_id)
+            .where(IncomeEvent.attributed_asset_id.isnot(None))
+            .group_by(IncomeEvent.attributed_asset_id)
+        )
+        income_results = session.exec(income_query).all()
+        income_map = {
+            r.attributed_asset_id: {"total": float(r.total_income or 0), "count": int(r.event_count)}
+            for r in income_results
+        }
+
+        # Inject realized-only assets: assets with realized PnL, fees, or warnings
+        # but no remaining CostLots (e.g. fully-disposed assets, perp-attributed PnL)
+        realized_only_ids = set()
+        for aid in realized_map:
+            if aid and aid not in balance_map:
+                realized_only_ids.add(aid)
+        for aid in fee_map:
+            if aid and aid not in balance_map:
+                realized_only_ids.add(aid)
+        for aid in warning_map:
+            if aid and aid not in balance_map:
+                realized_only_ids.add(aid)
+        for aid in income_map:
+            if aid and aid not in balance_map:
+                realized_only_ids.add(aid)
+        if realized_only_ids:
+            missing_assets = session.exec(
+                select(Asset).where(Asset.asset_id.in_(list(realized_only_ids)))
+            ).all()
+            for asset_obj in missing_assets:
+                balance_map[asset_obj.asset_id] = {
+                    "qty": Decimal(0),
+                    "cost": Decimal(0),
+                    "lots": 0,
+                    "asset": asset_obj,
+                    "account_ids": set(),
+                }
+
         # Query category IDs for all assets in the balance
         asset_ids_in_balance = list(balance_map.keys())
         category_query = (
@@ -3380,6 +3605,7 @@ def get_version_balances(
                 account_ids=sorted(list(data["account_ids"])),  # All accounts holding this asset
                 qty=float(data["qty"]),
                 cost_basis_in_base=float(data["cost"]),
+                total_invested_in_base=float(data["total_invested"]),
                 avg_unit_cost_in_base=float(data["cost"] / data["qty"]) if data["qty"] > 0 else 0.0,
                 lot_count=data["lots"],
                 # Aggregated P&L data
@@ -3389,6 +3615,8 @@ def get_version_balances(
                 warning_count=warning_map.get(asset_id, 0),
                 # Fee tracking
                 total_fees_in_base=fee_map.get(asset_id, 0.0),
+                income_total_in_base=income_map.get(asset_id, {}).get("total", 0.0),
+                income_event_count=income_map.get(asset_id, {}).get("count", 0),
                 unsettled_negative_count=unsettled_negative_by_asset.get(asset_id, 0),
                 category_ids=sorted(category_map.get(asset_id, [])),
             )
@@ -3405,6 +3633,7 @@ def get_version_balances(
         balance_map = defaultdict(lambda: {
             "qty": Decimal(0), 
             "cost": Decimal(0), 
+            "total_invested": Decimal(0),
             "lots": 0,
             "asset": None,
             "account": None,
@@ -3414,6 +3643,8 @@ def get_version_balances(
             key = (lot.asset_id, lot.account_id)
             balance_map[key]["qty"] += lot.qty_remaining
             balance_map[key]["cost"] += lot.qty_remaining * lot.unit_cost
+            if _is_investment_lot(lot):
+                balance_map[key]["total_invested"] += lot.qty * lot.unit_cost
             balance_map[key]["lots"] += 1
             if balance_map[key]["asset"] is None:
                 balance_map[key]["asset"] = lot.asset
@@ -3437,6 +3668,7 @@ def get_version_balances(
                 account_name=data["account"].name if data["account"] else None,
                 qty=float(data["qty"]),
                 cost_basis_in_base=float(data["cost"]),
+                total_invested_in_base=float(data["total_invested"]),
                 avg_unit_cost_in_base=float(data["cost"] / data["qty"]) if data["qty"] > 0 else 0.0,
                 lot_count=data["lots"],
                 unsettled_negative_count=unsettled_negative_by_key.get((asset_id, account_id), 0),
@@ -5357,6 +5589,7 @@ def get_portfolio_timeline(
                 "cost_basis_in_base": p.cost_basis_in_base,
                 "unrealized_pnl": p.unrealized_pnl,
                 "cumulative_realized_pnl": p.cumulative_realized_pnl,
+                "cumulative_income": p.cumulative_income,
                 "breakdown": [
                     {
                         "asset_id": b.asset_id,
@@ -5376,11 +5609,11 @@ def get_portfolio_timeline(
 
 
 # =============================================================================
-# Settled Metrics (cost-lot-based, no price lookup)
+# Book Metrics (cost-lot-based, no price lookup)
 # =============================================================================
 
-@router.get("/versions/{version_id}/metrics/settled")
-def get_settled_metrics(
+@router.get("/versions/{version_id}/metrics/book")
+def get_book_metrics(
     version_id: int,
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
@@ -5390,15 +5623,15 @@ def get_settled_metrics(
 ):
     """
     Compute cost-lot-based metrics that don't require market prices.
-    Returns instantly: cost_basis, realized_pnl, fees, and per-period settled fields.
+    Returns instantly: cost_basis, realized_pnl, fees, and per-period book fields.
     """
-    from backend.services.pnl.metrics_service import compute_settled_metrics
+    from backend.services.pnl.metrics_service import compute_book_metrics
 
     parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
     parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
     parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
 
-    metrics = compute_settled_metrics(
+    metrics = compute_book_metrics(
         session=session,
         version_id=version_id,
         asset_ids=parsed_asset_ids,
@@ -5418,6 +5651,10 @@ def get_settled_metrics(
             "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
             "total_fees": metrics.summary.total_fees,
             "fee_entry_count": metrics.summary.fee_entry_count,
+            "total_invested": metrics.summary.total_invested,
+            "total_income": metrics.summary.total_income,
+            "total_withholding": metrics.summary.total_withholding,
+            "income_event_count": metrics.summary.income_event_count,
         },
         "ranges": {
             key: {
@@ -5427,6 +5664,9 @@ def get_settled_metrics(
                 "realized_in_period": m.realized_in_period,
                 "cost_basis_in_period": m.cost_basis_in_period,
                 "fees_in_period": m.fees_in_period,
+                "total_invested": m.total_invested,
+                "income_in_period": m.income_in_period,
+                "withholding_in_period": m.withholding_in_period,
             }
             for key, m in metrics.ranges.items()
         },
@@ -5434,11 +5674,11 @@ def get_settled_metrics(
 
 
 # =============================================================================
-# Market Metrics (price-dependent, reads PriceSnapshot)
+# Live Metrics (price-dependent, reads PriceSnapshot)
 # =============================================================================
 
-@router.get("/versions/{version_id}/metrics/market")
-def get_market_metrics(
+@router.get("/versions/{version_id}/metrics/live")
+def get_live_metrics(
     version_id: int,
     asset_ids: Optional[str] = Query(None),
     account_ids: Optional[str] = Query(None),
@@ -5451,13 +5691,13 @@ def get_market_metrics(
     Does NOT refresh prices — trusts frontend already updated them.
     Call after frontend price fetch completes for accurate values.
     """
-    from backend.services.pnl.metrics_service import compute_market_metrics
+    from backend.services.pnl.metrics_service import compute_live_metrics
 
     parsed_asset_ids = [int(x) for x in asset_ids.split(",") if x.strip()] if asset_ids else None
     parsed_account_ids = [int(x) for x in account_ids.split(",") if x.strip()] if account_ids else None
     parsed_category_ids = [int(x) for x in category_ids.split(",") if x.strip()] if category_ids else None
 
-    metrics = compute_market_metrics(
+    metrics = compute_live_metrics(
         session=session,
         version_id=version_id,
         asset_ids=parsed_asset_ids,
@@ -5679,6 +5919,7 @@ def get_version_metrics(
         "summary": {
             "current_value": metrics.summary.current_value,
             "cost_basis": metrics.summary.cost_basis,
+            "total_invested": metrics.summary.total_invested,
             "unrealized_pnl": metrics.summary.unrealized_pnl,
             "realized_pnl": metrics.summary.realized_pnl,
             "taxable_realized_pnl": metrics.summary.taxable_realized_pnl,
@@ -5698,6 +5939,7 @@ def get_version_metrics(
                 "cost_basis_in_period": m.cost_basis_in_period,
                 "unrealized_in_period": m.unrealized_in_period,
                 "fees_in_period": m.fees_in_period,
+                "total_invested": m.total_invested,
                 "top_performers": [_serialize_performer(p) for p in m.top_performers],
                 "flop_performers": [_serialize_performer(p) for p in m.flop_performers],
             }
@@ -6765,5 +7007,112 @@ def export_fr_securities_tax_csv(
         content=csv_content.encode("utf-8-sig"),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# =============================================================================
+# French Income Tax (PFU on Dividends / Interest)
+# =============================================================================
+
+
+class FrenchIncomeTaxEntryResponse(BaseModel):
+    """Single French income tax line item (PFU on dividend/interest)."""
+    id: int
+    income_event_id: Optional[int]
+    fiscal_year: int
+    asset_symbol: str
+    income_type: str
+    gross_income: float
+    withholding_tax_credit: float
+    net_taxable: float
+    tax_amount: float
+
+
+class FrenchIncomeTaxAnnualSummaryResponse(BaseModel):
+    """Annual summary for French income tax (PFU)."""
+    id: int
+    fiscal_year: int
+    total_gross_income: float
+    total_withholding_credits: float
+    net_taxable: float
+    tax_total: float
+    event_count: int
+
+
+class FrenchIncomeTaxReportResponse(BaseModel):
+    """Complete French income tax report for a calculation version."""
+    version_id: int
+    tax_jurisdiction: Optional[str]
+    total_tax: float
+    annual_summaries: List[FrenchIncomeTaxAnnualSummaryResponse]
+    entries: List[FrenchIncomeTaxEntryResponse]
+
+
+@router.get("/versions/{version_id}/fr-income-tax", response_model=FrenchIncomeTaxReportResponse)
+def get_fr_income_tax(
+    version_id: int,
+    fiscal_year: Optional[int] = Query(None, description="Filter by fiscal year"),
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Return French income tax results (PFU on dividends/interest) for a calculation version.
+
+    Returns line-item entries and per-year summaries. Requires compute-tax to have been run.
+    Form references: 2042 (lines 2DC, 2BH), 2047 (foreign income).
+    """
+    from backend.db.models import DividendIncomeAnnualSummary, DividendIncomeTaxEntry
+
+    version = session.get(CalculationVersion, version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+
+    # Query annual summaries
+    summary_q = select(DividendIncomeAnnualSummary).where(
+        DividendIncomeAnnualSummary.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        summary_q = summary_q.where(DividendIncomeAnnualSummary.fiscal_year == fiscal_year)
+    summaries = session.exec(summary_q.order_by(DividendIncomeAnnualSummary.fiscal_year)).all()
+
+    # Query line entries
+    entry_q = select(DividendIncomeTaxEntry).where(
+        DividendIncomeTaxEntry.calculation_version_id == version_id
+    )
+    if fiscal_year:
+        entry_q = entry_q.where(DividendIncomeTaxEntry.fiscal_year == fiscal_year)
+    entries = session.exec(entry_q.order_by(DividendIncomeTaxEntry.fiscal_year)).all()
+
+    total_tax = sum(float(s.tax_total) for s in summaries)
+
+    return FrenchIncomeTaxReportResponse(
+        version_id=version_id,
+        tax_jurisdiction="fr",
+        total_tax=total_tax,
+        annual_summaries=[
+            FrenchIncomeTaxAnnualSummaryResponse(
+                id=s.id,
+                fiscal_year=s.fiscal_year,
+                total_gross_income=float(s.total_gross_income),
+                total_withholding_credits=float(s.total_withholding_credits),
+                net_taxable=float(s.net_taxable),
+                tax_total=float(s.tax_total),
+                event_count=s.event_count,
+            )
+            for s in summaries
+        ],
+        entries=[
+            FrenchIncomeTaxEntryResponse(
+                id=e.id,
+                income_event_id=e.income_event_id,
+                fiscal_year=e.fiscal_year,
+                asset_symbol=e.asset_symbol,
+                income_type=e.income_type,
+                gross_income=float(e.gross_income),
+                withholding_tax_credit=float(e.withholding_tax_credit),
+                net_taxable=float(e.net_taxable),
+                tax_amount=float(e.tax_amount),
+            )
+            for e in entries
+        ],
     )
 

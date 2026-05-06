@@ -1,0 +1,51 @@
+transactions:
+  # ── Step 1: Buy 2000 USDC on Binance at 0.92 EUR ─────────────
+  - source: "scenario-polymarket-pnl"
+    source_transaction_id: "pm_001_buy_usdc"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "2000.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-09-01T10:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "2.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: polymarket_pnl
+      - step: "1"
+
+  # ── Step 2a: Transfer 1500 USDC from Binance → Polymarket (withdrawal) ──
+  - source: "scenario-polymarket-pnl"
+    source_transaction_id: "pm_002_transfer_usdc_out"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "1500.000000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    date_time: "2024-09-05T14:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: polymarket_pnl
+      - step: "2"
+      - leg_type: disposed
+
+  # ── Step 2b: Transfer 1500 USDC deposit into Polymarket ──────
+  - source: "scenario-polymarket-pnl"
+    source_transaction_id: "pm_003_transfer_usdc_in"
+    account_name: Polymarket
+    asset_symbol: USDC
+    quantity: "1500.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2024-09-05T14:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: polymarket_pnl
+      - step: "2"
+      - leg_type: acquired

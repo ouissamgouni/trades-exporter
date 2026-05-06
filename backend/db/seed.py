@@ -25,6 +25,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from backend.db.models import (
@@ -32,7 +33,10 @@ from backend.db.models import (
     AccountConnector,
     AppSettings,
     Asset,
+    AssetCategory,
     AssetPriceGetter,
+    Category,
+    Dimension,
     FileImport,
     FileImportStatus,
     NormalizedTransaction,
@@ -44,9 +48,11 @@ from backend.config.loader import configure_logging
 log = configure_logging("db_seed")
 
 # Default config paths
-SEED_DATA_DIR = Path(__file__).parent / "seed_data"
-DEFAULT_SCENARIO_DIR = SEED_DATA_DIR / "scenarios" / "default"
-EXPORT_DATA_DIR = SEED_DATA_DIR / "exports"
+# Repo root: backend/db/seed.py → parents[2] = repo root
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCENARIOS_DIR = REPO_ROOT / "scenarios"
+DEFAULT_SCENARIO_DIR = SCENARIOS_DIR / "default"
+EXPORT_DATA_DIR = Path(__file__).parent / "exports"
 BROKER_EXPORTS_DIR = Path(__file__).parent.parent / "data" / "input" / "brokers-exports"
 DEFAULT_FILES_DIR = Path(__file__).parent.parent / "data" / "input" / "defaults"
 DEFAULT_CONFIG_PATH = DEFAULT_SCENARIO_DIR / "accounts.yaml"
@@ -361,8 +367,8 @@ class DatabaseSeeder:
             if candidate.exists():
                 source = candidate
             else:
-                # Try relative to seed_data dir
-                candidate = SEED_DATA_DIR / default_file_path
+                # Try relative to scenarios dir
+                candidate = SCENARIOS_DIR / default_file_path
                 if candidate.exists():
                     source = candidate
 
@@ -616,6 +622,108 @@ class DatabaseSeeder:
 
         return processed
 
+    # ------------------------------------------------------------------
+    # Categories from YAML
+    # ------------------------------------------------------------------
+
+    def seed_categories_from_yaml(
+        self, categories_path: Optional[Path] = None
+    ) -> int:
+        """
+        Seed dimensions, categories, and asset↔category links from categories.yaml.
+
+        YAML format:
+            dimensions:
+              - label: "Sector"
+                ordinal: 0
+                categories:
+                  - label: "Prediction Markets / Derivatives"
+                    color: "#8B5CF6"
+                    assets:
+                      - "PM:rain-friday-Yes"
+                      - "PM:eth-5k-Yes"
+
+        Returns:
+            Number of asset↔category links created.
+        """
+        if categories_path is None or not categories_path.exists():
+            return 0
+
+        log.info(f"📖 Loading categories from: {categories_path}")
+
+        with open(categories_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        dimensions_data = config.get("dimensions", [])
+        if not dimensions_data:
+            return 0
+
+        links_created = 0
+        for dim_data in dimensions_data:
+            dim_label = dim_data.get("label")
+            if not dim_label:
+                continue
+
+            # Upsert dimension
+            dimension = self.session.exec(
+                select(Dimension).where(Dimension.label == dim_label)
+            ).first()
+            if not dimension:
+                dimension = Dimension(
+                    label=dim_label,
+                    ordinal=dim_data.get("ordinal", 0),
+                )
+                self.session.add(dimension)
+                self.session.flush()
+                log.info(f"   ➕ Created dimension: {dim_label}")
+
+            for cat_data in dim_data.get("categories", []):
+                cat_label = cat_data.get("label")
+                if not cat_label:
+                    continue
+
+                # Upsert category
+                category = self.session.exec(
+                    select(Category).where(
+                        Category.dimension_id == dimension.id,
+                        Category.label == cat_label,
+                    )
+                ).first()
+                if not category:
+                    category = Category(
+                        dimension_id=dimension.id,
+                        label=cat_label,
+                        color=cat_data.get("color"),
+                        ordinal=cat_data.get("ordinal", 0),
+                    )
+                    self.session.add(category)
+                    self.session.flush()
+                    log.info(f"   ➕ Created category: {cat_label} (dimension={dim_label})")
+
+                # Link assets
+                for symbol in cat_data.get("assets", []):
+                    asset_id = self._resolve_asset_id(symbol)
+                    if asset_id is None:
+                        log.warning(f"   ⚠️ Asset not found for category link: {symbol}")
+                        continue
+
+                    existing = self.session.exec(
+                        select(AssetCategory).where(
+                            AssetCategory.asset_id == asset_id,
+                            AssetCategory.category_id == category.id,
+                        )
+                    ).first()
+                    if not existing:
+                        self.session.add(
+                            AssetCategory(asset_id=asset_id, category_id=category.id)
+                        )
+                        links_created += 1
+
+        self.session.commit()
+        if links_created:
+            log.info(f"✅ Seeded {links_created} asset↔category links")
+        return links_created
+
     def seed_assets_from_yaml(
         self, assets_path: Optional[Path] = None
     ) -> int:
@@ -675,6 +783,8 @@ class DatabaseSeeder:
                 )
                 existing.confidence = bundle_data.get("confidence", existing.confidence)
                 existing.reason = bundle_data.get("reason", existing.reason)
+                if "bundle_data" in bundle_data:
+                    existing.bundle_data = self._resolve_bundle_data(bundle_data.get("bundle_data"))
                 self.session.add(existing)
                 log.debug(f"📝 Updated bundle: {bundle_id} - {existing.label}")
             else:
@@ -687,14 +797,21 @@ class DatabaseSeeder:
                     taxability_override=bundle_data.get("taxability_override"),
                     confidence=bundle_data.get("confidence"),
                     reason=bundle_data.get("reason"),
+                    bundle_data=self._resolve_bundle_data(bundle_data.get("bundle_data")),
                 )
                 self.session.add(bundle)
                 log.debug(f"➕ Created bundle: {bundle_id} - {bundle.label}")
             processed += 1
 
         self.session.commit()
+
+        # Reset the sequence so the next auto-generated ID won't collide
         if processed > 0:
-            log.info(f"✅ Seeded {processed} bundles")
+            self.session.execute(
+                text("SELECT setval('bundles_id_seq', COALESCE((SELECT MAX(id) FROM bundles), 0))")
+            )
+            self.session.commit()
+            log.info(f"✅ Seeded {processed} bundles (sequence reset)")
         return processed
 
     def seed_bundles_from_yaml(
@@ -747,6 +864,21 @@ class DatabaseSeeder:
         log.warning(f"⚠️ Account not found: {name}")
         return None
 
+    def _resolve_bundle_data(self, data: Optional[dict]) -> Optional[dict]:
+        """Resolve symbol references in bundle_data to asset IDs."""
+        if not data:
+            return data
+        resolved = dict(data)
+        # Resolve spinoff_source_asset_symbol → spinoff_source_asset_id
+        if "spinoff_source_asset_symbol" in resolved:
+            symbol = resolved.pop("spinoff_source_asset_symbol")
+            asset_id = self._resolve_asset_id(symbol)
+            if asset_id:
+                resolved["spinoff_source_asset_id"] = asset_id
+            else:
+                log.warning(f"⚠️ Cannot resolve spinoff source asset: {symbol}")
+        return resolved
+
     def seed_transactions(
         self, transactions_config: List[Dict[str, Any]]
     ) -> int:
@@ -786,6 +918,9 @@ class DatabaseSeeder:
             )
             from_account_id = self._resolve_account_id(tx_data.get("source_from_account"))
             to_account_id = self._resolve_account_id(tx_data.get("source_to_account"))
+            attributed_asset_id = self._resolve_asset_id(
+                tx_data.get("source_attributed_asset_symbol")
+            )
 
             # Parse datetime
             date_time_str = tx_data.get("date_time")
@@ -877,6 +1012,13 @@ class DatabaseSeeder:
                 existing.source_asset_symbol = tx_data.get(
                     "asset_symbol", existing.source_asset_symbol
                 )
+                existing.attributed_asset_id = (
+                    attributed_asset_id or existing.attributed_asset_id
+                )
+                existing.source_attributed_asset_symbol = tx_data.get(
+                    "source_attributed_asset_symbol",
+                    existing.source_attributed_asset_symbol,
+                )
                 existing.updated_at = datetime.now(timezone.utc)
                 self.session.add(existing)
                 tx_identifier = f"id={existing.id}" if explicit_id else f"{source}/{source_tx_id}"
@@ -913,6 +1055,10 @@ class DatabaseSeeder:
                     total=total,
                     tags=tags,
                     review_notes=tx_data.get("review_notes"),
+                    attributed_asset_id=attributed_asset_id,
+                    source_attributed_asset_symbol=tx_data.get(
+                        "source_attributed_asset_symbol", ""
+                    ),
                     # raw_transaction_id is intentionally left null for seeded data
                 )
                 self.session.add(tx)
@@ -984,6 +1130,7 @@ class DatabaseSeeder:
             "bundles": 0,
             "transactions": 0,
             "prices": 0,
+            "categories": 0,
         }
 
         # Resolve paths from custom directory if provided
@@ -992,6 +1139,7 @@ class DatabaseSeeder:
         bundles_path = (seed_data_dir / "bundles.yaml") if seed_data_dir else None
         transactions_path = (seed_data_dir / "transactions.yaml") if seed_data_dir else None
         prices_path = (seed_data_dir / "prices.yaml") if seed_data_dir else None
+        categories_path = (seed_data_dir / "categories.yaml") if seed_data_dir else None
 
         if seed_data_dir:
             log.info(f"📂 Using seed data directory: {seed_data_dir}")
@@ -1002,19 +1150,65 @@ class DatabaseSeeder:
         # 2. Seed deterministic mock prices (if prices.yaml exists)
         results["prices"] = self.seed_prices_from_yaml(prices_path)
 
-        # 3. Seed accounts/connectors from accounts.yaml (may include custom assets)
+        # 3. Seed categories / dimensions from categories.yaml (after assets)
+        results["categories"] = self.seed_categories_from_yaml(categories_path)
+
+        # 4. Seed accounts/connectors from accounts.yaml (may include custom assets)
         yaml_results = self.seed_from_yaml(accounts_path)
         results["accounts"] = yaml_results.get("accounts", 0)
         results["connectors"] = yaml_results.get("connectors", 0)
         results["assets"] += yaml_results.get("assets", 0)
 
-        # 4. Seed bundles from bundles.yaml
+        # 5. Seed bundles from bundles.yaml
         results["bundles"] = self.seed_bundles_from_yaml(bundles_path)
 
-        # 5. Seed transactions from transactions.yaml
+        # 6. Seed transactions from transactions.yaml
         results["transactions"] = self.seed_transactions_from_yaml(transactions_path)
 
+        # 7. Ingest QA test plans from SEED_DIR into AppSettings
+        self._ingest_test_plans(seed_data_dir)
+
         return results
+
+    def _ingest_test_plans(self, seed_data_dir: Optional[Path]) -> None:
+        """Read test_plan.yaml files from seed dir and persist to AppSettings."""
+        plans: List[Dict[str, Any]] = []
+
+        if seed_data_dir and seed_data_dir.is_dir():
+            # Top-level test_plan.yaml → single scenario (dir name)
+            top = seed_data_dir / "test_plan.yaml"
+            if top.exists():
+                with open(top) as f:
+                    raw = yaml.safe_load(f) or {}
+                content = raw.get("test_plan", raw)
+                if content:
+                    content["scenario"] = seed_data_dir.name
+                    plans.append(content)
+
+            # Subdirectory test plans
+            for sub in sorted(seed_data_dir.iterdir()):
+                if sub.is_dir():
+                    sub_plan = sub / "test_plan.yaml"
+                    if sub_plan.exists():
+                        with open(sub_plan) as f:
+                            raw = yaml.safe_load(f) or {}
+                        content = raw.get("test_plan", raw)
+                        if content:
+                            content["scenario"] = sub.name
+                            plans.append(content)
+
+        # Persist to AppSettings (upsert)
+        settings = self.session.get(AppSettings, 1)
+        if not settings:
+            settings = AppSettings(id=1, qa_test_plans=plans or None)
+            self.session.add(settings)
+        else:
+            settings.qa_test_plans = plans or None
+        self.session.commit()
+
+        if plans:
+            names = [p.get("scenario", "?") for p in plans]
+            log.info(f"📋 Ingested {len(plans)} QA test plan(s): {names}")
 
     def export_seed_data(
         self,
@@ -1396,7 +1590,7 @@ if __name__ == "__main__":
 
     if not config_path.exists():
         print(f"❌ ERROR: Config file not found: {config_path}")
-        print("   Edit backend/db/seed_data/scenarios/default/accounts.yaml to configure accounts")
+        print("   Edit scenarios/default/accounts.yaml to configure accounts")
         import sys
 
         sys.exit(1)

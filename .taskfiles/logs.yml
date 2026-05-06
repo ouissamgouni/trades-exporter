@@ -1,20 +1,38 @@
 version: "3"
 
+vars:
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+
 tasks:
   dev:
     desc: View dev database logs
-    dotenv: [.env, .env.dev]
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
     cmds:
       - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev logs -f
 
-  test:
-    desc: View test stack logs
-    dotenv: [.env, .env.test]
+  staging:
+    desc: View staging stack logs
+    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
     cmds:
-      - ENV_NAME=test docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test logs -f
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging logs -f
 
   prod:
     desc: View prod stack logs
-    dotenv: [.env, .env.prod]
+    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
     cmds:
-      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter-prod logs -f
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod logs -f
+
+  scenario:
+    desc: "View scenario logs. SCENARIO=<name> to target instance."
+    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+    cmds:
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        # Try unified compose first (full Docker mode), then scenario-DB-only
+        if docker ps --filter "name=$QA_BACKEND_CONTAINER" --filter "status=running" --format '{{`{{.Names}}`}}' | grep -q "$QA_BACKEND_CONTAINER"; then
+          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT logs -f --tail 50
+        else
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT logs -f --tail 50
+        fi

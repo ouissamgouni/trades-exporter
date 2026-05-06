@@ -87,9 +87,11 @@ class FileUploadPreviewResponse(BaseModel):
 class NormalizedTransactionSample(BaseModel):
     """Sample normalized transaction for preview."""
     
+    group_id: Optional[str] = None
     source_transaction_id: str
     date_time: str
     transaction_type: str
+    source_transaction_type: Optional[str] = None
     direction: str
     source_asset_symbol: str
     quantity: float
@@ -411,6 +413,47 @@ def cleanup(
 # File Upload Endpoints (Generic - supports file connectors)
 # ============================================================================
 
+# Internal/computed keys added by file loaders — stripped from preview raw data
+_INTERNAL_ROW_KEYS = {"_row_type", "_generated_id", "withholding_amount", "withholding_jurisdiction", "change_decimal", "_consumed_by", "fx_rate", "fx_net_amount_base", "fx_base_currency"}
+
+
+def _sort_raw_rows_by_datetime(rows: list) -> list:
+    """Sort raw rows by datetime field for chronological display in preview."""
+    def _sort_key(row):
+        dt = row.get("datetime")
+        if dt is None:
+            return datetime.min
+        if isinstance(dt, str):
+            try:
+                return datetime.fromisoformat(dt)
+            except (ValueError, TypeError):
+                return datetime.min
+        return dt
+    return sorted(rows, key=_sort_key)
+
+
+def _strip_internal_keys(rows: list) -> list:
+    """Return raw rows with internal/computed keys removed for preview display.
+    
+    Renames _group_id → group_id and _role → role for frontend consumption.
+    """
+    cleaned = []
+    for row in rows:
+        out = {}
+        for k, v in row.items():
+            if k in _INTERNAL_ROW_KEYS:
+                continue
+            # Expose _group_id and _role without underscore prefix
+            if k == "_group_id":
+                out["group_id"] = v
+            elif k == "_role":
+                out["role"] = v
+            else:
+                out[k] = v
+        cleaned.append(out)
+    return cleaned
+
+
 # File loader dispatch - maps connector types to their loader modules
 # Add new file connectors here when adding support for other exchanges
 FILE_LOADERS = {
@@ -420,6 +463,8 @@ FILE_LOADERS = {
     "mexc-deposits-file": "backend.file_loaders.mexc_deposits_loader",
     "mexc-withdrawals-file": "backend.file_loaders.mexc_withdrawals_loader",
     "okx-file": "backend.file_loaders.okx_trading_history_loader",
+    "degiro-file": "backend.file_loaders.degiro_loader",
+    "degiro-account-file": "backend.file_loaders.degiro_account_loader",
 }
 
 # Connector class dispatch - maps connector types to their classes
@@ -429,6 +474,8 @@ CONNECTOR_CLASSES = {
     "mexc-deposits-file": "backend.connectors.cex.connector_mexc_deposits_file.MEXCDepositsFileConnector",
     "mexc-withdrawals-file": "backend.connectors.cex.connector_mexc_withdrawals_file.MEXCWithdrawalsFileConnector",
     "okx-file": "backend.connectors.cex.connector_okx_file.OKXFileConnector",
+    "degiro-file": "backend.connectors.cex.connector_degiro_file.DeGiroFileConnector",
+    "degiro-account-file": "backend.connectors.cex.connector_degiro_account_file.DeGiroAccountFileConnector",
 }
 
 
@@ -534,7 +581,7 @@ async def preview_file_upload(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-file"]:
+    if connector.connector_type in ["okx-file", "degiro-file", "degiro-account-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -632,7 +679,7 @@ async def preview_file_upload_detailed(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-file"]:
+    if connector.connector_type in ["okx-file", "degiro-file", "degiro-account-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -673,12 +720,25 @@ async def preview_file_upload_detailed(
         if not load_fn:
             raise HTTPException(status_code=500, detail="Loader missing load function")
         
-        df = load_fn(content=content)
-        rows = df.to_dict("records")
+        loaded = load_fn(content=content)
+        rows = loaded.to_dict("records") if hasattr(loaded, "to_dict") else loaded
         total_rows = len(rows)
         
+        # For degiro-account-file, also load consumed/skipped rows for preview
+        extra_rows = []
+        if connector.connector_type == "degiro-account-file":
+            loaded_all = load_fn(content=content, include_consumed=True)
+            all_rows = loaded_all if isinstance(loaded_all, list) else loaded_all.to_dict("records")
+            extra_rows = [r for r in all_rows if r.get("_role") in ("consumed", "skipped")]
+        
         # Limit raw samples based on max_samples parameter
-        sample_rows = rows if max_samples == 0 else rows[:max_samples]
+        raw_slice = rows if max_samples == 0 else rows[:max_samples]
+        # Include consumed/skipped rows in preview for transparency
+        if extra_rows:
+            raw_slice = raw_slice + extra_rows
+        # Sort raw rows by datetime for chronological display
+        raw_slice = _sort_raw_rows_by_datetime(raw_slice)
+        sample_rows = _strip_internal_keys(raw_slice)
         
         # 3. Normalize rows and collect results
         normalized_list = []
@@ -693,9 +753,11 @@ async def preview_file_upload_detailed(
                 
                 # Convert to sample dict
                 normalized_list.append(NormalizedTransactionSample(
+                    group_id=raw_row.get("_group_id"),
                     source_transaction_id=normalized.source_transaction_id,
                     date_time=normalized.date_time.replace(tzinfo=timezone.utc).isoformat() if normalized.date_time else "",
                     transaction_type=normalized.transaction_type or "",
+                    source_transaction_type=normalized.source_transaction_type,
                     direction=normalized.direction or "",
                     source_asset_symbol=normalized.source_asset_symbol or "",
                     quantity=float(normalized.quantity or 0),
@@ -784,7 +846,7 @@ async def confirm_file_upload(
         )
     
     # Validate file type based on connector
-    if connector.connector_type in ["okx-file"]:
+    if connector.connector_type in ["okx-file", "degiro-file", "degiro-account-file"]:
         # CSV connectors
         if not file.filename.endswith(".csv"):
             raise HTTPException(
@@ -1104,11 +1166,23 @@ def preview_default_file_detailed(
         if not load_fn:
             raise HTTPException(status_code=500, detail="Loader missing load function")
 
-        df = load_fn(content=content)
-        rows = df.to_dict("records")
+        loaded = load_fn(content=content)
+        rows = loaded.to_dict("records") if hasattr(loaded, "to_dict") else loaded
         total_rows = len(rows)
 
-        sample_rows = rows if max_samples == 0 else rows[:max_samples]
+        # For degiro-account-file, also load consumed/skipped rows for preview
+        extra_rows = []
+        if connector.connector_type == "degiro-account-file":
+            loaded_all = load_fn(content=content, include_consumed=True)
+            all_rows = loaded_all if isinstance(loaded_all, list) else loaded_all.to_dict("records")
+            extra_rows = [r for r in all_rows if r.get("_role") in ("consumed", "skipped")]
+
+        raw_slice = rows if max_samples == 0 else rows[:max_samples]
+        if extra_rows:
+            raw_slice = raw_slice + extra_rows
+        # Sort raw rows by datetime for chronological display
+        raw_slice = _sort_raw_rows_by_datetime(raw_slice)
+        sample_rows = _strip_internal_keys(raw_slice)
         rows_to_process = rows if max_samples == 0 else rows[:max_samples]
 
         normalized_list = []
@@ -1118,9 +1192,11 @@ def preview_default_file_detailed(
                 normalized = connector_instance.raw_to_normalized(raw_row)
                 normalized_list.append(
                     NormalizedTransactionSample(
+                        group_id=raw_row.get("_group_id"),
                         source_transaction_id=normalized.source_transaction_id,
                         date_time=normalized.date_time.replace(tzinfo=timezone.utc).isoformat() if normalized.date_time else "",
                         transaction_type=normalized.transaction_type or "",
+                        source_transaction_type=normalized.source_transaction_type,
                         direction=normalized.direction or "",
                         source_asset_symbol=normalized.source_asset_symbol or "",
                         quantity=float(normalized.quantity or 0),

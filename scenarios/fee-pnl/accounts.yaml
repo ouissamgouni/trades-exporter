@@ -1,0 +1,28 @@
+# Fee PnL Scenario — Accounts
+# ============================
+# Three accounts to cover different fee sources:
+#   - Binance: CEX trades with trading fees
+#   - Ethereum Wallet: on-chain gas fees (COST transactions)
+#   - DeGiro: broker fees (ADR custody, exchange fees)
+
+accounts:
+  - name: "Binance"
+    account_type: "cex"
+    owned: true
+    group: "Crypto"
+    color: "#F0B90B"
+    address_or_identifier: "binance_fee_qa"
+
+  - name: "Ethereum Wallet"
+    account_type: "wallet"
+    owned: true
+    group: "Crypto"
+    color: "#627EEA"
+    address_or_identifier: "0xFEE_QA_WALLET"
+
+  - name: "DeGiro"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_fee_qa"

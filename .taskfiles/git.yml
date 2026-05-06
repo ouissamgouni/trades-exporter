@@ -2,10 +2,465 @@ version: "3"
 
 tasks:
   # ════════════════════════════════════════════════════════════════
-  # Git Safety Utilities
+  # Branch Creation
   # ════════════════════════════════════════════════════════════════
 
-  check:clean:
+  feature:
+    desc: Create a new feature branch from develop
+    vars:
+      NAME: "{{.CLI_ARGS}}"
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+    deps: [_check-clean]
+    prompt: |
+      Create feature/{{.NAME}} from develop branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to develop, then create feature/{{.NAME}}
+
+      Continue?
+    cmds:
+      - task: _create-branch
+        vars: { TYPE: feature, NAME: "{{.NAME}}" }
+
+  fix:
+    desc: Create a new fix branch from develop
+    vars:
+      NAME: "{{.CLI_ARGS}}"
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+    deps: [_check-clean]
+    prompt: |
+      Create fix/{{.NAME}} from develop branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to develop, then create fix/{{.NAME}}
+
+      Continue?
+    cmds:
+      - task: _create-branch
+        vars: { TYPE: fix, NAME: "{{.NAME}}" }
+
+  hotfix:
+    desc: Create a hotfix branch from main
+    vars:
+      NAME: "{{.CLI_ARGS}}"
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+    deps: [_check-clean]
+    prompt: |
+      Create hotfix/{{.NAME}} from main branch?
+
+      Current branch: {{.CURRENT_BRANCH}}
+      This will switch to main, then create hotfix/{{.NAME}}
+
+      ⚠️  Hotfixes are for urgent production fixes only!
+
+      Continue?
+    cmds:
+      - |
+        NAME="{{.NAME}}"
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task git:hotfix -- <branch-name>"
+          exit 1
+        fi
+        git checkout main
+        git pull origin main
+        git checkout -b hotfix/$NAME
+        echo "✅ Created branch: hotfix/$NAME"
+
+  # ════════════════════════════════════════════════════════════════
+  # PR Lifecycle
+  # ════════════════════════════════════════════════════════════════
+
+  pr:
+    desc: Push and create draft PR (alias for git:pr:draft)
+    aliases: [pr]
+    cmds:
+      - task: pr:draft
+
+  pr:draft:
+    desc: Push and create draft PR (auto-detects target branch)
+    cmds:
+      - task: _push-validate
+      - |
+        BRANCH=$(git branch --show-current)
+        TARGET="develop"
+
+        # Auto-detect target for hotfix branches
+        if echo "$BRANCH" | grep -q "^hotfix/"; then
+          TARGET="main"
+          echo ""
+          echo "⚠️  Hotfix detected — PR will target main"
+          echo ""
+        fi
+
+        gh pr create --draft --base "$TARGET" --fill
+        echo "✅ Draft PR created: $BRANCH → $TARGET"
+
+  pr:publish:
+    desc: Push and create ready PR (auto-detects target branch)
+    cmds:
+      - task: _push-validate
+      - |
+        BRANCH=$(git branch --show-current)
+        TARGET="develop"
+
+        if echo "$BRANCH" | grep -q "^hotfix/"; then
+          TARGET="main"
+          echo ""
+          echo "⚠️  Hotfix detected — PR will target main"
+          echo ""
+        fi
+
+        gh pr create --base "$TARGET" --fill
+        echo "✅ PR created (ready for review): $BRANCH → $TARGET"
+
+  pr:ready:
+    desc: Mark current draft PR as ready for review
+    cmds:
+      - gh pr ready
+      - echo "✅ PR marked as ready"
+
+  pr:view:
+    desc: Open current PR in browser
+    cmds:
+      - gh pr view --web
+
+  pr:checks:
+    desc: Show CI status for current PR
+    cmds:
+      - gh pr checks
+
+  pr:merge:
+    desc: Merge current PR (squash) and show next steps
+    cmds:
+      - |
+        BRANCH=$(git branch --show-current)
+        TARGET=$(gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || echo "develop")
+
+        # Warn + confirm if merging into main
+        if [ "$TARGET" = "main" ]; then
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "⚠️  MERGING INTO MAIN"
+          echo ""
+          echo "   Branch: $BRANCH → main"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
+          read -p "Are you sure? (y/N) " confirm
+          if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "Cancelled."
+            exit 0
+          fi
+        fi
+
+        gh pr merge --squash --delete-branch
+
+        echo ""
+        echo "✅ Merged $BRANCH → $TARGET"
+        echo ""
+
+        # Print next steps based on target
+        if [ "$TARGET" = "main" ]; then
+          echo "Next steps:"
+          echo "   task git:release:tag -- vX.Y.Z     → Tag the release"
+          echo "   task deploy:prod -- vX.Y.Z         → Deploy to prod"
+          echo "   task release -- vX.Y.Z             → Tag + deploy combined"
+          echo ""
+          echo "⚠️  Don't forget to cherry-pick into develop if needed:"
+          echo "   git checkout develop && git cherry-pick <commit>"
+        else
+          echo "Next steps:"
+          echo "   task deploy:staging                 → Deploy to staging"
+        fi
+
+  # ════════════════════════════════════════════════════════════════
+  # Release Workflow (develop → main → tag)
+  # ════════════════════════════════════════════════════════════════
+
+  release:prepare:
+    desc: Create release PR (develop → main)
+    preconditions:
+      - sh: |
+          git fetch origin main develop 2>/dev/null
+          AHEAD=$(git rev-list --count origin/main..origin/develop 2>/dev/null || echo "0")
+          if [ "$AHEAD" = "0" ]; then
+            exit 1
+          fi
+        msg: |
+          ❌ develop has no commits ahead of main. Nothing to release.
+
+          Make sure develop has been updated:
+            git checkout develop && git pull
+    cmds:
+      - |
+        AHEAD=$(git rev-list --count origin/main..origin/develop)
+        echo "📦 $AHEAD commit(s) to release:"
+        echo ""
+        git log origin/main..origin/develop --oneline
+        echo ""
+      - |
+        gh pr create --base main --head develop \
+          --title "Release $(date +%Y-%m-%d)" \
+          --body "Release candidate from develop branch"
+        echo ""
+        echo "✅ Release PR created: develop → main"
+        echo ""
+        echo "Next steps:"
+        echo "   Review the PR in GitHub"
+        echo "   task git:release:ready              → Mark ready for review"
+        echo "   task git:release:merge              → Merge when approved"
+
+  release:ready:
+    desc: Mark release PR as ready for review
+    cmds:
+      - |
+        # Find the release PR (develop → main)
+        PR_NUM=$(gh pr list --base main --head develop --json number -q '.[0].number' 2>/dev/null)
+        if [ -z "$PR_NUM" ]; then
+          echo "❌ No release PR found (develop → main)"
+          echo "   Run: task git:release:prepare"
+          exit 1
+        fi
+        gh pr ready "$PR_NUM"
+        echo "✅ Release PR #$PR_NUM marked as ready"
+
+  release:merge:
+    desc: Merge release PR (develop → main) and show next steps
+    cmds:
+      - |
+        # Find the release PR (develop → main)
+        PR_NUM=$(gh pr list --base main --head develop --json number -q '.[0].number' 2>/dev/null)
+        if [ -z "$PR_NUM" ]; then
+          echo "❌ No release PR found (develop → main)"
+          echo "   Run: task git:release:prepare"
+          exit 1
+        fi
+
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "⚠️  MERGING RELEASE INTO MAIN"
+        echo ""
+        echo "   PR #$PR_NUM: develop → main"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+
+        gh pr merge "$PR_NUM" --merge
+
+        echo ""
+        echo "✅ Release merged: develop → main"
+        echo ""
+        echo "Next steps:"
+        echo "   task git:release:tag -- vX.Y.Z      → Tag the release"
+        echo "   task deploy:prod -- vX.Y.Z          → Deploy to prod"
+        echo "   task release -- vX.Y.Z              → Tag + deploy combined"
+
+  release:tag:
+    desc: Tag a release on main and push (e.g., task git:release:tag -- v1.2.0)
+    vars:
+      VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
+    preconditions:
+      - sh: '[ -n "{{.VERSION}}" ]'
+        msg: |
+          ❌ VERSION required
+
+          Usage:
+            task git:release:tag -- v1.2.0
+            task git:release:tag VERSION=v1.2.0
+      - sh: |
+          git fetch origin main develop 2>/dev/null
+          DEVELOP_HEAD=$(git rev-parse origin/develop)
+          if ! git merge-base --is-ancestor "$DEVELOP_HEAD" origin/main; then
+            exit 1
+          fi
+        msg: |
+          ❌ main does not contain develop HEAD.
+          Merge develop into main first:
+
+            task git:release:prepare
+            task git:release:merge
+    prompt: |
+      Tag release: {{.VERSION}}
+
+      This will:
+        • Tag main branch with {{.VERSION}}
+        • Push tag to origin
+
+      Continue?
+    cmds:
+      - |
+        VERSION="{{.VERSION}}"
+        echo "Updating main worktree..."
+        cd {{.WORKTREE_MAIN}} && git pull origin main
+      - |
+        VERSION="{{.VERSION}}"
+        cd {{.WORKTREE_MAIN}}
+        git tag -a "$VERSION" -m "Release $VERSION"
+        git push origin "$VERSION"
+        echo ""
+        echo "✅ Tagged $VERSION"
+        echo ""
+        echo "Next steps:"
+        echo "   task deploy:prod -- $VERSION         → Build + deploy to prod"
+        echo "   task release -- $VERSION             → Deploy to prod (combined)"
+
+  tags:
+    desc: List all release tags
+    cmds:
+      - git tag -l "v*" --sort=-version:refname
+
+  # ════════════════════════════════════════════════════════════════
+  # Worktree Management
+  # ════════════════════════════════════════════════════════════════
+
+  worktree:setup:
+    desc: Create persistent worktrees for main and develop branches
+    cmds:
+      - mkdir -p {{.WORKTREE_DIR}}
+      - |
+        # Setup main worktree
+        if [ ! -d "{{.WORKTREE_MAIN}}" ]; then
+          echo "Creating worktree for main branch..."
+          git worktree add {{.WORKTREE_MAIN}} main
+          echo "✅ Created {{.WORKTREE_MAIN}}"
+        else
+          echo "✅ Worktree {{.WORKTREE_MAIN}} already exists"
+        fi
+      - |
+        # Setup develop worktree
+        if [ ! -d "{{.WORKTREE_DEVELOP}}" ]; then
+          echo "Creating worktree for develop branch..."
+
+          # Check if develop branch exists
+          if ! git rev-parse --verify develop >/dev/null 2>&1; then
+            echo "⚠️  develop branch doesn't exist, creating from main..."
+            git branch develop main
+          fi
+
+          git worktree add {{.WORKTREE_DEVELOP}} develop
+          echo "✅ Created {{.WORKTREE_DEVELOP}}"
+        else
+          echo "✅ Worktree {{.WORKTREE_DEVELOP}} already exists"
+        fi
+      - |
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Worktrees ready"
+        echo ""
+        echo "   {{.WORKTREE_MAIN}}     → main branch"
+        echo "   {{.WORKTREE_DEVELOP}} → develop branch"
+        echo ""
+        echo "These directories are used for safe builds/deploys without"
+        echo "disrupting your current working directory."
+        echo "═══════════════════════════════════════════════════════════════"
+
+  worktree:setup:ref:
+    desc: Create temporary worktree for specific git ref
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+    deps:
+      - task: _resolve-ref
+        vars: { REF: "{{.REF}}" }
+    cmds:
+      - mkdir -p {{.WORKTREE_DIR}}
+      - |
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        WORKTREE_PATH="{{.WORKTREE_DIR}}/ref-$SHA"
+
+        if [ -d "$WORKTREE_PATH" ]; then
+          echo "✅ Worktree for $REF ($SHA) already exists at $WORKTREE_PATH"
+        else
+          echo "Creating temporary worktree for $REF ($SHA)..."
+          git worktree add "$WORKTREE_PATH" "$REF"
+          echo "✅ Created $WORKTREE_PATH"
+        fi
+
+        echo "$WORKTREE_PATH"
+
+  worktree:status:
+    desc: Show all active worktrees
+    cmds:
+      - |
+        echo "Active worktrees:"
+        echo ""
+        git worktree list
+        echo ""
+
+        # Show disk usage
+        if [ -d "{{.WORKTREE_DIR}}" ]; then
+          echo "Disk usage:"
+          du -sh {{.WORKTREE_DIR}}/* 2>/dev/null || echo "  No worktrees"
+        fi
+
+  worktree:clean:
+    desc: Remove all worktrees (main, develop, and refs)
+    prompt: This will remove ALL worktrees. Any uncommitted changes in worktrees will be lost. Continue?
+    cmds:
+      - |
+        echo "Removing all worktrees..."
+
+        # Remove all worktrees except the main working directory
+        git worktree list --porcelain | grep "worktree " | grep -v "$(pwd)$" | sed 's/worktree //' | while read -r wt; do
+          echo "Removing $wt..."
+          git worktree remove "$wt" --force 2>/dev/null || true
+        done
+
+        # Clean up the directory
+        rm -rf {{.WORKTREE_DIR}}
+
+        echo "✅ All worktrees removed"
+
+  worktree:clean:ref:
+    desc: Remove only temporary ref worktrees (keep main and develop)
+    prompt: This will remove all temporary ref worktrees. Continue?
+    cmds:
+      - |
+        if [ ! -d "{{.WORKTREE_DIR}}" ]; then
+          echo "No worktree directory found"
+          exit 0
+        fi
+
+        echo "Removing temporary ref worktrees..."
+
+        # Remove ref-* worktrees
+        for wt in {{.WORKTREE_DIR}}/ref-*; do
+          if [ -d "$wt" ]; then
+            echo "Removing $wt..."
+            git worktree remove "$wt" --force 2>/dev/null || true
+          fi
+        done
+
+        echo "✅ Temporary ref worktrees removed"
+        echo ""
+        echo "Persistent worktrees retained:"
+        [ -d "{{.WORKTREE_MAIN}}" ] && echo "  ✅ {{.WORKTREE_MAIN}}"
+        [ -d "{{.WORKTREE_DEVELOP}}" ] && echo "  ✅ {{.WORKTREE_DEVELOP}}"
+
+  worktree:update:
+    desc: Update persistent worktrees (git pull)
+    cmds:
+      - |
+        echo "Updating worktrees..."
+
+        if [ -d "{{.WORKTREE_MAIN}}" ]; then
+          echo "Updating main..."
+          cd {{.WORKTREE_MAIN}} && git pull origin main
+        fi
+
+        if [ -d "{{.WORKTREE_DEVELOP}}" ]; then
+          echo "Updating develop..."
+          cd {{.WORKTREE_DEVELOP}} && git pull origin develop
+        fi
+
+        echo "✅ Worktrees updated"
+
+  # ════════════════════════════════════════════════════════════════
+  # Internal Utilities
+  # ════════════════════════════════════════════════════════════════
+
+  _check-clean:
     internal: true
     desc: Check if working directory is clean (no uncommitted changes)
     preconditions:
@@ -24,26 +479,7 @@ tasks:
             git add . && git commit -m "Your message"
             git stash save "Work in progress"
 
-  confirm:switch:
-    internal: true
-    desc: Confirm branch switch with warning
-    vars:
-      CURRENT_BRANCH:
-        sh: git branch --show-current
-      TARGET_BRANCH: "{{.TARGET_BRANCH}}"
-    prompt: |
-      ⚠️  BRANCH SWITCH WARNING
-
-      This will switch from: {{.CURRENT_BRANCH}}
-                        to: {{.TARGET_BRANCH}}
-
-      Uncommitted changes may be lost.
-
-      Continue?
-    cmds:
-      - echo "Switching to {{.TARGET_BRANCH}}..."
-
-  resolve:ref:
+  _resolve-ref:
     internal: true
     desc: Validate and resolve git ref to SHA
     silent: true
@@ -73,25 +509,68 @@ tasks:
           exit 1
         fi
 
-        # Resolve to SHA
-        SHA=$(git rev-parse --short=7 "$REF")
-        echo "$SHA"
+        echo "$(git rev-parse --short=7 "$REF")"
 
-  current:branch:
+  _push-validate:
     internal: true
-    desc: Get current branch name
-    silent: true
-    cmds:
-      - git branch --show-current
-
-  has:uncommitted:
-    internal: true
-    desc: Check if there are uncommitted changes (exits 0 if dirty, 1 if clean)
-    silent: true
+    desc: Validate branch and push before PR creation
     cmds:
       - |
-        if [ -n "$(git status --porcelain)" ]; then
-          exit 0  # Has uncommitted changes
-        else
-          exit 1  # Clean
+        BRANCH=$(git branch --show-current)
+        if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "develop" ]; then
+          echo "❌ Cannot create PR from $BRANCH branch"
+          exit 1
         fi
+        git push -u origin "$BRANCH"
+
+  _create-branch:
+    internal: true
+    desc: Shared logic for creating branches from develop
+    vars:
+      TYPE: "{{.TYPE}}"
+      NAME: "{{.NAME}}"
+    cmds:
+      - |
+        NAME="{{.NAME}}"
+        TYPE="{{.TYPE}}"
+        if [ -z "$NAME" ]; then
+          echo "❌ Usage: task git:$TYPE -- <branch-name>"
+          exit 1
+        fi
+        # Create develop from main if it doesn't exist
+        if ! git show-ref --verify --quiet refs/heads/develop; then
+          echo "📝 Creating develop branch from main..."
+          git checkout main
+          git pull origin main
+          git checkout -b develop
+          git push -u origin develop
+        fi
+        git checkout develop
+        git pull origin develop 2>/dev/null || git pull origin main
+        # Check if branch already exists
+        if git show-ref --verify --quiet "refs/heads/$TYPE/$NAME"; then
+          echo "ℹ️  Branch $TYPE/$NAME already exists, switching to it..."
+          git checkout "$TYPE/$NAME"
+        else
+          git checkout -b "$TYPE/$NAME"
+          echo "✅ Created branch: $TYPE/$NAME"
+        fi
+
+  _confirm-switch:
+    internal: true
+    desc: Confirm branch switch with warning
+    vars:
+      CURRENT_BRANCH:
+        sh: git branch --show-current
+      TARGET_BRANCH: "{{.TARGET_BRANCH}}"
+    prompt: |
+      ⚠️  BRANCH SWITCH WARNING
+
+      This will switch from: {{.CURRENT_BRANCH}}
+                        to: {{.TARGET_BRANCH}}
+
+      Uncommitted changes may be lost.
+
+      Continue?
+    cmds:
+      - echo "Switching to {{.TARGET_BRANCH}}..."

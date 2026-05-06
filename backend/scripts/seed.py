@@ -4,6 +4,7 @@ Script to seed the database with default data.
 
 Usage:
     python -m backend.scripts.seed
+    python -m backend.scripts.seed --scenario fr_tax
     python -m backend.scripts.seed --seed-dir path/to/scenario/
 
 This script will seed:
@@ -11,6 +12,7 @@ This script will seed:
 - Accounts from settings.yaml
 - Connectors from settings.yaml
 
+With --scenario <name>, resolves to scenarios/<name>/ at the repo root.
 With --seed-dir, seeds from a custom directory (layered on top of defaults).
 """
 
@@ -19,9 +21,18 @@ import sys
 from pathlib import Path
 from ..config.loader import get_database_url
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCENARIOS_DIR = REPO_ROOT / "scenarios"
+
 
 def main():
     parser = argparse.ArgumentParser(description="Seed the database")
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default=None,
+        help="Scenario name (folder under scenarios/). Mutually exclusive with --seed-dir.",
+    )
     parser.add_argument(
         "--seed-dir",
         type=str,
@@ -29,6 +40,21 @@ def main():
         help="Path to a directory containing YAML seed files (assets.yaml, accounts.yaml, bundles.yaml, transactions.yaml). Layered on top of default seed data.",
     )
     args = parser.parse_args()
+
+    if args.scenario and args.seed_dir:
+        print("❌ --scenario and --seed-dir are mutually exclusive")
+        sys.exit(1)
+
+    seed_dir_arg = args.seed_dir
+    if args.scenario:
+        candidate = SCENARIOS_DIR / args.scenario
+        if not candidate.is_dir():
+            print(f"❌ Scenario directory not found: {candidate}")
+            sys.exit(1)
+        # 'default' is the implicit baseline; only pass through when the
+        # scenario adds extra fixtures.
+        if args.scenario != "default":
+            seed_dir_arg = str(candidate)
 
     # Get database URL
     db_url = get_database_url()
@@ -39,8 +65,10 @@ def main():
     print("=" * 55)
     print()
     print(f"📦 Database: {safe_url}")
-    if args.seed_dir:
-        seed_dir = Path(args.seed_dir)
+    if args.scenario:
+        print(f"🎬 Scenario: {args.scenario}")
+    if seed_dir_arg:
+        seed_dir = Path(seed_dir_arg)
         if not seed_dir.is_dir():
             print(f"❌ Seed directory not found: {seed_dir}")
             sys.exit(1)
@@ -51,7 +79,7 @@ def main():
     print("🌱 Seeding database...")
     from backend.db.seed import seed_database
 
-    result = seed_database(seed_data_dir=args.seed_dir)
+    result = seed_database(seed_data_dir=seed_dir_arg)
     prices_count = result.get('prices', 0)
     print(
         f"   Seeded {result.get('accounts', 0)} accounts, "

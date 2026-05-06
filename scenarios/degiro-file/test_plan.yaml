@@ -1,0 +1,42 @@
+# DeGiro File Connector Scenario — QA Test Plan
+# =================================================
+# Upload fixtures/sample_transactions.csv via the connector UI and verify results.
+
+test_plan:
+  name: "DeGiro File Connector — QA"
+  description: >
+    Upload a DeGiro CSV, verify preview, map raw assets, sync, and check
+    that transactions have EUR unit prices and correct fees.
+
+  steps:
+    - id: 1
+      title: "Upload CSV and verify preview"
+      description: >
+        Go to DeGiro account → connector → upload fixtures/sample_transactions.csv.
+      expected: >
+        File picker accepts only .csv. Preview shows 5 rows, 4 ISINs,
+        date range 2025-07-10 to 2025-11-20.
+
+    - id: 2
+      title: "Map raw assets and sync"
+      description: >
+        Confirm upload. Map the raw assets ("PRODUCT (ISIN)" format) to
+        the seeded assets (RGTI, ASML, RR, AMZN). Trigger sync.
+      expected: >
+        5 raw assets created with source="degiro-file".
+        Sync completes with 5 transactions imported.
+
+    - id: 3
+      title: "Verify imported transactions"
+      description: >
+        Open Transactions for the DeGiro account.
+      expected: >
+        All prices in EUR (value_eur / qty, not local currency).
+        Fees in EUR: RGTI €0.39, ASML €4.90, RR buy €3.00, RR sell €2.30, AMZN €0.57.
+
+    - id: 4
+      title: "Re-upload same file (dedup)"
+      description: >
+        Upload the same CSV again and sync.
+      expected: >
+        Sync completes with 0 new, 5 skipped. No duplicates created.

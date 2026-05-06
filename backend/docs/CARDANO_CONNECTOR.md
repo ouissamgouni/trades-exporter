@@ -61,7 +61,7 @@ Added to [backend/db/seed_data/accounts.yaml](../db/seed_data/accounts.yaml):
 Set your Cardanoscan API key:
 
 ```bash
-export CARDANOSCAN_API_KEY="***REMOVED_CARDANOSCAN_KEY***"
+export CARDANOSCAN_API_KEY="your-cardanoscan-api-key-here"
 ```
 
 ### Running the Connector

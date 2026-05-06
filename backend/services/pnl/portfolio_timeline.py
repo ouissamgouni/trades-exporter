@@ -27,6 +27,7 @@ from backend.db.models import (
     CalculationVersion,
     CostLot,
     CostLotEvent,
+    IncomeEvent,
 )
 from backend.config.loader import configure_logging
 from backend.services.pnl.metrics_service import (
@@ -65,6 +66,7 @@ class TimelinePoint:
     cost_basis_in_base: float
     unrealized_pnl: float
     cumulative_realized_pnl: float
+    cumulative_income: float = 0.0
     breakdown: List[BreakdownItem] = field(default_factory=list)
 
 
@@ -123,6 +125,53 @@ def _next_bucket(dt: datetime, granularity: str) -> datetime:
 # ---------------------------------------------------------------------------
 # Main service function
 # ---------------------------------------------------------------------------
+
+def _get_cumulative_income_at_dates(
+    session: Session,
+    version_id: int,
+    bucket_dates: List[datetime],
+) -> Dict[str, float]:
+    """
+    Compute cumulative net income (gross - withholding) up to each date bucket.
+
+    Returns:
+        { "YYYY-MM-DD": cumulative_net_income }
+    """
+    if not bucket_dates:
+        return {}
+
+    # Get all income events for this version, ordered by date
+    events = session.exec(
+        select(IncomeEvent.income_at, IncomeEvent.net_amount_in_base)
+        .where(IncomeEvent.version_id == version_id)
+        .order_by(IncomeEvent.income_at)
+    ).all()
+
+    if not events:
+        return {d.strftime("%Y-%m-%d"): 0.0 for d in bucket_dates}
+
+    # Build cumulative sum
+    result: Dict[str, float] = {}
+    cumulative = 0.0
+    event_idx = 0
+
+    for bucket_date in sorted(bucket_dates):
+        # Advance through events up to and including this bucket date
+        bucket_end = bucket_date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+        while event_idx < len(events):
+            evt_date = events[event_idx].income_at
+            if evt_date.tzinfo is None:
+                evt_date = evt_date.replace(tzinfo=timezone.utc)
+            if evt_date <= bucket_end:
+                cumulative += float(events[event_idx].net_amount_in_base or 0)
+                event_idx += 1
+            else:
+                break
+
+        result[bucket_date.strftime("%Y-%m-%d")] = cumulative
+
+    return result
+
 
 def compute_portfolio_timeline(
     session: Session,
@@ -230,12 +279,12 @@ def compute_portfolio_timeline(
     # as the /balances endpoint) so the latest point matches the UI.
     if buckets:
         last_ds = buckets[-1].strftime("%Y-%m-%d")
-        lot_balances, lot_costs = _get_current_from_cost_lots(
+        lot_balances, lot_remaining_costs, _ = _get_current_from_cost_lots(
             session, version_id, asset_ids, account_ids,
             include_unsettled_negative=include_unsettled_negative,
         )
         balance_snapshots[last_ds] = lot_balances
-        cost_basis_snapshots[last_ds] = lot_costs
+        cost_basis_snapshots[last_ds] = lot_remaining_costs
 
     # Collect all asset IDs that appear in any bucket
     all_asset_ids: set = set()
@@ -251,6 +300,11 @@ def compute_portfolio_timeline(
     # 4. Get cumulative realized P&L
     cumulative_rpnl = _get_cumulative_realized_pnl(
         session, version_id, buckets, asset_ids, account_ids
+    )
+
+    # 4b. Get cumulative income per date bucket
+    cumulative_income_by_date = _get_cumulative_income_at_dates(
+        session, version_id, buckets
     )
 
     # 5. Get asset symbols and labels
@@ -302,6 +356,7 @@ def compute_portfolio_timeline(
             cost_basis_in_base=round(total_cost_basis, 2),
             unrealized_pnl=round(unrealized, 2),
             cumulative_realized_pnl=round(rpnl_total, 2),
+            cumulative_income=round(cumulative_income_by_date.get(date_str, 0.0), 2),
             breakdown=breakdown,
         ))
 

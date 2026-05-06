@@ -49,6 +49,7 @@ const ISSUE_CONFIG: Record<string, { color: string; label: string }> = {
     unlinked_asset: { color: 'red', label: 'Asset' },
     unlinked_price_quote: { color: 'purple', label: 'Price' },
     unlinked_fee_quote: { color: 'yellow', label: 'Fee' },
+    unlinked_attributed_asset: { color: 'orange', label: 'Attributed' },
 };
 
 // ============================================================================
@@ -75,7 +76,7 @@ export const AssetLinkageTable: React.FC<AssetLinkageTableProps> = ({
                 const params = new URLSearchParams({
                     page: String(page),
                     per_page: '200', // Backend max is 200
-                    issue_types: 'unlinked_asset,unlinked_price_quote,unlinked_fee_quote',
+                    issue_types: 'unlinked_asset,unlinked_price_quote,unlinked_fee_quote,unlinked_attributed_asset',
                 });
                 const response = await fetch(`${API_URL}/transactions/data-health-check/linkage-issues?${params}`);
                 if (!response.ok) throw new Error('Failed to fetch issues');

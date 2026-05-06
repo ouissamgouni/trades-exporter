@@ -17,8 +17,8 @@ import { useBaseCurrency } from '../BaseCurrencySelector';
 import { Account, API_URL, PriceResponse, DimensionWithCategories, AccountBalance } from '../../types';
 import { useBalance } from '../../hooks/useBalance';
 import { useAssets } from '../../hooks/useAssets';
-import { usePortfolioTimeline, useVersionMetrics, useSettledMetrics, useMarketMetrics, useVersionPerformers } from '../../hooks/useChartData';
-import type { PortfolioTimelineResponse, VersionMetricsResponse, SettledMetricsResponse, MarketMetricsResponse, PerformersResponse } from '../../hooks/useChartData';
+import { usePortfolioTimeline, useVersionMetrics, useBookMetrics, useLiveMetrics, useVersionPerformers } from '../../hooks/useChartData';
+import type { PortfolioTimelineResponse, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse } from '../../hooks/useChartData';
 import { computeDelta } from './deltaUtils';
 import type { BalanceHealthData } from './SummaryCards';
 import type { VersionListItem, AssetPnLRow, AccountBalanceBreakdown, UnmappedLiveAsset } from './types';
@@ -71,13 +71,13 @@ export interface PnLContextValue {
         error: string | null;
         refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<VersionMetricsResponse>>;
     };
-    settledMetrics: {
-        data: SettledMetricsResponse | null;
+    bookMetrics: {
+        data: BookMetricsResponse | null;
         isLoading: boolean;
         error: string | null;
     };
-    marketMetrics: {
-        data: MarketMetricsResponse | null;
+    liveMetrics: {
+        data: LiveMetricsResponse | null;
         isLoading: boolean;
         error: string | null;
     };
@@ -212,13 +212,13 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
     const pricesReady = hasSeenRefreshing.current && !state.isRefreshingPrices;
 
     // ── Split metrics hooks ──
-    const settledMetrics = useSettledMetrics(
+    const bookMetrics = useBookMetrics(
         state.currentVersionId,
         {},
         !!state.currentVersionId,
     );
 
-    const marketMetrics = useMarketMetrics(
+    const liveMetrics = useLiveMetrics(
         state.currentVersionId,
         { pricesReady },
         !!state.currentVersionId,
@@ -315,8 +315,8 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
 
     // ── Derived: scorecard summary (prefers settled+market split, falls back to combined) ──
     const scorecardSummary = useMemo(() => {
-        const ss = settledMetrics.data?.summary;
-        const mm = marketMetrics.data?.summary;
+        const ss = bookMetrics.data?.summary;
+        const mm = liveMetrics.data?.summary;
         if (ss) {
             return {
                 portfolioValue: mm?.current_value ?? 0,
@@ -352,7 +352,7 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
             };
         }
         return null;
-    }, [settledMetrics.data, marketMetrics.data, versionMetrics.data, state.summary, assets]);
+    }, [bookMetrics.data, liveMetrics.data, versionMetrics.data, state.summary, assets]);
 
     // ── Derived: balance health ──
     const balanceHealth: BalanceHealthData | undefined = useMemo(() => {
@@ -465,8 +465,8 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         versionsQuery,
         heroTimeline,
         versionMetrics,
-        settledMetrics,
-        marketMetrics,
+        bookMetrics,
+        liveMetrics,
         performers: performersQuery,
         pricesReady,
         queryClient,
@@ -499,8 +499,8 @@ export const PnLProvider: React.FC<PnLProviderProps> = ({ isActive, children }) 
         versionsQuery,
         heroTimeline,
         versionMetrics,
-        settledMetrics,
-        marketMetrics,
+        bookMetrics,
+        liveMetrics,
         performersQuery,
         pricesReady,
         queryClient,

@@ -68,19 +68,26 @@ class ConnectorPolymarketHub(BaseHubConnector):
             config=config,
         )
 
-        # Build child config
+        # Build child config (shared keys)
         child_config = {"parent_output_path": self.output_path}
         if config:
-            for key in ("test_mode", "renormalize_mode", "since_datetime"):
+            for key in ("test_mode", "renormalize_mode", "since_datetime",
+                        "clob_api_key", "clob_api_secret", "clob_passphrase", "signer_address"):
                 if key in config:
                     child_config[key] = config[key]
+
+        # Polymarket activity child gets the fixture file path (not polygon child,
+        # which has its own default fixture or yields nothing in test mode)
+        activity_config = dict(child_config)
+        if config and config.get("test_file_path"):
+            activity_config["test_file_path"] = config["test_file_path"]
 
         # Child 1: Polymarket Data API (trades + redemptions)
         polymarket_connector = ConnectorPolymarket(
             wallet_address=self.wallet_address,
             account_id=account_id,
             connector_id=connector_id,
-            config=child_config,
+            config=activity_config,
         )
 
         # Child 2: Filtered Polygon token transfers (external USDC deposits/withdrawals)

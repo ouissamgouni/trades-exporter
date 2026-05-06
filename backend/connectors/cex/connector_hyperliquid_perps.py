@@ -9,7 +9,7 @@ Closing a position = USDC inflow (margin returned ± PnL).
 The P&L engine treats derivative settlements specially:
 - Gains (perp_close inflows) create zero-cost RealizedPnl entries.
 - Losses (perp_close disposals) override proceeds to zero.
-Both carry related_asset_symbol from tags[0]["coin"] for per-asset attribution.
+Both carry source_attributed_asset_symbol for per-asset attribution.
 
 Stores closedPnl from the API in transaction tags for validation.
 """
@@ -426,6 +426,7 @@ class HyperliquidPerpsConnector(BaseConnector):
                 transaction_type="margin",
                 source_transaction_type=source_trx_type,
                 source_asset_symbol=margin_currency,
+                source_attributed_asset_symbol=coin,
                 quantity=quantity,
                 fee=abs(float(fee_str)),
                 source_fee_quote_asset_symbol=fee_token,

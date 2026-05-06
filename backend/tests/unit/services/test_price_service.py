@@ -101,14 +101,16 @@ class TestCurrencyConverter:
 
     @patch('backend.services.price_service.get_price_getter')
     def test_conversion_uses_forex_getter(self, mock_get_getter):
-        """Currency conversion should use forex getter."""
+        """Currency conversion should use forex getter when no configured getter."""
         converter = CurrencyConverter()
         mock_session = Mock()
         
         # Mock asset lookup
         mock_asset = Mock()
         mock_asset.symbol = "USD"
-        mock_session.exec.return_value.first.return_value = mock_asset
+        mock_asset.asset_id = 1
+        # First exec().first() returns asset, second returns None (no APG)
+        mock_session.exec.return_value.first.side_effect = [mock_asset, None]
         
         # Mock forex getter
         mock_forex = Mock()
@@ -120,6 +122,39 @@ class TestCurrencyConverter:
         result = converter.convert(mock_session, 100.0, "USD", "EUR")
         
         assert result == 85.0  # 100 * 0.85
+
+    @patch('backend.services.price_service.get_price_getter')
+    def test_conversion_prefers_configured_getter_over_forex(self, mock_get_getter):
+        """When a non-forex getter is configured for the currency, use it."""
+        converter = CurrencyConverter()
+        mock_session = Mock()
+
+        # Mock asset lookup
+        mock_asset = Mock()
+        mock_asset.symbol = "USDC"
+        mock_asset.asset_id = 42
+
+        # Mock APG row (e.g. mock getter configured for USDC)
+        mock_apg = Mock()
+        mock_apg.price_getter = "mock"
+        mock_apg.external_id = "USDC"
+        mock_apg.params = {"quote_currency": "EUR"}
+        mock_apg.enabled = True
+        mock_apg.priority = 1
+
+        # First exec().first() returns asset, second returns APG
+        mock_session.exec.return_value.first.side_effect = [mock_asset, mock_apg]
+
+        # Mock the configured getter (not forex)
+        mock_configured = Mock()
+        mock_configured.get_current_price.return_value = PriceResult(
+            price=0.92, quote_currency="EUR", source="mock"
+        )
+        mock_get_getter.return_value = mock_configured
+
+        result = converter.convert(mock_session, 100.0, "USDC", "EUR")
+
+        assert result == 92.0  # 100 * 0.92
 
     @patch('backend.services.price_service.get_price_getter')
     def test_conversion_raises_on_missing_currency(self, mock_get_getter):

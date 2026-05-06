@@ -10,9 +10,11 @@ from decimal import Decimal
 from backend.db.models import CalculationUnitLeg, NormalizedTransaction
 from backend.services.pnl.leg_expander import (
     expand_transaction,
+    expand_transaction_to_list,
     should_expand_as_trade,
     has_fee,
     is_neutral_transaction,
+    is_cost_transaction,
 )
 from backend.services.pnl.trade_splitter import prepare_transactions_for_pnl
 from backend.services.pnl.models import RuntimeUnitType
@@ -169,6 +171,65 @@ class TestIsNeutralTransaction:
         """Sell transaction is not neutral."""
         tx = make_tx(source_transaction_type="sell", direction="outflow")
         assert is_neutral_transaction(tx) is False
+
+    def test_memo_is_neutral(self):
+        """Memo transaction (audit-only) should be neutral."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+        )
+        assert is_neutral_transaction(tx) is True
+
+    def test_cost_detected_by_is_cost(self):
+        """Cost transaction is detected by is_cost_transaction."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="approval",
+            quantity=Decimal("0"),
+        )
+        assert is_cost_transaction(tx) is True
+
+
+class TestMemoExpansion:
+    """Memo transactions should produce no legs (no PnL impact)."""
+
+    def test_memo_no_fee_produces_no_legs(self):
+        """Memo with qty but no fee → zero legs, completely ignored by PnL."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+            fee=Decimal("0"),
+            fee_quote_asset_id=None,
+        )
+        legs = expand_transaction_to_list(tx)
+        assert legs == []
+        assert expand_transaction(tx) is None
+
+    def test_memo_with_fee_produces_fee_only_leg(self):
+        """Memo with fee → one fee leg only (fee is still deductible)."""
+        tx = make_tx(
+            transaction_type="memo",
+            source_transaction_type="redeem",
+            direction="neutral",
+            quantity=Decimal("100"),
+            fee=Decimal("5"),
+            fee_quote_asset_id=2,
+            source_fee_quote_asset_symbol="USDC",
+        )
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        assert legs[0].leg_type.value == "fee"
+
+        result = expand_transaction(tx)
+        assert result is not None
+        assert result.expansion_type == "fee_only"
+        assert result.fee_leg is not None
+        assert result.outflow is None
+        assert result.inflow is None
 
 
 # =============================================================================
@@ -336,6 +397,121 @@ class TestExpandFeeOnly:
         assert result.expansion_type == "fee_only"
         assert result.fee_leg is not None
         assert result.fee_leg.quantity == Decimal("0.002")
+
+
+# =============================================================================
+# Test: expand_transaction - COST transaction expansion
+# =============================================================================
+
+
+class TestCostExpansion:
+    """Tests for COST transaction expansion (new and old formats)."""
+
+    def test_new_format_creates_fee_leg_from_qty(self):
+        """New-format COST (qty>0, price_quote_asset_id set) creates a FEE leg."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="outflow",
+            quantity=Decimal("2.50"),
+            price=Decimal("1"),
+            asset_id=None,
+            source_asset_symbol="",
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            source_fee_quote_asset_symbol="",
+            include_fee=False,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        leg = legs[0]
+        assert leg.leg_type == "fee"
+        assert leg.quantity == Decimal("2.50")
+        assert leg.asset_id == 99  # EUR from price_quote_asset_id
+
+    def test_old_format_backward_compat(self):
+        """Old-format COST (qty=0, fee>0, fee_quote_asset_id) still works."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="neutral",
+            quantity=Decimal("0"),
+            asset_id=10,
+            fee=Decimal("3.00"),
+            fee_quote_asset_id=99,
+            source_fee_quote_asset_symbol="EUR",
+            include_fee=True,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 1
+        leg = legs[0]
+        assert leg.leg_type == "fee"
+        assert leg.quantity == Decimal("3.00")
+        assert leg.asset_id == 99  # EUR from fee_quote_asset_id
+
+    def test_empty_cost_produces_no_legs(self):
+        """COST with qty=0 and no fee produces no legs."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="unknown",
+            direction="neutral",
+            quantity=Decimal("0"),
+            asset_id=None,
+            fee=None,
+            fee_quote_asset_id=None,
+            include_fee=False,
+        )
+
+        legs = expand_transaction_to_list(tx)
+        assert len(legs) == 0
+
+    def test_new_format_expand_transaction_returns_expansion_result(self):
+        """expand_transaction() returns ExpansionResult for new-format COST."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="adr_custody_fee",
+            direction="outflow",
+            quantity=Decimal("5.00"),
+            price=Decimal("1"),
+            asset_id=None,
+            source_asset_symbol="",
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            source_fee_quote_asset_symbol="",
+            include_fee=False,
+        )
+
+        result = expand_transaction(tx)
+        assert result is not None
+        assert result.expansion_type == "fee_only"
+        assert result.fee_leg is not None
+        assert result.fee_leg.quantity == Decimal("5.00")
+        assert result.outflow is None
+        assert result.inflow is None
+
+    def test_cost_not_treated_as_neutral(self):
+        """COST transactions bypass neutral path entirely."""
+        tx = make_tx(
+            transaction_type="cost",
+            source_transaction_type="exchange_fee",
+            direction="outflow",
+            quantity=Decimal("2.50"),
+            price=Decimal("1"),
+            asset_id=None,
+            price_quote_asset_id=99,
+            source_price_quote_asset_symbol="EUR",
+            fee=None,
+            fee_quote_asset_id=None,
+            include_fee=False,
+        )
+        assert is_cost_transaction(tx) is True
+        assert is_neutral_transaction(tx) is False
 
 
 # =============================================================================

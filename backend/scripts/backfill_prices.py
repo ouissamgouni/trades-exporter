@@ -32,7 +32,9 @@ for i, arg in enumerate(sys.argv):
     if arg == "--asset" and i + 1 < len(sys.argv):
         SINGLE_ASSET = sys.argv[i + 1]
 
-DB_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
+DB_URL = os.environ.get("DATABASE_URL")
+if not DB_URL:
+    sys.exit("Error: DATABASE_URL environment variable is required. See .env.example.")
 TODAY = date(2026, 3, 6)
 SOURCE = "backfill"
 
@@ -43,8 +45,8 @@ COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 MARKETSTACK_BASE = "http://api.marketstack.com/v1"
 ALPHAVANTAGE_BASE = "https://www.alphavantage.co/query"
 
-MARKETSTACK_KEY = os.environ.get("MARKETSTACK_API_KEY", "***REMOVED_MARKETSTACK_KEY***")
-ALPHAVANTAGE_KEY = os.environ.get("ALPHAVANTAGE_API_KEY", "***REMOVED_ALPHAVANTAGE_KEY***")
+MARKETSTACK_KEY = os.environ.get("MARKETSTACK_API_KEY", "")
+ALPHAVANTAGE_KEY = os.environ.get("ALPHAVANTAGE_API_KEY", "")
 
 session = requests.Session()
 session.headers.update(YAHOO_HEADERS)

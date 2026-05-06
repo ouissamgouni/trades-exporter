@@ -108,15 +108,15 @@ class TestSuiFixture:
         assert tx.source_from_account == FIXTURE_WALLET
         assert tx.source_to_account == FIXTURE_RECIPIENT_TX2
 
-        # Verify fee transaction
+        # Verify fee transaction (new COST format: qty=fee, price=1, price_quote=SUI)
         fee = fee_txs[0]
         assert fee.direction == "outflow"
         assert fee.transaction_type == "cost"
-        assert fee.quantity == Decimal(0)
-        assert fee.fee == Decimal("0.0032")  # 3_200_000 MIST = 0.0032 SUI
-        assert fee.include_fee is True
+        assert fee.quantity == Decimal("0.0032")  # 3_200_000 MIST = 0.0032 SUI
+        assert fee.price == Decimal(1)
+        assert fee.source_price_quote_asset_symbol == "SUI"
+        assert fee.include_fee is False
         assert fee.source_asset_symbol == "SUI"
-        assert fee.source_fee_quote_asset_symbol == "SUI"
         assert fee.source_transaction_id.endswith("_fee")
 
         # Fee from/to: wallet pays fee, no specific recipient
@@ -154,9 +154,10 @@ class TestSuiFixture:
         assert usdc_tx.source_from_account == FIXTURE_DEX_USDC_TX3
         assert usdc_tx.source_to_account == FIXTURE_WALLET
 
-        # Fee
+        # Fee (new COST format: qty=fee, price=1)
         fee = fee_txs[0]
-        assert fee.fee == Decimal("0.004")  # 4_000_000 MIST = 0.004 SUI
+        assert fee.quantity == Decimal("0.004")  # 4_000_000 MIST = 0.004 SUI
+        assert fee.price == Decimal(1)
 
         # Fee from/to
         assert fee.source_from_account == FIXTURE_WALLET
@@ -180,9 +181,9 @@ class TestSuiFixture:
         assert len(fee_txs) == 1, "Should have 1 fee record"
 
         fee = fee_txs[0]
-        assert fee.fee == Decimal("0.0016")  # 1_600_000 MIST = 0.0016 SUI
-        assert fee.quantity == Decimal(0)
-        assert fee.include_fee is True
+        assert fee.quantity == Decimal("0.0016")  # 1_600_000 MIST = 0.0016 SUI
+        assert fee.price == Decimal(1)
+        assert fee.include_fee is False
 
         # Fee from/to: wallet pays fee, no recipient
         assert fee.source_from_account == FIXTURE_WALLET
@@ -256,8 +257,12 @@ class TestSuiFixture:
                 assert norm.direction in ["inflow", "outflow", "neutral"]
                 assert norm.date_time is not None
                 assert isinstance(norm.quantity, Decimal)
-                assert isinstance(norm.fee, Decimal)
-                assert norm.source_fee_quote_asset_symbol == "SUI"
+                if norm.transaction_type == "cost":
+                    # New COST format: no fee fields
+                    assert norm.source_price_quote_asset_symbol == "SUI"
+                else:
+                    assert isinstance(norm.fee, Decimal)
+                    assert norm.source_fee_quote_asset_symbol == "SUI"
 
     def test_from_to_addresses(self, connector):
         """Verify source_from_account and source_to_account across all fixture transactions."""

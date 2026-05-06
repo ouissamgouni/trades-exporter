@@ -124,13 +124,13 @@ export const PortfolioPerformanceChart: React.FC<PortfolioPerformanceChartProps>
 
         if (!filteredPoints.length) return { chartData: series, colorMap: colors };
 
-        // 1) Portfolio ROI line: ((unrealized + realized) / cost_basis) × 100, rebased to 0% at start
+        // 1) Portfolio ROI line: ((unrealized + realized + income) / cost_basis) × 100, rebased to 0% at start
         const portfolioData: { x: string; y: number }[] = [];
         let roi0: number | null = null;
         for (const pt of filteredPoints) {
             const costBasis = pt.cost_basis_in_base;
             if (costBasis <= 0) continue;
-            const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl) / costBasis) * 100;
+            const roi = ((pt.unrealized_pnl + pt.cumulative_realized_pnl + (pt.cumulative_income ?? 0)) / costBasis) * 100;
             if (roi0 === null) roi0 = roi;
             portfolioData.push({ x: pt.date, y: roi - roi0 });
         }

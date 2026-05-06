@@ -27,6 +27,7 @@ const ARRAY_PARAM_MAP: Record<string, keyof TransactionFilterState> = {
     related_account_id: 'relatedAccountIds',
     asset_id: 'assetIds',
     related_asset_id: 'relatedAssetIds',
+    attributed_asset_id: 'attributedAssetIds',
     category_id: 'categoryIds',
     transaction_type: 'transactionTypes',
     direction: 'directions',

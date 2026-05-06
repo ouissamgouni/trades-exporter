@@ -34,6 +34,8 @@ UPDATABLE_FIELDS = [
     "asset_id",
     "price_quote_asset_id",
     "fee_quote_asset_id",
+    "source_attributed_asset_symbol",
+    "attributed_asset_id",
     
     # Core transaction data
     "date_time",
@@ -397,8 +399,12 @@ class PersistenceStage(PipelineStage):
         session = None,
     ) -> NormalizedTransaction:
         """Convert Pydantic model to SQLModel."""
-        # Handle tags
-        tags = tx.tags if isinstance(tx.tags, list) else []
+        # Handle tags — coerce dict to list for legacy/connector compatibility
+        tags = tx.tags
+        if isinstance(tags, dict):
+            tags = [tags] if tags else []
+        elif not isinstance(tags, list):
+            tags = []
 
         # Auto-detect include_fee for trades: when the fee is denominated in the
         # same asset as the inflow, the exchange already deducted it from the
@@ -427,6 +433,8 @@ class PersistenceStage(PipelineStage):
             asset_id=tx.asset_id,
             price_quote_asset_id=tx.price_quote_asset_id,
             fee_quote_asset_id=tx.fee_quote_asset_id,
+            source_attributed_asset_symbol=tx.source_attributed_asset_symbol,
+            attributed_asset_id=tx.attributed_asset_id,
             user_calculation_unit_id=tx.user_calculation_unit_id,
             date_time=tx.date_time,
             direction=tx.direction,

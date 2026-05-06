@@ -24,7 +24,7 @@ from backend.services.pnl.metrics_service import (
     PerformersResult,
     AssetPeriodDelta,
     compute_performers,
-    compute_market_metrics,
+    compute_live_metrics,
 )
 
 
@@ -318,7 +318,8 @@ class TestVersionSnapshotAttributes:
             now=now,
             now_ds=now.strftime("%Y-%m-%d"),
             now_lot_balances={1: 10.0},
-            now_lot_costs={1: 100.0},
+            now_lot_remaining_costs={1: 100.0},
+            now_lot_invested={1: 100.0},
             all_asset_ids={1},
             range_starts={"all": now - timedelta(days=365)},
             unique_dates=[now],
@@ -361,6 +362,7 @@ class TestPerformersResultTotalCount:
 class TestComputePerformersBaseCurrency:
     """Integration test: compute_performers excludes base currency."""
 
+    @patch(f"{MOCK_PREFIX}._get_invested_snapshots_at_dates")
     @patch(f"{MOCK_PREFIX}._get_fees_by_asset")
     @patch(f"{MOCK_PREFIX}._get_asset_labels")
     @patch(f"{MOCK_PREFIX}._get_asset_symbols")
@@ -371,7 +373,7 @@ class TestComputePerformersBaseCurrency:
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_base_currency_excluded(
         self, mock_lots, mock_balances, mock_costs, mock_prices, mock_rpnl,
-        mock_symbols, mock_labels, mock_fees_asset,
+        mock_symbols, mock_labels, mock_fees_asset, mock_invested,
     ):
         """compute_performers should not return base currency in results."""
         from backend.db.models import CalculationVersion
@@ -388,6 +390,7 @@ class TestComputePerformersBaseCurrency:
         # Assets: 10 (BTC), 221 (EUR base currency)
         mock_lots.return_value = (
             {10: 2.0, 221: 5000.0},
+            {10: 1000.0, 221: 5000.0},
             {10: 1000.0, 221: 5000.0},
         )
 
@@ -419,22 +422,23 @@ class TestComputePerformersBaseCurrency:
 
 
 # ============================================================================
-# compute_market_metrics: ensures no AttributeError on version.version_id
+# compute_live_metrics: ensures no AttributeError on version.version_id
 # ============================================================================
 
 
-class TestComputeMarketMetricsVersionField:
-    """Regression test: compute_market_metrics must use version.version_id, not .id."""
+class TestComputeLiveMetricsVersionField:
+    """Regression test: compute_live_metrics must use version.version_id, not .id."""
 
+    @patch(f"{MOCK_PREFIX}._get_invested_snapshots_at_dates")
     @patch(f"{MOCK_PREFIX}._get_cumulative_realized_pnl")
     @patch(f"{MOCK_PREFIX}._get_price_at_dates")
     @patch(f"{MOCK_PREFIX}._get_cost_basis_snapshots_at_dates")
     @patch(f"{MOCK_PREFIX}._get_balance_snapshots_at_dates")
     @patch(f"{MOCK_PREFIX}._get_current_from_cost_lots")
     def test_no_attribute_error(
-        self, mock_lots, mock_balances, mock_costs, mock_prices, mock_rpnl,
+        self, mock_lots, mock_balances, mock_costs, mock_prices, mock_rpnl, mock_invested,
     ):
-        """compute_market_metrics should not raise AttributeError: 'id'."""
+        """compute_live_metrics should not raise AttributeError: 'id'."""
         from backend.db.models import CalculationVersion
 
         version = CalculationVersion(version_id=42, base_currency_id=221)
@@ -445,7 +449,7 @@ class TestComputeMarketMetricsVersionField:
         mock_result.one.return_value = (_utc(2024, 1, 1), _utc(2024, 6, 1))
         session.exec.return_value = mock_result
 
-        mock_lots.return_value = ({10: 1.0}, {10: 100.0})
+        mock_lots.return_value = ({10: 1.0}, {10: 100.0}, {10: 100.0})
 
         def balance_data(*a, **kw):
             return {d.strftime("%Y-%m-%d"): {10: 1.0} for d in a[2]}
@@ -465,7 +469,7 @@ class TestComputeMarketMetricsVersionField:
         mock_rpnl.side_effect = rpnl_data
 
         # Should NOT raise AttributeError: 'CalculationVersion' has no attribute 'id'
-        result = compute_market_metrics(session, version_id=42)
+        result = compute_live_metrics(session, version_id=42)
 
         assert result is not None
         assert result.version_id == 42

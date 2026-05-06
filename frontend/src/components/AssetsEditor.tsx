@@ -14,6 +14,7 @@ import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
 import { DeleteAssetDialog } from './DeleteAssetDialog';
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
+import AssetFormDialog from './AssetFormDialog';
 
 // Use ASSET_TYPE_OPTIONS but it now only has 3 values: crypto, stock, fiat
 const PRICE_TYPE_OPTIONS = ASSET_TYPE_OPTIONS;
@@ -77,7 +78,6 @@ export const AssetsEditor: React.FC = () => {
     const [editingId, setEditingId] = useState<number | null>(null);
     const [editValues, setEditValues] = useState<Partial<Asset>>({});
     const [showCreateDialog, setShowCreateDialog] = useState(false);
-    const [newAsset, setNewAsset] = useState<Partial<Asset>>({ status: 0 });
 
     // Extended filters (client-side)
     const [searchFilter, setSearchFilter] = useState(''); // Searches symbol + label
@@ -464,11 +464,23 @@ export const AssetsEditor: React.FC = () => {
             const res = await fetch(`${API_URL}/assets/${assetId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ [field]: field === 'status' ? parseInt(cellValue) : cellValue }),
+                body: JSON.stringify({ [field]: field === 'status' ? parseInt(cellValue) : field === 'denomination_currency_id' ? (cellValue ? parseInt(cellValue) : null) : field === 'isin' ? (cellValue || null) : cellValue }),
             });
             if (!res.ok) throw new Error('Failed to save');
             // Optimistic update
-            setAllAssets(prev => prev.map(a => a.asset_id === assetId ? { ...a, [field]: field === 'status' ? parseInt(cellValue) : cellValue } : a));
+            setAllAssets(prev => prev.map(a => {
+                if (a.asset_id !== assetId) return a;
+                if (field === 'denomination_currency_id') {
+                    const denomId = cellValue ? parseInt(cellValue) : null;
+                    const denomAsset = denomId ? prev.find(x => x.asset_id === denomId) : null;
+                    return {
+                        ...a,
+                        denomination_currency_id: denomId,
+                        denomination_currency: denomAsset ? { asset_id: denomAsset.asset_id!, symbol: denomAsset.symbol, label: denomAsset.label } : null,
+                    };
+                }
+                return { ...a, [field]: field === 'status' ? parseInt(cellValue) : cellValue };
+            }));
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save' });
         }
@@ -508,27 +520,9 @@ export const AssetsEditor: React.FC = () => {
         }
     };
 
-    const createAsset = async () => {
-        if (!newAsset.symbol?.trim()) {
-            toaster.error({ title: 'Validation error', description: 'Symbol is required' });
-            return;
-        }
-        try {
-            const response = await fetch(`${API_URL}/assets`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newAsset)
-            });
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detail || 'Failed to create asset');
-            }
-            await refreshAssets();
-            setNewAsset({ status: 0 });
-            setShowCreateDialog(false);
-        } catch (err) {
-            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create asset' });
-        }
+    const handleCreateFormClose = (createdAssetId?: number) => {
+        setShowCreateDialog(false);
+        if (createdAssetId) refreshAssets();
     };
 
     const deleteAsset = (id: number, symbol: string) => {
@@ -1518,7 +1512,9 @@ export const AssetsEditor: React.FC = () => {
                             <Table.ColumnHeader width="50px">ID</Table.ColumnHeader>
                             <Table.ColumnHeader width="80px">Symbol</Table.ColumnHeader>
                             <Table.ColumnHeader width="180px">Label</Table.ColumnHeader>
+                            <Table.ColumnHeader width="100px">ISIN</Table.ColumnHeader>
                             <Table.ColumnHeader width="60px">Type</Table.ColumnHeader>
+                            <Table.ColumnHeader width="80px">Currency</Table.ColumnHeader>
                             <Table.ColumnHeader width="280px">Categories</Table.ColumnHeader>
                             <Table.ColumnHeader width="100px">Getters</Table.ColumnHeader>
                             <Table.ColumnHeader width="70px">Txns</Table.ColumnHeader>
@@ -1529,7 +1525,7 @@ export const AssetsEditor: React.FC = () => {
                     <Table.Body>
                         {assets.length === 0 ? (
                             <Table.Row>
-                                <Table.Cell colSpan={10}>
+                                <Table.Cell colSpan={12}>
                                     <Text textAlign="center" py={8} color="gray.500">
                                         {allAssets.length === 0 ? 'No assets found' : 'No assets match filters'}
                                     </Text>
@@ -1566,6 +1562,15 @@ export const AssetsEditor: React.FC = () => {
                                             <Text _hover={{ color: 'blue.600' }}>{asset.label || '-'}</Text>
                                         )}
                                     </Table.Cell>
+                                    {/* Click-to-edit: ISIN */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'isin', asset.isin || '')}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'isin' ? (
+                                            <Input size="sm" autoFocus value={cellValue} onChange={e => setCellValue(e.target.value)}
+                                                onBlur={saveCellEdit} onKeyDown={handleCellKeyDown} />
+                                        ) : (
+                                            <Text fontSize="xs" color={asset.isin ? undefined : 'gray.400'} _hover={{ color: 'blue.600' }}>{asset.isin || '-'}</Text>
+                                        )}
+                                    </Table.Cell>
                                     {/* Click-to-edit: Type */}
                                     <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'price_type', asset.price_type || '')}>
                                         {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'price_type' ? (
@@ -1587,6 +1592,28 @@ export const AssetsEditor: React.FC = () => {
                                             }>
                                                 <Tag.Label>{asset.price_type || '-'}</Tag.Label>
                                             </Tag.Root>
+                                        )}
+                                    </Table.Cell>
+                                    {/* Click-to-edit: Denomination Currency */}
+                                    <Table.Cell cursor="pointer" onClick={() => startCellEdit(asset.asset_id!, 'denomination_currency_id', String(asset.denomination_currency_id ?? ''))}>
+                                        {editingCell && editingCell.assetId === asset.asset_id && editingCell.field === 'denomination_currency_id' ? (
+                                            <NativeSelect.Root size="sm">
+                                                <NativeSelect.Field autoFocus value={cellValue}
+                                                    onChange={e => setCellValue(e.target.value)}
+                                                    onBlur={saveCellEdit}
+                                                >
+                                                    <option value="">—</option>
+                                                    {allAssets.filter(a => a.price_type === 'fiat' && a.asset_id).map(a => (
+                                                        <option key={a.asset_id} value={String(a.asset_id)}>
+                                                            {a.symbol}
+                                                        </option>
+                                                    ))}
+                                                </NativeSelect.Field>
+                                            </NativeSelect.Root>
+                                        ) : (
+                                            <Badge colorPalette={asset.denomination_currency ? 'teal' : 'gray'} size="sm">
+                                                {asset.denomination_currency?.symbol || '-'}
+                                            </Badge>
                                         )}
                                     </Table.Cell>
                                     <Table.Cell>
@@ -1731,75 +1758,11 @@ export const AssetsEditor: React.FC = () => {
                 </Flex>
             </Box>
 
-            {/* Create Asset Dialog */}
-            <Dialog.Root open={showCreateDialog} onOpenChange={(e) => setShowCreateDialog(e.open)}>
-                <Portal>
-                    <Dialog.Backdrop />
-                    <Dialog.Positioner>
-                        <Dialog.Content>
-                            <Dialog.Header>
-                                <Dialog.Title>Add New Asset</Dialog.Title>
-                            </Dialog.Header>
-                            <Dialog.Body>
-                                <Flex direction="column" gap={4}>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Symbol *</Text>
-                                        <Input
-                                            placeholder="e.g., BTC, ETH"
-                                            value={newAsset.symbol || ''}
-                                            onChange={e => setNewAsset({ ...newAsset, symbol: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Label</Text>
-                                        <Input
-                                            placeholder="e.g., Bitcoin"
-                                            value={newAsset.label || ''}
-                                            onChange={e => setNewAsset({ ...newAsset, label: e.target.value })}
-                                        />
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Price Type</Text>
-                                        <ComboSelect
-                                            value={newAsset.price_type || ''}
-                                            onChange={val => setNewAsset({ ...newAsset, price_type: val })}
-                                            options={PRICE_TYPE_OPTIONS}
-                                            placeholder="Select type..."
-                                            width="100%"
-                                            size="md"
-                                        />
-                                        <Text fontSize="xs" color="gray.500" mt={1}>
-                                            Determines which price getter to use (crypto=CoinGecko, stock=DataReader, fiat=Forex)
-                                        </Text>
-                                    </Box>
-                                    <Box>
-                                        <Text fontWeight="medium" mb={1}>Status</Text>
-                                        <NativeSelect.Root>
-                                            <NativeSelect.Field
-                                                value={String(newAsset.status ?? 0)}
-                                                onChange={e => setNewAsset({ ...newAsset, status: parseInt(e.target.value) })}
-                                            >
-                                                <option value="0">Active</option>
-                                                <option value="1">Inactive</option>
-                                            </NativeSelect.Field>
-                                        </NativeSelect.Root>
-                                    </Box>
-                                </Flex>
-                            </Dialog.Body>
-                            <Dialog.Footer>
-                                <Flex gap={2}>
-                                    <Button variant="outline" onClick={() => { setShowCreateDialog(false); setNewAsset({ status: 0 }); }}>
-                                        Cancel
-                                    </Button>
-                                    <Button colorPalette="blue" onClick={createAsset}>
-                                        Create Asset
-                                    </Button>
-                                </Flex>
-                            </Dialog.Footer>
-                        </Dialog.Content>
-                    </Dialog.Positioner>
-                </Portal>
-            </Dialog.Root>
+            {/* Create Asset Dialog — delegated to canonical AssetFormDialog */}
+            <AssetFormDialog
+                isOpen={showCreateDialog}
+                onClose={handleCreateFormClose}
+            />
 
             {/* Price Getters Dialog */}
             <Dialog.Root open={showGettersDialog} onOpenChange={(e) => setShowGettersDialog(e.open)}>

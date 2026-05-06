@@ -7,12 +7,15 @@ Usage:
     PYTHONPATH=/path/to/trades-exporter .venv/bin/python scripts/gap_analysis.py
 """
 
+import os
 import sys
 from datetime import datetime, timedelta
 from collections import defaultdict
 from sqlalchemy import create_engine, text
 
-DB_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
+DB_URL = os.environ.get("DATABASE_URL")
+if not DB_URL:
+    sys.exit("Error: DATABASE_URL environment variable is required.")
 TODAY = datetime(2026, 3, 6).date()
 
 def main():

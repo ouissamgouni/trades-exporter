@@ -20,10 +20,13 @@ from backend.db.models import (
     Asset,
     CalculationUnit,
     CalculationVersion,
+    DividendIncomeAnnualSummary,
+    DividendIncomeTaxEntry,
     FrenchCryptoTaxAnnualSummary,
     FrenchCryptoTaxEntry,
     FrenchSecuritiesTaxAnnualSummary,
     FrenchSecuritiesTaxEntry,
+    IncomeEvent,
     NormalizedTransaction,
     RealizedPnl,
     TransactionTaxOverride,
@@ -135,6 +138,9 @@ class FrenchTaxService:
             securities_report = securities_calc.compute(list(securities_entries), asset_map, effective_taxable_map=fr_overrides)
             self._persist_securities_tax(version, securities_report, account_id)
 
+        # Run income tax calculator (PFU on dividends/interest)
+        income_count = self._compute_income_tax(version)
+
         self.session.commit()
 
         log.info(
@@ -142,6 +148,7 @@ class FrenchTaxService:
             version_id=version_id,
             crypto_entries=len(crypto_entries),
             securities_entries=len(securities_entries),
+            income_entries=income_count,
             skipped_entries=skipped_entries,
         )
 
@@ -149,6 +156,7 @@ class FrenchTaxService:
             "status": "computed",
             "crypto_entries": len(crypto_entries),
             "securities_entries": len(securities_entries),
+            "income_entries": income_count,
             "excluded_entries": 0,
             "skipped_entries": skipped_entries,
         }
@@ -177,13 +185,24 @@ class FrenchTaxService:
             .where(FrenchSecuritiesTaxAnnualSummary.calculation_version_id == version_id)
         ).first() is not None
 
+        has_income_entries = self.session.exec(
+            select(DividendIncomeTaxEntry)
+            .where(DividendIncomeTaxEntry.calculation_version_id == version_id)
+        ).first() is not None
+        has_income_summaries = self.session.exec(
+            select(DividendIncomeAnnualSummary)
+            .where(DividendIncomeAnnualSummary.calculation_version_id == version_id)
+        ).first() is not None
+
         has_crypto = has_crypto_entries or has_crypto_summaries
         has_securities = has_securities_entries or has_securities_summaries
+        has_income = has_income_entries or has_income_summaries
         return {
             "version_id": version_id,
-            "has_tax_results": has_crypto or has_securities,
+            "has_tax_results": has_crypto or has_securities or has_income,
             "has_crypto": has_crypto,
             "has_securities": has_securities,
+            "has_income": has_income,
         }
 
     def _delete_tax_results(self, version_id: int) -> None:
@@ -193,6 +212,8 @@ class FrenchTaxService:
             FrenchCryptoTaxAnnualSummary,
             FrenchSecuritiesTaxEntry,
             FrenchSecuritiesTaxAnnualSummary,
+            DividendIncomeTaxEntry,
+            DividendIncomeAnnualSummary,
         ]:
             rows = self.session.exec(
                 select(model).where(model.calculation_version_id == version_id)
@@ -281,3 +302,95 @@ class FrenchTaxService:
                 transaction_count=summary.taxable_disposals,
             )
             self.session.add(annual)
+
+    # -------------------------------------------------------------------------
+    # Income Tax (PFU on dividends / interest)
+    # -------------------------------------------------------------------------
+    # French Prélèvement Forfaitaire Unique (PFU / "flat tax"):
+    #   - 12.8% income tax (IR)
+    #   - 17.2% social contributions (prélèvements sociaux)
+    #   - Total: 30% on gross income
+    # Foreign withholding tax is a credit against the 12.8% IR portion only.
+    # Form 2042 lines: 2DC (gross dividends), 2BH (elective barème option)
+    # Form 2047: foreign income + withholding credits
+
+    PFU_RATE = Decimal("0.30")
+    IR_RATE = Decimal("0.128")
+    SOCIAL_RATE = Decimal("0.172")
+
+    def _compute_income_tax(self, version: CalculationVersion) -> int:
+        """Compute PFU income tax on IncomeEvent entries for this version.
+
+        Returns the number of income events processed.
+        """
+        events = self.session.exec(
+            select(IncomeEvent)
+            .where(IncomeEvent.version_id == version.version_id)
+            .order_by(IncomeEvent.income_at)
+        ).all()
+
+        if not events:
+            return 0
+
+        account_id = version.account_ids[0] if version.account_ids else None
+
+        # Group by fiscal year for annual summaries
+        from collections import defaultdict
+        by_year: dict[int, list[IncomeEvent]] = defaultdict(list)
+        for ev in events:
+            by_year[ev.income_at.year].append(ev)
+
+        for fiscal_year, year_events in sorted(by_year.items()):
+            year_gross = Decimal(0)
+            year_withholding_credit = Decimal(0)
+            year_net_taxable = Decimal(0)
+            year_tax = Decimal(0)
+
+            for ev in year_events:
+                gross = ev.gross_amount_in_base
+                wht = ev.withholding_amount_in_base or Decimal(0)
+
+                # Withholding credit is limited to the IR portion (12.8%) of gross
+                max_credit = gross * self.IR_RATE
+                credit = min(wht, max_credit)
+
+                # Net taxable = gross (withholding is a credit, not a deduction)
+                net_taxable = gross
+
+                # Total PFU = 30% of gross, minus foreign withholding credit
+                tax = (gross * self.PFU_RATE) - credit
+                if tax < 0:
+                    tax = Decimal(0)
+
+                entry = DividendIncomeTaxEntry(
+                    calculation_version_id=version.version_id,
+                    account_id=ev.transaction.account_id if ev.transaction else account_id,
+                    income_event_id=ev.id,
+                    fiscal_year=fiscal_year,
+                    asset_symbol=ev.attributed_asset.symbol if ev.attributed_asset else (ev.asset.symbol if ev.asset else "?"),
+                    income_type=ev.income_type,
+                    gross_income=gross,
+                    withholding_tax_credit=credit,
+                    net_taxable=net_taxable,
+                    tax_amount=tax,
+                )
+                self.session.add(entry)
+
+                year_gross += gross
+                year_withholding_credit += credit
+                year_net_taxable += net_taxable
+                year_tax += tax
+
+            summary = DividendIncomeAnnualSummary(
+                calculation_version_id=version.version_id,
+                account_id=account_id,
+                fiscal_year=fiscal_year,
+                total_gross_income=year_gross,
+                total_withholding_credits=year_withholding_credit,
+                net_taxable=year_net_taxable,
+                tax_total=year_tax,
+                event_count=len(year_events),
+            )
+            self.session.add(summary)
+
+        return len(events)
