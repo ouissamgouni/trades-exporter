@@ -70,8 +70,8 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         versionsQuery,
         heroTimeline,
         versionMetrics,
-        settledMetrics,
-        marketMetrics,
+        bookMetrics,
+        liveMetrics,
         performers,
         pricesReady,
         liveBalanceMap,
@@ -298,7 +298,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                         fontSize="xs"
                     >
                         <FiRefreshCw size={12} />
-                        <Text ml={0.5}>{isCalcStale ? 'Refresh' : 'Recalc'}</Text>
+                        <Text ml={0.5}>{isCalcStale ? 'Refresh' : currentVersionId ? 'Recalc' : 'Calculate'}</Text>
                     </Button>
                     <Button
                         size="xs"

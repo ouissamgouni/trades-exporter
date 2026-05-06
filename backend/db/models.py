@@ -122,6 +122,7 @@ class UnitPattern(str, Enum):
     UNMATCHED_INTERNAL_TRANSFER = "unmatched_internal_transfer"  # Incomplete internal transfer (no P&L)
     FLOW = "flow"  # External single-leg movement (airdrop, payment, external deposit/withdrawal)
     SPLIT = "split"  # Stock split - same asset, qty changes (non-taxable)
+    SPINOFF = "spinoff"  # Corporate spin-off - cost basis reallocation across parent and new company
     CUSTOM = "custom"  # User-created bundle with no predefined pattern
     UNKNOWN = "unknown"  # Needs review
 
@@ -141,6 +142,7 @@ class LotEventType(str, Enum):
     NEGATIVE_CREATED = "created-negative"
     CONSUMED = "consumed"
     SETTLED = "settled"
+    SPINOFF_ADJUSTED = "spinoff-adjusted"
 
 
 class TransactionType(str, Enum):
@@ -153,6 +155,8 @@ class TransactionType(str, Enum):
                  single leg, no from/to, non-taxable by default.
     * COST     – fee-only transaction (gas, management fee, approval cost);
                  zero tracked value, neutral PnL impact.
+    * MEMO     – audit-only record (e.g. redeem cash settlement);
+                 no PnL impact, no cost lot changes.
 
     Note: Internal transfers are detected at P&L calculation time using
     from_account_id / to_account_id, not through transaction_type.
@@ -162,6 +166,8 @@ class TransactionType(str, Enum):
     TRANSFER = "transfer" # Asset movement – single leg, from/to expected
     MARGIN = "margin"     # Derivative cash flow – single leg, no from/to
     COST = "cost"         # Fee-only – neutral, zero tracked value
+    DIVIDEND = "dividend" # Income inflow – single leg, creates IncomeEvent
+    MEMO = "memo"         # Audit-only record – no PnL impact, no cost lot changes
 
 
 class TaxabilityStatus(str, Enum):
@@ -306,6 +312,11 @@ class AppSettings(SQLModel, table=True):
     pnl_compute_residuals: bool = Field(default=False)  # Whether to compute residual warnings
     pnl_use_price_fallback: bool = Field(default=True)
     pnl_price_staleness_days: int = Field(default=7)
+
+    # QA test plans ingested at seed time (from test_plan.yaml files in SEED_DIR)
+    qa_test_plans: Optional[List[Dict[str, Any]]] = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
 
 
 # ============================================================================
@@ -555,12 +566,16 @@ class Asset(SQLModel, table=True):
     asset_id: Optional[int] = Field(default=None, primary_key=True)
     symbol: str = Field(index=True, unique=True, nullable=False)
     label: Optional[str] = None
+    isin: Optional[str] = Field(default=None, index=True, unique=True)
     price_type: Optional[str] = Field(
         default=None, index=True
     )  # 'crypto', 'stock', 'fiat' - for price getter selection
     tags: Optional[List[Dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB))
     created_at: Optional[datetime] = Field(default_factory=utc_now)
     status: int = Field(default=0)
+    denomination_currency_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True,
+    )  # FK to fiat Asset (e.g., USD, EUR) — the currency this asset is naturally priced in
 
     # Relationships
     price_snapshots: List["PriceSnapshot"] = Relationship(
@@ -569,6 +584,9 @@ class Asset(SQLModel, table=True):
     )
     raw_assets: List["RawAsset"] = Relationship(back_populates="asset")
     price_getters: List["AssetPriceGetter"] = Relationship(back_populates="asset")
+    denomination_currency: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[Asset.denomination_currency_id]", "remote_side": "[Asset.asset_id]"},
+    )
     # Note: categories relationship defined via AssetCategory junction table
     # Access via: select(Category).join(AssetCategory).where(AssetCategory.asset_id == asset_id)
 
@@ -832,6 +850,13 @@ class NormalizedTransaction(SQLModel, table=True):
     fee_quote_asset_id: Optional[int] = Field(
         default=None, foreign_key="assets.asset_id"
     )
+
+    # Attributed asset (e.g., derivative PnL attributed to underlying: ETH for ETH-PERP settled in USDC)
+    source_attributed_asset_symbol: Optional[str] = Field(default=None)
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id"
+    )
+
     include_fee: bool = Field(
         default=False
     )  # Whether to include fee in P&L calculation
@@ -919,6 +944,11 @@ class NormalizedTransaction(SQLModel, table=True):
     fee_quote_asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={
             "foreign_keys": "[NormalizedTransaction.fee_quote_asset_id]"
+        },
+    )
+    attributed_asset: Optional[Asset] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "[NormalizedTransaction.attributed_asset_id]"
         },
     )
     price_snapshot: Optional[PriceSnapshot] = Relationship()
@@ -1081,11 +1111,12 @@ class UserCalculationBundle(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     label: Optional[str] = Field(default=None)
-    pattern: Optional[str] = Field(default=None)  # internal_transfer, swap, flow, split, unknown
+    pattern: Optional[str] = Field(default=None)  # internal_transfer, swap, flow, split, spinoff, unknown
     notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     taxability_override: Optional[str] = Field(
         default=None
     )  # taxable, non_taxable, or None (use computed)
+    bundle_data: Optional[dict] = Field(default=None, sa_column=Column("bundle_data", JSON))  # Pattern-specific data (e.g. spinoff allocation)
     
     # Suggestion metadata (set when created from GroupingEngine)
     confidence: Optional[float] = Field(default=None)  # 0.0-1.0 for suggestions
@@ -1204,6 +1235,18 @@ class CalculationVersion(SQLModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     french_securities_tax_annual_summaries: List["FrenchSecuritiesTaxAnnualSummary"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    income_events: List["IncomeEvent"] = Relationship(
+        back_populates="version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "foreign_keys": "[IncomeEvent.version_id]"}
+    )
+    dividend_income_tax_entries: List["DividendIncomeTaxEntry"] = Relationship(
+        back_populates="calculation_version",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    dividend_income_annual_summaries: List["DividendIncomeAnnualSummary"] = Relationship(
         back_populates="calculation_version",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
@@ -1517,10 +1560,11 @@ class RealizedPnl(SQLModel, table=True):
     proceeds_price_source: Optional[str] = Field(default=None)  # 'coingecko', 'manual', 'fallback', etc.
     proceeds_price_timestamp: Optional[datetime] = Field(default=None)  # When price was fetched
 
-    # Related asset for derivative settlements (e.g., "ETH" for an ETH perp settled in USDC)
-    # Allows grouping derivative PnL under the underlying asset in the UI
-    related_asset_symbol: Optional[str] = Field(default=None, index=True)
-    
+    # Attributed asset — PnL from this record is attributed to this asset instead of asset_id
+    # e.g., derivative settlement in USDC attributed to ETH
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True
+    )
 
     # Relationships
     # slices is viewonly - ConsumedLotSlice is owned by CostLot
@@ -1533,6 +1577,9 @@ class RealizedPnl(SQLModel, table=True):
     )
     asset: Optional[Asset] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.asset_id]"},
+    )
+    attributed_asset: Optional[Asset] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[RealizedPnl.attributed_asset_id]"},
     )
     # Owner relationship: RealizedPnl belongs to CalculationUnit
     origin_unit: Optional["CalculationUnit"] = Relationship(
@@ -1792,6 +1839,13 @@ class CalculationUnit(SQLModel, table=True):
             "foreign_keys": "[ConsumedLotSlice.unit_id]"
         }
     )
+    income_events: List["IncomeEvent"] = Relationship(
+        back_populates="unit",
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[IncomeEvent.unit_id]"
+        }
+    )
     
     # Model configuration to allow extra attributes for runtime data
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
@@ -1804,11 +1858,13 @@ class CalculationUnit(SQLModel, table=True):
         _label = data.pop('_label', None)
         bundle_taxability_override = data.pop('bundle_taxability_override', None)
         bundle_pattern = data.pop('bundle_pattern', None)
+        bundle_metadata = data.pop('bundle_metadata', None)
         
         super().__init__(**data)
         
         # Runtime-only attributes (not persisted)
         object.__setattr__(self, 'bundle_taxability_override', bundle_taxability_override)
+        object.__setattr__(self, 'bundle_metadata', bundle_metadata)
         object.__setattr__(self, 'residual_pct', None)
         
         if _label and not self.unit_label:
@@ -2006,8 +2062,35 @@ class CalculationUnit(SQLModel, table=True):
     
     @property
     def is_cost_basis_transfer(self) -> bool:
-        """True if cost basis transfers (internal transfers or splits)."""
-        return self.pattern in (UnitPattern.INTERNAL_TRANSFER.value, UnitPattern.SPLIT.value)
+        """True if cost basis transfers (internal transfers, splits, or spinoffs)."""
+        return self.pattern in (UnitPattern.INTERNAL_TRANSFER.value, UnitPattern.SPLIT.value, UnitPattern.SPINOFF.value)
+
+    @property
+    def is_spinoff(self) -> bool:
+        """True if this is a corporate spin-off unit."""
+        return self.pattern == UnitPattern.SPINOFF.value
+
+    @property
+    def is_dividend(self) -> bool:
+        """True if this unit represents an income event (dividend, interest, etc.)."""
+        if not self.legs:
+            return False
+        for leg in self.legs:
+            tx = leg.transaction
+            if tx and getattr(tx, 'transaction_type', None) == TransactionType.DIVIDEND.value:
+                return True
+        return False
+
+    @property
+    def is_cash_in_lieu(self) -> bool:
+        """True if this unit represents a cash-in-lieu corporate action settlement."""
+        if not self.legs:
+            return False
+        for leg in self.legs:
+            tx = leg.transaction
+            if tx and getattr(tx, 'source_transaction_type', None) == "cash_in_lieu":
+                return True
+        return False
     
     @property
     def is_inflow_only(self) -> bool:
@@ -2693,4 +2776,198 @@ class TransactionTaxOverride(SQLModel, table=True):
     transaction: Optional["NormalizedTransaction"] = Relationship(
         back_populates="tax_overrides",
         sa_relationship_kwargs={"foreign_keys": "[TransactionTaxOverride.transaction_id]"},
+    )
+
+
+# ============================================================================
+# Income tracking models
+# ============================================================================
+
+
+class IncomeType(str, Enum):
+    """Classification of income events."""
+    DIVIDEND = "dividend"
+    INTEREST = "interest"
+    STAKING = "staking"
+    FUNDING = "funding"
+    AIRDROP = "airdrop"
+    OTHER = "other"
+
+
+class IncomeEvent(SQLModel, table=True):
+    """
+    Income event record — sibling of RealizedPnl for non-disposal income.
+
+    Tracks dividends, interest, staking rewards, funding rate payments, and
+    other income that does not involve disposing of an asset. Withholding tax
+    is stored inline (not as a separate transaction).
+
+    Ownership: CalculationUnit → IncomeEvent (cascade all, delete-orphan).
+    """
+
+    __tablename__ = "income_events"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    version_id: int = Field(
+        foreign_key="calculation_versions.version_id", nullable=False, index=True
+    )
+    unit_id: int = Field(
+        foreign_key="calculation_units.id", nullable=False, index=True
+    )
+    income_type: str = Field(nullable=False, index=True)  # IncomeType values
+    asset_id: int = Field(
+        foreign_key="assets.asset_id", nullable=False, index=True
+    )  # Cash/token received
+    attributed_asset_id: Optional[int] = Field(
+        default=None, foreign_key="assets.asset_id", index=True
+    )  # Stock/position generating income
+    transaction_id: Optional[int] = Field(
+        default=None, foreign_key="normalized_transactions.id", index=True
+    )
+
+    # Amounts
+    gross_amount_in_base: Decimal = Field(
+        sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+    net_amount_in_base: Decimal = Field(
+        sa_column=Column(Numeric(36, 18), nullable=False)
+    )
+    withholding_amount_in_base: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Withholding details
+    withholding_jurisdiction: Optional[str] = Field(default=None, max_length=10)
+    withholding_rate: Optional[Decimal] = Field(
+        default=None, sa_column=Column(Numeric(10, 6), nullable=True)
+    )
+
+    # Timing
+    income_at: datetime = Field(index=True)
+
+    # Metadata
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    unit: Optional["CalculationUnit"] = Relationship(
+        back_populates="income_events",
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.unit_id]"},
+    )
+    version: Optional["CalculationVersion"] = Relationship(
+        back_populates="income_events",
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.version_id]"},
+    )
+    asset: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.asset_id]"},
+    )
+    attributed_asset: Optional["Asset"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.attributed_asset_id]"},
+    )
+    transaction: Optional["NormalizedTransaction"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[IncomeEvent.transaction_id]"},
+    )
+
+
+class DividendIncomeTaxEntry(SQLModel, table=True):
+    """
+    Individual income tax calculation record (French PFU on securities income).
+
+    Stores line-item tax data for each income event (dividend, interest)
+    with withholding tax credit handling per US-France treaty.
+    """
+
+    __tablename__ = "dividend_income_tax_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+    income_event_id: Optional[int] = Field(
+        default=None, foreign_key="income_events.id", index=True
+    )
+
+    fiscal_year: int = Field(index=True)
+    asset_symbol: str = Field(index=True)
+    income_type: str = Field(default="dividend")  # dividend, interest, etc.
+
+    # Amounts
+    gross_income: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    withholding_tax_credit: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    tax_amount: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    # Metadata
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="dividend_income_tax_entries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[DividendIncomeTaxEntry.account_id]"}
+    )
+    income_event: Optional["IncomeEvent"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[DividendIncomeTaxEntry.income_event_id]"}
+    )
+
+
+class DividendIncomeAnnualSummary(SQLModel, table=True):
+    """
+    Annual aggregation of income taxes (French PFU on securities income).
+
+    Summarizes all income events for a fiscal year with withholding tax
+    credit tracking for 2042/2047 form filling.
+    """
+
+    __tablename__ = "dividend_income_annual_summaries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    calculation_version_id: int = Field(
+        foreign_key="calculation_versions.version_id", index=True
+    )
+    account_id: Optional[int] = Field(
+        default=None, foreign_key="accounts.id", index=True
+    )
+
+    fiscal_year: int = Field(index=True)
+
+    # Annual aggregates
+    total_gross_income: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    total_withholding_credits: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    net_taxable: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+    tax_total: Decimal = Field(
+        default=Decimal(0), sa_column=Column(Numeric(36, 18), nullable=False, default=0)
+    )
+
+    event_count: int = Field(default=0)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+    # Relationships
+    calculation_version: Optional["CalculationVersion"] = Relationship(
+        back_populates="dividend_income_annual_summaries"
+    )
+    account_rel: Optional["Account"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[DividendIncomeAnnualSummary.account_id]"}
     )

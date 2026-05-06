@@ -91,6 +91,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             quantity: balance.qty,
             market_value: 0,
             cost_basis: balance.cost_basis_in_base,
+            total_invested: balance.total_invested_in_base,
             unit_cost: balance.avg_unit_cost_in_base,
             unrealized_pnl: 0,
             unrealized_pnl_pct: 0,
@@ -100,7 +101,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             lot_count: balance.lot_count,
             realized_event_count: balance.realized_event_count,
             warning_count: balance.warning_count,
-            has_lots: true,
+            has_lots: balance.lot_count > 0 || balance.realized_event_count > 0,
         }));
     }, []);
 
@@ -646,6 +647,12 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
         if (availableVersions.length > 0 && status === PNL_STATUS.IDLE) {
             hasAutoLoaded.current = true;
             loadVersionById(availableVersions[0].version_id);
+            return;
+        }
+
+        // Nothing to load — mark as done so UI shows empty state
+        if (status === PNL_STATUS.IDLE) {
+            hasAutoLoaded.current = true;
         }
     }, [isActive, serviceVersionId, availableVersions, isLoadingVersions, status, loadVersionById]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -1,17 +1,14 @@
 
-import React, { Suspense, useEffect, useState, useCallback } from 'react';
-import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner, Flex, Button } from '@chakra-ui/react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { Box, Container, Heading, Tabs, Text, HStack, Badge, Center, Spinner, Flex } from '@chakra-ui/react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { TestModeBanner } from './components/TestModeBanner';
-import { API_URL, SyncJobProgress, ConnectorProgress, Account, Asset, BundleSuggestion } from './types';
+import { API_URL, SyncJobProgress, ConnectorProgress, BundleSuggestion } from './types';
 import { DataHealthProvider, useDataHealth } from './contexts/DataHealthContext';
-import { defaultFilterState } from './components/TransactionFilters';
-import { FiActivity, FiCheckCircle } from 'react-icons/fi';
 import logoSrc from './assets/logo.png';
-import { DataHealthCheckDrawer } from './components/DataHealthCheckDrawer';
-import { useAssets } from './hooks/useAssets';
 import { AssetDetailPanelProvider } from './contexts/AssetDetailPanelContext';
 import { AssetDetailSlidePanel } from './components/AssetDetailSlidePanel';
+import { QaTestPlanProvider, useQaPinnedWidth } from './components/QaTestPlanPanel';
+import { StatusBar, STATUS_BAR_HEIGHT_PX } from './components/StatusBar';
 import type { PnLCalcStatus } from './components/pnl/types';
 
 // Setup status interface
@@ -61,16 +58,11 @@ const TabLoadingFallback = () => (
 
 const AppContent = () => {
     // Use global data health context
-    const { validationSummary, refreshHealthData } = useDataHealth();
+    const { validationSummary } = useDataHealth();
     // Setup status for Setup tab badge
     const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
     // Sync job status for Sync tab badge
     const [syncStatus, setSyncStatus] = useState<SyncJobProgress | null>(null);
-    // Data health drawer state
-    const [isHealthCheckOpen, setIsHealthCheckOpen] = useState(false);
-    const [healthCheckRefreshTrigger, setHealthCheckRefreshTrigger] = useState(0);
-    const { assets, refetchAssets } = useAssets();
-    const [accounts, setAccounts] = useState<Account[]>([]);
 
     // Fetch bundle suggestions count for Inbox tab badge
     const { data: bundleSuggestions = [] } = useQuery({
@@ -100,26 +92,6 @@ const AppContent = () => {
         const interval = setInterval(fetchSetupStatus, 30000);
         return () => clearInterval(interval);
     }, []);
-
-    // Fetch accounts for health check drawer
-    const fetchAccounts = useCallback(async () => {
-        try {
-            const response = await fetch(`${API_URL}/accounts/`);
-            if (response.ok) {
-                const data = await response.json();
-                setAccounts(data);
-            }
-        } catch (err) {
-            console.error('Failed to fetch accounts:', err);
-        }
-    }, []);
-
-    // Fetch accounts when health check opens
-    useEffect(() => {
-        if (isHealthCheckOpen) {
-            fetchAccounts();
-        }
-    }, [isHealthCheckOpen, fetchAccounts]);
 
     // Fetch sync job status for Sync tab badge
     useEffect(() => {
@@ -175,9 +147,10 @@ const AppContent = () => {
         : 0;
     const hasSyncFailures = syncStatus?.status === 'failed' || failedConnectorsCount > 0;
 
+    const qaPinnedWidth = useQaPinnedWidth();
+
     return (
-        <Box minH="100vh" bg="gray.50">
-            <TestModeBanner />
+        <Box minH="100vh" bg="gray.50" marginRight={qaPinnedWidth ? `${qaPinnedWidth}px` : undefined} transition="margin-right 0.2s ease" pb={`${STATUS_BAR_HEIGHT_PX + 4}px`}>
             <Container maxW="8xl" py={2}>
                 {/* Compact header: Title (left) + Workflow (center) + Data Health (right) */}
                 <Flex align="center" justify="space-between" mb={2} flexWrap="wrap" gap={2}>
@@ -198,38 +171,6 @@ const AppContent = () => {
                         <Badge colorScheme="green" size="sm" px={1.5} py={0.5}>4. P&L</Badge>
                     </HStack>
 
-                    {/* Data Health Badge — moved from tab bar */}
-                    <Box>
-                        {validationSummary && (
-                            <Button
-                                variant="ghost"
-                                p={0}
-                                onClick={() => {
-                                    refreshHealthData();
-                                    setIsHealthCheckOpen(true);
-                                }}
-                                cursor="pointer"
-                                _hover={{ transform: 'scale(1.05)' }}
-                                transition="all 0.2s"
-                            >
-                                {validationSummary.has_issues ? (
-                                    <Badge colorPalette="orange" size="lg" variant="solid" px={3} py={1}>
-                                        <Flex align="center" gap={1}>
-                                            <FiActivity />
-                                            <Text>Data Issues: {validationSummary.total_issues}</Text>
-                                        </Flex>
-                                    </Badge>
-                                ) : (
-                                    <Badge colorPalette="green" size="lg" variant="subtle" px={3} py={1}>
-                                        <Flex align="center" gap={1}>
-                                            <FiCheckCircle />
-                                            <Text>Data Healthy</Text>
-                                        </Flex>
-                                    </Badge>
-                                )}
-                            </Button>
-                        )}
-                    </Box>
                 </Flex>
 
                 <Tabs.Root defaultValue="setup" lazyMount value={activeTab} onValueChange={(e) => setActiveTab(e.value)}>
@@ -347,10 +288,6 @@ const AppContent = () => {
                         <Suspense fallback={<TabLoadingFallback />}>
                             <PnLPanel
                                 isActive={activeTab === 'pnl'}
-                                onOpenHealthCheck={() => {
-                                    refreshHealthData();
-                                    setIsHealthCheckOpen(true);
-                                }}
                             />
                         </Suspense>
                     </Tabs.Content>
@@ -362,20 +299,8 @@ const AppContent = () => {
                         </Suspense>
                     </Tabs.Content>
                 </Tabs.Root>
-                {/* Global Data Health Check Drawer */}
-                <DataHealthCheckDrawer
-                    isOpen={isHealthCheckOpen}
-                    onClose={() => setIsHealthCheckOpen(false)}
-                    refreshTrigger={healthCheckRefreshTrigger}
-                    assets={assets}
-                    accounts={accounts}
-                    onAssetsUpdated={refetchAssets}
-                    onAccountsUpdated={fetchAccounts}
-                    onIssueFixed={() => {
-                        refreshHealthData();
-                        setHealthCheckRefreshTrigger(prev => prev + 1);
-                    }}
-                />            </Container>
+            </Container>
+            <StatusBar />
         </Box>
     );
 };
@@ -384,10 +309,12 @@ const App = () => {
     return (
         <QueryClientProvider client={queryClient}>
             <AssetDetailPanelProvider>
-            <DataHealthProvider>
-                <AppContent />
-                <AssetDetailSlidePanel />
-            </DataHealthProvider>
+                <DataHealthProvider>
+                    <QaTestPlanProvider>
+                        <AppContent />
+                        <AssetDetailSlidePanel />
+                    </QaTestPlanProvider>
+                </DataHealthProvider>
             </AssetDetailPanelProvider>
         </QueryClientProvider>
     );

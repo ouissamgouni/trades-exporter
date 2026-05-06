@@ -1,0 +1,21 @@
+# Corporate Spin-Off Scenario — Bundles
+# ========================================
+# Only Group A (GE → GEV) has a pre-seeded bundle.
+# Group B (APTV → VRSG) has NO bundle — the QA tester creates it manually.
+#
+# Bundle ID 1: GE → GEV spinoff (already complete, on Interactive Brokers).
+#   - 12% allocation: €768 of GE's €6,400 cost moves to GEV
+#   - spinoff_source_asset_symbol resolved to asset_id at seed time
+
+bundles:
+  - id: 1
+    label: "GE → GE Vernova Spin-Off"
+    pattern: spinoff
+    notes: "General Electric spin-off of GE Vernova. 12% cost basis allocation based on corporate filing."
+    taxability_override: non_taxable
+    reason: "Corporate spin-off — non-taxable cost basis reallocation"
+    bundle_data:
+      spinoff_source_asset_symbol: GE
+      spinoff_allocation_pct: 0.12
+
+  # ⚠️ No bundle for APTV → VRSG — the tester creates this manually during QA Phase 3.

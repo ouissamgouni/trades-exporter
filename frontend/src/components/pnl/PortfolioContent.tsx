@@ -21,6 +21,7 @@ import { MarketValuePieChart } from './MarketValuePieChart';
 import { DrillDownBreadcrumb } from './DrillDownBreadcrumb';
 import { ViewModeToggle, type AssetsViewMode } from './ViewModeToggle';
 import { usePortfolioTimeline } from '../../hooks/useChartData';
+import { useAssets } from '../../hooks/useAssets';
 import type { AssetPeriodDelta } from '../../hooks/useChartData';
 import type { Range } from './TotalReturnScorecard';
 
@@ -95,6 +96,18 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
     const [assetsOpen, setAssetsOpen] = useState(true);
     const [auditOpen, setAuditOpen] = useState(true);
 
+    // ── Asset denomination currency map (asset_id → currency symbol) ──
+    const { assets: allMasterAssets } = useAssets();
+    const assetCurrencyMap = useMemo(() => {
+        const m: Record<number, string> = {};
+        for (const a of allMasterAssets) {
+            if (a.asset_id != null && a.denomination_currency?.symbol) {
+                m[a.asset_id] = a.denomination_currency.symbol;
+            }
+        }
+        return m;
+    }, [allMasterAssets]);
+
     // Reset sections whenever drill context changes
     useEffect(() => {
         setAssetsOpen(true);
@@ -148,7 +161,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
 
     // ── Shared filter state for list views ──
     const [search, setSearch] = useState('');
-    const [minMarketValue, setMinMarketValue] = useState(5);
+    const [minMarketValue, setMinMarketValue] = useState(0);
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
 
@@ -238,6 +251,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                         isLoading={effectiveTimeline.isLoading}
                         accountBalances={accountBalances}
                         onAssetNavigate={onAssetNavigate}
+                        assetCurrencyMap={assetCurrencyMap}
                     />
                 </Box>
             )}
@@ -248,6 +262,7 @@ export const PortfolioContent: React.FC<PortfolioContentProps> = ({
                         dimensions={dimensions}
                         baseCurrency={config.base_currency_symbol}
                         selectedCategoryIds={selectedCategoryIds}
+                        assetCurrencyMap={assetCurrencyMap}
                         onCategoryClick={(catId) => {
                             if (catId == null) return;
                             handleCategoryIdsChange(

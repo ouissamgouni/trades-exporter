@@ -47,6 +47,7 @@ pandas-datareader==0.10.0
 peewee==3.18.3
 platformdirs==4.5.1
 pluggy==1.6.0
+pre-commit==4.2.0
 propcache==0.4.1
 protobuf==6.33.2
 psycopg2-binary==2.9.10

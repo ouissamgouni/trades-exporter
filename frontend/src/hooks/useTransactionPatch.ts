@@ -60,7 +60,7 @@ export function useTransactionPatch(transactionId: number) {
                     // Handle boolean fields that may come as strings
                     payload[field] = typeof value === 'string' ? value === 'true' : !!value;
                 } else if (field === 'account_id' || field === 'asset_id' || field === 'price_quote_asset_id' ||
-                    field === 'fee_quote_asset_id' || field === 'from_account_id' || field === 'to_account_id') {
+                    field === 'fee_quote_asset_id' || field === 'attributed_asset_id' || field === 'from_account_id' || field === 'to_account_id') {
                     // ID fields: parse as int or null
                     payload[field] = value ? parseInt(String(value), 10) : null;
                 } else {

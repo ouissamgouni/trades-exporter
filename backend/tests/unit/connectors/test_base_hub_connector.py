@@ -298,8 +298,8 @@ class TestConnectorIdInWrapper:
 class TestHubErrorHandling:
     """Tests for error handling in hub connector."""
 
-    def test_connector_error_yields_error_item(self):
-        """Test that connector errors are wrapped and yielded."""
+    def test_connector_error_yields_error_item_and_raises(self):
+        """Test that connector errors are wrapped, yielded, then raised."""
         connector = SimpleTestConnector(
             name="error_test",
             connector_id=1,
@@ -312,9 +312,12 @@ class TestHubErrorHandling:
             parallel_strategy="futures",
         )
         
-        items = list(hub.yield_raws())
+        items = []
+        with pytest.raises(RuntimeError, match="Child connector error"):
+            for item in hub.yield_raws():
+                items.append(item)
         
-        # Should have an error item
+        # Should have yielded an error item before raising
         error_items = [i for i in items if i.get("error")]
         assert len(error_items) >= 1
         assert "error_test" in error_items[0]["error"]
@@ -340,9 +343,12 @@ class TestHubErrorHandling:
             parallel_strategy="futures",
         )
         
-        items = list(hub.yield_raws())
+        items = []
+        with pytest.raises(RuntimeError, match="Child connector error"):
+            for item in hub.yield_raws():
+                items.append(item)
         
-        # Should have items from good connector
+        # Should have items from good connector despite the error
         good_items = [i for i in items if i.get("connector_name") == "good" and not i.get("is_connector_complete")]
         assert len(good_items) == 2
 

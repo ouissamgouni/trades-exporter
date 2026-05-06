@@ -185,8 +185,8 @@ def mock_realized_pnl():
     entry.proceeds_price_source = "price_service"
     entry.proceeds_price_timestamp = datetime.utcnow()
     
-    # Derivative/related asset
-    entry.related_asset_symbol = None
+    # Derivative/attributed asset
+    entry.attributed_asset = None
     
     # Mock asset relationship
     entry.asset = MagicMock()
@@ -843,6 +843,7 @@ class TestFrTaxEffectiveInResponse:
         entry1.proceeds_source = None; entry1.proceeds_price = None
         entry1.proceeds_price_source = None; entry1.proceeds_price_timestamp = None
         entry1.related_asset_symbol = None
+        entry1.attributed_asset = None
         entry1.asset = MagicMock(); entry1.asset.asset_id = 2
         entry1.asset.symbol = "BTC"; entry1.asset.label = "Bitcoin"
         entry1.transaction = MagicMock(); entry1.transaction.account_id = 1
@@ -857,6 +858,7 @@ class TestFrTaxEffectiveInResponse:
         entry2.proceeds_source = None; entry2.proceeds_price = None
         entry2.proceeds_price_source = None; entry2.proceeds_price_timestamp = None
         entry2.related_asset_symbol = None
+        entry2.attributed_asset = None
         entry2.asset = MagicMock(); entry2.asset.asset_id = 2
         entry2.asset.symbol = "BTC"; entry2.asset.label = "Bitcoin"
         entry2.transaction = MagicMock(); entry2.transaction.account_id = 1

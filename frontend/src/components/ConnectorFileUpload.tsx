@@ -200,7 +200,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
 
         // Validate file type based on connector
         const isExcelConnector = connectorType.includes('mexc');
-        const isCsvConnector = connectorType.includes('okx-funding') || connectorType.includes('okx-trades');
+        const isCsvConnector = connectorType.includes('okx-funding') || connectorType.includes('okx-trades') || connectorType.includes('degiro');
 
         if (isExcelConnector && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
             setError('Only XLSX/XLS files are supported for this connector');
@@ -381,7 +381,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                     <Box>
                         <input
                             type="file"
-                            accept={connectorType.includes('okx') ? '.csv' : '.xlsx,.xls'}
+                            accept={(connectorType.includes('okx') || connectorType.includes('degiro')) ? '.csv' : '.xlsx,.xls'}
                             onChange={handleFileSelect}
                             style={{ display: 'none' }}
                             id={`file-input-${connectorId}`}
@@ -404,7 +404,7 @@ export const ConnectorFileUpload: React.FC<ConnectorFileUploadProps> = ({
                             >
                                 <LuUpload size={24} color="gray" />
                                 <Text fontSize="sm" color="gray.600">
-                                    Upload {(connectorType.includes('okx-funding') || connectorType.includes('okx-trades')) ? 'CSV file' : 'trades file (.xlsx)'}
+                                    Upload {(connectorType.includes('okx-funding') || connectorType.includes('okx-trades') || connectorType.includes('degiro')) ? 'CSV file' : 'trades file (.xlsx)'}
                                 </Text>
                                 <Text fontSize="xs" color="gray.400">
                                     Export from exchange and upload here

@@ -26,7 +26,7 @@ import { currencySymbol } from './TotalReturnScorecard';
 
 /** Drilldown state exported by the treemap for cross-component filtering */
 export interface TreemapDrilldownState {
-    groupBy: 'flat' | 'category' | 'account';
+    groupBy: 'flat' | 'category' | 'account' | 'currency';
     /** The drilled-into group name (category label or account name), or null */
     drilldown: string | null;
 }
@@ -47,9 +47,11 @@ interface AllocationTreemapProps {
     accountBalances?: Map<number, AccountBalanceBreakdown[]>;
     /** Called when user double-clicks a leaf asset to navigate to asset detail */
     onAssetNavigate?: (assetId: number, assetSymbol: string) => void;
+    /** Per-asset denomination currency map: assetId → currency symbol (e.g., "USD") */
+    assetCurrencyMap?: Record<number, string>;
 }
 
-type GroupBy = 'flat' | 'category' | 'account';
+type GroupBy = 'flat' | 'category' | 'account' | 'currency';
 type SizeBy = 'market_value' | 'total_return' | 'cost_basis' | 'efficiency';
 
 /** Minimum cost basis to compute meaningful ROI / efficiency (avoids division-by-near-zero) */
@@ -118,6 +120,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
     onDrilldownChange,
     accountBalances,
     onAssetNavigate,
+    assetCurrencyMap = {},
 }) => {
     const [groupBy, setGroupBy] = useState<GroupBy>('category');
     const [sizeBy, setSizeBy] = useState<SizeBy>('market_value');
@@ -269,6 +272,23 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                     .map(([cat, catItems]) => ({
                         id: cat,
                         children: catItems.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf),
+                    }));
+            } else if (groupBy === 'currency') {
+                const groups: Record<string, TimelineBreakdownItem[]> = {};
+                for (const b of items) {
+                    const ccy = assetCurrencyMap[b.asset_id] || 'Unknown';
+                    if (!groups[ccy]) groups[ccy] = [];
+                    groups[ccy].push(b);
+                }
+                return Object.entries(groups)
+                    .sort(([, a], [, b]) => {
+                        const aSum = a.reduce((s, i) => s + getSizeValue(i), 0);
+                        const bSum = b.reduce((s, i) => s + getSizeValue(i), 0);
+                        return bSum - aSum;
+                    })
+                    .map(([ccy, ccyItems]) => ({
+                        id: ccy,
+                        children: ccyItems.sort((a, b) => getSizeValue(b) - getSizeValue(a)).map(mkLeaf),
                     }));
             } else {
                 // account grouping
@@ -533,7 +553,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                     {/* Group by */}
                     <Flex gap={1} align="center">
                         <Text fontSize="xs" color="gray.500">Group:</Text>
-                        {(['flat', 'category', 'account'] as const).map(g => (
+                        {(['flat', 'category', 'account', 'currency'] as const).map(g => (
                             <Badge
                                 key={g}
                                 cursor="pointer"
@@ -543,7 +563,7 @@ export const AllocationTreemap: React.FC<AllocationTreemapProps> = ({
                                 size="sm"
                                 px={2}
                             >
-                                {g === 'flat' ? 'Flat' : g === 'category' ? 'Category' : 'Account'}
+                                {g === 'flat' ? 'Flat' : g === 'category' ? 'Category' : g === 'account' ? 'Account' : 'Currency'}
                             </Badge>
                         ))}
                     </Flex>

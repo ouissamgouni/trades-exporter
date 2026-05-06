@@ -35,6 +35,7 @@ import { FeesSlidePanel } from './FeesSlidePanel';
 import { WarningsSlidePanel } from './WarningsSlidePanel';
 import { LotEventsSlidePanel } from './LotEventsSlidePanel';
 import { TransactionsSlidePanel } from './TransactionsSlidePanel';
+import { IncomeSlidePanel } from './IncomeSlidePanel';
 import { ValueDisplay } from '../ValueDisplay';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -187,11 +188,11 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
     }, [versionId, txFilterParams]);
 
     // ── Slide panel state ───────────────────────────────────────────────────
-    const [openPanel, setOpenPanel] = useState<'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | null>(defaultPanel);
+    const [openPanel, setOpenPanel] = useState<'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | 'income' | null>(defaultPanel);
 
     useEffect(() => { setOpenPanel(defaultPanel); }, [defaultPanel]);
 
-    const handleOpenPanel = useCallback((panel: 'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions') => {
+    const handleOpenPanel = useCallback((panel: 'lots' | 'realized' | 'fees' | 'warnings' | 'events' | 'transactions' | 'income') => {
         const next = openPanel === panel ? null : panel;
         setOpenPanel(next);
         onPanelChange?.(next);
@@ -380,6 +381,13 @@ export const InvestigationView: React.FC<InvestigationViewProps> = ({
                 baseCurrency={baseCurrency}
                 onTransactionClick={onTransactionClick}
                 contextFilters={txFilters}
+            />
+            <IncomeSlidePanel
+                isOpen={openPanel === 'income'}
+                onClose={handleClosePanel}
+                versionId={versionId}
+                baseCurrency={baseCurrency}
+                onAssetClick={onAssetClick}
             />
         </Box>
     );

@@ -4,9 +4,9 @@ Unit tests for derivative settlement P&L handling.
 Tests cover:
 - Derivative gain: perp_close inflow creates RealizedPnl(proceeds=FMV, cost=0)
 - Derivative loss: perp_close outflow overrides proceeds to 0
-- related_asset_symbol extraction from transaction tags
+- attributed_asset_id extraction from transaction field
 - Funding income creates gain entries
-- Missing tags → related_asset_symbol = None
+- Missing attributed_asset_id → None
 """
 
 from datetime import datetime, timedelta, timezone
@@ -43,6 +43,7 @@ class TestDerivativeGain:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         tx.tags = [{"coin": "ETH", "closedPnl": "50.0"}]
+        tx.attributed_asset_id = 3  # ETH
 
         leg = make_leg(asset_id=4, leg_type=LegType.INFLOW, quantity=Decimal("50"), transaction=tx)
         unit = make_unit(legs=[leg])
@@ -59,7 +60,7 @@ class TestDerivativeGain:
         assert entry.cost_basis_in_base == Decimal("0")
         assert entry.pnl_in_base == Decimal("50")
         assert entry.disposal_taxable is False
-        assert entry.related_asset_symbol == "ETH"
+        assert entry.attributed_asset_id == 3  # ETH
         assert entry.holding_period_days == 0
 
     def test_funding_gain_creates_realized_pnl(
@@ -74,6 +75,7 @@ class TestDerivativeGain:
             date_time=base_datetime, source_transaction_type="funding",
         )
         tx.tags = [{"coin": "BTC"}]
+        tx.attributed_asset_id = 2  # BTC
 
         leg = make_leg(asset_id=4, leg_type=LegType.INFLOW, quantity=Decimal("5"), transaction=tx)
         unit = make_unit(legs=[leg])
@@ -83,13 +85,13 @@ class TestDerivativeGain:
         deriv_entries = [e for e in (result.realized_pnl_records or [])
                          if e.proceeds_source == "derivative_settlement"]
         assert len(deriv_entries) == 1
-        assert deriv_entries[0].related_asset_symbol == "BTC"
+        assert deriv_entries[0].attributed_asset_id == 2  # BTC
         assert deriv_entries[0].pnl_in_base == Decimal("5")
 
     def test_gain_with_no_tags_has_none_related_asset(
         self, fifo_config, mock_price_service, base_datetime
     ):
-        """Missing tags should result in related_asset_symbol=None."""
+        """Missing attributed_asset_id should result in None."""
         lot_manager = LotManager(fifo_config)
         fmv_service = FMVService(mock_price_service, fifo_config)
 
@@ -107,7 +109,7 @@ class TestDerivativeGain:
         deriv_entries = [e for e in (result.realized_pnl_records or [])
                          if e.proceeds_source == "derivative_settlement"]
         assert len(deriv_entries) == 1
-        assert deriv_entries[0].related_asset_symbol is None
+        assert deriv_entries[0].attributed_asset_id is None
 
     def test_non_derivative_inflow_no_gain_entry(
         self, fifo_config, mock_price_service, base_datetime
@@ -155,6 +157,7 @@ class TestDerivativeLoss:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         tx.tags = [{"coin": "ETH", "closedPnl": "-30.0"}]
+        tx.attributed_asset_id = 3  # ETH
 
         leg = make_leg(asset_id=4, leg_type=LegType.OUTFLOW, quantity=Decimal("30"), transaction=tx)
         unit = make_unit(legs=[leg])
@@ -167,13 +170,13 @@ class TestDerivativeLoss:
         assert entry.cost_basis_in_base == Decimal("30")  # 30 * 1.0 unit cost
         assert entry.pnl_in_base == Decimal("-30")
         assert entry.disposal_taxable is False
-        assert entry.related_asset_symbol == "ETH"
+        assert entry.attributed_asset_id == 3  # ETH
         assert entry.proceeds_source == "derivative_settlement"
 
     def test_loss_with_no_tags_has_none_related_asset(
         self, fifo_config, mock_price_service, base_datetime
     ):
-        """Missing tags on derivative loss should set related_asset_symbol=None."""
+        """Missing attributed_asset_id on derivative loss should be None."""
         lot_manager = LotManager(fifo_config)
         fmv_service = FMVService(mock_price_service, fifo_config)
 
@@ -196,7 +199,7 @@ class TestDerivativeLoss:
         result = handle_unit(unit, lot_manager, fmv_service, fifo_config)
 
         assert len(result.realized_pnl_records) == 1
-        assert result.realized_pnl_records[0].related_asset_symbol is None
+        assert result.realized_pnl_records[0].attributed_asset_id is None
 
     def test_normal_payment_not_affected(
         self, fifo_config, mock_price_service, base_datetime
@@ -227,7 +230,7 @@ class TestDerivativeLoss:
         # Normal proceeds = FMV (AAPL price 100 * 5 = 500)
         assert entry.proceeds_in_base == Decimal("500")
         assert entry.proceeds_source != "derivative_settlement"
-        assert entry.related_asset_symbol is None
+        assert entry.attributed_asset_id is None
 
 
 class TestDerivativeGainAndLotCreation:
@@ -303,6 +306,7 @@ class TestDerivativeWithFees:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         gain_tx.tags = [{"coin": "ETH", "closedPnl": "30.0"}]
+        gain_tx.attributed_asset_id = 3  # ETH
         inflow_leg = make_leg(
             asset_id=4, leg_type=LegType.INFLOW, quantity=Decimal("30"),
             transaction=gain_tx,
@@ -336,7 +340,7 @@ class TestDerivativeWithFees:
         gain_entry = gain_entries[0]
         assert gain_entry.proceeds_in_base == Decimal("30")  # 30 * 1 (USDT price)
         assert gain_entry.pnl_in_base == Decimal("30")
-        assert gain_entry.related_asset_symbol == "ETH"
+        assert gain_entry.attributed_asset_id == 3  # ETH
 
         # --- Lot cost must be FMV-based, NOT inherited from fee slices ---
         assert len(result.cost_lots) == 1
@@ -376,6 +380,7 @@ class TestDerivativeWithFees:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         loss_tx.tags = [{"coin": "BTC", "closedPnl": "-25.0"}]
+        loss_tx.attributed_asset_id = 2  # BTC
         outflow_leg = make_leg(
             asset_id=4, leg_type=LegType.OUTFLOW, quantity=Decimal("25"),
             transaction=loss_tx,
@@ -404,7 +409,7 @@ class TestDerivativeWithFees:
         assert loss.proceeds_in_base == Decimal("0")
         assert loss.cost_basis_in_base == Decimal("21.25")
         assert loss.pnl_in_base == Decimal("-21.25")
-        assert loss.related_asset_symbol == "BTC"
+        assert loss.attributed_asset_id == 2  # BTC
 
         # Fee entry: proceeds=0 (derivative override), cost = 0.3 * 0.85 = 0.255
         fee_entries = [e for e in (result.realized_pnl_records or [])
@@ -779,6 +784,7 @@ class TestDerivativeFMVFailure:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         tx.tags = [{"coin": "ETH", "closedPnl": "17.22"}]
+        tx.attributed_asset_id = 3  # ETH
         leg = make_leg(
             asset_id=USDC, leg_type=LegType.INFLOW,
             quantity=Decimal("17.22"), transaction=tx,
@@ -799,7 +805,7 @@ class TestDerivativeFMVFailure:
         assert entry.proceeds_in_base == Decimal("0")
         assert entry.cost_basis_in_base == Decimal("0")
         assert entry.pnl_in_base == Decimal("0")
-        assert entry.related_asset_symbol == "ETH"
+        assert entry.attributed_asset_id == 3  # ETH
         assert entry.proceeds_price_source == "missing"
 
         # MISSING_PRICE warning must be emitted
@@ -835,6 +841,7 @@ class TestDerivativeFMVFailure:
             date_time=base_datetime, source_transaction_type="perp_close",
         )
         tx.tags = [{"coin": "ETH", "closedPnl": "17.22"}]
+        tx.attributed_asset_id = 3  # ETH
         leg = make_leg(
             asset_id=USDC, leg_type=LegType.INFLOW,
             quantity=Decimal("17.22"), transaction=tx,
@@ -853,7 +860,7 @@ class TestDerivativeFMVFailure:
         expected_proceeds = Decimal("17.22") * Decimal("0.90")
         assert entry.proceeds_in_base == expected_proceeds
         assert entry.pnl_in_base == expected_proceeds
-        assert entry.related_asset_symbol == "ETH"
+        assert entry.attributed_asset_id == 3  # ETH
         assert entry.proceeds_price_source != "missing"
 
         # No MISSING_PRICE warning for the derivative gain

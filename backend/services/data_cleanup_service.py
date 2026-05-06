@@ -226,6 +226,9 @@ class DataCleanupService:
         )
 
         # ── 2. Detach P&L children of affected transactions ──
+        # Nullify consumed_lot_slices FK to legs before deleting legs
+        leg_sub = f"(SELECT id FROM calculation_unit_legs WHERE transaction_id IN {tx_sub})"
+        self._exec(f"UPDATE consumed_lot_slices SET consumed_by_leg_id = NULL WHERE consumed_by_leg_id IN {leg_sub}", p)
         self._exec(f"DELETE FROM calculation_unit_legs WHERE transaction_id IN {tx_sub}", p)
         self._exec(f"UPDATE cost_lots SET origin_transaction_id = NULL WHERE origin_transaction_id IN {tx_sub}", p)
         self._exec(f"UPDATE realized_pnl SET transaction_id = NULL WHERE transaction_id IN {tx_sub}", p)
@@ -235,6 +238,7 @@ class DataCleanupService:
 
         # ── 3. Detach cost lot children ──
         self._exec(f"UPDATE cost_lots SET settled_by_lot_id = NULL WHERE settled_by_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE cost_lots SET source_lot_id = NULL WHERE source_lot_id IN {lot_sub}", p)
         self._exec(f"DELETE FROM consumed_lot_slices WHERE cost_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET negative_lot_id = NULL WHERE negative_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET settling_lot_id = NULL WHERE settling_lot_id IN {lot_sub}", p)
@@ -326,6 +330,8 @@ class DataCleanupService:
         orphan_tx_sub = "(SELECT id FROM normalized_transactions WHERE account_id = :aid AND connector_id IS NULL)"
 
         # Detach P&L refs for orphan transactions
+        orphan_leg_sub = f"(SELECT id FROM calculation_unit_legs WHERE transaction_id IN {orphan_tx_sub})"
+        self._exec(f"UPDATE consumed_lot_slices SET consumed_by_leg_id = NULL WHERE consumed_by_leg_id IN {orphan_leg_sub}", p)
         self._exec(f"DELETE FROM calculation_unit_legs WHERE transaction_id IN {orphan_tx_sub}", p)
         self._exec(f"UPDATE cost_lots SET origin_transaction_id = NULL WHERE origin_transaction_id IN {orphan_tx_sub}", p)
         self._exec(f"UPDATE realized_pnl SET transaction_id = NULL WHERE transaction_id IN {orphan_tx_sub}", p)
@@ -356,6 +362,7 @@ class DataCleanupService:
         # Delete remaining account-level cost lots
         lot_sub = "(SELECT cost_lot_id FROM cost_lots WHERE account_id = :aid)"
         self._exec(f"UPDATE cost_lots SET settled_by_lot_id = NULL WHERE settled_by_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE cost_lots SET source_lot_id = NULL WHERE source_lot_id IN {lot_sub}", p)
         self._exec(f"DELETE FROM consumed_lot_slices WHERE cost_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET negative_lot_id = NULL WHERE negative_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET settling_lot_id = NULL WHERE settling_lot_id IN {lot_sub}", p)
@@ -468,6 +475,10 @@ class DataCleanupService:
         )
 
         # ── 3. Delete calculation unit legs referencing this asset ──
+        asset_leg_sub = "(SELECT id FROM calculation_unit_legs WHERE asset_id = :aid)"
+        self._exec(
+            f"UPDATE consumed_lot_slices SET consumed_by_leg_id = NULL WHERE consumed_by_leg_id IN {asset_leg_sub}", p
+        )
         result["calc_legs_deleted"] = self._exec(
             "DELETE FROM calculation_unit_legs WHERE asset_id = :aid", p
         )
@@ -486,6 +497,7 @@ class DataCleanupService:
         lot_sub = "(SELECT cost_lot_id FROM cost_lots WHERE asset_id = :aid)"
         # Detach self-references and children
         self._exec(f"UPDATE cost_lots SET settled_by_lot_id = NULL WHERE settled_by_lot_id IN {lot_sub}", p)
+        self._exec(f"UPDATE cost_lots SET source_lot_id = NULL WHERE source_lot_id IN {lot_sub}", p)
         self._exec(f"DELETE FROM consumed_lot_slices WHERE cost_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET negative_lot_id = NULL WHERE negative_lot_id IN {lot_sub}", p)
         self._exec(f"UPDATE lot_settlements SET settling_lot_id = NULL WHERE settling_lot_id IN {lot_sub}", p)

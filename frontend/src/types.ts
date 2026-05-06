@@ -50,6 +50,7 @@ export interface AppliedFilters {
     related_account_ids: (number | string)[];
     asset_ids: number[];
     related_asset_ids: number[];
+    attributed_asset_ids: number[];
     category_ids: number[];
     transaction_types: string[];
     directions: string[];
@@ -141,6 +142,7 @@ export interface Transaction {
     asset_id?: number | null;
     price_quote_asset_id?: number | null;
     fee_quote_asset_id?: number | null;
+    attributed_asset_id?: number | null;
     // V2 Architecture fields
     status?: WorkflowStatus;
     taxability_status?: TaxabilityStatus;
@@ -155,10 +157,12 @@ export interface Transaction {
     source_asset_symbol?: string;
     source_price_quote_asset_symbol?: string;
     source_fee_quote_asset_symbol?: string;
+    source_attributed_asset_symbol?: string;
     // Nested asset references (preferred for display)
     linked_asset?: AssetRef | null;
     price_quote_asset?: AssetRef | null;
     fee_quote_asset?: AssetRef | null;
+    attributed_asset?: AssetRef | null;
     // Backward-compatible flat symbol fields (deprecated, prefer nested objects)
     linked_asset_symbol?: string; // From assets table via asset_id FK
     linked_price_quote_asset_symbol?: string; // From assets table via price_quote_asset_id FK
@@ -206,6 +210,7 @@ export interface CalculationUnit {
     taxability_override?: TaxabilityStatus;
     confidence?: number;
     reason?: string;
+    metadata?: Record<string, any> | null;
     created_at: string;
     transaction_count: number;
     transactions: TransactionSummary[];
@@ -357,10 +362,13 @@ export interface Asset {
     asset_id?: number;
     symbol: string;
     label?: string;
+    isin?: string | null;
     price_type?: string;  // 'crypto', 'stock', 'fiat' - for price getter
     tags?: Record<string, any>[];
     created_at?: string;
     status?: number;
+    denomination_currency_id?: number | null;
+    denomination_currency?: { asset_id: number; symbol: string; label?: string | null } | null;
     price_getters?: AssetPriceGetter[];
     categories?: Category[];  // Categories assigned to this asset
 }
@@ -866,6 +874,7 @@ export interface AppInfo {
     backend_version: string;
     frontend_version?: string | null;
     db_schema_version?: string | null;
+    qa_scenarios?: string[];
 }
 
 // P&L Types
@@ -883,6 +892,8 @@ export interface BalanceEntry {
     cost_basis_in_base: number;
     avg_unit_cost_in_base: number;  // Average cost per unit
     lot_count?: number;  // Number of lots for this balance
+    income_total_in_base?: number;  // Gross income from dividends/interest
+    income_event_count?: number;  // Number of income events
 }
 
 // Price API types
@@ -950,6 +961,7 @@ export type IssueType =
     | 'unlinked_account'
     | 'unlinked_price_quote'
     | 'unlinked_fee_quote'
+    | 'unlinked_attributed_asset'
     | 'missing_transfer_from_account'
     | 'missing_transfer_to_account'
     | 'unlinked_transfer_from_account'
@@ -1148,9 +1160,11 @@ export interface DerivativePosition {
 // ============================================================================
 
 export interface NormalizedTransactionSample {
+    group_id?: string;
     source_transaction_id: string;
     date_time: string;
     transaction_type: string;
+    source_transaction_type?: string;
     direction: string;
     source_asset_symbol: string;
     quantity: number;

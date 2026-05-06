@@ -13,6 +13,7 @@ export enum UnitPattern {
   SWAP = 'swap',
   SPLIT = 'split',
   FLOW = 'flow',
+  SPINOFF = 'spinoff',
   UNMATCHED_INTERNAL_TRANSFER = 'unmatched_internal_transfer',
   CUSTOM = 'custom',
   UNKNOWN = 'unknown',
@@ -26,6 +27,7 @@ export enum TransactionType {
   TRANSFER = 'transfer',
   MARGIN = 'margin',
   COST = 'cost',
+  DIVIDEND = 'dividend',
 }
 
 /**
@@ -127,6 +129,7 @@ export function getUnitPatternLabel(pattern: UnitPattern | string): string {
     [UnitPattern.SWAP]: 'Swap',
     [UnitPattern.SPLIT]: 'Split',
     [UnitPattern.FLOW]: 'Flow',
+    [UnitPattern.SPINOFF]: 'Spin-Off',
     [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
     [UnitPattern.CUSTOM]: 'Custom',
     [UnitPattern.UNKNOWN]: 'Unknown',
@@ -143,6 +146,7 @@ export function getTransactionTypeLabel(type: TransactionType | string): string 
     [TransactionType.TRANSFER]: 'Transfer',
     [TransactionType.MARGIN]: 'Margin',
     [TransactionType.COST]: 'Cost',
+    [TransactionType.DIVIDEND]: 'Dividend',
   };
   return labels[type] || type;
 }

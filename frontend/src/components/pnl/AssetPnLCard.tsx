@@ -242,7 +242,7 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                         )}
                     </Flex>
 
-                    {/* Right side: delta bar + badges + nav chevron */}
+                    {/* Right side: badges */}
                     <Flex align="center" gap={1.5} flexShrink={0}>
                         {isNoPnl ? (
                             isUnmapped
@@ -250,39 +250,11 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                 : <Badge size="xs" colorPalette="yellow" variant="subtle">No P&L</Badge>
                         ) : (
                             <>
-                                {/* Delta bar (balance indicator) */}
-                                {liveBalanceLoading ? (
-                                    <Spinner size="xs" color="gray.400" />
-                                ) : (
-                                    <Flex align="center" gap={0.5}>
-                                        <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={row.quantity} size="xs" />
-                                        {hasLiveErrors && (
-                                            <Tooltip
-                                                content={
-                                                    <Box fontSize="xs">
-                                                        <Text fontWeight="medium" mb={1}>Some accounts had fetch errors</Text>
-                                                        {assetErrorAccounts.map(accId => {
-                                                            const errs = liveAccountErrors?.get(accId) ?? [];
-                                                            const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
-                                                            return errs.map((err, i) => (
-                                                                <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
-                                                            ));
-                                                        })}
-                                                    </Box>
-                                                }
-                                                openDelay={200}
-                                            >
-                                                <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
-                                            </Tooltip>
-                                        )}
-                                    </Flex>
-                                )}
                                 {row.warning_count > 0 && (
                                     <Badge size="xs" colorPalette="orange">{row.warning_count} ⚠</Badge>
                                 )}
                             </>
                         )}
-                        {!isNoPnl && <FiChevronRight size={12} color="gray" />}
                     </Flex>
                 </Flex>
 
@@ -311,9 +283,16 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                 }
                                 openDelay={200}
                             >
-                                <Text fontSize="xs" cursor="help">
-                                    <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
-                                </Text>
+                                <Box cursor="help">
+                                    <Text fontSize="xs">
+                                        <ValueDisplay value={row.cost_basis} currency={baseCurrency} options={compact} />
+                                    </Text>
+                                    {row.total_invested != null && Math.abs(row.total_invested - row.cost_basis) > 0.01 && (
+                                        <Text fontSize="2xs" color="gray.400" lineHeight="1">
+                                            invested <ValueDisplay value={row.total_invested} currency={baseCurrency} options={compact} />
+                                        </Text>
+                                    )}
+                                </Box>
                             </Tooltip>
                         </Metric>
 
@@ -436,6 +415,38 @@ export const AssetPnLCard: React.FC<AssetPnLCardProps> = ({
                                 <ValueDisplay value={Math.round(row.total_fees)} currency={baseCurrency} options={compact} />
                             </Text>
                         </Metric>
+                    </Flex>
+                )}
+
+                {/* Live balance indicator — bottom right */}
+                {!isNoPnl && (
+                    <Flex justify="flex-end" mt={0.5}>
+                        {liveBalanceLoading ? (
+                            <Spinner size="xs" color="gray.400" />
+                        ) : (
+                            <Flex align="center" gap={0.5}>
+                                <DeltaBar delta={deltaInfo} liveQty={liveQty} pnlQty={row.quantity} size="xs" />
+                                {hasLiveErrors && (
+                                    <Tooltip
+                                        content={
+                                            <Box fontSize="xs">
+                                                <Text fontWeight="medium" mb={1}>Some accounts had fetch errors</Text>
+                                                {assetErrorAccounts.map(accId => {
+                                                    const errs = liveAccountErrors?.get(accId) ?? [];
+                                                    const accName = accounts.find(a => a.id === accId)?.name ?? `Account ${accId}`;
+                                                    return errs.map((err, i) => (
+                                                        <Text key={`${accId}-${i}`} color="red.300">{accName}: {err}</Text>
+                                                    ));
+                                                })}
+                                            </Box>
+                                        }
+                                        openDelay={200}
+                                    >
+                                        <Text fontSize="xs" color="orange.500" cursor="help" flexShrink={0}>⚠</Text>
+                                    </Tooltip>
+                                )}
+                            </Flex>
+                        )}
                     </Flex>
                 )}
 

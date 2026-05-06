@@ -1,16 +1,19 @@
 version: "3"
 
+vars:
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+
 tasks:
   dev:
     desc: Stop all dev services (db + backend + frontend)
-    dotenv: [.env, .env.dev]
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
     deps: [dev:db, dev:backend, dev:frontend]
     cmds:
       - echo "✅ All dev services stopped"
 
   dev:db:
     desc: Stop dev database
-    dotenv: [.env, .env.dev]
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
     cmds:
       - |
         ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
@@ -25,7 +28,7 @@ tasks:
 
   dev:backend:
     desc: Stop dev backend
-    dotenv: [.env, .env.dev]
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
     cmds:
       - |
         if pkill -f "backend.api.main" 2>/dev/null; then
@@ -50,7 +53,7 @@ tasks:
 
   dev:frontend:
     desc: Stop dev frontend
-    dotenv: [.env, .env.dev]
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
     cmds:
       - |
         if pkill -f "vite" 2>/dev/null; then
@@ -59,16 +62,137 @@ tasks:
           echo "ℹ️  Frontend not running"
         fi
 
-  test:
-    desc: Stop test stack
-    dotenv: [.env, .env.test]
+  staging:
+    desc: Stop staging stack
+    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
     cmds:
-      - ENV_NAME=test docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-test down
-      - echo "✅ Test stack stopped"
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
+      - echo "✅ Staging stack stopped"
 
   prod:
     desc: Stop prod stack
-    dotenv: [.env, .env.prod]
+    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
     cmds:
       - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod stack stopped"
+
+  # === Volume cleanup (data destructive) ===
+
+  dev:volumes:
+    desc: "⚠️ Remove dev containers and volumes (data lost). DRY_RUN=1 to preview."
+    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    prompt: This will DELETE dev database data. Continue?
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove dev containers and volumes"
+          echo "   Project: trades-exporter-dev"
+          exit 0
+        fi
+      - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down -v
+      - echo "✅ Dev containers and volumes removed"
+
+  staging:volumes:
+    desc: "⚠️ Remove staging containers and volumes (data lost). DRY_RUN=1 to preview."
+    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    prompt: This will DELETE staging database data. Continue?
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove staging containers and volumes"
+          echo "   Project: trades-exporter-staging"
+          exit 0
+        fi
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down -v
+      - echo "✅ Staging containers and volumes removed"
+
+  prod:volumes:
+    desc: "🚨 Remove prod containers and volumes (DANGEROUS!). DRY_RUN=1 to preview."
+    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove prod containers and volumes"
+          echo "   Project: trades-exporter-prod"
+          exit 0
+        fi
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down -v
+      - echo "⚠️ Prod containers and volumes removed"
+
+  # === Scenario lifecycle ===
+
+  scenario:
+    desc: "Stop a scenario instance. SCENARIO=<name> to target, or omit for default."
+    prompt: "This will stop and remove the scenario instance (including DB volume). Continue?"
+    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+    cmds:
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        echo "Stopping scenario environment ($QA_ENV_NAME)..."
+
+        # Stop Docker containers (both scenario-DB-only and unified compose)
+        docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT down -v 2>/dev/null || true
+        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT down -v 2>/dev/null || true
+
+        # Remove Docker images
+        docker rmi trades-exporter-backend:$QA_ENV_NAME trades-exporter-frontend:$QA_ENV_NAME 2>/dev/null || true
+
+        # Kill local processes (hybrid mode)
+        pkill -f "uvicorn.*--port $QA_API_PORT" 2>/dev/null || true
+        pkill -f "vite.*--port $QA_WEB_PORT" 2>/dev/null || true
+
+        # Cleanup env symlink
+        if [ "$QA_ENV_NAME" != "qa" ]; then
+          rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
+        fi
+
+        echo ""
+        echo "✅ Scenario environment stopped ($QA_ENV_NAME)"
+        echo "   Containers: removed"
+        echo "   DB volume:  removed"
+        echo "   Ports:      $QA_DB_PORT, $QA_API_PORT, $QA_WEB_PORT freed"
+
+  scenario:all:
+    desc: "Stop ALL running scenario instances"
+    prompt: "This will stop ALL running scenario instances. Continue?"
+    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    cmds:
+      - |
+        echo "Scanning for running scenario instances..."
+        FOUND=0
+
+        # Find all scenario database containers (trades_db_qa, trades_db_qa-*)
+        for CONTAINER in $(docker ps --filter "name=trades_db_qa" --format '{{`{{.Names}}`}}' 2>/dev/null); do
+          FOUND=$((FOUND + 1))
+          # Extract scenario from container name
+          SCENARIO="${CONTAINER#trades_db_qa}"
+          SCENARIO="${SCENARIO#-}"
+
+          source {{.SCENARIO_PORTS_SH}} "$SCENARIO"
+          echo "Stopping $QA_ENV_NAME (DB: $QA_DB_PORT, API: $QA_API_PORT, WEB: $QA_WEB_PORT)..."
+
+          docker compose -f infra/docker/docker-compose.scenario-db.yml -p $QA_PROJECT down -v 2>/dev/null || true
+          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT down -v 2>/dev/null || true
+          docker rmi trades-exporter-backend:$QA_ENV_NAME trades-exporter-frontend:$QA_ENV_NAME 2>/dev/null || true
+          pkill -f "uvicorn.*--port $QA_API_PORT" 2>/dev/null || true
+          pkill -f "vite.*--port $QA_WEB_PORT" 2>/dev/null || true
+          if [ "$QA_ENV_NAME" != "qa" ]; then
+            rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
+          fi
+        done
+
+        if [ $FOUND -eq 0 ]; then
+          echo "No running scenario instances found."
+        else
+          echo ""
+          echo "✅ Stopped $FOUND scenario instance(s)"
+        fi

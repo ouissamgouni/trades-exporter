@@ -129,6 +129,8 @@ class PnLEngine:
             if bundle:
                 unit_data['pattern'] = bundle.pattern
                 unit_data['bundle_taxability_override'] = bundle.taxability_override
+                if bundle.bundle_data:
+                    unit_data['bundle_metadata'] = bundle.bundle_data
             
             unit = CalculationUnit(**unit_data)
             if version:
@@ -180,6 +182,7 @@ class PnLEngine:
         query = (
             select(NormalizedTransaction)
             .where(NormalizedTransaction.review_status == "valid")
+            .where(NormalizedTransaction.transaction_type != "memo")
             .options(
                 selectinload(NormalizedTransaction.asset),
                 selectinload(NormalizedTransaction.price_quote_asset),

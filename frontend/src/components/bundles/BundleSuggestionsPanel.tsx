@@ -52,6 +52,7 @@ const patternColors: Record<string, string> = {
     [UnitPattern.SWAP]: 'orange',
     [UnitPattern.SPLIT]: 'purple',
     [UnitPattern.FLOW]: 'cyan',
+    [UnitPattern.SPINOFF]: 'pink',
 };
 
 // ============================================================================

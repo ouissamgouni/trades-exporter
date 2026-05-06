@@ -3,15 +3,16 @@
 Script to reset and seed the database.
 
 Usage:
-    python scripts/reset_and_seed.py [--test] [--force]
+    python scripts/reset_and_seed.py [--test] [--force] [--scenario NAME]
 
 This script will:
 1. Empty all tables (TRUNCATE CASCADE)
 2. Seed default data (assets, accounts, connectors from config)
 
 Options:
-    --test   Use test database (default: production)
-    --force  Skip confirmation prompt
+    --test      Use test database (default: production)
+    --force     Skip confirmation prompt
+    --scenario  Load a specific scenario from seed_data/scenarios/<NAME>/
 """
 
 import sys
@@ -95,11 +96,34 @@ def main():
         action="store_true",
         help="Skip confirmation prompt",
     )
+    parser.add_argument(
+        "--test",
+        "-t",
+        action="store_true",
+        help="Use test database",
+    )
+    parser.add_argument(
+        "--scenario",
+        "-s",
+        type=str,
+        default=None,
+        help="Scenario name from seed_data/scenarios/ (e.g. polymarket_pnl, derivative_pnl)",
+    )
     args = parser.parse_args()
+
+    # Resolve scenario directory
+    seed_data_dir = None
+    if args.scenario:
+        from backend.db.seed import SEED_DATA_DIR
+        seed_data_dir = SEED_DATA_DIR / "scenarios" / args.scenario
+        if not seed_data_dir.exists():
+            print(f"❌ Scenario not found: {seed_data_dir}")
+            sys.exit(1)
 
     # Get database URL
     db_url = get_database_url()
     safe_url = db_url.split("@")[-1] if "@" in db_url else db_url
+    mode_label = f"scenario: {args.scenario}" if args.scenario else "default"
 
     print("=" * 55)
     print(f"  DATABASE RESET & SEED ({mode_label})")
@@ -132,9 +156,12 @@ def main():
     print("🌱 Step 2: Seeding database...")
     from backend.db.seed import seed_database
 
-    result = seed_database()
+    result = seed_database(seed_data_dir=seed_data_dir)
     print(
-        f"   Seeded {result.get('accounts', 0)} accounts, {result.get('connectors', 0)} connectors, {result.get('assets', 0)} assets"
+        f"   Seeded {result.get('accounts', 0)} accounts, "
+        f"{result.get('connectors', 0)} connectors, "
+        f"{result.get('assets', 0)} assets, "
+        f"{result.get('transactions', 0)} transactions"
     )
     print()
 

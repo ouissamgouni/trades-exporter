@@ -1,0 +1,224 @@
+# DeGiro Account Normalization Scenario — QA Test Plan
+# ======================================================
+# Upload fixtures/Account.csv via a degiro-account-file connector
+# and verify correct row classification and normalization.
+#
+# The CSV covers all AccountRowType variants:
+#   - DIVIDEND (3): US, NL, GB securities
+#   - WITHHOLDING (3): matching WHT rows
+#   - FX_STANDALONE (4): FX debit+credit pairs for Qualcomm USD + Rolls Royce GBP dividends
+#   - EXCHANGE_FEE (2): Nasdaq + Euronext
+#   - ADR_FEE (1): Aptiv PLC
+#   - INTEREST (1): Flatex interest
+#   - DEPOSIT (1): Bank deposit
+#   - CASH_IN_LIEU (1): Corporate action cash settlement
+#   - FX_STANDALONE (2): Unmatched FX debit + credit pair (no dividend)
+#   - SKIP (5): Trade (1), brokerage fee (1), trade FX (1), cash sweep (1),
+#               trade row with no description (1)
+
+test_plan:
+  name: "DeGiro Account CSV — Row Classification & Normalization"
+  description: >
+    Upload Account.csv and verify every row is parsed to the correct
+    AccountRowType and normalized to the expected transaction type.
+
+  steps:
+    - id: 1
+      title: "Upload Account.csv and verify row count"
+      description: >
+        Upload fixtures/Account.csv via the degiro-account-file connector.
+      expected: >
+        23 rows parsed. 5 SKIP rows excluded (trade, brokerage fee,
+        trade-FX, cash sweep, trade with no description).
+        After pairing: 3 WHT consumed into dividends, 4 FX consumed
+        into dividends (Qualcomm + Rolls Royce), 2 unmatched FX filtered.
+        9 normalized transactions:
+          3 DIVIDEND, 2 EXCHANGE_FEE, 1 ADR_FEE, 1 INTEREST,
+          1 DEPOSIT, 1 CASH_IN_LIEU.
+
+    - id: 2
+      title: "Verify DIVIDEND + WITHHOLDING pairing"
+      description: >
+        Check that each DIVIDEND row is paired with the matching
+        WITHHOLDING row (same datetime, product, ISIN).
+      expected: >
+        QUALCOMM: gross=$5.34, WHT=$1.60, jurisdiction='US' (from ISIN prefix)
+        ASML:     gross=€7.82, WHT=€1.17, jurisdiction='NL'
+        ROLLS:    gross=£3.50, WHT=£0.35, jurisdiction='GB'
+
+    - id: 3
+      title: "Verify FEE normalization"
+      description: >
+        Exchange fees and ADR fees are normalized correctly.
+        COST transactions should NOT carry source_asset_symbol
+        (the field is dead weight for qty==0 fees — PnL engine ignores it).
+      expected: >
+        tx_type=cost, direction=neutral:
+          Nasdaq fee:   €2.50, source_asset_symbol="" (not set)
+          Euronext fee: €2.50, source_asset_symbol="" (not set)
+          ADR fee:      $0.45, source_asset_symbol="" (not set),
+            source_attributed_asset_symbol="APTIV PLC (JE00BTDN8H13)"
+
+    - id: 4
+      title: "Verify INTEREST normalization"
+      description: >
+        Flatex interest is normalized as interest income.
+      expected: >
+        tx_type=interest, direction=inflow, amount=€0.12
+
+    - id: 5
+      title: "Verify DEPOSIT normalization"
+      description: >
+        Bank deposit is normalized correctly.
+      expected: >
+        tx_type=deposit, direction=inflow, amount=€1000.00
+
+    - id: 6
+      title: "Verify CASH_IN_LIEU normalization and PnL impact"
+      description: >
+        Cash settlement from corporate action normalizes as cash_in_lieu
+        with source asset attribution and corporate_action tags.
+        PnL engine routes via is_cash_in_lieu → _handle_cash_in_lieu:
+        back-calculates fractional qty via parent FMV, consumes parent
+        lots, creates RealizedPnl (taxable disposal), then creates
+        cash cost lot via _handle_acquisition.
+      expected: >
+        Normalization:
+          tx_type=trade, source_tx_type=cash_in_lieu, direction=inflow,
+          amount=$9.30, source_attributed_asset_symbol="APTIV PLC (JE00BTDN8H13)",
+          tags=[{source: corporate_action}, {isin: JE00BTDN8H13}]
+        PnL (requires parent lots + FMV):
+          fractional_qty = cash_proceeds / parent_fmv_per_share
+          RealizedPnl: asset=APTIV, qty=fractional, proceeds=cash_in_base,
+            cost=consumed_lot_cost, disposal_taxable=true
+          CostLot created for EUR cash received (cost = proceeds)
+
+    - id: 7
+      title: "Verify FX pairing with dividends"
+      description: >
+        FX debit+credit pairs are matched and consumed into the
+        dividend row. Qualcomm (USD) and Rolls Royce (GBP) dividends
+        should each have FX data enriched.
+      expected: >
+        QUALCOMM dividend enriched:
+          fx_rate=1.0850, fx_net_amount_base=3.45, fx_base_currency=EUR
+        ROLLS ROYCE dividend enriched:
+          fx_rate=0.8490, fx_net_amount_base=3.71, fx_base_currency=EUR
+        ASML (EUR): no FX data (same currency)
+        4 FX rows (2 debit + 2 credit) consumed as SKIP
+        2 unmatched FX rows (line 16-17 in CSV) also filtered as SKIP
+
+    - id: 8
+      title: "Verify group_id in preview"
+      description: >
+        Use detailed preview to check group_id linking.
+        QUALCOMM: dividend + WHT + FX debit + FX credit share same group_id
+      expected: >
+        1 primary row (dividend) + 3 consumed rows (WHT, FX debit, FX credit)
+        all share group_id starting with "div-US7475251036-"
+
+    - id: 9
+      title: "Verify FX tags on normalized transactions"
+      description: >
+        After normalization, check tags on Qualcomm dividend.
+      expected: >
+        Tags include: fx_rate, net_amount_base, base_currency,
+        source_currency, gross_amount_source, wht_amount_source
+
+    - id: 10
+      title: "Verify deduplication on re-upload"
+      description: >
+        Upload the same Account.csv again and sync.
+      expected: >
+        All rows deduplicated via _generated_id (MD5 hash).
+        0 new transactions created.
+
+    - id: 11
+      title: "Verify European number parsing"
+      description: >
+        Amounts with comma decimal separator and period thousand
+        separator are parsed correctly.
+      expected: >
+        "5,34" → 5.34
+        "-1,60" → -1.60
+        "1000,00" → 1000.00
+        "543,21" → 543.21
+
+    - id: 12
+      title: "Verify skipped rows visible in preview"
+      description: >
+        Using detailed preview, confirm that skipped rows (trade,
+        brokerage fee, trade-FX, cash sweep) appear with role="skipped"
+        and are visually dimmed with a "skip" badge.
+      expected: >
+        5 skipped rows shown in raw preview:
+          - "Achat 5 @ 152.30" (trade with Order ID)
+          - "Frais DEGIRO de courtage" (fee with Order ID)
+          - "Opération de change - Débit" (trade FX with Order ID)
+          - "Degiro Cash Sweep Transfer" (internal bookkeeping)
+          - RIGETTI row (no description, has Order ID)
+        Each has role="skipped" and opacity ~0.55 with red "skip" badge.
+        Normalized count unchanged: 9 transactions.
+
+    - id: 13
+      title: "Verify raw rows sorted by datetime in preview"
+      description: >
+        Detailed preview raw rows are sorted chronologically by datetime.
+      expected: >
+        Rows sorted oldest → newest (deposit Jan 15 first, Rolls Royce
+        dividend Jun 10 last). Consumed and skipped rows sorted inline
+        with primary rows by their datetime.
+
+    - id: 14
+      title: "Verify ADR fee attribution in PnL"
+      description: >
+        After PnL computation, the ADR custody fee's FeeEntry should
+        have related_asset_id pointing to APTIV (via attributed_asset_id
+        fallback in _determine_related_asset_for_fee).
+      expected: >
+        FeeEntry for ADR fee leg:
+          related_asset_id = APTIV asset_id
+          fee_value_in_base = $0.45 in EUR
+        This works because standalone fee units (no non-fee, non-base legs)
+        now fall back to tx.attributed_asset_id.
+
+accounts:
+  - name: "DeGiro Account QA"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_account_qa"
+    connectors:
+      - connector_type: "degiro-account-file"
+        color: "#C56A00"
+        enabled: true
+        sync_priority: 10
+        config: {}
+
+assets:
+  - symbol: "QCOM"
+    label: "Qualcomm Inc"
+    isin: "US7475251036"
+    price_type: "stock"
+  - symbol: "ASML"
+    label: "ASML Holding NV"
+    isin: "NL0010273215"
+    price_type: "stock"
+  - symbol: "RR"
+    label: "Rolls Royce Holdings PLC"
+    isin: "GB00B63H8491"
+    price_type: "stock"
+  - symbol: "APTV"
+    label: "Aptiv PLC"
+    isin: "JE00BTDN8H13"
+    price_type: "stock"
+  - symbol: "EUR"
+    label: "Euro"
+    price_type: "fiat"
+  - symbol: "USD"
+    label: "US Dollar"
+    price_type: "fiat"
+  - symbol: "GBP"
+    label: "British Pound"
+    price_type: "fiat"

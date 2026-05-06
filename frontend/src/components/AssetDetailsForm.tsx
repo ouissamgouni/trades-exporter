@@ -10,8 +10,9 @@ import { Badge, Box, Flex, SimpleGrid, Text } from '@chakra-ui/react';
 import { API_URL, Asset } from '../types';
 import { EditableField } from './EditableField';
 import { toaster } from './ui/toaster';
+import { useAssets } from '../hooks/useAssets';
 
-const NOOP = async () => {};
+const NOOP = async () => { };
 
 const PRICE_TYPE_OPTIONS = [
     { label: '— Not set —', value: '' },
@@ -31,9 +32,23 @@ interface AssetDetailsFormProps {
 }
 
 export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSaved }) => {
-    const patchField = async (field: string, rawValue: string) => {
+    const { assets: allAssets } = useAssets();
+
+    // Build denomination currency options from fiat assets
+    const denominationCurrencyOptions = React.useMemo(() => {
+        const fiatAssets = allAssets.filter(a => a.price_type === 'fiat' && a.asset_id);
+        return [
+            { label: '— Not set —', value: '' },
+            ...fiatAssets.map(a => ({ label: `${a.symbol}${a.label ? ` (${a.label})` : ''}`, value: String(a.asset_id) })),
+        ];
+    }, [allAssets]);
+
+    const patchField = async (field: string, rawValue: string | null) => {
         if (!asset.asset_id) return;
-        const value = field === 'status' ? parseInt(rawValue) : rawValue;
+        let value: any = rawValue;
+        if (field === 'status') value = parseInt(rawValue as string);
+        if (field === 'denomination_currency_id') value = rawValue ? parseInt(rawValue) : null;
+        if (field === 'isin') value = rawValue || null;
         const response = await fetch(`${API_URL}/assets/${asset.asset_id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -80,6 +95,11 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                         value={asset.label || ''}
                         onSave={v => patchField('label', v)}
                     />
+                    <EditableField
+                        label="ISIN"
+                        value={asset.isin || ''}
+                        onSave={v => patchField('isin', v)}
+                    />
                 </Box>
                 {/* Column 3 */}
                 <Box css={{ '& > div': { justifyContent: 'flex-start' } }}>
@@ -101,6 +121,22 @@ export const AssetDetailsForm: React.FC<AssetDetailsFormProps> = ({ asset, onSav
                             </Badge>
                         }
                         onSave={v => patchField('status', v)}
+                    />
+                    <EditableField
+                        label="Denomination Currency"
+                        value={String(asset.denomination_currency_id ?? '')}
+                        type="select"
+                        options={denominationCurrencyOptions}
+                        displayValue={
+                            asset.denomination_currency ? (
+                                <Badge size="xs" colorPalette="teal" variant="subtle">
+                                    {asset.denomination_currency.symbol}
+                                </Badge>
+                            ) : (
+                                <Text fontSize="10px" color="gray.400">Not set</Text>
+                            )
+                        }
+                        onSave={v => patchField('denomination_currency_id', v)}
                     />
                 </Box>
             </SimpleGrid>

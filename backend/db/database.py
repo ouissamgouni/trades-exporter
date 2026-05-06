@@ -65,9 +65,6 @@ def init_db():
 def drop_all_tables():
     """
     Drop all tables. USE WITH CAUTION - mainly for testing.
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
     """
     engine = get_engine()
     SQLModel.metadata.drop_all(engine)
@@ -83,9 +80,6 @@ def get_session() -> Generator[Session, None, None]:
         with get_session() as session:
             session.add(model)
             session.commit()
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
 
     Yields:
         SQLModel Session
@@ -108,9 +102,6 @@ def get_session_dependency() -> Generator[Session, None, None]:
         @app.get("/items")
         def get_items(session: Session = Depends(get_session_dependency)):
             return session.exec(select(Item)).all()
-
-    Args:
-        test_mode: Override test mode. If None, uses environment variable.
 
     Yields:
         SQLModel Session

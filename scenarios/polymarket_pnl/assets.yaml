@@ -1,0 +1,36 @@
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  - symbol: "PM:rain-friday-Yes"
+    label: "Rain Friday — Yes"
+    price_type: null
+
+  - symbol: "PM:eth-5k-Yes"
+    label: "ETH 5k — Yes"
+    price_type: null
+
+  - symbol: "PM:superbowl-No"
+    label: "Superbowl — No"
+    price_type: null
+
+  - symbol: "PM:partial-sell-win-Yes"
+    label: "Partial Sell Win — Yes"
+    price_type: null
+
+  - symbol: "PM:partial-sell-loss-Yes"
+    label: "Partial Sell Loss — Yes"
+    price_type: null
+
+  - symbol: "PM:full-exit-Yes"
+    label: "Full Exit — Yes"
+    price_type: null
+
+  - symbol: "PM:reentry-Yes"
+    label: "Re-entry — Yes"
+    price_type: null

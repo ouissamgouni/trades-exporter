@@ -1,0 +1,291 @@
+# Fee PnL Scenario — Transactions
+# =================================
+# Seven fee cases covering every fee path in the PnL engine.
+#
+# Pre-seed transactions establish cost lots needed by later fee cases.
+# Fee cases test: FeeEntry creation, related_asset attribution,
+# RealizedPnl for non-base fees, base-currency fee short-circuit,
+# transfer fee absorption, and the attributed_asset_id fallback.
+#
+# Base currency: EUR
+
+transactions:
+  # ═══════════════════════════════════════════════════════════════
+  # PRE-SEED: Establish cost lots
+  # ═══════════════════════════════════════════════════════════════
+
+  # PS1: Buy 10 ETH on Binance (establishes ETH cost lot for Case 4 SELL)
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_ps1_buy_eth"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "10.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-01-10T10:00:00"
+    price: "2000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - step: "preseed"
+
+  # PS2: Buy 0.5 BTC on Binance (establishes BTC cost lot for Case 6 crypto-to-crypto)
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_ps2_buy_btc"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-01-05T10:00:00"
+    price: "40000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - step: "preseed"
+
+  # PS3: Buy 500 USDC on Binance (establishes USDC cost lot for Case 5 transfer)
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_ps3_buy_usdc"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "500.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-01-08T10:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - step: "preseed"
+
+  # PS4: Deposit 0.1 ETH into Ethereum Wallet (for gas fee in Case 2)
+  #      Must come AFTER PS1 so there's an ETH cost lot to split from.
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_ps4_eth_withdraw"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "0.100000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    source_transaction_type: "withdrawal"
+    date_time: "2024-01-12T10:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: fee-pnl
+      - step: "preseed"
+
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_ps4_eth_deposit"
+    account_name: Ethereum Wallet
+    asset_symbol: ETH
+    quantity: "0.100000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    source_transaction_type: "deposit"
+    date_time: "2024-01-12T10:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: fee-pnl
+      - step: "preseed"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 1: Trade with embedded trading fee
+  # ═══════════════════════════════════════════════════════════════
+  # BUY 2 ETH @ 2000 EUR on Binance, fee = 5 EUR
+  # Leg expander: inflow(ETH) + outflow(EUR) + fee(EUR)
+  # Expected: FeeEntry created, related_asset = ETH (inflow, non-base)
+  # Fee is in base currency → no RealizedPnl for fee, fee_value_in_base = 5 EUR
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c1_buy_eth_with_fee"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "2.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-01-10T10:00:00"
+    price: "2000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "5.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "1"
+      - title: "Trade with base-currency trading fee"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 2: COST transaction — on-chain gas fee, no attribution
+  # ═══════════════════════════════════════════════════════════════
+  # Gas fee: 0.005 ETH on Ethereum Wallet (standalone fee, no trade)
+  # New COST format: qty = fee amount, price_quote = fee currency
+  # Expected: standalone fee unit, FeeEntry.related_asset = None (no other legs, no attribution)
+  # Fee is in ETH (non-base) → RealizedPnl created for fee disposal
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c2_gas_fee"
+    account_name: Ethereum Wallet
+    asset_symbol: ""
+    quantity: "0.005000000000000000"
+    direction: outflow
+    transaction_type: cost
+    source_transaction_type: "gas_fee"
+    date_time: "2024-01-15T10:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: ETH
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "2"
+      - title: "On-chain gas fee (no attribution)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 3: COST transaction with attributed asset (ADR custody fee)
+  # ═══════════════════════════════════════════════════════════════
+  # ADR fee: 0.45 EUR attributed to APTIV PLC
+  # New COST format: qty = fee, price_quote = EUR
+  # Expected: FeeEntry.related_asset = APTIV (via attributed_asset_id fallback)
+  # Fee is in EUR (base) → no RealizedPnl, fee_value_in_base = 0.45 EUR
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c3_adr_custody"
+    account_name: DeGiro
+    asset_symbol: ""
+    quantity: "0.450000000000000000"
+    direction: outflow
+    transaction_type: cost
+    source_transaction_type: "adr_custody_fee"
+    date_time: "2024-02-01T10:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: EUR
+    source_attributed_asset_symbol: "APTIV PLC (JE00BTDN8H13)"
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "3"
+      - title: "ADR custody fee with attribution"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 4: Sell with fee — fee alongside realized PnL
+  # ═══════════════════════════════════════════════════════════════
+  # SELL 5 ETH @ 2500 EUR, fee = 10 EUR
+  # Leg expander: outflow(ETH) + inflow(EUR) + fee(EUR)
+  # Expected: RealizedPnl for ETH disposal + FeeEntry.related_asset = ETH
+  # Fee in base currency → fee_value_in_base = 10 EUR, no separate fee RealizedPnl
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c4_sell_eth_with_fee"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "5.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    source_transaction_type: "sell"
+    date_time: "2024-02-01T10:00:00"
+    price: "2500.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "10.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "4"
+      - title: "Sell with base-currency fee"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 5: Transfer with fee — fee absorbed into cost basis
+  # ═══════════════════════════════════════════════════════════════
+  # Transfer 200 USDC from Binance → Ethereum Wallet, network fee = 2 USDC
+  # The withdrawal leg carries the fee. Grouping engine matches as transfer.
+  # Expected: fee absorbed (default: fee_taxable_by_default=False)
+  #   → FeeEntry created with no RealizedPnl, fee cost added to transfer basis
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c5_usdc_withdrawal"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "200.000000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    source_transaction_type: "withdrawal"
+    date_time: "2024-02-15T10:00:00"
+    fee: "2.000000000000000000"
+    fee_quote_asset_symbol: USDC
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: fee-pnl
+      - case: "5"
+      - title: "Transfer fee (absorbed)"
+
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c5_usdc_deposit"
+    account_name: Ethereum Wallet
+    asset_symbol: USDC
+    quantity: "200.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    source_transaction_type: "deposit"
+    date_time: "2024-02-15T10:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: fee-pnl
+      - case: "5"
+      - title: "Transfer deposit (matching leg)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 6: Crypto-to-crypto trade with fee in outflow asset
+  # ═══════════════════════════════════════════════════════════════
+  # BUY 1 ETH paying 0.05 BTC, fee = 0.0005 BTC
+  # Leg expander: inflow(ETH) + outflow(BTC) + fee(BTC)
+  # Expected: FeeEntry.related_asset = BTC (outflow, non-base, non-fee)
+  # Fee is in BTC (non-base) → RealizedPnl created for BTC fee disposal
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c6_eth_btc_trade"
+    account_name: Binance
+    asset_symbol: ETH
+    quantity: "1.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: "buy"
+    date_time: "2024-03-01T10:00:00"
+    price: "0.048888888888888888"
+    price_quote_asset_symbol: BTC
+    fee: "0.000500000000000000"
+    fee_quote_asset_symbol: BTC
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "6"
+      - title: "Crypto-to-crypto fee in outflow asset"
+
+  # ═══════════════════════════════════════════════════════════════
+  # CASE 7: COST in base currency (EUR exchange fee)
+  # ═══════════════════════════════════════════════════════════════
+  # Exchange platform fee: 2.50 EUR (no attribution)
+  # New COST format: qty = 2.50, price_quote = EUR
+  # Expected: standalone fee unit, fee is base currency
+  #   → no RealizedPnl (P&L always 0 for base-to-base), FeeEntry.fee_value_in_base = 2.50
+  #   → FeeEntry.related_asset = None (no other legs, no attribution)
+  - source: "scenario-fee-pnl"
+    source_transaction_id: "fee_c7_exchange_fee"
+    account_name: DeGiro
+    asset_symbol: ""
+    quantity: "2.500000000000000000"
+    direction: outflow
+    transaction_type: cost
+    source_transaction_type: "exchange_fee"
+    date_time: "2024-03-15T10:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: fee-pnl
+      - case: "7"
+      - title: "Base-currency exchange fee (no attribution)"

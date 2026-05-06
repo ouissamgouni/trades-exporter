@@ -26,9 +26,6 @@ load_dotenv()
 
 CONFIG_DIR = Path(__file__).parent
 
-# Default database URL for local development
-DEFAULT_DATABASE_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
-
 
 def get_database_url() -> str:
     """
@@ -36,7 +33,10 @@ def get_database_url() -> str:
 
     Priority:
     1. DATABASE_URL environment variable (recommended)
-    2. Constructed from individual POSTGRES_* vars (legacy support)
+    2. Constructed from individual POSTGRES_* vars
+
+    Raises ValueError if no database configuration is found.
+    Set DATABASE_URL or POSTGRES_* env vars (via .env file or environment).
 
     Returns:
         PostgreSQL connection URL
@@ -46,12 +46,19 @@ def get_database_url() -> str:
     if database_url:
         return database_url
 
-    # Fallback: Construct from individual vars (legacy support)
-    user = os.getenv("POSTGRES_USER", "trades_user")
-    password = os.getenv("POSTGRES_PASSWORD", "trades_password")
+    # Fallback: Construct from individual vars
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
-    db_name = os.getenv("POSTGRES_DB", "trades_db_dev")
+    db_name = os.getenv("POSTGRES_DB")
+
+    if not all([user, password, db_name]):
+        raise ValueError(
+            "Database not configured. Set DATABASE_URL or "
+            "POSTGRES_USER, POSTGRES_PASSWORD, and POSTGRES_DB environment variables. "
+            "See .env.example for reference."
+        )
 
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 

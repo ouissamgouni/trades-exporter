@@ -64,7 +64,7 @@ const statusBadgeColors: Record<TransactionStatus, string> = {
 export type EditableField =
     | 'account_id' | 'from_account_id' | 'to_account_id'
     | 'source_transaction_type' | 'direction' | 'transaction_type'
-    | 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id'
+    | 'asset_id' | 'attributed_asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id'
     | 'review_status' | 'review_notes' | 'date_time' | 'source'
     | 'source_asset_symbol' | 'quantity' | 'price' | 'fee'
     | 'user_calculation_unit_id';
@@ -669,6 +669,33 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                 )}
                                             </Badge>
                                         </Tooltip>
+                                        {tx.from_account_id && (
+                                            <Tooltip content="Clear from account" openDelay={100}>
+                                                <Box
+                                                    as="button"
+                                                    onClick={async (e: React.MouseEvent) => {
+                                                        e.stopPropagation();
+                                                        try {
+                                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                method: 'PATCH',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ from_account_id: null })
+                                                            });
+                                                            if (!response.ok) throw new Error('Failed to clear');
+                                                            invalidateTransactionData();
+                                                        } catch (err) {
+                                                            toaster.error({ title: 'Error', description: 'Failed to clear from account' });
+                                                        }
+                                                    }}
+                                                    color="red.400"
+                                                    cursor="pointer"
+                                                    flexShrink={0}
+                                                    _hover={{ color: 'red.600' }}
+                                                >
+                                                    <LuX size={10} />
+                                                </Box>
+                                            </Tooltip>
+                                        )}
                                         {!tx.from_account_id && tx.source_from_account && (
                                             <Tooltip content="Create new account" openDelay={100}>
                                                 <Box
@@ -824,6 +851,33 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                                 )}
                                             </Badge>
                                         </Tooltip>
+                                        {tx.to_account_id && (
+                                            <Tooltip content="Clear to account" openDelay={100}>
+                                                <Box
+                                                    as="button"
+                                                    onClick={async (e: React.MouseEvent) => {
+                                                        e.stopPropagation();
+                                                        try {
+                                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                method: 'PATCH',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ to_account_id: null })
+                                                            });
+                                                            if (!response.ok) throw new Error('Failed to clear');
+                                                            invalidateTransactionData();
+                                                        } catch (err) {
+                                                            toaster.error({ title: 'Error', description: 'Failed to clear to account' });
+                                                        }
+                                                    }}
+                                                    color="red.400"
+                                                    cursor="pointer"
+                                                    flexShrink={0}
+                                                    _hover={{ color: 'red.600' }}
+                                                >
+                                                    <LuX size={10} />
+                                                </Box>
+                                            </Tooltip>
+                                        )}
                                         {!tx.to_account_id && tx.source_to_account && (
                                             <Tooltip content="Create new account" openDelay={100}>
                                                 <Box
@@ -1000,135 +1054,51 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                 )}
                 {/* Linked Asset - click to edit */}
                 {showColumn('asset') && (
-                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
-                        {isEditingCell(tx.id, 'asset_id') ? (
-                            <Flex direction="column" gap={1} minW="90px">
-                                <AssetSelector
-                                    value={editValues.asset_id ?? null}
-                                    onChange={(assetId) => {
-                                        if (!escapePressedRef.current) {
-                                            updateEditValues({ asset_id: assetId ?? undefined });
-                                            saveAndClose();
-                                        }
-                                    }}
-                                    assets={assets}
-                                    onAssetCreated={refetchAssets}
-                                    defaultSymbol={tx.source_asset_symbol || ''}
-                                    placeholder="Link..."
-                                    rawAssetSource={tx.source}
-                                    rawAssetSymbol={tx.source_asset_symbol}
-                                />
-                                {/* Show asset suggestions when editing unlinked asset */}
-                                {tx.source_asset_symbol && !tx.asset_id && (() => {
-                                    const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
-                                    return suggestions.length > 0 ? (
-                                        <HStack gap={1} flexWrap="wrap">
-                                            <Text fontSize="7px" color="gray.500">Suggestions:</Text>
-                                            {suggestions.map((s, idx) => (
-                                                <Tooltip
-                                                    key={idx}
-                                                    content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
-                                                    openDelay={100}
-                                                >
-                                                    <Badge
-                                                        size="xs"
-                                                        colorPalette={getConfidenceColor(s.confidence)}
-                                                        variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
-                                                        cursor="pointer"
-                                                        fontSize="7px"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            updateEditValues({ asset_id: s.item.asset_id });
-                                                            saveAndClose();
-                                                        }}
-                                                    >
-                                                        {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
-                                                        {s.confidence >= 0.9 && ' ✓'}
-                                                    </Badge>
-                                                </Tooltip>
-                                            ))}
-                                        </HStack>
-                                    ) : null;
-                                })()}
-                            </Flex>
-                        ) : (
-                            tx.linked_asset_symbol ? (
-                                <AssetBadge
-                                    asset={tx.linked_asset}
-                                    size="sm"
-                                    colorPalette="purple"
-                                    maxLength={10}
-                                    onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
-                                />
-                            ) : tx.source_asset_symbol ? (
-                                <Flex direction="column" gap={0.5} align="start">
-                                    <Flex align="center" gap={0.5}>
-                                        <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
-                                            <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
-                                                ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
-                                            </Text>
-                                        </Tooltip>
-                                        <Tooltip content="Create new asset" openDelay={100}>
-                                            <Box
-                                                as="button"
-                                                onClick={(e: React.MouseEvent) => {
-                                                    e.stopPropagation();
-                                                    setQuickCreateAsset({
-                                                        txId: tx.id,
-                                                        field: 'asset_id',
-                                                        prefill: { symbol: tx.source_asset_symbol || '' },
-                                                        rawSource: tx.source,
-                                                        rawSymbol: tx.source_asset_symbol || undefined,
-                                                    });
-                                                }}
-                                                color="green.500"
-                                                cursor="pointer"
-                                                flexShrink={0}
-                                                _hover={{ color: 'green.700' }}
-                                            >
-                                                <FiPlusCircle size={10} />
-                                            </Box>
-                                        </Tooltip>
-                                    </Flex>
-                                    {/* Always-visible suggestion badges for unlinked asset */}
-                                    {(() => {
-                                        const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
+                    <Table.Cell py={1} onClick={() => !isEditingCell(tx.id, 'asset_id') && !isEditingCell(tx.id, 'attributed_asset_id') && startCellEdit(tx, 'asset_id')} cursor="pointer">
+                        <Flex direction="column" gap={0.5}>
+                            {isEditingCell(tx.id, 'asset_id') ? (
+                                <Flex direction="column" gap={1} minW="90px">
+                                    <AssetSelector
+                                        value={editValues.asset_id ?? null}
+                                        onChange={(assetId) => {
+                                            if (!escapePressedRef.current) {
+                                                updateEditValues({ asset_id: assetId ?? undefined });
+                                                saveAndClose();
+                                            }
+                                        }}
+                                        assets={assets}
+                                        onAssetCreated={refetchAssets}
+                                        defaultSymbol={tx.source_asset_symbol || ''}
+                                        placeholder="Link..."
+                                        rawAssetSource={tx.source}
+                                        rawAssetSymbol={tx.source_asset_symbol}
+                                    />
+                                    {/* Show asset suggestions when editing unlinked asset */}
+                                    {tx.source_asset_symbol && !tx.asset_id && (() => {
+                                        const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 3);
                                         return suggestions.length > 0 ? (
-                                            <HStack gap={0.5} flexWrap="wrap">
+                                            <HStack gap={1} flexWrap="wrap">
+                                                <Text fontSize="7px" color="gray.500">Suggestions:</Text>
                                                 {suggestions.map((s, idx) => (
-                                                    <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
+                                                    <Tooltip
+                                                        key={idx}
+                                                        content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
+                                                        openDelay={100}
+                                                    >
                                                         <Badge
                                                             size="xs"
                                                             colorPalette={getConfidenceColor(s.confidence)}
                                                             variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
                                                             cursor="pointer"
-                                                            fontSize="6px"
-                                                            onClick={async (e) => {
+                                                            fontSize="7px"
+                                                            onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                try {
-                                                                    const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
-                                                                        method: 'PATCH',
-                                                                        headers: { 'Content-Type': 'application/json' },
-                                                                        body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                    });
-                                                                    if (!response.ok) throw new Error('Failed to update');
-                                                                    // Also link the raw_asset
-                                                                    if (tx.source_asset_symbol) {
-                                                                        try {
-                                                                            await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_asset_symbol)}`, {
-                                                                                method: 'PATCH',
-                                                                                headers: { 'Content-Type': 'application/json' },
-                                                                                body: JSON.stringify({ asset_id: s.item.asset_id })
-                                                                            });
-                                                                        } catch { }
-                                                                    }
-                                                                    invalidateTransactionData();
-                                                                } catch (err) {
-                                                                    toaster.error({ title: 'Error', description: 'Failed to link asset' });
-                                                                }
+                                                                updateEditValues({ asset_id: s.item.asset_id });
+                                                                saveAndClose();
                                                             }}
                                                         >
-                                                            {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
+                                                            {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
+                                                            {s.confidence >= 0.9 && ' ✓'}
                                                         </Badge>
                                                     </Tooltip>
                                                 ))}
@@ -1137,9 +1107,236 @@ export const TransactionTableRow = React.memo<TransactionRowProps>(function Tran
                                     })()}
                                 </Flex>
                             ) : (
-                                <Text color="gray.400" fontSize="8px">-</Text>
-                            )
-                        )}
+                                tx.linked_asset_symbol ? (
+                                    <AssetBadge
+                                        asset={tx.linked_asset}
+                                        size="sm"
+                                        colorPalette="purple"
+                                        maxLength={10}
+                                        onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}
+                                    />
+                                ) : tx.source_asset_symbol ? (
+                                    <Flex direction="column" gap={0.5} align="start">
+                                        <Flex align="center" gap={0.5}>
+                                            <Tooltip content={`${tx.source_asset_symbol} - Click to link`} openDelay={200}>
+                                                <Text color="orange.500" fontWeight="bold" fontSize="8px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'asset_id'); }}>
+                                                    ⚠ {tx.source_asset_symbol.slice(0, 8)}{tx.source_asset_symbol.length > 8 && '…'}
+                                                </Text>
+                                            </Tooltip>
+                                            <Tooltip content="Create new asset" openDelay={100}>
+                                                <Box
+                                                    as="button"
+                                                    onClick={(e: React.MouseEvent) => {
+                                                        e.stopPropagation();
+                                                        setQuickCreateAsset({
+                                                            txId: tx.id,
+                                                            field: 'asset_id',
+                                                            prefill: { symbol: tx.source_asset_symbol || '' },
+                                                            rawSource: tx.source,
+                                                            rawSymbol: tx.source_asset_symbol || undefined,
+                                                        });
+                                                    }}
+                                                    color="green.500"
+                                                    cursor="pointer"
+                                                    flexShrink={0}
+                                                    _hover={{ color: 'green.700' }}
+                                                >
+                                                    <FiPlusCircle size={10} />
+                                                </Box>
+                                            </Tooltip>
+                                        </Flex>
+                                        {/* Always-visible suggestion badges for unlinked asset */}
+                                        {(() => {
+                                            const suggestions = getAssetSuggestions(tx.source_asset_symbol, assets, 0.5, 2);
+                                            return suggestions.length > 0 ? (
+                                                <HStack gap={0.5} flexWrap="wrap">
+                                                    {suggestions.map((s, idx) => (
+                                                        <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
+                                                            <Badge
+                                                                size="xs"
+                                                                colorPalette={getConfidenceColor(s.confidence)}
+                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                cursor="pointer"
+                                                                fontSize="6px"
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    try {
+                                                                        const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                            method: 'PATCH',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({ asset_id: s.item.asset_id })
+                                                                        });
+                                                                        if (!response.ok) throw new Error('Failed to update');
+                                                                        // Also link the raw_asset
+                                                                        if (tx.source_asset_symbol) {
+                                                                            try {
+                                                                                await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_asset_symbol)}`, {
+                                                                                    method: 'PATCH',
+                                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                                    body: JSON.stringify({ asset_id: s.item.asset_id })
+                                                                                });
+                                                                            } catch { }
+                                                                        }
+                                                                        invalidateTransactionData();
+                                                                    } catch (err) {
+                                                                        toaster.error({ title: 'Error', description: 'Failed to link asset' });
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
+                                                            </Badge>
+                                                        </Tooltip>
+                                                    ))}
+                                                </HStack>
+                                            ) : null;
+                                        })()}
+                                    </Flex>
+                                ) : (
+                                    <Text color="gray.400" fontSize="8px">-</Text>
+                                )
+                            )}
+                            {/* Attributed asset badge with inline editing */}
+                            {(tx.source_attributed_asset_symbol || tx.attributed_asset_id) && (
+                                isEditingCell(tx.id, 'attributed_asset_id') ? (
+                                    <Flex direction="column" gap={0.5} onClick={(e) => e.stopPropagation()} minW="90px">
+                                        <Text fontSize="7px" color="gray.500">Attr. asset:</Text>
+                                        <AssetSelector
+                                            value={editValues.attributed_asset_id ?? null}
+                                            onChange={(assetId) => {
+                                                if (!escapePressedRef.current) {
+                                                    updateEditValues({ attributed_asset_id: assetId ?? undefined });
+                                                    saveAndClose();
+                                                }
+                                            }}
+                                            assets={assets}
+                                            onAssetCreated={refetchAssets}
+                                            defaultSymbol={tx.source_attributed_asset_symbol || ''}
+                                            placeholder="Link attributed..."
+                                            rawAssetSource={tx.source}
+                                            rawAssetSymbol={tx.source_attributed_asset_symbol}
+                                        />
+                                        {tx.source_attributed_asset_symbol && !tx.attributed_asset_id && (() => {
+                                            const suggestions = getAssetSuggestions(tx.source_attributed_asset_symbol, assets, 0.5, 3);
+                                            return suggestions.length > 0 ? (
+                                                <HStack gap={1} flexWrap="wrap">
+                                                    <Text fontSize="7px" color="gray.500">Suggestions:</Text>
+                                                    {suggestions.map((s, idx) => (
+                                                        <Tooltip
+                                                            key={idx}
+                                                            content={`${s.item.symbol} (${formatConfidence(s.confidence)} match)`}
+                                                            openDelay={100}
+                                                        >
+                                                            <Badge
+                                                                size="xs"
+                                                                colorPalette={getConfidenceColor(s.confidence)}
+                                                                variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                cursor="pointer"
+                                                                fontSize="7px"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    updateEditValues({ attributed_asset_id: s.item.asset_id });
+                                                                    saveAndClose();
+                                                                }}
+                                                            >
+                                                                {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}
+                                                                {s.confidence >= 0.9 && ' ✓'}
+                                                            </Badge>
+                                                        </Tooltip>
+                                                    ))}
+                                                </HStack>
+                                            ) : null;
+                                        })()}
+                                    </Flex>
+                                ) : (
+                                    tx.attributed_asset_id && tx.attributed_asset ? (
+                                        <Flex align="center" gap={0.5} onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }} cursor="pointer">
+                                            <Text fontSize="7px" color="gray.500">→</Text>
+                                            <AssetBadge
+                                                asset={tx.attributed_asset}
+                                                size="xs"
+                                                colorPalette="orange"
+                                                maxLength={8}
+                                            />
+                                        </Flex>
+                                    ) : tx.source_attributed_asset_symbol ? (
+                                        <Flex direction="column" gap={0.5} align="start" onClick={(e) => e.stopPropagation()}>
+                                            <Flex align="center" gap={0.5}>
+                                                <Text fontSize="7px" color="gray.500">→</Text>
+                                                <Tooltip content={`${tx.source_attributed_asset_symbol} - Click to link attributed asset`} openDelay={200}>
+                                                    <Text color="orange.500" fontWeight="bold" fontSize="7px" cursor="pointer" onClick={(e) => { e.stopPropagation(); startCellEdit(tx, 'attributed_asset_id'); }}>
+                                                        ⚠ {tx.source_attributed_asset_symbol.slice(0, 6)}{tx.source_attributed_asset_symbol.length > 6 && '…'}
+                                                    </Text>
+                                                </Tooltip>
+                                                <Tooltip content="Create new asset" openDelay={100}>
+                                                    <Box
+                                                        as="button"
+                                                        onClick={(e: React.MouseEvent) => {
+                                                            e.stopPropagation();
+                                                            setQuickCreateAsset({
+                                                                txId: tx.id,
+                                                                field: 'attributed_asset_id',
+                                                                prefill: { symbol: tx.source_attributed_asset_symbol || '' },
+                                                                rawSource: tx.source,
+                                                                rawSymbol: tx.source_attributed_asset_symbol || undefined,
+                                                            });
+                                                        }}
+                                                        color="green.500"
+                                                        cursor="pointer"
+                                                        flexShrink={0}
+                                                        _hover={{ color: 'green.700' }}
+                                                    >
+                                                        <FiPlusCircle size={8} />
+                                                    </Box>
+                                                </Tooltip>
+                                            </Flex>
+                                            {(() => {
+                                                const suggestions = getAssetSuggestions(tx.source_attributed_asset_symbol, assets, 0.5, 2);
+                                                return suggestions.length > 0 ? (
+                                                    <HStack gap={0.5} flexWrap="wrap">
+                                                        {suggestions.map((s, idx) => (
+                                                            <Tooltip key={idx} content={`${s.item.symbol} (${formatConfidence(s.confidence)} match) - Click to link`} openDelay={100}>
+                                                                <Badge
+                                                                    size="xs"
+                                                                    colorPalette={getConfidenceColor(s.confidence)}
+                                                                    variant={s.confidence >= 0.9 ? 'solid' : 'outline'}
+                                                                    cursor="pointer"
+                                                                    fontSize="6px"
+                                                                    onClick={async (e) => {
+                                                                        e.stopPropagation();
+                                                                        try {
+                                                                            const response = await fetch(`${API_URL}/transactions/${tx.id}`, {
+                                                                                method: 'PATCH',
+                                                                                headers: { 'Content-Type': 'application/json' },
+                                                                                body: JSON.stringify({ attributed_asset_id: s.item.asset_id })
+                                                                            });
+                                                                            if (!response.ok) throw new Error('Failed to update');
+                                                                            if (tx.source_attributed_asset_symbol) {
+                                                                                try {
+                                                                                    await fetch(`${API_URL}/raw-assets/${encodeURIComponent(tx.source)}/${encodeURIComponent(tx.source_attributed_asset_symbol)}`, {
+                                                                                        method: 'PATCH',
+                                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                                        body: JSON.stringify({ asset_id: s.item.asset_id })
+                                                                                    });
+                                                                                } catch { }
+                                                                            }
+                                                                            invalidateTransactionData();
+                                                                        } catch (err) {
+                                                                            toaster.error({ title: 'Error', description: 'Failed to link attributed asset' });
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {s.item.symbol.slice(0, 10)}{s.item.symbol.length > 10 ? '…' : ''}{s.confidence >= 0.9 && '✓'}
+                                                                </Badge>
+                                                            </Tooltip>
+                                                        ))}
+                                                    </HStack>
+                                                ) : null;
+                                            })()}
+                                        </Flex>
+                                    ) : null
+                                )
+                            )}
+                        </Flex>
                     </Table.Cell>
                 )}
                 {/* Quantity - click to edit */}

@@ -669,13 +669,12 @@ class ConnectorSui(BaseConnector):
                     direction="outflow",
                     transaction_type="cost",
                     source_transaction_type=source_tx_type,
-                    # Asset and amounts (quantity=0 for fee transaction)
+                    # Asset and amounts — qty=fee, price=1, price_quote=native
                     source_asset_symbol="SUI",
-                    quantity=Decimal(0),
-                    # Fee information
-                    fee=fee_sui,
-                    source_fee_quote_asset_symbol="SUI",
-                    include_fee=True,
+                    quantity=fee_sui,
+                    price=Decimal(1),
+                    source_price_quote_asset_symbol="SUI",
+                    include_fee=False,
                     # Addresses
                     source_from_account=self.wallet_address,
                     source_to_account=None,

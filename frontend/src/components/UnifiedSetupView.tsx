@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from "react";
 import {
   Box,
-  Heading,
   VStack,
   Container,
   Badge,
   HStack,
   Text,
   Flex,
-  Icon,
 } from "@chakra-ui/react";
-import { FiChevronDown } from "react-icons/fi";
+import {
+  FiUser,
+  FiDollarSign,
+  FiBarChart2,
+  FiLink,
+  FiTag,
+} from "react-icons/fi";
 import AccountsManagement from "./AccountsManagement";
 import { RawAccountsEditor } from "./RawAccountsEditor";
 import { AssetsEditor } from "./AssetsEditor";
@@ -35,19 +39,16 @@ interface SetupStatus {
 interface NavItem {
   id: string;
   label: string;
-  icon: string;
+  icon: React.ElementType;
   component: React.FC;
   group?: string;
-  status?: boolean;
   badge?: string | number;
-  description: string;
 }
 
 interface PrimaryTab {
   id: string;
   label: string;
-  icon: string;
-  status?: boolean;
+  icon: React.ElementType;
 }
 
 const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true }) => {
@@ -55,7 +56,6 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
   const [activeItem, setActiveItem] = useState<string>("accounts");
   const [activePrimaryTab, setActivePrimaryTab] = useState<string>("accounts");
 
-  // Fetch setup status on mount and when tab becomes active
   useEffect(() => {
     if (!isActive) return;
     fetchSetupStatus();
@@ -71,210 +71,163 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
     }
   };
 
-  // Navigation items organized by primary tabs
   const navItems: NavItem[] = [
-
     {
       id: "accounts",
       label: "Accounts & Connectors",
-      icon: "👤",
+      icon: FiUser,
       group: "accounts",
       component: AccountsManagement,
-      status: setupStatus?.accounts_configured && setupStatus?.connectors_configured,
       badge: setupStatus?.accounts_count ? `${setupStatus.accounts_count}` : undefined,
-      description: "Manage trading accounts with inline connectors",
     },
     {
       id: "raw-accounts",
       label: "Account Mappings",
-      icon: "🔗",
+      icon: FiLink,
       group: "accounts",
       component: RawAccountsEditor,
-      status: !setupStatus?.unmapped_raw_accounts_count,
       badge: setupStatus?.unmapped_raw_accounts_count ? `${setupStatus.unmapped_raw_accounts_count} unmapped` : undefined,
-      description: "Link source accounts to normalized accounts",
     },
     {
       id: "assets",
       label: "Assets",
-      icon: "💰",
+      icon: FiDollarSign,
       group: "assets",
       component: AssetsEditor,
-      status: setupStatus?.assets_configured,
       badge: setupStatus?.assets_count ? `${setupStatus.assets_count}` : undefined,
-      description: "Configure tradable assets and price sources",
     },
     {
       id: "raw-assets",
       label: "Asset Mappings",
-      icon: "🔗",
+      icon: FiLink,
       group: "assets",
       component: RawAssetsEditor,
-      status: !setupStatus?.unmapped_raw_assets_count,
       badge: setupStatus?.unmapped_raw_assets_count ? `${setupStatus.unmapped_raw_assets_count} unmapped` : undefined,
-      description: "Link source symbols to normalized assets",
     },
     {
       id: "categories",
       label: "Categories",
-      icon: "🏷️",
+      icon: FiTag,
       group: "assets",
       component: CategoriesEditor,
-      status: true,
-      description: "Organize assets by sector, region, etc.",
     },
     {
       id: "pnl-defaults",
       label: "P&L Defaults",
-      icon: "📊",
+      icon: FiBarChart2,
       component: PnLDefaultsEditor,
-      status: setupStatus?.base_currency_set,
       badge: setupStatus?.base_currency_symbol || undefined,
-      description: "Base currency & default P&L calculation settings",
     },
   ];
 
-  // Primary tabs (top-level categories)
   const primaryTabs: PrimaryTab[] = [
     {
       id: "accounts",
       label: "Accounts",
-      icon: "👤",
-      status: setupStatus?.accounts_configured && !setupStatus?.unmapped_raw_accounts_count,
+      icon: FiUser,
     },
     {
       id: "assets",
       label: "Assets",
-      icon: "💰",
-      status: setupStatus?.assets_configured && !setupStatus?.unmapped_raw_assets_count,
+      icon: FiDollarSign,
     },
     {
       id: "pnl-defaults",
       label: "P&L Settings",
-      icon: "📊",
-      status: setupStatus?.base_currency_set,
+      icon: FiBarChart2,
     },
   ];
 
-  // Get secondary items for current primary tab
   const getSecondaryItems = () => {
     if (activePrimaryTab === "pnl-defaults") return [];
     return navItems.filter((item) => item.group === activePrimaryTab);
   };
 
   const secondaryItems = getSecondaryItems();
-
   const ActiveComponent = navItems.find((item) => item.id === activeItem)?.component || PnLDefaultsEditor;
 
-  // Calculate completion percentage
-  const completionPercentage = setupStatus
-    ? Math.round(
-      (setupStatus.base_currency_set ? 25 : 0) +
-      (setupStatus.accounts_count > 0 ? 25 : 0) +
-      (setupStatus.unmapped_raw_accounts_count ? 0 : 25) +
-      (setupStatus.unmapped_raw_assets_count ? 0 : 25)
-    )
-    : 0;
-
-  // Handle primary tab change
   const handlePrimaryTabChange = (tabId: string) => {
     setActivePrimaryTab(tabId);
     if (tabId === "pnl-defaults") {
       setActiveItem(tabId);
     } else {
-      // Set to first item in the group
       const firstItem = navItems.find((item) => item.group === tabId);
       if (firstItem) setActiveItem(firstItem.id);
     }
   };
 
-  // Render primary tab button
   const renderPrimaryTab = (tab: PrimaryTab) => {
     const isActive = activePrimaryTab === tab.id;
-    const hasWarning = tab.status === false;
-    const hasSubItems = tab.id !== "pnl-defaults";
+    const TabIcon = tab.icon;
 
     return (
       <Box
         key={tab.id}
-        px={{ base: 1.5, md: 2 }}
+        px={{ base: 3, md: 4 }}
         py={1.5}
-        borderRadius="md"
+        borderRadius="0"
         cursor="pointer"
-        bg={isActive ? "blue.500" : "white"}
-        color={isActive ? "white" : "gray.700"}
-        borderWidth={1}
-        borderColor={isActive ? "blue.500" : (hasWarning ? "orange.300" : "gray.200")}
+        bg={isActive ? "gray.700" : "white"}
+        color={isActive ? "white" : "gray.500"}
         _hover={{
-          bg: isActive ? "blue.600" : "gray.50",
-          borderColor: isActive ? "blue.600" : "blue.300"
+          color: isActive ? "white" : "gray.700",
+          bg: isActive ? "gray.700" : "gray.50",
         }}
         onClick={() => handlePrimaryTabChange(tab.id)}
-        transition="all 0.2s"
-        minW={{ base: "auto", md: "110px" }}
+        transition="all 0.15s ease"
       >
-        <HStack justify="center" gap={1}>
-          <Text fontSize={{ base: "xs", md: "sm" }}>{tab.icon}</Text>
-          <Text fontWeight="semibold" fontSize={{ base: "2xs", md: "xs" }} display={{ base: "none", sm: "block" }}>
+        <HStack gap={1.5}>
+          <Box as={TabIcon} boxSize="14px" />
+          <Text
+            fontWeight={isActive ? "600" : "500"}
+            fontSize="sm"
+            display={{ base: "none", sm: "block" }}
+          >
             {tab.label}
           </Text>
-          {hasSubItems && (
-            <Icon
-              as={FiChevronDown}
-              boxSize={3}
-              color={isActive ? "white" : "gray.400"}
-            />
-          )}
-          {tab.status !== undefined && (
-            <Text fontSize="2xs">
-              {tab.status ? "✓" : "⚠"}
-            </Text>
-          )}
         </HStack>
       </Box>
     );
   };
 
-  // Render secondary item (pill style)
   const renderSecondaryItem = (item: NavItem) => {
     const isActive = activeItem === item.id;
-    const hasWarning = item.status === false || (typeof item.badge === 'string' && item.badge.includes('unmapped'));
+    const hasWarning = typeof item.badge === 'string' && item.badge.includes('unmapped');
+    const ItemIcon = item.icon;
 
     return (
       <Box
         key={item.id}
-        px={2}
+        px={3}
         py={1}
-        borderRadius="full"
+        borderRadius="0"
         cursor="pointer"
-        bg={isActive ? "blue.50" : "white"}
-        borderWidth={1}
-        borderColor={isActive ? "blue.400" : (hasWarning ? "orange.200" : "gray.200")}
+        bg={isActive ? "gray.700" : "white"}
+        color={isActive ? "white" : "gray.600"}
         _hover={{
-          bg: isActive ? "blue.100" : "gray.50",
-          borderColor: isActive ? "blue.500" : "blue.200"
+          bg: isActive ? "gray.700" : "gray.50",
+          color: isActive ? "white" : "gray.700",
         }}
         onClick={() => setActiveItem(item.id)}
-        transition="all 0.2s"
+        transition="all 0.15s ease"
       >
         <HStack gap={1.5}>
-          <Text fontSize="xs">{item.icon}</Text>
-          <Text fontWeight={isActive ? "semibold" : "medium"} fontSize="xs">
+          <Box as={ItemIcon} boxSize="12px" />
+          <Text fontWeight={isActive ? "600" : "400"} fontSize="xs">
             {item.label}
           </Text>
           {item.badge && (
             <Badge
-              size="xs"
-              colorScheme={hasWarning ? "orange" : "gray"}
-              variant={hasWarning ? "solid" : "subtle"}
+              fontSize="2xs"
+              px={1.5}
+              py={0}
+              borderRadius="full"
+              bg={hasWarning ? "orange.100" : "gray.100"}
+              color={hasWarning ? "orange.700" : "gray.600"}
+              fontWeight="500"
             >
               {item.badge}
             </Badge>
-          )}
-          {item.status !== undefined && !item.badge && (
-            <Text fontSize="2xs" color={item.status ? "green.500" : "orange.400"}>
-              {item.status ? "✓" : "⚠"}
-            </Text>
           )}
         </HStack>
       </Box>
@@ -283,60 +236,39 @@ const UnifiedSetupView: React.FC<{ isActive?: boolean }> = ({ isActive = true })
 
   return (
     <Container maxW="container.xl" py={1}>
-      <VStack align="stretch" gap={1}>
-        {/* Header with overall progress */}
-        <Flex justify="space-between" align="right" mb={1} flexWrap="wrap" gap={2}>
-          <Badge
-            colorScheme={completionPercentage === 100 ? "green" : "orange"}
-            fontSize="2xs"
-            px={2}
-            py={0.5}
-            borderRadius="md"
-          >
-            {completionPercentage}% Complete
-          </Badge>
-        </Flex>
-
-        {/* Horizontal Two-Tier Navigation */}
-        <Box
-          borderWidth={1}
-          borderRadius="lg"
+      <VStack align="stretch" gap={2}>
+        {/* Primary Pill Toggle Group */}
+        <HStack
           bg="white"
-          p={{ base: 1.5, md: 2 }}
+          borderRadius="0"
+          p={0}
+          gap={0}
+          borderWidth={1}
+          borderColor="gray.200"
+          alignSelf="flex-start"
         >
-          {/* Primary Tabs Row */}
-          <HStack
-            gap={{ base: 1, md: 1.5 }}
-            mb={secondaryItems.length > 0 ? 2 : 0}
-            flexWrap={{ base: "wrap", md: "nowrap" }}
-            justify={{ base: "center", md: "flex-start" }}
-          >
-            {primaryTabs.map((tab) => renderPrimaryTab(tab))}
-          </HStack>
+          {primaryTabs.map((tab) => renderPrimaryTab(tab))}
+        </HStack>
 
-          {/* Secondary Items Row (Pills) */}
-          {secondaryItems.length > 0 && (
-            <Box
-              pt={2}
-              borderTopWidth={1}
-              borderColor="gray.100"
-            >
-              <Flex
-                gap={1.5}
-                flexWrap="wrap"
-                justify={{ base: "center", md: "flex-start" }}
-              >
-                {secondaryItems.map((item) => renderSecondaryItem(item))}
-              </Flex>
-            </Box>
-          )}
-        </Box>
+        {/* Secondary Sub-Pills */}
+        {secondaryItems.length > 0 && (
+          <HStack
+            gap={0}
+            borderWidth={1}
+            borderColor="gray.200"
+            alignSelf="flex-start"
+            flexWrap="wrap"
+          >
+            {secondaryItems.map((item) => renderSecondaryItem(item))}
+          </HStack>
+        )}
 
         {/* Content Area */}
         <Box
           borderWidth={1}
-          borderRadius="lg"
-          p={{ base: 2, md: 3 }}
+          borderColor="gray.200"
+          borderRadius="0"
+          p={{ base: 3, md: 4 }}
           bg="white"
           minH="500px"
         >

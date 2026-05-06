@@ -1,0 +1,37 @@
+accounts:
+  - name: "Binance"
+    account_type: "cex"
+    owned: true
+    group: "Crypto"
+    color: "#F0B90B"
+    address_or_identifier: "binance_pm_qa"
+
+  - name: "Polymarket"
+    account_type: "wallet"
+    owned: true
+    group: "Prediction Markets"
+    color: "#7D6608"
+    address_or_identifier: "0xPM_QA_WALLET"
+    connectors:
+      - connector_type: "polymarket"
+        color: "#4A90D9"
+        enabled: true
+        sync_priority: 10
+        config:
+          chain: "polygon"
+          test_mode: true
+          test_file_path: "tests/e2e/fixtures/polymarket_pnl.json"
+
+  - name: "Polymarket Live"
+    account_type: "wallet"
+    owned: true
+    group: "Prediction Markets"
+    color: "#2E86C1"
+    address_or_identifier: "0x6f5E6579Cd9F9eaB734674e33dE4f41A33ae27DE"
+    connectors:
+      - connector_type: "polymarket"
+        color: "#4A90D9"
+        enabled: true
+        sync_priority: 20
+        config:
+          chain: "polygon"

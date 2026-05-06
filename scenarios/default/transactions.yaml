@@ -1,0 +1,60 @@
+# Default Transaction Seed Data
+# ==============================
+# Generic sample transactions for development.
+# For personal transactions, use a scenario:
+#   task start:scenario SCENARIO=private-accounts
+
+transactions:
+  # BTC buy on Binance
+  - source: "seed-default"
+    source_transaction_id: "default_001_btc_buy"
+    account_name: Binance
+    asset_symbol: BTC
+    quantity: "0.500000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-03-01T10:00:00"
+    price: "50000.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "10.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - goal: sample
+
+  # ETH buy on Coinbase
+  - source: "seed-default"
+    source_transaction_id: "default_002_eth_buy"
+    account_name: Coinbase
+    asset_symbol: ETH
+    quantity: "2.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-03-15T14:00:00"
+    price: "2800.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "5.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - goal: sample
+
+  # AAPL stock buy on Degiro
+  - source: "seed-default"
+    source_transaction_id: "default_003_aapl_buy"
+    account_name: Degiro
+    asset_symbol: AAPL
+    quantity: "5.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-04-01T09:30:00"
+    price: "190.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "4.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - goal: sample

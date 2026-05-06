@@ -1,0 +1,69 @@
+# Corporate Spin-Off Scenario — Deterministic Prices
+# =====================================================
+# Prices are set to enable deterministic P&L verification for both spinoff groups.
+#
+# ── Group A: GE → GEV (pre-seeded bundle, IBKR) ──
+#   GE purchase:   €160
+#   GE at spinoff:  €165  (FMV at 2024-04-02)
+#   GEV at spinoff: €130  (FMV at 2024-04-02)
+#   Bundle uses explicit allocation = 12%
+#   → auto-allocation would be 130/(165+130) = 44.1% but we override with 12%
+#   GEV later sell:  €150  (for realized PnL test)
+#
+# ── Group B: APTV → VRSG (manual bundle, DEGIRO CTO) ──
+#   APTV purchases: €50, €48
+#   APTV at spinoff: €55
+#   VRSG at spinoff: €9.70
+#   → auto-allocation = 9.70 / (55 + 9.70) ≈ 15.0%
+#   VRSG later sell:  €12
+
+prices:
+  # ── Group A prices ──
+  - asset_symbol: GE
+    quote_currency: EUR
+    entries:
+      - at: "2024-01-15T10:00:00"
+        price: "160.00"
+      - at: "2024-04-02T00:00:00"
+        price: "165.00"
+      - at: current
+        price: "170.00"
+
+  - asset_symbol: GEV
+    quote_currency: EUR
+    entries:
+      - at: "2024-04-02T00:00:00"
+        price: "130.00"
+      - at: "2024-10-01T10:00:00"
+        price: "150.00"
+      - at: current
+        price: "155.00"
+
+  # ── Group B prices ──
+  - asset_symbol: APTV
+    quote_currency: EUR
+    entries:
+      - at: "2024-03-10T10:00:00"
+        price: "50.00"
+      - at: "2024-06-20T14:00:00"
+        price: "48.00"
+      - at: "2025-05-01T00:00:00"
+        price: "55.00"
+      - at: current
+        price: "47.00"
+
+  - asset_symbol: VRSG
+    quote_currency: EUR
+    entries:
+      - at: "2025-05-01T00:00:00"
+        price: "9.70"
+      - at: "2025-08-15T10:00:00"
+        price: "12.00"
+      - at: current
+        price: "12.00"
+
+  - asset_symbol: EUR
+    quote_currency: EUR
+    entries:
+      - at: current
+        price: "1.00"

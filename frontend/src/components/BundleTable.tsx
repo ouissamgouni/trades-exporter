@@ -27,7 +27,7 @@ import {
 import { Tooltip } from './ui/tooltip';
 import { toaster } from './ui/toaster';
 import { ConfirmDialog, useConfirmDialog } from './ui/ConfirmDialog';
-import { FiChevronDown, FiChevronRight, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader, FiFileText } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiChevronLeft, FiChevronsLeft, FiChevronsRight, FiTrash2, FiX, FiCheck, FiFilter, FiSearch, FiLoader, FiFileText, FiRepeat, FiArrowRight, FiGitBranch, FiTrendingUp, FiShare2, FiTool, FiHelpCircle, FiDollarSign, FiShield } from 'react-icons/fi';
 import { Bundle, TransactionSummary, TaxabilityStatus, API_URL, AssetRef } from '../types';
 import { UnitPattern, TaxabilityStatus as TaxabilityEnum } from '../enums';
 import { TransactionTooltip } from './TransactionTooltip';
@@ -36,6 +36,7 @@ import { formatDateTimeCompact, parseApiDate } from '../utils/dateUtils';
 import { formatQuantity } from '../utils/numberUtils';
 import { ValueDisplay } from './ValueDisplay';
 import { BundleMemberTransactionsTable } from './tables/wrappers/BundleMemberTransactionsTable';
+import { useAssets } from '../hooks/useAssets';
 
 // ============================================================================
 // Types
@@ -141,6 +142,11 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
                     </Text>
                 </Flex>
                 <Flex gap={2}>
+                    <Tooltip content="To create a bundle, select transactions in the Transactions tab and use the Bundle action" openDelay={100}>
+                        <Button size="xs" variant="outline" colorPalette="purple" disabled>
+                            ➕ Create
+                        </Button>
+                    </Tooltip>
                     {onRefresh && (
                         <Button
                             size="xs"
@@ -197,6 +203,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFiltersChange, bundleC
                                 <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
                                 <option value={UnitPattern.SWAP}>Swap</option>
                                 <option value={UnitPattern.SPLIT}>Split</option>
+                                <option value={UnitPattern.SPINOFF}>Spin-Off</option>
                                 <option value={UnitPattern.UNKNOWN}>Unknown</option>
                             </NativeSelect.Field>
                         </NativeSelect.Root>
@@ -609,6 +616,17 @@ const BundleRow: React.FC<BundleRowProps> = ({
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const assets = getUniqueAssets(bundle.transactions);
+    const { assets: allAssets } = useAssets();
+
+    // Resolve spinoff parent asset from metadata
+    const isSpinoff = bundle.pattern === UnitPattern.SPINOFF;
+    const spinoffSourceAssetId = bundle.metadata?.spinoff_source_asset_id;
+    const spinoffSourceAsset = isSpinoff && spinoffSourceAssetId
+        ? allAssets.find(a => a.asset_id === spinoffSourceAssetId)
+        : null;
+    const spinoffAccountName = isSpinoff && bundle.transactions?.length
+        ? bundle.transactions[0].account_name
+        : null;
 
     const openDeleteConfirm = () => setShowDeleteConfirm(true);
 
@@ -652,67 +670,109 @@ const BundleRow: React.FC<BundleRowProps> = ({
                 transition="all 0.15s"
             >
                 <Card.Body p={3}>
-                    {/* Top row: checkbox + pattern selector + label + taxability + delete */}
-                    <Flex align="center" gap={1.5} mb={1.5}>
+                    {/* Top row: checkbox + pattern icon + taxability icon + delete */}
+                    <Flex align="center" gap={1.5} mb={1}>
                         <Checkbox.Root checked={isSelected} onCheckedChange={onToggleSelect}>
                             <Checkbox.HiddenInput />
                             <Checkbox.Control />
                         </Checkbox.Root>
-                        <NativeSelect.Root size="xs" width="72px">
-                            <NativeSelect.Field
-                                value={bundle.pattern || UnitPattern.UNKNOWN}
-                                onChange={e => handlePatternChange(e.target.value)}
-                                style={{
-                                    fontSize: '9px',
-                                    padding: '1px 2px',
-                                    lineHeight: 1.2,
-                                    height: '20px',
-                                    backgroundColor: {
+                        <Tooltip content={{
+                            [UnitPattern.SWAP]: 'Swap',
+                            [UnitPattern.INTERNAL_TRANSFER]: 'Transfer',
+                            [UnitPattern.SPLIT]: 'Split',
+                            [UnitPattern.FLOW]: 'Flow',
+                            [UnitPattern.SPINOFF]: 'Spin-Off',
+                            [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: 'Unmatched Transfer',
+                            [UnitPattern.CUSTOM]: 'Custom',
+                            [UnitPattern.UNKNOWN]: 'Unknown',
+                        }[bundle.pattern || UnitPattern.UNKNOWN] || 'Unknown'} openDelay={200}>
+                            <Box position="relative" display="inline-flex">
+                                <Box
+                                    display="flex"
+                                    alignItems="center"
+                                    justifyContent="center"
+                                    w="22px" h="22px"
+                                    borderRadius="4px"
+                                    bg={{
                                         [UnitPattern.INTERNAL_TRANSFER]: '#BEE3F8',
                                         [UnitPattern.SWAP]: '#FEEBC8',
                                         [UnitPattern.SPLIT]: '#E9D8FD',
                                         [UnitPattern.FLOW]: '#C6F6D5',
+                                        [UnitPattern.SPINOFF]: '#FED7E2',
                                         [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: '#FEFCBF',
                                         [UnitPattern.CUSTOM]: '#E2E8F0',
                                         [UnitPattern.UNKNOWN]: '#EDF2F7',
-                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7',
-                                    borderRadius: '3px',
-                                }}
-                            >
-                                <option value={UnitPattern.SWAP}>Swap</option>
-                                <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
-                                <option value={UnitPattern.SPLIT}>Split</option>
-                                <option value={UnitPattern.FLOW}>Flow</option>
-                                <option value={UnitPattern.CUSTOM}>Custom</option>
-                                <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
-                        <Box flex={1} minW={0}>
-                            <InlineEditLabel
-                                value={bundle.label || ''}
-                                onSave={async (value) => onUpdate({ label: value })}
-                                placeholder={`Bundle #${bundle.id}`}
-                            />
-                        </Box>
-                        <NativeSelect.Root size="xs" width="58px">
-                            <NativeSelect.Field
-                                value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
-                                onChange={e => handleTaxabilityChange(e.target.value)}
-                                style={{
-                                    fontSize: '9px',
-                                    padding: '1px 2px',
-                                    lineHeight: 1.2,
-                                    height: '20px',
-                                    backgroundColor: bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
-                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF',
-                                    borderRadius: '3px',
-                                }}
-                            >
-                                <option value={TaxabilityEnum.UNKNOWN}>Unk</option>
-                                <option value={TaxabilityEnum.TAXABLE}>Tax</option>
-                                <option value={TaxabilityEnum.NON_TAXABLE}>Non</option>
-                            </NativeSelect.Field>
-                        </NativeSelect.Root>
+                                    }[bundle.pattern || UnitPattern.UNKNOWN] || '#EDF2F7'}
+                                    color="gray.700"
+                                    pointerEvents="none"
+                                >
+                                    {{
+                                        [UnitPattern.SWAP]: <FiRepeat size={11} />,
+                                        [UnitPattern.INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                        [UnitPattern.SPLIT]: <FiGitBranch size={11} />,
+                                        [UnitPattern.FLOW]: <FiTrendingUp size={11} />,
+                                        [UnitPattern.SPINOFF]: <FiShare2 size={11} />,
+                                        [UnitPattern.UNMATCHED_INTERNAL_TRANSFER]: <FiArrowRight size={11} />,
+                                        [UnitPattern.CUSTOM]: <FiTool size={11} />,
+                                        [UnitPattern.UNKNOWN]: <FiHelpCircle size={11} />,
+                                    }[bundle.pattern || UnitPattern.UNKNOWN] || <FiHelpCircle size={11} />}
+                                </Box>
+                                <Box
+                                    as="select"
+                                    position="absolute"
+                                    inset={0}
+                                    opacity={0}
+                                    cursor="pointer"
+                                    value={bundle.pattern || UnitPattern.UNKNOWN}
+                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handlePatternChange(e.target.value)}
+                                >
+                                    <option value={UnitPattern.SWAP}>Swap</option>
+                                    <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
+                                    <option value={UnitPattern.SPLIT}>Split</option>
+                                    <option value={UnitPattern.FLOW}>Flow</option>
+                                    <option value={UnitPattern.SPINOFF}>Spin-Off</option>
+                                    <option value={UnitPattern.CUSTOM}>Custom</option>
+                                    <option value={UnitPattern.UNKNOWN}>Unknown</option>
+                                </Box>
+                            </Box>
+                        </Tooltip>
+                        <Tooltip content={{
+                            [TaxabilityEnum.TAXABLE]: 'Taxable',
+                            [TaxabilityEnum.NON_TAXABLE]: 'Non-Taxable',
+                            [TaxabilityEnum.UNKNOWN]: 'Taxability Unknown',
+                        }[bundle.taxability_override || TaxabilityEnum.UNKNOWN] || 'Taxability Unknown'} openDelay={200}>
+                            <Box position="relative" display="inline-flex">
+                                <Box
+                                    display="flex"
+                                    alignItems="center"
+                                    justifyContent="center"
+                                    w="22px" h="22px"
+                                    borderRadius="4px"
+                                    bg={bundle.taxability_override === TaxabilityEnum.TAXABLE ? '#FED7AA' :
+                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? '#C6F6D5' : '#FEFCBF'}
+                                    color="gray.700"
+                                    pointerEvents="none"
+                                >
+                                    {bundle.taxability_override === TaxabilityEnum.TAXABLE ? <FiDollarSign size={11} /> :
+                                        bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? <FiShield size={11} /> :
+                                            <FiHelpCircle size={11} />}
+                                </Box>
+                                <Box
+                                    as="select"
+                                    position="absolute"
+                                    inset={0}
+                                    opacity={0}
+                                    cursor="pointer"
+                                    value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
+                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleTaxabilityChange(e.target.value)}
+                                >
+                                    <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
+                                    <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
+                                    <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
+                                </Box>
+                            </Box>
+                        </Tooltip>
+                        <Box flex={1} />
                         <Button
                             size="xs"
                             variant="ghost"
@@ -727,6 +787,15 @@ const BundleRow: React.FC<BundleRowProps> = ({
                             <FiTrash2 size={11} />
                         </Button>
                     </Flex>
+
+                    {/* Bundle name on its own line */}
+                    <Box mb={1.5}>
+                        <InlineEditLabel
+                            value={bundle.label || ''}
+                            onSave={async (value) => onUpdate({ label: value })}
+                            placeholder={`Bundle #${bundle.id}`}
+                        />
+                    </Box>
 
                     {/* Assets + date + notes icon row */}
                     <Flex align="center" gap={2} fontSize="10px" color="gray.600" flexWrap="wrap">
@@ -756,6 +825,33 @@ const BundleRow: React.FC<BundleRowProps> = ({
                             </Box>
                         </Tooltip>
                     </Flex>
+
+                    {/* Spinoff source info row */}
+                    {isSpinoff && (spinoffSourceAsset || spinoffAccountName) && (
+                        <Flex align="center" gap={1.5} mt={1} fontSize="10px" color="gray.500" flexWrap="wrap">
+                            {spinoffSourceAsset && (
+                                <Flex align="center" gap={1}>
+                                    <Text fontSize="10px" color="gray.400">Parent:</Text>
+                                    <AssetBadge
+                                        asset={{ id: spinoffSourceAsset.asset_id!, symbol: spinoffSourceAsset.symbol || '?', label: spinoffSourceAsset.label }}
+                                        size="xs"
+                                        colorPalette="pink"
+                                        maxLength={12}
+                                    />
+                                </Flex>
+                            )}
+                            {spinoffAccountName && (
+                                <Badge size="xs" variant="outline" colorPalette="gray">
+                                    {spinoffAccountName}
+                                </Badge>
+                            )}
+                            {bundle.metadata?.spinoff_allocation_pct != null && (
+                                <Text fontSize="10px" color="gray.400">
+                                    {(bundle.metadata.spinoff_allocation_pct * 100).toFixed(0)}% alloc
+                                </Text>
+                            )}
+                        </Flex>
+                    )}
 
                     {/* Collapsible transaction list */}
                     <Box

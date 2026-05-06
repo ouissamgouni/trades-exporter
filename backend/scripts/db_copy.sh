@@ -4,15 +4,22 @@
 # ─────────────────────────────────────────────────────────────
 #
 # Usage:
-#   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run]
+#   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run] [--migrate]
 #
 # Each env file must define:
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
 #   POSTGRES_HOST, POSTGRES_PORT
 #
+# Flags:
+#   --dry-run     Preview what would happen without making changes
+#   --migrate     After restore, run Alembic migrations on the target
+#                 to bring the schema up to HEAD. Requires BACKEND_DIR
+#                 and ROOT_DIR env vars (set by Taskfile).
+#
 # Examples:
-#   ./db_copy.sh .env.dev .env.test
-#   ./db_copy.sh .env.test .env.prod --dry-run
+#   ./db_copy.sh config/dev.env config/staging.env
+#   ./db_copy.sh config/staging.env config/dev.env --migrate
+#   ./db_copy.sh config/staging.env config/prod.env --dry-run
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -61,12 +68,14 @@ test_connection() {
 # ── Parse arguments ──────────────────────────────────────────
 
 DRY_RUN=false
+MIGRATE=false
 SRC_ENV=""
 DST_ENV=""
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
+    --migrate) MIGRATE=true ;;
     *)
       if [[ -z "$SRC_ENV" ]]; then
         SRC_ENV="$arg"
@@ -79,8 +88,8 @@ for arg in "$@"; do
   esac
 done
 
-[[ -n "$SRC_ENV" ]] || die "Missing source env file.\nUsage: $0 <src_env> <dst_env> [--dry-run]"
-[[ -n "$DST_ENV" ]] || die "Missing target env file.\nUsage: $0 <src_env> <dst_env> [--dry-run]"
+[[ -n "$SRC_ENV" ]] || die "Missing source env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
+[[ -n "$DST_ENV" ]] || die "Missing target env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
 
 # ── Parse env files ──────────────────────────────────────────
 
@@ -97,6 +106,9 @@ echo "🔄 Database Copy"
 echo "═══════════════════════════════════════════════════"
 echo "   Source:  $SRC_HOST:$SRC_PORT/$SRC_DB"
 echo "   Target:  $DST_HOST:$DST_PORT/$DST_DB"
+if $MIGRATE; then
+  echo "   Migrate: yes (alembic upgrade head after restore)"
+fi
 echo "═══════════════════════════════════════════════════"
 echo ""
 
@@ -194,6 +206,52 @@ if [[ "$SRC_TABLES" == "$DST_TABLES_AFTER" ]]; then
 else
   info "⚠️  Table count mismatch — check for errors above"
 fi
-
 echo ""
+
+# ── Step 5 (optional): Migrate target to HEAD ───────────────
+
+if $MIGRATE; then
+  # Resolve paths: BACKEND_DIR and ROOT_DIR are passed by Taskfile.
+  # Fall back to reasonable defaults relative to this script.
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  _BACKEND_DIR="${BACKEND_DIR:-$(dirname "$SCRIPT_DIR")}"
+  _ROOT_DIR="${ROOT_DIR:-$(dirname "$_BACKEND_DIR")}"
+  ALEMBIC_INI="$_BACKEND_DIR/alembic.ini"
+  ALEMBIC_BIN="$_BACKEND_DIR/.venv/bin/alembic"
+
+  if [[ ! -f "$ALEMBIC_INI" ]]; then
+    echo "⚠️  Cannot migrate: alembic.ini not found at $ALEMBIC_INI"
+  elif [[ ! -x "$ALEMBIC_BIN" ]]; then
+    echo "⚠️  Cannot migrate: alembic not found at $ALEMBIC_BIN"
+  else
+    # Read current version from restored DB
+    RESTORED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+      --no-password -d "$DST_DB" -tAq \
+      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
+
+    echo "🔀 Running Alembic migrations on target..."
+    info "Current version: $RESTORED_VER"
+
+    PYTHONPATH="$_ROOT_DIR" \
+    DATABASE_URL="postgresql://$DST_USER:$DST_PASS@$DST_HOST:$DST_PORT/$DST_DB" \
+      "$ALEMBIC_BIN" -c "$ALEMBIC_INI" upgrade head 2>&1 | while IFS= read -r line; do
+        echo "   $line"
+      done
+
+    MIGRATED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+      --no-password -d "$DST_DB" -tAq \
+      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
+
+    if [[ "$RESTORED_VER" == "$MIGRATED_VER" ]]; then
+      info "✅ Already at HEAD ($MIGRATED_VER)"
+    else
+      info "✅ Migrated: $RESTORED_VER → $MIGRATED_VER"
+    fi
+
+    DST_TABLES_FINAL=$(table_count "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB")
+    info "Target tables (after migration): $DST_TABLES_FINAL"
+    echo ""
+  fi
+fi
+
 echo "✅ Done — $SRC_HOST:$SRC_PORT/$SRC_DB  →  $DST_HOST:$DST_PORT/$DST_DB"

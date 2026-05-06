@@ -21,6 +21,7 @@ class LinkageIssueDetector(IssueDetector):
         IssueType.UNLINKED_ASSET.value,
         IssueType.UNLINKED_PRICE_QUOTE.value,
         IssueType.UNLINKED_FEE_QUOTE.value,
+        IssueType.UNLINKED_ATTRIBUTED_ASSET.value,
     ]
     
     def count(
@@ -141,7 +142,8 @@ class LinkageIssueDetector(IssueDetector):
                 if issue_type in (
                     IssueType.UNLINKED_ASSET.value,
                     IssueType.UNLINKED_PRICE_QUOTE.value,
-                    IssueType.UNLINKED_FEE_QUOTE.value
+                    IssueType.UNLINKED_FEE_QUOTE.value,
+                    IssueType.UNLINKED_ATTRIBUTED_ASSET.value,
                 ):
                     suggestion = get_best_asset_suggestion(raw_value, all_assets)
                 elif issue_type == IssueType.UNLINKED_ACCOUNT.value:
@@ -271,6 +273,23 @@ class LinkageIssueDetector(IssueDetector):
                 NormalizedTransaction.account_id.in_(account_ids)
             )
         
+        # Subquery for unlinked attributed asset
+        missing_attributed_asset_subq = (
+            select(
+                NormalizedTransaction.id.label('tx_id'),
+                literal(IssueType.UNLINKED_ATTRIBUTED_ASSET.value).label('issue_type'),
+                NormalizedTransaction.source_attributed_asset_symbol.label('raw_value'),
+            )
+            .where(NormalizedTransaction.attributed_asset_id.is_(None))
+            .where(NormalizedTransaction.source_attributed_asset_symbol.isnot(None))
+            .where(NormalizedTransaction.source_attributed_asset_symbol != '')
+            .where(NormalizedTransaction.review_status != ReviewStatus.INVALID)
+        )
+        if account_ids:
+            missing_attributed_asset_subq = missing_attributed_asset_subq.where(
+                NormalizedTransaction.account_id.in_(account_ids)
+            )
+        
         # Collect subqueries based on requested issue types
         subqueries = []
         if types_set is None or IssueType.UNLINKED_ASSET.value in types_set:
@@ -281,9 +300,11 @@ class LinkageIssueDetector(IssueDetector):
             subqueries.append(missing_price_quote_subq)
         if types_set is None or IssueType.UNLINKED_FEE_QUOTE.value in types_set:
             subqueries.append(missing_fee_quote_subq)
+        if types_set is None or IssueType.UNLINKED_ATTRIBUTED_ASSET.value in types_set:
+            subqueries.append(missing_attributed_asset_subq)
         
         if not subqueries:
             # Fallback: return all types if empty filter somehow passed
-            subqueries = [missing_asset_subq, missing_account_subq, missing_price_quote_subq, missing_fee_quote_subq]
+            subqueries = [missing_asset_subq, missing_account_subq, missing_price_quote_subq, missing_fee_quote_subq, missing_attributed_asset_subq]
         
         return union_all(*subqueries).subquery()

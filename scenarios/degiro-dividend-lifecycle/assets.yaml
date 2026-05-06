@@ -1,0 +1,40 @@
+# DeGiro Dividend Lifecycle Scenario — Assets
+# ==============================================
+# Fiat currencies (EUR, USD, CHF) + 4 dividend-paying stocks.
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: USD
+    label: US Dollar
+    price_type: fiat
+
+  - symbol: CHF
+    label: Swiss Franc
+    price_type: fiat
+
+  - symbol: AAPL
+    label: Apple Inc
+    price_type: stock
+    isin: US0378331005
+    denomination_currency: USD
+
+  - symbol: MSFT
+    label: Microsoft Corp
+    price_type: stock
+    isin: US5949181045
+    denomination_currency: USD
+
+  - symbol: TTE
+    label: TotalEnergies SE
+    price_type: stock
+    isin: FR0000120271
+    denomination_currency: EUR
+
+  - symbol: NESN
+    label: Nestlé SA
+    price_type: stock
+    isin: CH0038863350
+    denomination_currency: CHF

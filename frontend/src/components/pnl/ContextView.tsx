@@ -31,8 +31,8 @@ import { ViewModeToggle, type AssetsViewMode } from './ViewModeToggle';
 import { useCategoryMaps } from '../../hooks/useCategoryMaps';
 import {
     useVersionMetrics,
-    useSettledMetrics,
-    useMarketMetrics,
+    useBookMetrics,
+    useLiveMetrics,
     useVersionPerformers,
     usePortfolioTimeline,
     useAssetPeriodDeltas,
@@ -106,8 +106,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
         balanceHealth,
         heroTimeline,
         versionMetrics,
-        settledMetrics,
-        marketMetrics,
+        bookMetrics,
+        liveMetrics,
         performers,
         pricesReady,
         baseCurrency,
@@ -184,13 +184,13 @@ export const ContextView: React.FC<ContextViewProps> = ({
         !!currentVersionId && hasScope,
     );
 
-    const scopedSettled = useSettledMetrics(
+    const scopedBook = useBookMetrics(
         currentVersionId,
         scopeApiFilters,
         !!currentVersionId && hasScope,
     );
 
-    const scopedMarket = useMarketMetrics(
+    const scopedLive = useLiveMetrics(
         currentVersionId,
         { ...scopeApiFilters, pricesReady },
         !!currentVersionId && hasScope,
@@ -225,14 +225,14 @@ export const ContextView: React.FC<ContextViewProps> = ({
 
     // ── Effective data: scoped when not at portfolio, global otherwise ──
     const effectiveMetrics = hasScope ? scopedVersionMetrics : versionMetrics;
-    const effectiveSettled = hasScope ? scopedSettled : settledMetrics;
-    const effectiveMarket = hasScope ? scopedMarket : marketMetrics;
+    const effectiveBook = hasScope ? scopedBook : bookMetrics;
+    const effectiveLive = hasScope ? scopedLive : liveMetrics;
     const effectivePerformers = hasScope ? scopedPerformers : performers;
     const effectiveTimeline = hasScope ? scopedTimeline : heroTimeline;
 
     const effectiveSummary = useMemo(() => {
-        const s = effectiveSettled.data?.summary;
-        const m = effectiveMarket.data?.summary;
+        const s = effectiveBook.data?.summary;
+        const m = effectiveLive.data?.summary;
         if (s) {
             return {
                 costBasis: s.cost_basis,
@@ -245,7 +245,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
             };
         }
         return scorecardSummary;
-    }, [effectiveSettled.data, effectiveMarket.data, scorecardSummary]);
+    }, [effectiveBook.data, effectiveLive.data, scorecardSummary]);
 
     // ── Filter assets by scope ──
     const scopedAssets: AssetPnLRow[] = useMemo(() => {
@@ -278,7 +278,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
 
     // ── Local asset table filters (do NOT affect metrics) ──
     const [search, setSearch] = useState('');
-    const [minMarketValue, setMinMarketValue] = useState(5);
+    const [minMarketValue, setMinMarketValue] = useState(0);
     const [pnlStatus, setPnlStatus] = useState<PnlStatusFilter>('with_pnl');
     const [balanceStatus, setBalanceStatus] = useState<BalanceStatusFilter>('all');
     const [assetsView, setAssetsView] = useState<AssetsViewMode>('list');
@@ -329,13 +329,13 @@ export const ContextView: React.FC<ContextViewProps> = ({
     // ── Period card ROI (scoped) ──
     const allRangeRois = useMemo(() => {
         const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
-        const mktData = effectiveMarket.data;
+        const mktData = effectiveLive.data;
         for (const r of RANGES) {
             const mkt = mktData?.ranges?.[r.key as RangeKey];
             if (mkt) result[r.key] = mkt.roi_pct;
         }
         return result;
-    }, [effectiveMarket.data]);
+    }, [effectiveLive.data]);
 
     // ── Tax status (on-demand) ──
     // Tax tab is always visible when a version exists — no longer gated by jurisdiction
@@ -528,8 +528,8 @@ export const ContextView: React.FC<ContextViewProps> = ({
                         ) : undefined}
                         summary={!overviewOpen && effectiveSummary ? (() => {
                             // Use period-specific metrics when a period is selected
-                            const settled = effectiveSettled.data?.ranges?.[timeframeRange as RangeKey];
-                            const market = effectiveMarket.data?.ranges?.[timeframeRange as RangeKey];
+                            const settled = effectiveBook.data?.ranges?.[timeframeRange as RangeKey];
+                            const market = effectiveLive.data?.ranges?.[timeframeRange as RangeKey];
                             const isPeriod = timeframeRange !== 'all' && (settled || market);
 
                             const costVal = isPeriod ? (settled?.cost_basis_in_period ?? 0) : effectiveSummary.costBasis;
@@ -564,12 +564,12 @@ export const ContextView: React.FC<ContextViewProps> = ({
                         <TimeframeIndicators
                             points={effectiveTimeline.data?.points || []}
                             baseCurrency={baseCurrency}
-                            isLoading={effectiveTimeline.isLoading || effectiveSettled.isLoading}
+                            isLoading={effectiveTimeline.isLoading || effectiveBook.isLoading}
                             summary={effectiveSummary}
                             periodSummaryData={effectiveMetrics.data ?? undefined}
-                            settledData={effectiveSettled.data ?? undefined}
-                            marketData={effectiveMarket.data ?? undefined}
-                            isMarketLoading={effectiveMarket.isLoading}
+                            bookData={effectiveBook.data ?? undefined}
+                            liveData={effectiveLive.data ?? undefined}
+                            isLiveLoading={effectiveLive.isLoading}
                             performersData={effectivePerformers.data ?? undefined}
                             isPerformersLoading={effectivePerformers.isLoading}
                             range={timeframeRange}
@@ -581,6 +581,7 @@ export const ContextView: React.FC<ContextViewProps> = ({
                             onGroupByChange={(g: GroupBy) => dispatch({ type: 'SET_PERFORMER_GROUP_BY', groupBy: g })}
                             onPerformerClick={onPerformerClick}
                             onFeesClick={() => { }}
+                            onIncomeClick={() => { }}
                             dimensions={dimensions}
                             selectedDimensionId={performerDimensionId}
                             onDimensionChange={(id: number | null) => dispatch({ type: 'SET_PERFORMER_DIMENSION_ID', id })}

@@ -89,6 +89,11 @@ export function usePnLCalculationStatus(
             });
             if (response.ok) {
                 const data = await response.json();
+                // Mark as initialized so that when the calculation completes
+                // and a new version_id appears, onNewVersion fires correctly.
+                // Without this, the first-ever calculation result is swallowed
+                // by the "first poll" guard in fetchStatus.
+                hasInitializedRef.current = true;
                 // Immediately re-fetch status to get calculating state
                 await fetchStatus();
                 return data.started === true;

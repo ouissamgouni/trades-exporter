@@ -98,3 +98,41 @@ class TestEtherscanNormalTxConnector:
             assert normalized_tx.include_fee is True
             assert normalized_tx.source_from_account == "0xtest_wallet"
             assert normalized_tx.source_to_account == "0xRECEIVER_ADDRESS"
+
+    def test_zero_value_tx_becomes_cost(self):
+        """Zero-value tx (contract call) uses new COST format: qty=fee, price=1, no fee fields."""
+        connector = ConnectorEtherscanNormalTx(
+            wallet_address="0xTEST_WALLET",
+            chain_name="ethereum",
+        )
+
+        mock_api_response = [
+            {
+                "hash": "0xeth_approval",
+                "transactionIndex": "5",
+                "from": "0xtest_wallet",
+                "to": "0xCONTRACT",
+                "value": "0",
+                "gasUsed": "46000",
+                "gasPrice": "50000000000",  # 50 gwei
+                "timeStamp": "1673900000",
+                "methodId": "0x095ea7b3",
+            }
+        ]
+
+        with patch.object(connector, "safe_request", return_value=mock_api_response):
+            results = list(connector.yield_normalized())
+            normalized_txs = [res[1] for res in results]
+            assert len(normalized_txs) == 1
+            tx = normalized_txs[0]
+
+            assert tx.transaction_type == "cost"
+            assert tx.direction == "outflow"
+            # New format: qty=fee_amount, price=1, price_quote=native
+            assert tx.quantity == 0.0023  # 46000 * 50 gwei = 2.3e15 wei = 0.0023 ETH
+            assert tx.price == 1.0
+            assert tx.source_price_quote_asset_symbol == "ETH"
+            assert tx.include_fee is False
+            # Fee fields should NOT be set
+            assert not tx.fee
+            assert not tx.source_fee_quote_asset_symbol

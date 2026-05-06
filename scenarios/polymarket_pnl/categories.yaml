@@ -1,0 +1,22 @@
+dimensions:
+  - label: "Sector"
+    ordinal: 0
+    categories:
+      - label: "Prediction Markets / Derivatives"
+        color: "#8B5CF6"
+        ordinal: 10
+        assets:
+          - "PM:rain-friday-Yes"
+          - "PM:eth-5k-Yes"
+          - "PM:superbowl-No"
+
+  - label: "Sub-Sector"
+    ordinal: 1
+    categories:
+      - label: "Crypto | Prediction Markets"
+        color: "#6366F1"
+        ordinal: 10
+        assets:
+          - "PM:rain-friday-Yes"
+          - "PM:eth-5k-Yes"
+          - "PM:superbowl-No"

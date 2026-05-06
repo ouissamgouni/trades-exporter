@@ -1,0 +1,30 @@
+# Docker Compose - Scenario Database Only
+# Used by start:scenario:dirty for isolated per-scenario PostgreSQL instances.
+# No env_file dependency — all config comes from shell environment.
+#
+# Usage (via Taskfile only):
+#   task start:scenario:dirty                        → default instance
+#   task start:scenario:dirty SCENARIO=fr_tax        → fr_tax instance (port 5440)
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: trades_db_${ENV_NAME}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: trades_${ENV_NAME}_data

@@ -17,12 +17,12 @@ Guarantees:
 """
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlmodel import Session, select
 
 from backend.db.models import (
@@ -35,6 +35,7 @@ from backend.db.models import (
     CostLot,
     CostLotEvent,
     FeeEntry,
+    IncomeEvent,
     PriceSnapshot,
     RealizedPnl,
 )
@@ -74,34 +75,96 @@ class PerformerItem:
     efficiency: float = 0.0  # total_return / max(cost_basis, 1)
 
 
-@dataclass
-class RangeMetrics:
-    """Metrics for a single time period."""
-    total_return: float
-    roi_pct: float
-    current_value: float
-    cost_basis: float
-    unrealized_pnl: float
-    realized_pnl: float
-    taxable_realized_pnl: float
-    realized_in_period: float
-    cost_basis_in_period: float = 0.0
-    unrealized_in_period: float = 0.0
-    fees_in_period: float = 0.0
-    top_performers: List[PerformerItem] = field(default_factory=list)
-    flop_performers: List[PerformerItem] = field(default_factory=list)
-
+# ---------------------------------------------------------------------------
+# Book metrics (cost-lot-based, no market prices needed)
+# ---------------------------------------------------------------------------
 
 @dataclass
-class SummaryMetrics:
-    """All-time portfolio summary (constant across periods)."""
-    current_value: float
+class BookSummary:
+    """All-time book summary (cost-lot-based, no prices needed)."""
     cost_basis: float
-    unrealized_pnl: float
     realized_pnl: float
     taxable_realized_pnl: float
     total_fees: float
     fee_entry_count: int
+    total_invested: float = 0.0
+    total_income: float = 0.0
+    total_withholding: float = 0.0
+    income_event_count: int = 0
+
+
+@dataclass
+class BookRangeMetrics:
+    """Per-period book metrics (no market prices needed)."""
+    cost_basis: float
+    realized_pnl: float
+    taxable_realized_pnl: float
+    realized_in_period: float
+    cost_basis_in_period: float
+    fees_in_period: float
+    total_invested: float = 0.0
+    income_in_period: float = 0.0
+    withholding_in_period: float = 0.0
+
+
+@dataclass
+class BookVersionMetrics:
+    """Book metrics result (fast, no price lookup)."""
+    version_id: int
+    summary: BookSummary
+    ranges: Dict[str, BookRangeMetrics] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Live metrics (price-dependent)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LiveSummary:
+    """All-time live summary (price-dependent)."""
+    current_value: float
+    unrealized_pnl: float
+
+
+@dataclass
+class LiveRangeMetrics:
+    """Per-period live metrics (price-dependent)."""
+    current_value: float
+    unrealized_pnl: float
+    unrealized_in_period: float
+    total_return: float
+    roi_pct: float
+
+
+@dataclass
+class LiveVersionMetrics:
+    """Live metrics result (requires prices from PriceSnapshot)."""
+    version_id: int
+    summary: LiveSummary
+    ranges: Dict[str, LiveRangeMetrics] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Combined metrics (book + live + performers)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SummaryMetrics(BookSummary):
+    """All-time portfolio summary. Extends BookSummary with live price fields."""
+    current_value: float = 0.0
+    unrealized_pnl: float = 0.0
+
+
+@dataclass
+class RangeMetrics(BookRangeMetrics):
+    """Combined per-period metrics with live data and performers."""
+    total_return: float = 0.0
+    roi_pct: float = 0.0
+    current_value: float = 0.0
+    unrealized_pnl: float = 0.0
+    unrealized_in_period: float = 0.0
+    top_performers: List[PerformerItem] = field(default_factory=list)
+    flop_performers: List[PerformerItem] = field(default_factory=list)
 
 
 @dataclass
@@ -112,34 +175,9 @@ class VersionMetrics:
     ranges: Dict[str, RangeMetrics] = field(default_factory=dict)
 
 
-@dataclass
-class SettledSummary:
-    """All-time settled summary (no market prices needed)."""
-    cost_basis: float
-    realized_pnl: float
-    taxable_realized_pnl: float
-    total_fees: float
-    fee_entry_count: int
-
-
-@dataclass
-class SettledRangeMetrics:
-    """Per-period settled metrics (no market prices needed)."""
-    cost_basis: float
-    realized_pnl: float
-    taxable_realized_pnl: float
-    realized_in_period: float
-    cost_basis_in_period: float
-    fees_in_period: float
-
-
-@dataclass
-class SettledVersionMetrics:
-    """Settled metrics result (fast, no price lookup)."""
-    version_id: int
-    summary: SettledSummary
-    ranges: Dict[str, SettledRangeMetrics] = field(default_factory=dict)
-
+# ---------------------------------------------------------------------------
+# Other result types
+# ---------------------------------------------------------------------------
 
 @dataclass
 class PerformersResult:
@@ -166,31 +204,6 @@ class AssetPeriodDelta:
     market_value_change: float
 
 
-@dataclass
-class MarketSummary:
-    """All-time market summary (price-dependent)."""
-    current_value: float
-    unrealized_pnl: float
-
-
-@dataclass
-class MarketRangeMetrics:
-    """Per-period market metrics (price-dependent)."""
-    current_value: float
-    unrealized_pnl: float
-    unrealized_in_period: float
-    total_return: float
-    roi_pct: float
-
-
-@dataclass
-class MarketVersionMetrics:
-    """Market metrics result (requires prices from PriceSnapshot)."""
-    version_id: int
-    summary: MarketSummary
-    ranges: Dict[str, MarketRangeMetrics] = field(default_factory=dict)
-
-
 # ---------------------------------------------------------------------------
 # Internal helpers (moved from portfolio_timeline.py)
 # ---------------------------------------------------------------------------
@@ -200,26 +213,47 @@ def _ensure_naive(dt: datetime) -> datetime:
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
+# Patterns that represent real cash expenditure (include in total_invested)
+_INVESTMENT_PATTERNS = ["swap", "flow"]
+
+
 def _get_current_from_cost_lots(
     session: Session,
     version_id: int,
     asset_ids: Optional[List[int]] = None,
     account_ids: Optional[List[int]] = None,
     include_unsettled_negative: bool = False,
-) -> Tuple[Dict[int, float], Dict[int, float]]:
+) -> Tuple[Dict[int, float], Dict[int, float], Dict[int, float]]:
     """
     Get current balances and cost basis directly from CostLot records.
 
     This is the authoritative source used by the /balances endpoint.
 
     Returns:
-        (balances, costs) where each is { asset_id: value }
+        (balances, remaining_costs, total_invested) where each is { asset_id: value }
+        - balances: current remaining qty per asset
+        - remaining_costs: remaining cost basis (qty_remaining × unit_cost_in_base)
+        - total_invested: cash actually spent (only swap/flow patterns)
     """
+    # Only count lots from real acquisitions (swap/flow/unknown) toward total_invested.
+    # Lots created by spinoff, internal_transfer, split, custom are cost
+    # redistributions — not new cash expenditure.
+    invested_expr = func.sum(
+        case(
+            (CalculationUnit.pattern.in_(_INVESTMENT_PATTERNS),
+             CostLot.qty * CostLot.unit_cost_in_base),
+            (CalculationUnit.pattern.is_(None),
+             CostLot.qty * CostLot.unit_cost_in_base),
+            else_=0,
+        )
+    ).label("total_invested")
+
     query = (
         select(
             CostLot.asset_id,
             func.sum(CostLot.qty_remaining).label("total_qty"),
             func.sum(CostLot.qty_remaining * CostLot.unit_cost_in_base).label("total_cost"),
+            invested_expr,
         )
         .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
         .where(CalculationUnit.version_id == version_id)
@@ -239,16 +273,19 @@ def _get_current_from_cost_lots(
     rows = session.exec(query).all()
 
     balances: Dict[int, float] = {}
-    costs: Dict[int, float] = {}
+    remaining_costs: Dict[int, float] = {}
+    total_invested: Dict[int, float] = {}
     for row in rows:
         aid = row.asset_id
         qty = float(row.total_qty or 0)
         cost = float(row.total_cost or 0)
+        invested = float(row.total_invested or 0)
         if abs(qty) > 1e-12 or abs(cost) > 1e-12:
             balances[aid] = qty
-            costs[aid] = cost
+            remaining_costs[aid] = cost
+            total_invested[aid] = invested
 
-    return balances, costs
+    return balances, remaining_costs, total_invested
 
 
 def _get_current_from_cost_lots_by_account(
@@ -436,6 +473,76 @@ def _get_cost_basis_snapshots_at_dates(
     return result
 
 
+def _get_invested_snapshots_at_dates(
+    session: Session,
+    version_id: int,
+    bucket_dates: List[datetime],
+    asset_ids: Optional[List[int]] = None,
+    account_ids: Optional[List[int]] = None,
+    include_unsettled_negative: bool = False,
+) -> Dict[str, Dict[int, float]]:
+    """
+    For each date bucket, compute cumulative invested per asset.
+
+    Uses CostLot.acquired_at for timing and current qty × unit_cost for the
+    amount.  Only includes swap/flow/None patterns (real cash expenditure).
+
+    Returns: { date_str: { asset_id: cumulative_invested } }
+    """
+    if not bucket_dates:
+        return {}
+
+    query = (
+        select(
+            CostLot.acquired_at,
+            CostLot.asset_id,
+            (CostLot.qty * CostLot.unit_cost_in_base).label("invested"),
+        )
+        .join(CalculationUnit, CostLot.unit_id == CalculationUnit.id)
+        .where(CalculationUnit.version_id == version_id)
+        .where(
+            or_(
+                CalculationUnit.pattern.in_(_INVESTMENT_PATTERNS),
+                CalculationUnit.pattern.is_(None),
+            )
+        )
+        .order_by(CostLot.acquired_at)
+    )
+
+    if not include_unsettled_negative:
+        query = query.where(
+            or_(CostLot.is_negative == False, CostLot.is_settled == True)  # noqa: E712
+        )
+    if asset_ids:
+        query = query.where(CostLot.asset_id.in_(asset_ids))
+    if account_ids:
+        query = query.where(CostLot.account_id.in_(account_ids))
+
+    lots = session.exec(query).all()
+    if not lots:
+        return {bd.strftime("%Y-%m-%d"): {} for bd in bucket_dates}
+
+    lots_list = [
+        (_ensure_naive(l.acquired_at), l.asset_id, float(l.invested))
+        for l in lots
+    ]
+
+    result: Dict[str, Dict[int, float]] = {}
+    lot_idx = 0
+    cumulative: Dict[int, float] = defaultdict(float)
+
+    for bucket_date in sorted(bucket_dates):
+        bd = _ensure_naive(bucket_date)
+        while lot_idx < len(lots_list) and lots_list[lot_idx][0] <= bd:
+            _, asset_id, invested = lots_list[lot_idx]
+            cumulative[asset_id] += invested
+            lot_idx += 1
+
+        result[bucket_date.strftime("%Y-%m-%d")] = dict(cumulative)
+
+    return result
+
+
 def _get_price_at_dates(
     session: Session,
     base_currency_id: Optional[int],
@@ -541,7 +648,7 @@ def _get_cumulative_realized_pnl(
 
     rpnl_query = (
         select(
-            RealizedPnl.asset_id,
+            func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).label("effective_asset_id"),
             RealizedPnl.pnl_in_base,
             RealizedPnl.realized_at,
         )
@@ -555,7 +662,10 @@ def _get_cumulative_realized_pnl(
         rpnl_query = rpnl_query.where(RealizedPnl.disposal_taxable == True)  # noqa: E712
 
     if asset_ids:
-        rpnl_query = rpnl_query.where(RealizedPnl.asset_id.in_(asset_ids))
+        # Filter on effective asset: entries where either asset_id or attributed_asset_id matches
+        rpnl_query = rpnl_query.where(
+            func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).in_(asset_ids)
+        )
 
     if account_ids:
         from backend.db.models import NormalizedTransaction
@@ -568,7 +678,7 @@ def _get_cumulative_realized_pnl(
     rpnl_rows = session.exec(rpnl_query).all()
 
     rpnl_list = [
-        (_ensure_naive(r.realized_at), r.asset_id, float(r.pnl_in_base))
+        (_ensure_naive(r.realized_at), r.effective_asset_id, float(r.pnl_in_base))
         for r in rpnl_rows
     ]
 
@@ -626,7 +736,9 @@ def _get_cumulative_realized_pnl_by_account(
     )
 
     if asset_ids:
-        rpnl_query = rpnl_query.where(RealizedPnl.asset_id.in_(asset_ids))
+        rpnl_query = rpnl_query.where(
+            func.coalesce(RealizedPnl.attributed_asset_id, RealizedPnl.asset_id).in_(asset_ids)
+        )
     if account_ids:
         rpnl_query = rpnl_query.where(NormalizedTransaction.account_id.in_(account_ids))
 
@@ -804,6 +916,57 @@ def _get_fees_by_asset(
 
 
 # ---------------------------------------------------------------------------
+# Income aggregation helpers
+# ---------------------------------------------------------------------------
+
+def _compute_income_summary(
+    session: Session,
+    version_id: int,
+) -> Tuple[float, float, int]:
+    """Compute total income, withholding, and event count for a version."""
+    try:
+        result = session.exec(
+            select(
+                func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0).label("total_income"),
+                func.coalesce(func.sum(IncomeEvent.withholding_amount_in_base), 0).label("total_withholding"),
+                func.count(IncomeEvent.id).label("event_count"),
+            )
+            .where(IncomeEvent.version_id == version_id)
+        ).first()
+        if not result:
+            return 0.0, 0.0, 0
+        return float(result.total_income), float(result.total_withholding), int(result.event_count)
+    except (TypeError, AttributeError):
+        return 0.0, 0.0, 0
+
+
+def _compute_income_in_period(
+    session: Session,
+    version_id: int,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> Tuple[float, float]:
+    """Compute income and withholding within a date range."""
+    try:
+        result = session.exec(
+            select(
+                func.coalesce(func.sum(IncomeEvent.gross_amount_in_base), 0),
+                func.coalesce(func.sum(IncomeEvent.withholding_amount_in_base), 0),
+            )
+            .where(
+                IncomeEvent.version_id == version_id,
+                IncomeEvent.income_at >= start_dt,
+                IncomeEvent.income_at <= end_dt,
+            )
+        ).first()
+        if not result:
+            return 0.0, 0.0
+        return float(result[0]), float(result[1])
+    except (TypeError, AttributeError):
+        return 0.0, 0.0
+
+
+# ---------------------------------------------------------------------------
 # Shared snapshot infrastructure
 # ---------------------------------------------------------------------------
 
@@ -816,12 +979,14 @@ class _VersionSnapshot:
     now: datetime
     now_ds: str
     now_lot_balances: Dict[int, float]
-    now_lot_costs: Dict[int, float]
+    now_lot_remaining_costs: Dict[int, float]
+    now_lot_invested: Dict[int, float]
     all_asset_ids: set
     range_starts: Dict[str, datetime]
     unique_dates: List[datetime]
     balance_snapshots: Dict[str, Dict[int, float]]
     cost_basis_snapshots: Dict[str, Dict[int, float]]
+    invested_snapshots: Dict[str, Dict[int, float]] = field(default_factory=dict)
 
 
 def _build_version_snapshot(
@@ -863,15 +1028,15 @@ def _build_version_snapshot(
         min_date = min_date.replace(tzinfo=timezone.utc)
 
     # Current lots
-    now_lot_balances, now_lot_costs = _get_current_from_cost_lots(
+    now_lot_balances, now_lot_remaining_costs, now_lot_acquired = _get_current_from_cost_lots(
         session, version_id, asset_ids, account_ids,
         include_unsettled_negative=include_unsettled_negative,
     )
 
     if need_balances:
-        all_asset_ids = set(now_lot_balances.keys()) | set(now_lot_costs.keys())
+        all_asset_ids = set(now_lot_balances.keys()) | set(now_lot_remaining_costs.keys())
     else:
-        all_asset_ids = set(now_lot_costs.keys())
+        all_asset_ids = set(now_lot_remaining_costs.keys())
 
     # Build boundary dates
     boundary_dates: List[datetime] = [now]
@@ -900,10 +1065,15 @@ def _build_version_snapshot(
         include_unsettled_negative=include_unsettled_negative,
     )
 
+    invested_snapshots = _get_invested_snapshots_at_dates(
+        session, version_id, unique_dates, asset_ids, account_ids,
+        include_unsettled_negative=include_unsettled_negative,
+    )
+
     now_ds = now.strftime("%Y-%m-%d")
     if need_balances:
         balance_snapshots[now_ds] = now_lot_balances
-    cost_basis_snapshots[now_ds] = now_lot_costs
+    cost_basis_snapshots[now_ds] = now_lot_remaining_costs
 
     # Expand all_asset_ids from historical snapshots
     if need_balances:
@@ -917,12 +1087,14 @@ def _build_version_snapshot(
         now=now,
         now_ds=now_ds,
         now_lot_balances=now_lot_balances,
-        now_lot_costs=now_lot_costs,
+        now_lot_remaining_costs=now_lot_remaining_costs,
+        now_lot_invested=now_lot_acquired,
         all_asset_ids=all_asset_ids,
         range_starts=range_starts,
         unique_dates=unique_dates,
         balance_snapshots=balance_snapshots,
         cost_basis_snapshots=cost_basis_snapshots,
+        invested_snapshots=invested_snapshots,
     )
 
 
@@ -988,7 +1160,7 @@ def _compute_portfolio_range_metrics(
 ) -> Tuple[float, float, float, float, float]:
     """
     Compute portfolio-level range metrics shared by compute_version_metrics
-    and compute_market_metrics.
+    and compute_live_metrics.
 
     Base currency is excluded from period aggregation to avoid inflated
     ROI from cash-flow movements.
@@ -1322,6 +1494,159 @@ def _sort_top_flop(
 
 
 # ---------------------------------------------------------------------------
+# Internal computation cores (shared by public functions)
+# ---------------------------------------------------------------------------
+
+def _compute_book_core(
+    session: Session,
+    snap: "_VersionSnapshot",
+    version_id: int,
+    asset_ids: Optional[List[int]],
+    account_ids: Optional[List[int]],
+) -> Tuple[
+    BookSummary,
+    Dict[str, BookRangeMetrics],
+    float,                                               # total_fees
+    int,                                                 # fee_count
+    Dict[str, Tuple[float, Dict[int, float]]],           # cumulative_rpnl
+]:
+    """
+    Core book metrics computation shared by compute_book_metrics and compute_version_metrics.
+
+    Returns:
+        (summary, ranges, total_fees, fee_count, cumulative_rpnl)
+    """
+    all_asset_ids = snap.all_asset_ids
+    cost_basis = sum(snap.now_lot_remaining_costs.values())
+    total_invested = sum(snap.now_lot_invested.get(aid, 0.0) for aid in all_asset_ids)
+
+    # Fee summary
+    total_fees, fee_count = _compute_fee_summary(session, version_id)
+
+    # Realized PnL
+    cumulative_rpnl = _build_realized_pnl_snapshots(
+        session, snap, asset_ids, account_ids, taxable_only=False,
+    )
+    cumulative_rpnl_taxable = _get_cumulative_realized_pnl(
+        session, snap.version.version_id, [snap.now], asset_ids, account_ids,
+        taxable_only=True,
+    )
+
+    now_rpnl_total = cumulative_rpnl.get(snap.now_ds, (0.0, {}))[0]
+    taxable_rpnl_total = cumulative_rpnl_taxable.get(snap.now_ds, (0.0, {}))[0]
+
+    # Income summary
+    total_income, total_withholding, income_count = _compute_income_summary(session, version_id)
+
+    summary = BookSummary(
+        cost_basis=round(cost_basis, 2),
+        realized_pnl=round(now_rpnl_total, 2),
+        taxable_realized_pnl=round(taxable_rpnl_total, 2),
+        total_fees=round(total_fees, 2),
+        fee_entry_count=fee_count,
+        total_invested=round(total_invested, 2),
+        total_income=round(total_income, 2),
+        total_withholding=round(total_withholding, 2),
+        income_event_count=income_count,
+    )
+
+    ranges: Dict[str, BookRangeMetrics] = {}
+    for range_key, start_dt in snap.range_starts.items():
+        start_ds = start_dt.strftime("%Y-%m-%d")
+        start_costs = snap.cost_basis_snapshots.get(start_ds, {})
+        start_rpnl_total = cumulative_rpnl.get(start_ds, (0.0, {}))[0]
+
+        realized_in_period = now_rpnl_total - start_rpnl_total
+
+        if range_key == "all":
+            cost_basis_in_period = cost_basis
+            fees_in_period = total_fees
+            invested_in_period = total_invested
+            income_in_period = total_income
+            withholding_in_period = total_withholding
+        else:
+            start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
+            cost_basis_in_period = cost_basis - start_cost
+            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, snap.now)
+            start_invested = snap.invested_snapshots.get(start_ds, {})
+            invested_in_period = total_invested - sum(
+                start_invested.get(aid, 0.0) for aid in all_asset_ids
+            )
+            income_in_period, withholding_in_period = _compute_income_in_period(
+                session, version_id, start_dt, snap.now
+            )
+
+        ranges[range_key] = BookRangeMetrics(
+            cost_basis=round(cost_basis, 2),
+            realized_pnl=round(now_rpnl_total, 2),
+            taxable_realized_pnl=round(taxable_rpnl_total, 2),
+            realized_in_period=round(realized_in_period, 2),
+            cost_basis_in_period=round(cost_basis_in_period, 2),
+            fees_in_period=round(fees_in_period, 2),
+            total_invested=round(invested_in_period, 2),
+            income_in_period=round(income_in_period, 2),
+            withholding_in_period=round(withholding_in_period, 2),
+        )
+
+    return summary, ranges, total_fees, fee_count, cumulative_rpnl
+
+
+def _compute_live_core(
+    snap: "_VersionSnapshot",
+    price_snapshots: Dict[str, Dict[int, float]],
+    cumulative_rpnl: Dict[str, Tuple[float, Dict[int, float]]],
+    cost_basis: float,
+) -> Tuple[LiveSummary, Dict[str, LiveRangeMetrics]]:
+    """
+    Core live metrics computation shared by compute_live_metrics and compute_version_metrics.
+
+    Returns:
+        (summary, ranges)
+    """
+    all_asset_ids = snap.all_asset_ids
+
+    now_balances, now_costs, now_prices, now_rpnl_total, _ = _snapshot_at(
+        snap, price_snapshots, cumulative_rpnl, snap.now,
+    )
+
+    current_value = sum(
+        now_balances.get(aid, 0.0) * now_prices.get(aid, 0.0)
+        for aid in all_asset_ids
+    )
+    unrealized_pnl = current_value - cost_basis
+
+    summary = LiveSummary(
+        current_value=round(current_value, 2),
+        unrealized_pnl=round(unrealized_pnl, 2),
+    )
+
+    ranges: Dict[str, LiveRangeMetrics] = {}
+    for range_key, start_dt in snap.range_starts.items():
+        start_balances, start_costs, start_prices, start_rpnl_total, _ = _snapshot_at(
+            snap, price_snapshots, cumulative_rpnl, start_dt,
+        )
+
+        total_return, roi_pct, unrealized_in_period, _, _ = _compute_portfolio_range_metrics(
+            all_asset_ids, range_key,
+            now_balances, now_costs, now_prices,
+            start_balances, start_costs, start_prices,
+            now_rpnl_total, start_rpnl_total,
+            unrealized_pnl, cost_basis,
+            base_currency_id=snap.base_currency_id,
+        )
+
+        ranges[range_key] = LiveRangeMetrics(
+            current_value=round(current_value, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),
+            unrealized_in_period=round(unrealized_in_period, 2),
+            total_return=round(total_return, 2),
+            roi_pct=round(roi_pct, 2),
+        )
+
+    return summary, ranges
+
+
+# ---------------------------------------------------------------------------
 # Main public function
 # ---------------------------------------------------------------------------
 
@@ -1341,8 +1666,8 @@ def compute_version_metrics(
     """
     Compute all PnL metrics for a version.
 
-    This is the single entry point for all metric computation. It guarantees
-    consistency across realized/unrealized P&L, market value, and performers.
+    Composes book core (cost-lot-based) + live core (price-dependent) + performers.
+    This is the single entry point for combined metric computation.
 
     Args:
         periods: Which period ranges to compute. Default: all of them.
@@ -1363,7 +1688,10 @@ def compute_version_metrics(
         if resolved is None:
             return VersionMetrics(
                 version_id=version_id,
-                summary=SummaryMetrics(0, 0, 0, 0, 0, 0, 0),
+                summary=SummaryMetrics(
+                    cost_basis=0, realized_pnl=0, taxable_realized_pnl=0,
+                    total_fees=0, fee_entry_count=0,
+                ),
             )
         asset_ids = resolved
 
@@ -1378,78 +1706,50 @@ def compute_version_metrics(
         total_fees, fee_count = _compute_fee_summary(session, version_id)
         return VersionMetrics(
             version_id=version_id,
-            summary=SummaryMetrics(0, 0, 0, 0, 0, total_fees, fee_count),
+            summary=SummaryMetrics(
+                cost_basis=0, realized_pnl=0, taxable_realized_pnl=0,
+                total_fees=total_fees, fee_entry_count=fee_count,
+            ),
         )
 
-    # Price and realized PnL snapshots
-    price_snapshots = _build_price_snapshot(session, snap, refresh=refresh_prices)
-    cumulative_rpnl = _build_realized_pnl_snapshots(
-        session, snap, asset_ids, account_ids, taxable_only=False,
-    )
-    cumulative_rpnl_taxable = _get_cumulative_realized_pnl(
-        session, snap.version.version_id, [snap.now], asset_ids, account_ids,
-        taxable_only=True,
+    # ── Book core (cost-lot-based) ──
+    book_summary, book_ranges, total_fees, fee_count, cumulative_rpnl = _compute_book_core(
+        session, snap, version_id, asset_ids, account_ids,
     )
 
+    # ── Live core (price-dependent) ──
+    price_snapshots = _build_price_snapshot(session, snap, refresh=refresh_prices)
+    live_summary, live_ranges = _compute_live_core(
+        snap, price_snapshots, cumulative_rpnl, book_summary.cost_basis,
+    )
+
+    # ── Combined summary ──
+    summary = SummaryMetrics(
+        **asdict(book_summary),
+        current_value=live_summary.current_value,
+        unrealized_pnl=live_summary.unrealized_pnl,
+    )
+
+    # ── Per-period combined ranges (book + live + performers) ──
     all_asset_ids = snap.all_asset_ids
     all_asset_ids_list = list(all_asset_ids)
     asset_symbols = _get_asset_symbols(session, all_asset_ids_list)
     asset_labels = _get_asset_labels(session, all_asset_ids_list)
     fees_by_asset = _get_fees_by_asset(session, version_id)
 
-    # Current snapshots
     now_balances, now_costs, now_prices, now_rpnl_total, now_rpnl_by_asset = _snapshot_at(
         snap, price_snapshots, cumulative_rpnl, snap.now,
     )
-    taxable_rpnl_total = cumulative_rpnl_taxable.get(snap.now_ds, (0.0, {}))[0]
 
-    # Portfolio-level "now" values (constant across periods)
-    current_value = sum(
-        now_balances.get(aid, 0.0) * now_prices.get(aid, 0.0)
-        for aid in all_asset_ids
-    )
-    cost_basis = sum(now_costs.get(aid, 0.0) for aid in all_asset_ids)
-    unrealized_pnl = current_value - cost_basis
-    realized_pnl = now_rpnl_total
-
-    # Fee summary
-    total_fees, fee_count = _compute_fee_summary(session, version_id)
-
-    summary = SummaryMetrics(
-        current_value=round(current_value, 2),
-        cost_basis=round(cost_basis, 2),
-        unrealized_pnl=round(unrealized_pnl, 2),
-        realized_pnl=round(realized_pnl, 2),
-        taxable_realized_pnl=round(taxable_rpnl_total, 2),
-        total_fees=round(total_fees, 2),
-        fee_entry_count=fee_count,
-    )
-
-    # Compute per-period metrics
     ranges: Dict[str, RangeMetrics] = {}
 
     for range_key, start_dt in snap.range_starts.items():
+        book_range = book_ranges[range_key]
+        live_range = live_ranges[range_key]
+
         start_balances, start_costs, start_prices, start_rpnl_total, start_rpnl_by_asset = (
             _snapshot_at(snap, price_snapshots, cumulative_rpnl, start_dt)
         )
-
-        total_return, roi_pct, unrealized_in_period, realized_in_period, start_cost = (
-            _compute_portfolio_range_metrics(
-                all_asset_ids, range_key,
-                now_balances, now_costs, now_prices,
-                start_balances, start_costs, start_prices,
-                now_rpnl_total, start_rpnl_total,
-                unrealized_pnl, cost_basis,
-                base_currency_id=snap.base_currency_id,
-            )
-        )
-
-        if range_key == "all":
-            cost_basis_in_period = cost_basis
-            fees_in_period = total_fees
-        else:
-            cost_basis_in_period = cost_basis - start_cost
-            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, snap.now)
 
         # Rank performers based on group_by
         if group_by == "account":
@@ -1476,17 +1776,12 @@ def compute_version_metrics(
             )
 
         ranges[range_key] = RangeMetrics(
-            total_return=round(total_return, 2),
-            roi_pct=round(roi_pct, 2),
-            current_value=round(current_value, 2),
-            cost_basis=round(cost_basis, 2),
-            unrealized_pnl=round(unrealized_pnl, 2),
-            realized_pnl=round(realized_pnl, 2),
-            taxable_realized_pnl=round(taxable_rpnl_total, 2),
-            realized_in_period=round(realized_in_period, 2),
-            cost_basis_in_period=round(cost_basis_in_period, 2),
-            unrealized_in_period=round(unrealized_in_period, 2),
-            fees_in_period=round(fees_in_period, 2),
+            **asdict(book_range),
+            total_return=live_range.total_return,
+            roi_pct=live_range.roi_pct,
+            current_value=live_range.current_value,
+            unrealized_pnl=live_range.unrealized_pnl,
+            unrealized_in_period=live_range.unrealized_in_period,
             top_performers=top,
             flop_performers=flop,
         )
@@ -1506,10 +1801,10 @@ def compute_version_metrics(
 
 
 # ---------------------------------------------------------------------------
-# Settled metrics (no market prices needed)
+# Book metrics (cost-lot-based, no market prices needed)
 # ---------------------------------------------------------------------------
 
-def compute_settled_metrics(
+def compute_book_metrics(
     session: Session,
     version_id: int,
     periods: Optional[List[str]] = None,
@@ -1517,7 +1812,7 @@ def compute_settled_metrics(
     account_ids: Optional[List[int]] = None,
     category_ids: Optional[List[int]] = None,
     include_unsettled_negative: bool = False,
-) -> Optional[SettledVersionMetrics]:
+) -> Optional[BookVersionMetrics]:
     """
     Compute cost-lot-based metrics that don't require market prices.
     Returns immediately without any price lookup — ideal for instant display.
@@ -1528,13 +1823,15 @@ def compute_settled_metrics(
     if category_ids:
         resolved = _resolve_category_to_asset_ids(session, category_ids, asset_ids)
         if resolved is None:
-            return SettledVersionMetrics(
+            return BookVersionMetrics(
                 version_id=version_id,
-                summary=SettledSummary(0, 0, 0, 0, 0),
+                summary=BookSummary(
+                    cost_basis=0, realized_pnl=0, taxable_realized_pnl=0,
+                    total_fees=0, fee_entry_count=0,
+                    total_income=0, total_withholding=0, income_event_count=0,
+                ),
             )
         asset_ids = resolved
-
-    total_fees, fee_count = _compute_fee_summary(session, version_id)
 
     snap = _build_version_snapshot(
         session, version_id, periods, asset_ids, account_ids,
@@ -1545,65 +1842,26 @@ def compute_settled_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        return SettledVersionMetrics(
+        total_fees, fee_count = _compute_fee_summary(session, version_id)
+        return BookVersionMetrics(
             version_id=version_id,
-            summary=SettledSummary(0, 0, 0, total_fees, fee_count),
+            summary=BookSummary(
+                cost_basis=0, realized_pnl=0, taxable_realized_pnl=0,
+                total_fees=total_fees, fee_entry_count=fee_count,
+                total_income=0, total_withholding=0, income_event_count=0,
+            ),
         )
 
-    all_asset_ids = snap.all_asset_ids
-    cost_basis = sum(snap.now_lot_costs.values())
-
-    # Realized PnL
-    cumulative_rpnl = _build_realized_pnl_snapshots(
-        session, snap, asset_ids, account_ids, taxable_only=False,
-    )
-    cumulative_rpnl_taxable = _get_cumulative_realized_pnl(
-        session, snap.version.version_id, [snap.now], asset_ids, account_ids,
-        taxable_only=True,
+    book_summary, book_ranges, _, _, _ = _compute_book_core(
+        session, snap, version_id, asset_ids, account_ids,
     )
 
-    now_rpnl_total = cumulative_rpnl.get(snap.now_ds, (0.0, {}))[0]
-    taxable_rpnl_total = cumulative_rpnl_taxable.get(snap.now_ds, (0.0, {}))[0]
+    log.info("book_metrics_computed", version_id=version_id, ranges=list(book_ranges.keys()))
 
-    summary = SettledSummary(
-        cost_basis=round(cost_basis, 2),
-        realized_pnl=round(now_rpnl_total, 2),
-        taxable_realized_pnl=round(taxable_rpnl_total, 2),
-        total_fees=round(total_fees, 2),
-        fee_entry_count=fee_count,
-    )
-
-    ranges: Dict[str, SettledRangeMetrics] = {}
-    for range_key, start_dt in snap.range_starts.items():
-        start_ds = start_dt.strftime("%Y-%m-%d")
-        start_costs = snap.cost_basis_snapshots.get(start_ds, {})
-        start_rpnl_total = cumulative_rpnl.get(start_ds, (0.0, {}))[0]
-
-        realized_in_period = now_rpnl_total - start_rpnl_total
-
-        if range_key == "all":
-            cost_basis_in_period = cost_basis
-            fees_in_period = total_fees
-        else:
-            start_cost = sum(start_costs.get(aid, 0.0) for aid in all_asset_ids)
-            cost_basis_in_period = cost_basis - start_cost
-            fees_in_period = _compute_fees_in_period(session, version_id, start_dt, snap.now)
-
-        ranges[range_key] = SettledRangeMetrics(
-            cost_basis=round(cost_basis, 2),
-            realized_pnl=round(now_rpnl_total, 2),
-            taxable_realized_pnl=round(taxable_rpnl_total, 2),
-            realized_in_period=round(realized_in_period, 2),
-            cost_basis_in_period=round(cost_basis_in_period, 2),
-            fees_in_period=round(fees_in_period, 2),
-        )
-
-    log.info("settled_metrics_computed", version_id=version_id, ranges=list(ranges.keys()))
-
-    return SettledVersionMetrics(
+    return BookVersionMetrics(
         version_id=version_id,
-        summary=summary,
-        ranges=ranges,
+        summary=book_summary,
+        ranges=book_ranges,
     )
 
 
@@ -1704,10 +1962,10 @@ def compute_performers(
 
 
 # ---------------------------------------------------------------------------
-# Market metrics (price-dependent, reads from PriceSnapshot)
+# Live metrics (price-dependent, reads from PriceSnapshot)
 # ---------------------------------------------------------------------------
 
-def compute_market_metrics(
+def compute_live_metrics(
     session: Session,
     version_id: int,
     periods: Optional[List[str]] = None,
@@ -1715,7 +1973,7 @@ def compute_market_metrics(
     account_ids: Optional[List[int]] = None,
     category_ids: Optional[List[int]] = None,
     include_unsettled_negative: bool = False,
-) -> Optional[MarketVersionMetrics]:
+) -> Optional[LiveVersionMetrics]:
     """
     Compute price-dependent metrics using prices already in PriceSnapshot.
     Does NOT refresh prices — trusts that frontend already updated them.
@@ -1727,9 +1985,9 @@ def compute_market_metrics(
     if category_ids:
         resolved = _resolve_category_to_asset_ids(session, category_ids, asset_ids)
         if resolved is None:
-            return MarketVersionMetrics(
+            return LiveVersionMetrics(
                 version_id=version_id,
-                summary=MarketSummary(0, 0),
+                summary=LiveSummary(current_value=0, unrealized_pnl=0),
             )
         asset_ids = resolved
 
@@ -1741,9 +1999,9 @@ def compute_market_metrics(
         version = session.get(CalculationVersion, version_id)
         if not version:
             return None
-        return MarketVersionMetrics(
+        return LiveVersionMetrics(
             version_id=version_id,
-            summary=MarketSummary(0, 0),
+            summary=LiveSummary(current_value=0, unrealized_pnl=0),
         )
 
     # Price and realized PnL snapshots (no refresh)
@@ -1752,54 +2010,17 @@ def compute_market_metrics(
         session, snap, asset_ids, account_ids, taxable_only=False,
     )
 
-    all_asset_ids = snap.all_asset_ids
-    now_balances, now_costs, now_prices, now_rpnl_total, _ = _snapshot_at(
-        snap, price_snapshots, cumulative_rpnl, snap.now,
+    cost_basis = sum(snap.now_lot_remaining_costs.values())
+    live_summary, live_ranges = _compute_live_core(
+        snap, price_snapshots, cumulative_rpnl, cost_basis,
     )
 
-    # Portfolio-level current values
-    current_value = sum(
-        now_balances.get(aid, 0.0) * now_prices.get(aid, 0.0)
-        for aid in all_asset_ids
-    )
-    cost_basis = sum(now_costs.get(aid, 0.0) for aid in all_asset_ids)
-    unrealized_pnl = current_value - cost_basis
+    log.info("live_metrics_computed", version_id=version_id, ranges=list(live_ranges.keys()))
 
-    summary = MarketSummary(
-        current_value=round(current_value, 2),
-        unrealized_pnl=round(unrealized_pnl, 2),
-    )
-
-    # Per-period market metrics
-    ranges: Dict[str, MarketRangeMetrics] = {}
-    for range_key, start_dt in snap.range_starts.items():
-        start_balances, start_costs, start_prices, start_rpnl_total, _ = _snapshot_at(
-            snap, price_snapshots, cumulative_rpnl, start_dt,
-        )
-
-        total_return, roi_pct, unrealized_in_period, _, _ = _compute_portfolio_range_metrics(
-            all_asset_ids, range_key,
-            now_balances, now_costs, now_prices,
-            start_balances, start_costs, start_prices,
-            now_rpnl_total, start_rpnl_total,
-            unrealized_pnl, cost_basis,
-            base_currency_id=snap.base_currency_id,
-        )
-
-        ranges[range_key] = MarketRangeMetrics(
-            current_value=round(current_value, 2),
-            unrealized_pnl=round(unrealized_pnl, 2),
-            unrealized_in_period=round(unrealized_in_period, 2),
-            total_return=round(total_return, 2),
-            roi_pct=round(roi_pct, 2),
-        )
-
-    log.info("market_metrics_computed", version_id=version_id, ranges=list(ranges.keys()))
-
-    return MarketVersionMetrics(
+    return LiveVersionMetrics(
         version_id=version_id,
-        summary=summary,
-        ranges=ranges,
+        summary=live_summary,
+        ranges=live_ranges,
     )
 
 

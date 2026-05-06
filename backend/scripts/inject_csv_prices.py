@@ -12,6 +12,7 @@ Usage:
 """
 
 import csv
+import os
 import re
 import sys
 from datetime import datetime
@@ -19,7 +20,9 @@ from sqlalchemy import create_engine, text
 
 DRY_RUN = "--dry-run" in sys.argv
 
-DB_URL = "postgresql://trades_user:trades_password@localhost:5432/trades_db_dev"
+DB_URL = os.environ.get("DATABASE_URL")
+if not DB_URL:
+    sys.exit("Error: DATABASE_URL environment variable is required.")
 CSV_PATH = "data/input/assets/assets-prices.csv"
 SOURCE = "csv_import"
 

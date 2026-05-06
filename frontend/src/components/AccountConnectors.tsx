@@ -227,7 +227,21 @@ const AccountConnectors: React.FC<AccountConnectorsProps> = ({ account }) => {
                                                     <Text fontWeight="medium" fontSize="xs">
                                                         {getConnectorDisplayName(connector.connector_type)}
                                                     </Text>
-                                                    {getCategoryBadge(connector.connector_type)}
+                                                    <HStack gap={1}>
+                                                        {getCategoryBadge(connector.connector_type)}
+                                                        {connector.config?.test_mode && (
+                                                            <Badge
+                                                                colorPalette="orange"
+                                                                size="xs"
+                                                                fontSize="2xs"
+                                                                cursor="pointer"
+                                                                onClick={(e) => { e.stopPropagation(); handleEdit(connector); }}
+                                                                title="Click to manage test fixture"
+                                                            >
+                                                                🧪 Test
+                                                            </Badge>
+                                                        )}
+                                                    </HStack>
                                                 </VStack>
                                             </Table.Cell>
                                             <Table.Cell>

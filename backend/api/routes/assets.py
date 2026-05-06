@@ -13,6 +13,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from backend.db.database import get_db
 from backend.db.models import (
@@ -90,9 +91,11 @@ class AssetCreate(BaseModel):
 
     symbol: str
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = 0
+    denomination_currency_id: Optional[int] = None
 
 
 class AssetUpdate(BaseModel):
@@ -100,9 +103,11 @@ class AssetUpdate(BaseModel):
 
     symbol: Optional[str] = None
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
     status: Optional[int] = None
+    denomination_currency_id: Optional[int] = None
 
 
 class AssetPriceGetterResponse(BaseModel):
@@ -129,16 +134,26 @@ class CategoryResponse(BaseModel):
     ordinal: int = 0
 
 
+class DenominationCurrencyRef(BaseModel):
+    """Lightweight reference for denomination currency."""
+    asset_id: int
+    symbol: str
+    label: Optional[str] = None
+
+
 class AssetResponse(BaseModel):
     """Response model for assets."""
 
     asset_id: Optional[int] = None
     symbol: str
     label: Optional[str] = None
+    isin: Optional[str] = None
     price_type: Optional[str] = None
     tags: Optional[List[Dict[str, Any]]] = None
     created_at: Optional[str] = None
     status: Optional[int] = 0
+    denomination_currency_id: Optional[int] = None
+    denomination_currency: Optional[DenominationCurrencyRef] = None
     price_getters: Optional[List[AssetPriceGetterResponse]] = None
     categories: Optional[List[CategoryResponse]] = None
 
@@ -179,10 +194,19 @@ def _asset_to_response(asset: Asset, include_getters: bool = False, include_cate
         asset_id=asset.asset_id,
         symbol=asset.symbol,
         label=asset.label,
+        isin=asset.isin,
         price_type=asset.price_type,
         tags=asset.tags,
         created_at=asset.created_at.isoformat() if asset.created_at else None,
         status=asset.status,
+        denomination_currency_id=asset.denomination_currency_id,
+        denomination_currency=(
+            DenominationCurrencyRef(
+                asset_id=asset.denomination_currency.asset_id,
+                symbol=asset.denomination_currency.symbol,
+                label=asset.denomination_currency.label,
+            ) if asset.denomination_currency else None
+        ),
     )
 
     if include_getters and asset.price_getters:
@@ -247,7 +271,7 @@ def list_assets(
 ):
     """List all assets with optional filtering."""
     try:
-        statement = select(Asset)
+        statement = select(Asset).options(selectinload(Asset.denomination_currency))
 
         if status is not None:
             statement = statement.where(Asset.status == status)
@@ -375,9 +399,11 @@ def create_asset(
         asset = Asset(
             symbol=asset_data.symbol,
             label=asset_data.label,
+            isin=asset_data.isin,
             price_type=asset_data.price_type,
             tags=asset_data.tags,
             status=asset_data.status or 0,
+            denomination_currency_id=asset_data.denomination_currency_id,
         )
 
         session.add(asset)
