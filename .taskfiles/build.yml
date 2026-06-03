@@ -3,14 +3,26 @@ version: "3"
 tasks:
   staging:
     desc: Build both backend and frontend images from develop branch
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     deps: [":git:worktree:setup", staging:backend, staging:frontend]
     cmds:
       - echo "✅ All staging images built (:develop)"
 
   staging:backend:
     desc: Build backend image from develop branch
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     deps: [":git:worktree:setup"]
     cmds:
       - |
@@ -23,7 +35,13 @@ tasks:
 
   staging:frontend:
     desc: Build frontend image from develop branch
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     deps: [":git:worktree:setup"]
     cmds:
       - |
@@ -38,7 +56,13 @@ tasks:
 
   prod:
     desc: Build both backend and frontend images from main branch (e.g., task build:prod v1.2.0)
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
       - task: prod:backend
         vars: { VERSION: "{{.CLI_ARGS}}" }
@@ -48,7 +72,13 @@ tasks:
 
   prod:backend:
     desc: Build backend image from main branch (e.g., task build:prod:backend v1.2.0)
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     deps: [":git:worktree:setup"]
     cmds:
       - |
@@ -70,7 +100,13 @@ tasks:
 
   prod:frontend:
     desc: Build frontend image from main branch (e.g., task build:prod:frontend v1.2.0)
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     deps: [":git:worktree:setup"]
     cmds:
       - |
@@ -94,7 +130,13 @@ tasks:
 
   ref:
     desc: Build images from any git ref (e.g., task build:ref -- feature/my-branch)
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
     prompt: |
@@ -143,11 +185,19 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:staging -- $TAG"
+        echo "Deploy with: task deploy:staging:local -- $TAG"
 
   dirty:
     desc: Build images from current working directory (uncommitted changes)
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      TAG: '{{.TAG | default ""}}'
     prompt: |
       ⚠️  BUILD FROM WORKING DIRECTORY
 
@@ -160,8 +210,11 @@ tasks:
       Continue?
     cmds:
       - |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        TAG="dirty-$TIMESTAMP"
+        TAG="{{.TAG}}"
+        if [ -z "$TAG" ]; then
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TAG="dirty-$TIMESTAMP"
+        fi
 
         echo ""
         echo "Building from current working directory..."
@@ -183,7 +236,7 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:staging -- $TAG"
+        echo "Deploy with: task deploy:staging:local -- $TAG"
 
   list:
     desc: List all trades-exporter Docker images

@@ -20,14 +20,26 @@ tasks:
   unit:backend:
     desc: Run backend unit + API tests in parallel
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - .venv/bin/python -m pytest tests/unit/ tests/api/ -v -n auto -m "not integration" --timeout=30
 
   unit:frontend:
     desc: Run frontend build and type check
     dir: "{{.FRONTEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - npm run build
       - npx tsc --noEmit || true
@@ -39,7 +51,13 @@ tasks:
   int:cex:
     desc: "Integration: CEX connector tests (Binance, OKX, MEXC, Coinbase)"
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running CEX integration tests..."
@@ -49,7 +67,13 @@ tasks:
   int:onchain:
     desc: "Integration: Onchain connector tests (Blockscout, Etherscan, Moralis, SUI, Hyperliquid)"
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running onchain integration tests..."
@@ -58,7 +82,13 @@ tasks:
   int:exchanges:
     desc: "Integration: Exchange-specific tests (MEXC deposits/withdrawals)"
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running exchange integration tests..."
@@ -67,7 +97,13 @@ tasks:
   int:prices:
     desc: "Integration: Price getter tests (Yahoo, CoinGecko)"
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running price getter integration tests..."
@@ -76,7 +112,13 @@ tasks:
   int:db:
     desc: "Integration: DB-only tests (data health, seeding, bulk update)"
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running DB integration tests..."
@@ -96,7 +138,13 @@ tasks:
   int:
     desc: Run all integration tests against local integration database (trades_db_integ)
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running ALL integration tests against trades_db_integ..."
@@ -107,7 +155,13 @@ tasks:
 
   int:full:
     desc: Run full integration test cycle (setup → test → cleanup)
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - cmd: echo "Setting up integration test database..."
       - task: :db:setup:integ
@@ -155,6 +209,12 @@ tasks:
 
   ci:
     desc: Simulate full CI locally via Act
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - act push -j backend-tests --container-architecture linux/amd64

@@ -11,48 +11,88 @@ vars:
   WORKTREE_DIR: .worktrees
   WORKTREE_MAIN: .worktrees/main
   WORKTREE_DEVELOP: .worktrees/develop
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
 
 includes:
   build:
     taskfile: .taskfiles/build.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   db:
     taskfile: .taskfiles/db.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
   deploy:
     taskfile: .taskfiles/deploy.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+  fly:
+    taskfile: .taskfiles/fly.yml
+    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   git:
     taskfile: .taskfiles/git.yml
     dir: "{{.ROOT_DIR}}"
   logs:
     taskfile: .taskfiles/logs.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   release:
     taskfile: .taskfiles/release.yml
     dir: "{{.ROOT_DIR}}"
+  open:
+    taskfile: .taskfiles/open.yml
+    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   start:
     taskfile: .taskfiles/start.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
+      FRONTEND_DIR: "{{.FRONTEND_DIR}}"
   stop:
     taskfile: .taskfiles/stop.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   test:
     taskfile: .taskfiles/test.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
+      FRONTEND_DIR: "{{.FRONTEND_DIR}}"
 
 tasks:
   install:
-    desc: Install all dependencies
+    desc: Install all dependencies (backend + frontend)
     cmds:
-      - |
-        echo "Installing backend dependencies..."
-        cd {{.BACKEND_DIR}} && .venv/bin/pip install -r requirements.txt
-        echo ""
-        echo "Installing frontend dependencies..."
-        cd {{.FRONTEND_DIR}} && npm install
-        echo ""
-        echo "✅ All dependencies installed"
+      - task: install:backend
+      - task: install:frontend
+
+  install:backend:
+    desc: Install backend Python dependencies
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - .venv/bin/pip install -r requirements.txt
+    sources:
+      - requirements.txt
+
+  install:frontend:
+    desc: Install frontend Node dependencies
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm install
+    sources:
+      - package.json
 
   status:
     desc: Show all running containers across all environments
@@ -172,6 +212,8 @@ tasks:
         echo "  task start:dev                  Start full dev stack (DB + API + Web)"
         echo "  task start:dev:debug            Start full dev stack with debugger"
         echo "  task start:dev:db               Start dev database only"
+        echo "  task open:shared:dev            Focus/open dev in default Chrome"
+        echo "  task open:isolated:dev          Open isolated dev browser session"
         echo "  task stop:dev                   Stop all dev services"
         echo ""
         echo "TESTING"
@@ -180,10 +222,11 @@ tasks:
         echo "  task test:int:full              Full integration cycle (setup → test → cleanup)"
         echo ""
         echo "STAGING"
-        echo "  task deploy:staging             Build from develop + deploy to staging"
-        echo "  task deploy:staging:dirty       Deploy from working directory"
-        echo "  task start:staging              Start staging (existing images)"
-        echo "  task stop:staging               Stop staging stack"
+        echo "  task deploy:staging:local       Build from develop + deploy local staging"
+        echo "  task deploy:staging:local:cwd   Deploy local staging from working directory"
+        echo "  task deploy:staging:remote      Deploy Fly + Cloudflare remote staging"
+        echo "  task start:staging:local        Start local staging (existing images)"
+        echo "  task stop:staging:local         Stop local staging stack"
         echo ""
         echo "SCENARIO (Isolated QA)"
         echo "  task start:scenario              Local code + Docker DB + live reload"
@@ -195,13 +238,15 @@ tasks:
         echo "  task release                    Tag release + deploy to prod"
         echo "  task git:release:prepare        Check develop is ahead of main"
         echo "  task git:release:tag v1.0       Tag release on main"
-        echo "  task deploy:prod -- v1.2.0      Deploy to local prod"
-        echo "  task start:prod                 Start prod (existing images)"
+        echo "  task deploy:prod:local -- v1.2.0 Deploy to local prod"
+        echo "  task deploy:prod:remote         Deploy Fly + Cloudflare remote prod"
+        echo "  task start:prod:local           Start local prod (existing images)"
         echo ""
         echo "UTILITIES"
         echo "  task status                     Show all running containers"
         echo "  task logs:dev                   Tail dev logs"
-        echo "  task logs:staging               Tail staging logs"
+        echo "  task logs:staging:local         Tail local staging logs"
+        echo "  task fly:staging:status         Show staging Fly app status"
         echo "  task db:reset:dev               Reset dev database"
         echo ""
         echo "Run 'task --list' for all commands"

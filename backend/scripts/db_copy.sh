@@ -6,9 +6,10 @@
 # Usage:
 #   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run] [--migrate]
 #
-# Each env file must define:
-#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
-#   POSTGRES_HOST, POSTGRES_PORT
+# Environment files are loaded using the same layered convention as Taskfile:
+#   config/base.env → config/<env>.env → config/secrets.env → config/secrets.<env>.env
+# The final resolved configuration must define:
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT
 #
 # Flags:
 #   --dry-run     Preview what would happen without making changes
@@ -28,23 +29,58 @@ set -euo pipefail
 die()  { echo "❌ $*" >&2; exit 1; }
 info() { echo "   $*"; }
 
+env_name_from_file() {
+  local file="$1" name
+  name="$(basename "$file")"
+  name="${name%.env}"
+  # staging.remote/prod.remote share the staging/prod secret layer.
+  name="${name%%.remote}"
+  printf '%s' "$name"
+}
+
+env_value_from_layers() {
+  # env_value_from_layers <key> <env_file> — prints the last value found across layers.
+  local key="$1" env_file="$2"
+  local config_dir env_name layers value layer line
+
+  config_dir="$(cd "$(dirname "$env_file")" && pwd)"
+  env_name="$(env_name_from_file "$env_file")"
+  layers=(
+    "$config_dir/base.env"
+    "$env_file"
+    "$config_dir/secrets.env"
+    "$config_dir/secrets.$env_name.env"
+  )
+
+  value=""
+  for layer in "${layers[@]}"; do
+    [[ -f "$layer" ]] || continue
+    line=$(grep -E "^[[:space:]]*${key}=" "$layer" | tail -1 || true)
+    [[ -n "$line" ]] || continue
+    value="${line#*=}"
+    value="${value%$'\r'}"
+  done
+
+  printf '%s' "$value"
+}
+
 parse_env() {
-  # parse_env <file> <prefix>  — sets PREFIX_USER, PREFIX_PASS, etc.
+  # parse_env <file> <prefix> — sets PREFIX_USER, PREFIX_PASS, etc.
   local file="$1" prefix="$2"
   [[ -f "$file" ]] || die "Env file not found: $file"
 
   local user pass db host port
-  user=$(grep '^POSTGRES_USER='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  pass=$(grep '^POSTGRES_PASSWORD=' "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  db=$(grep   '^POSTGRES_DB='       "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  host=$(grep '^POSTGRES_HOST='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  port=$(grep '^POSTGRES_PORT='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
+  user=$(env_value_from_layers POSTGRES_USER "$file")
+  pass=$(env_value_from_layers POSTGRES_PASSWORD "$file")
+  db=$(env_value_from_layers POSTGRES_DB "$file")
+  host=$(env_value_from_layers POSTGRES_HOST "$file")
+  port=$(env_value_from_layers POSTGRES_PORT "$file")
 
-  [[ -n "$user" ]] || die "POSTGRES_USER missing in $file"
-  [[ -n "$pass" ]] || die "POSTGRES_PASSWORD missing in $file"
-  [[ -n "$db"   ]] || die "POSTGRES_DB missing in $file"
-  [[ -n "$host" ]] || die "POSTGRES_HOST missing in $file"
-  [[ -n "$port" ]] || die "POSTGRES_PORT missing in $file"
+  [[ -n "$user" ]] || die "POSTGRES_USER missing after loading config layers for $file"
+  [[ -n "$pass" ]] || die "POSTGRES_PASSWORD missing after loading config layers for $file"
+  [[ -n "$db"   ]] || die "POSTGRES_DB missing after loading config layers for $file"
+  [[ -n "$host" ]] || die "POSTGRES_HOST missing after loading config layers for $file"
+  [[ -n "$port" ]] || die "POSTGRES_PORT missing after loading config layers for $file"
 
   eval "${prefix}_USER='$user'"
   eval "${prefix}_PASS='$pass'"

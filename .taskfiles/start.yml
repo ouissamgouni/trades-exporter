@@ -16,7 +16,13 @@ tasks:
 
   dev:db:
     desc: Start dev database only
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     vars:
       RESET: '{{.RESET | default "0"}}'
     cmds:
@@ -53,11 +59,20 @@ tasks:
   # ════════════════════════════════════════════════════════════════
 
   dev:
-    desc: Start full dev environment (DB + backend + frontend)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    desc: Start full dev environment (DB + backend + frontend). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     deps: [dev:db]
     vars:
       RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - echo ""
       - echo "═══════════════════════════════════════════════════════════════"
@@ -73,20 +88,30 @@ tasks:
       - echo ""
       - |
         npx concurrently \
-          --names "DB,API,WEB" \
-          --prefix-colors "blue.bold,yellow.bold,green.bold" \
+          --names "DB,API,WEB,OPEN" \
+          --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
+          "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
 
   dev:debug:
-    desc: Start full dev environment with debugging (DB + backend + frontend)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    desc: Start full dev environment with debugging. BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     deps: [dev:db]
     vars:
       RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - echo ""
       - echo "═══════════════════════════════════════════════════════════════"
@@ -103,13 +128,14 @@ tasks:
       - echo ""
       - |
         npx concurrently \
-          --names "DB,API,WEB" \
-          --prefix-colors "blue.bold,yellow.bold,green.bold" \
+          --names "DB,API,WEB,OPEN" \
+          --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
+          "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
 
   # ════════════════════════════════════════════════════════════════
   # Dev Environment: Individual Components
@@ -117,7 +143,13 @@ tasks:
 
   dev:backend:
     desc: Start backend locally (no debugger)
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env", "{{.ROOT_DIR}}/config/secrets.env", "{{.ROOT_DIR}}/config/secrets.dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -132,7 +164,13 @@ tasks:
 
   dev:backend:debug:
     desc: Start backend with debugger
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env", "{{.ROOT_DIR}}/config/secrets.env", "{{.ROOT_DIR}}/config/secrets.dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -148,21 +186,42 @@ tasks:
       - .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m backend.api.run
 
   dev:frontend:
-    desc: Start frontend locally (Vite)
-    dotenv: ["{{.ROOT_DIR}}/config/base.env", "{{.ROOT_DIR}}/config/dev.env", "{{.ROOT_DIR}}/config/secrets.env", "{{.ROOT_DIR}}/config/secrets.dev.env"]
+    desc: Start frontend locally (Vite). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     dir: "{{.FRONTEND_DIR}}"
+    vars:
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
-      - VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT
+      - |
+        (until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}) &
+        VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT
 
   # ════════════════════════════════════════════════════════════════
   # Staging & Prod: Full Stacks (existing images)
   # ════════════════════════════════════════════════════════════════
 
-  staging:
-    desc: Start staging stack (existing images)
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+  staging:local:
+    desc: Start staging stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     vars:
       RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - |
         if [ "{{.RESET}}" = "1" ]; then
@@ -176,18 +235,28 @@ tasks:
       - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
+      - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "staging-local" "{{.RESET_BROWSER}}"'
 
-  prod:
-    desc: Start prod stack (existing images)
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+  prod:local:
+    desc: Start prod stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     vars:
       RESET: '{{.RESET | default "0"}}'
       FORCE: '{{.FORCE | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - |
         if [ "{{.RESET}}" = "1" ]; then
           if [ "{{.FORCE}}" != "1" ]; then
-            echo "🚨 RESET on prod requires FORCE=1. Usage: task start:prod RESET=1 FORCE=1"
+            echo "🚨 RESET on prod requires FORCE=1. Usage: task start:prod:local RESET=1 FORCE=1"
             exit 1
           fi
           echo "🚨 RESET: tearing down PRODUCTION stack..."
@@ -200,20 +269,30 @@ tasks:
       - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
+      - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "prod-local" "{{.RESET_BROWSER}}"'
 
   # ════════════════════════════════════════════════════════════════
   # Scenario: Full Docker from git ref
   # ════════════════════════════════════════════════════════════════
 
   scenario:ref:
-    desc: "Build from git ref and start isolated scenario stack (SCENARIO=<name> for multi-instance)"
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    desc: "Build from git ref and start isolated scenario stack. SCENARIO=<name>, BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
       WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
       RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - |
         REF="{{.REF}}"
@@ -307,19 +386,29 @@ tasks:
         echo "   task stop:scenario SCENARIO={{.SCENARIO}}    → Stop this instance"
         echo "   task stop:scenario:all                       → Stop all scenarios"
         echo "═══════════════════════════════════════════════════════════════"
+        ./.taskfiles/open-browsers.sh "http://localhost:$QA_WEB_PORT" "{{.BROWSER}}" "{{.COUNT}}" "scenario-$QA_ENV_NAME" "{{.RESET_BROWSER}}"
 
   # ════════════════════════════════════════════════════════════════
   # Scenario: Local code + Docker DB (default, like start:dev)
   # ════════════════════════════════════════════════════════════════
 
   scenario:
-    desc: "Start scenario with local code (DB Docker, backend+frontend local, live reload). SCENARIO=<name> for multi-instance."
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    desc: "Start scenario with local code (DB Docker, backend+frontend local, live reload). SCENARIO=<name>, BROWSER=none|shared|isolated."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
       WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
       RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       # Phase 1: Setup DB + schema + seed
       - |
@@ -417,12 +506,13 @@ tasks:
         SCENARIO_LABEL="{{.SCENARIO}}"
         [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
         npx concurrently \
-          --names "API:$SCENARIO_LABEL,WEB:$SCENARIO_LABEL" \
-          --prefix-colors "yellow.bold,green.bold" \
+          --names "API:$SCENARIO_LABEL,WEB:$SCENARIO_LABEL,OPEN:$SCENARIO_LABEL" \
+          --prefix-colors "yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app --reload --port $QA_API_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$QA_API_PORT npm run dev -- --port $QA_WEB_PORT"
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$QA_API_PORT npm run dev -- --port $QA_WEB_PORT" \
+          "until curl -sf http://localhost:$QA_WEB_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$QA_WEB_PORT {{.BROWSER}} {{.COUNT}} scenario-$SCENARIO_LABEL {{.RESET_BROWSER}}"
 
   # ════════════════════════════════════════════════════════════════
   # Internal helpers
@@ -430,7 +520,13 @@ tasks:
 
   _wait_healthy:
     internal: true
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       SCENARIO: '{{.SCENARIO | default ""}}'
     cmds:
