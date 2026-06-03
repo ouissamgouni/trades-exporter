@@ -3,7 +3,13 @@ version: "3"
 tasks:
   migrate:dev:
     desc: Run database migrations on dev
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini upgrade head
@@ -11,21 +17,39 @@ tasks:
 
   migrate:staging:
     desc: Run database migrations on staging
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend python -m alembic upgrade head
       - echo "✅ Staging database migrated"
 
   migrate:prod:
     desc: Run database migrations on prod
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend python -m alembic upgrade head
       - echo "✅ Prod database migrated"
 
   seed:dev:
     desc: Seed dev database
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
@@ -33,7 +57,13 @@ tasks:
 
   seed:staging:
     desc: Seed staging database
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging exec backend python -m backend.scripts.seed
       - echo "✅ Staging database seeded"
@@ -41,7 +71,13 @@ tasks:
   reset:dev:
     desc: "⚠️ Reset dev database (drops all tables). DRY_RUN=1 to preview."
     prompt: This will DELETE all data in dev database. Continue?
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
@@ -62,7 +98,13 @@ tasks:
   reset:staging:
     desc: "⚠️ Reset staging database (drops all tables). DRY_RUN=1 to preview."
     prompt: This will DELETE all data in staging database. Continue?
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
@@ -80,7 +122,13 @@ tasks:
 
   setup:integ:
     desc: Setup integration test database (one-time setup)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         echo "🔧 Setting up integration test database (trades_db_integ)..."
@@ -103,7 +151,13 @@ tasks:
   reset:integ:
     desc: Reset integration test database
     prompt: This will reset the integration test database. Continue?
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         echo "🔄 Resetting integration test database..."
@@ -117,7 +171,13 @@ tasks:
   reset:prod:
     desc: "🚨 Reset prod database (DANGEROUS!)"
     prompt: "🚨 This will DELETE ALL PRODUCTION DATA. Are you absolutely sure?"
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
       - docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod exec backend sh -c 'echo "y" | python -m backend.scripts.reset && python -m backend.scripts.seed'
       - echo "⚠️ Prod database reset"
@@ -126,7 +186,13 @@ tasks:
 
   status:dev:
     desc: Show migration status (current version, heads, pending)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         echo "📊 Migration Status (dev)"
@@ -150,7 +216,13 @@ tasks:
 
   status:staging:
     desc: Show migration status on staging
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     cmds:
       - |
         echo "📊 Migration Status (staging)"
@@ -165,7 +237,13 @@ tasks:
 
   check:dev:
     desc: Validate migration health (for CI/PR checks)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         echo "🔍 Checking migration health (dev)..."
@@ -196,7 +274,13 @@ tasks:
 
   history:dev:
     desc: Show migration history
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         echo "📜 Migration History (dev)"
@@ -206,7 +290,13 @@ tasks:
 
   merge:dev:
     desc: Merge multiple migration heads
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         HEAD_COUNT=$(PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB" \
@@ -224,7 +314,13 @@ tasks:
   stamp:dev:
     desc: "⚠️ Stamp database to a revision (recovery tool)"
     prompt: "This will update alembic_version without running migrations. Continue?"
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         if [ -z "{{.CLI_ARGS}}" ]; then
@@ -239,7 +335,13 @@ tasks:
   downgrade:dev:
     desc: "⚠️ Rollback migrations (use with caution)"
     prompt: "This will rollback migrations. Continue?"
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         if [ -z "{{.CLI_ARGS}}" ]; then
@@ -365,7 +467,13 @@ tasks:
 
   cleanup-tags:dev:
     desc: "🧹 Clean up tags from dev transactions (DRY_RUN=1, ALL=1, KEY=<key>)"
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
       ALL: '{{.ALL | default "0"}}'
@@ -405,7 +513,13 @@ tasks:
   cleanup-tags:staging:
     desc: "🧹 Clean up user tags from staging database. DRY_RUN=1 to preview."
     prompt: "This will remove user tags from staging transactions. Continue?"
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
@@ -421,7 +535,13 @@ tasks:
 
   seed:scenario:
     desc: "Seed scenario database (SCENARIO=<name>, SEED_DIR=<path>, WITH_DEFAULTS=1)"
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
@@ -475,7 +595,13 @@ tasks:
   reset:scenario:
     desc: "Reset scenario database (truncate + reseed). SCENARIO=<name>, DRY_RUN=1 to preview."
     prompt: This will DELETE all data in scenario database. Continue?
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       SEED_DIR: "{{.SEED_DIR}}"
       SCENARIO: '{{.SCENARIO | default ""}}'
