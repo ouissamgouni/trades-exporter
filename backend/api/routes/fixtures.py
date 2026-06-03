@@ -268,3 +268,29 @@ def get_connector_fixture_status(
         "item_count": item_count,
         "fixture_size_bytes": fixture_path.stat().st_size if has_fixture else None,
     }
+
+
+@router.get("/connectors/{connector_id}/test-fixture/content")
+def get_connector_fixture_content(
+    connector_id: int,
+    session: Session = Depends(get_session_dependency),
+):
+    """
+    Get the actual JSON content of a connector's test fixture file.
+    
+    Returns the parsed JSON array directly for preview purposes.
+    """
+    connector = session.get(AccountConnector, connector_id)
+    if not connector:
+        raise HTTPException(status_code=404, detail=f"Connector {connector_id} not found")
+    
+    fixture_path = get_fixture_path(connector_id)
+    if not fixture_path.exists():
+        raise HTTPException(status_code=404, detail="No fixture file found")
+    
+    try:
+        with open(fixture_path, "r") as f:
+            data = json.load(f)
+        return data
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON in fixture: {e}")

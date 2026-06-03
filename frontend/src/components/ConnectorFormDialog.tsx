@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
+    Badge,
     Box,
     Button,
     Dialog,
@@ -49,6 +50,15 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
     const [defaultFileName, setDefaultFileName] = useState<string | null>(null);
     const [uploadingDefault, setUploadingDefault] = useState(false);
 
+    // Test fixture state
+    const [testFixtureFile, setTestFixtureFile] = useState<File | null>(null);
+    const [testFixtureStatus, setTestFixtureStatus] = useState<{
+        test_mode: boolean;
+        has_fixture: boolean;
+        item_count: number | null;
+    } | null>(null);
+    const [uploadingFixture, setUploadingFixture] = useState(false);
+
     // Track previous isOpen state to detect when dialog opens
     const prevIsOpenRef = React.useRef(isOpen);
 
@@ -80,6 +90,15 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             // Load default file name if set
             setDefaultFileName(connector.config?.default_file_name || null);
             setDefaultFile(null);
+
+            // Load test fixture status
+            setTestFixtureFile(null);
+            if (connector.id) {
+                fetch(`${API_URL}/fixtures/connectors/${connector.id}/test-fixture`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => setTestFixtureStatus(data))
+                    .catch(() => setTestFixtureStatus(null));
+            }
         } else {
             // Reset form for creating new connector
             const firstAvailable = connectorTypes.find(t => !existingConnectorTypes.includes(t.type));
@@ -102,6 +121,8 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                 sync_priority: 100,
                 color: getNextAvailableEntityColor(usedColors),
             });
+            setTestFixtureStatus(null);
+            setTestFixtureFile(null);
         }
         setError('');
     }, [isOpen, connector, connectorTypes, existingConnectorTypes, account]);
@@ -184,6 +205,53 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
             ...prev,
             config: { ...prev.config, [key]: value },
         }));
+    };
+
+    const handleUploadFixture = async () => {
+        if (!testFixtureFile || !connector?.id) return;
+        setUploadingFixture(true);
+        setError('');
+        try {
+            const fd = new FormData();
+            fd.append('file', testFixtureFile);
+            const response = await fetch(
+                `${API_URL}/fixtures/connectors/${connector.id}/test-fixture`,
+                { method: 'POST', body: fd }
+            );
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || 'Failed to upload fixture');
+            }
+            const result = await response.json();
+            setTestFixtureStatus({ test_mode: true, has_fixture: true, item_count: result.item_count });
+            setTestFixtureFile(null);
+        } catch (err: any) {
+            setError(err.message || 'Failed to upload fixture');
+        } finally {
+            setUploadingFixture(false);
+        }
+    };
+
+    const handleRemoveFixture = async () => {
+        if (!connector?.id) return;
+        setUploadingFixture(true);
+        setError('');
+        try {
+            const response = await fetch(
+                `${API_URL}/fixtures/connectors/${connector.id}/test-fixture`,
+                { method: 'DELETE' }
+            );
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || 'Failed to remove fixture');
+            }
+            setTestFixtureStatus({ test_mode: false, has_fixture: false, item_count: null });
+            setTestFixtureFile(null);
+        } catch (err: any) {
+            setError(err.message || 'Failed to remove fixture');
+        } finally {
+            setUploadingFixture(false);
+        }
     };
 
     // Detect blockchain chain from address format
@@ -577,7 +645,7 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                                             )}
                                             <Input
                                                 type="file"
-                                                accept={selectedTypeInfo.type.includes('okx') ? '.csv' : '.xlsx,.xls'}
+                                                accept={(selectedTypeInfo.type.includes('okx') || selectedTypeInfo.type.includes('degiro')) ? '.csv' : '.xlsx,.xls'}
                                                 onChange={(e) => {
                                                     const file = e.target.files?.[0] || null;
                                                     setDefaultFile(file);
@@ -594,6 +662,67 @@ const ConnectorFormDialog: React.FC<ConnectorFormDialogProps> = ({
                                                 <Text fontSize="xs" color="gray.500" mt={1}>
                                                     File will be uploaded after the connector is created.
                                                 </Text>
+                                            )}
+                                        </Box>
+                                    )}
+
+                                    {/* Test Fixture (edit mode only) */}
+                                    {connector && (
+                                        <Box
+                                            p={4}
+                                            borderWidth="1px"
+                                            borderRadius="md"
+                                            borderColor={testFixtureStatus?.test_mode ? 'orange.300' : 'gray.200'}
+                                            bg={testFixtureStatus?.test_mode ? 'orange.50' : 'transparent'}
+                                        >
+                                            <Text fontWeight="medium" mb={2}>🧪 Test Fixture</Text>
+                                            <Text fontSize="sm" color="gray.500" mb={3}>
+                                                Upload a JSON fixture to use during sync instead of the real API.
+                                            </Text>
+                                            {testFixtureStatus?.has_fixture && (
+                                                <Flex align="center" gap={2} mb={2}>
+                                                    <Badge colorPalette="orange" size="sm">
+                                                        Test Mode Active — {testFixtureStatus.item_count} items
+                                                    </Badge>
+                                                    <Button
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        colorPalette="red"
+                                                        onClick={handleRemoveFixture}
+                                                        disabled={uploadingFixture}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </Flex>
+                                            )}
+                                            {!testFixtureStatus?.has_fixture && (
+                                                <>
+                                                    <Input
+                                                        type="file"
+                                                        accept=".json"
+                                                        onChange={(e) => {
+                                                            const file = e.target.files?.[0] || null;
+                                                            setTestFixtureFile(file);
+                                                        }}
+                                                        disabled={uploadingFixture}
+                                                        size="sm"
+                                                    />
+                                                    {testFixtureFile && (
+                                                        <Flex align="center" gap={2} mt={2}>
+                                                            <Text fontSize="xs" color="orange.600">
+                                                                Selected: {testFixtureFile.name}
+                                                            </Text>
+                                                            <Button
+                                                                size="xs"
+                                                                colorPalette="orange"
+                                                                onClick={handleUploadFixture}
+                                                                loading={uploadingFixture}
+                                                            >
+                                                                Upload
+                                                            </Button>
+                                                        </Flex>
+                                                    )}
+                                                </>
                                             )}
                                         </Box>
                                     )}

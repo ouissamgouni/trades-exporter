@@ -48,8 +48,6 @@ class ConnectorHub(BaseHubConnector):
         Args:
             enabled_connectors: List of connector names to enable. If None, all are enabled.
             parent_output_path: Parent output path for connector logs and raw data
-
-        Note: Test mode is determined by the TEST_MODE environment variable.
         """
         # Load settings for configuration
         settings = load_settings()

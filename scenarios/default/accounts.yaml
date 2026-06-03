@@ -1,0 +1,70 @@
+# Default Account and Connector Configuration
+# =============================================
+# Generic sample accounts for development and testing.
+# For personal/real accounts, use a scenario:
+#   task start:scenario SCENARIO=private-accounts
+
+accounts:
+  # =========================================================================
+  # CEX Accounts
+  # =========================================================================
+
+  - name: "Binance"
+    account_type: "cex"
+    owned: true
+    group: "Trading"
+    color: "#F0B90B"
+    address_or_identifier: "binance_demo"
+    connectors:
+      - connector_type: "binance-transactions"
+        color: "#1A4971"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2025-01-01T00:00:00"
+
+  - name: "Coinbase"
+    account_type: "cex"
+    owned: true
+    group: "Trading"
+    color: "#0052FF"
+    address_or_identifier: "coinbase_demo"
+    connectors:
+      - connector_type: "coinbase-transactions"
+        color: "#3B7A3E"
+        enabled: false
+        sync_priority: 10
+        config:
+          start_datetime: "2025-01-01T00:00:00"
+
+  # =========================================================================
+  # Broker Account
+  # =========================================================================
+
+  - name: "Degiro"
+    account_type: "broker"
+    owned: true
+    group: "Investing"
+    color: "#C56A00"
+    address_or_identifier: "degiro_demo"
+    connectors: []
+
+  # =========================================================================
+  # Wallet Account
+  # =========================================================================
+
+  - name: "Ledger Ethereum"
+    account_type: "wallet"
+    owned: true
+    group: "Hardware Wallet"
+    color: "#6C3483"
+    address_or_identifier: "0x0000000000000000000000000000000000000001"
+    connectors:
+      - connector_type: "blockscout"
+        color: "#9A7B00"
+        enabled: false
+        sync_priority: 10
+        config:
+          chain: "ethereum"
+          include_internal_txs: true
+          include_token_transfers: true

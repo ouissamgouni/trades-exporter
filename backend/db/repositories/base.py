@@ -2,6 +2,7 @@
 Base utilities for repository classes.
 """
 
+import math
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Any
@@ -14,7 +15,14 @@ def make_json_serializable(obj: Any) -> Any:
     """
     if obj is None:
         return None
-    if isinstance(obj, (str, int, float, bool)):
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        # NaN and Inf are not valid JSON values
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, (str, int)):
         return obj
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()

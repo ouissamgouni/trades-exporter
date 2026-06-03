@@ -1,0 +1,166 @@
+test_plan:
+  name: "Polymarket PnL — Stock Model with Cost Basis Transfer"
+  description: >
+    Verify that Polymarket prediction market outcome shares are treated as tradeable
+    assets (stock model), with correct cost basis propagation from Binance → transfer →
+    Polymarket, and accurate realized PnL calculation for wins, losses, partial sells,
+    full exits, and re-entry scenarios. REDEEMs are memo (audit-only, no PnL impact).
+  fixture_file: "db/seed_data/scenarios/polymarket_pnl/fixtures/polymarket_pnl.json"
+  steps:
+    # ── Cost Basis Chain ─────────────────────────────────────────
+    - id: 1
+      title: "Seed scenario data"
+      description: >
+        Run reset_and_seed.py --scenario polymarket_pnl --test.
+        Verify 3 NTs seeded: USDC buy on Binance (Sep 1), withdrawal from Binance (Sep 5),
+        deposit to Polymarket (Sep 5).
+        Verify 9 assets created: EUR, USDC, plus 7 PM share symbols.
+      expected: "3 transactions, 9 assets, 2 accounts (Binance + Polymarket) with 1 connector."
+
+    - id: 2
+      title: "USDC cost lot on Binance"
+      description: >
+        Run PnL calculation. Check that Binance account has a USDC CostLot
+        with correct EUR cost basis from the initial purchase (2000 USDC bought with EUR).
+      expected: "CostLot: 2000 USDC @ 0.92 EUR = 1840 EUR total cost basis."
+
+    - id: 3
+      title: "Transfer matched as INTERNAL_TRANSFER"
+      description: >
+        Check grouping engine results. The 1500 USDC withdrawal (Binance, Sep 5) and
+        deposit (Polymarket, Sep 5) should be matched as an internal transfer.
+      expected: "1 transfer group with pattern INTERNAL_TRANSFER. No realized PnL."
+
+    - id: 4
+      title: "Cost basis propagated to Polymarket"
+      description: >
+        After transfer processing, verify cost lots split correctly across both accounts.
+        Binance should retain 500 USDC @ 0.92 EUR.
+        Polymarket should have 1500 USDC @ 0.92 EUR (transferred cost basis preserved).
+      expected: "Binance: 500 USDC @ 0.92 EUR. Polymarket: 1500 USDC @ 0.92 EUR."
+
+    # ── Mock Sync ───────────────────────────────────────────────
+    - id: 5
+      title: "Upload test fixture to Polymarket connector"
+      description: >
+        Upload polymarket_pnl.json via POST /fixtures/connectors/{connector_id}/test-fixture.
+        Verify connector config gets test_mode=true and test_file_path set.
+        Fixture contains 19 items: 8 BUYs, 4 SELLs, 4 REDEEMs, 2 SYNTHETIC_CLOSEs (losers),
+        1 superbowl BUY. Connector auto-generates resolution synthetics before each REDEEM.
+      expected: "Connector config updated. GET /fixtures/connectors/{id}/test-fixture returns item_count=19."
+
+    - id: 6
+      title: "Run mock sync"
+      description: >
+        Trigger POST /sync-job/start. Polymarket connector loads fixture data.
+        NTs created from fixture + auto-generated resolution synthetics:
+          Case 1 (simple win): rain-friday BUY + resolution synthetic + REDEEM memo
+          Case 1b (simple win): superbowl BUY + resolution synthetic + REDEEM memo
+          Case 2 (simple loss): eth-5k BUY + SYNTHETIC_CLOSE @ $0 (from fixture)
+          Case 3 (partial sell + win): BUY + SELL + resolution synthetic + REDEEM memo
+          Case 4 (partial sell + loss): BUY + SELL + SYNTHETIC_CLOSE @ $0 (from fixture)
+          Case 5 (full exit): BUY + SELL (no resolution needed)
+          Case 6 (re-entry): BUY + SELL + BUY + resolution synthetic + REDEEM memo
+      expected: >
+        Total NTs = 3 (seeded) + ~23 (synced including auto-generated synthetics).
+        BUYs/SELLs/synthetics: transaction_type=trade. REDEEMs: transaction_type=memo, direction=neutral.
+
+    - id: 7
+      title: "PM share cost lots created"
+      description: >
+        After PnL recalculation, verify CostLots for each PM asset.
+        BUY consumes USDC (outflow leg) and creates PM share lots (inflow leg).
+      expected: >
+        PM:rain-friday-Yes: 100 shares @ $0.60 (cost = 60 USDC = 55.20 EUR).
+        PM:eth-5k-Yes: 200 shares @ $0.50 (cost = 100 USDC = 92.00 EUR).
+        PM:superbowl-No: 150 shares @ $0.35 (cost = 52.50 USDC = 48.30 EUR).
+        PM:partial-sell-win-Yes: 100 shares @ $0.40 (cost = 40 USDC = 36.80 EUR).
+        PM:partial-sell-loss-Yes: 100 shares @ $0.40 (cost = 40 USDC = 36.80 EUR).
+        PM:full-exit-Yes: 100 shares @ $0.40 (cost = 40 USDC = 36.80 EUR).
+        PM:reentry-Yes: 100+100 shares @ $0.40/$0.70.
+
+    # ── Realized PnL ────────────────────────────────────────────
+    - id: 8
+      title: "Case 1a — Win: Rain Friday Yes"
+      description: >
+        Resolution synthetic SELL 100 shares @ $1.00. Proceeds = 100 USDC.
+        CostLot consumed: 100 @ $0.60 = 60 USDC cost.
+        REDEEM recorded as memo (no PnL impact).
+      expected: >
+        Realized PnL = +40 USDC ≈ +36.80 EUR (at 0.92 EUR/USDC).
+
+    - id: 9
+      title: "Case 2 — Loss: ETH 5k Yes"
+      description: >
+        Synthetic SELL 200 shares @ $0.00. Proceeds = 0.
+        CostLot consumed: 200 @ $0.50 = 100 USDC cost.
+      expected: >
+        Realized PnL = -100 USDC ≈ -92.00 EUR.
+
+    - id: 10
+      title: "Case 1b — Win: Superbowl No"
+      description: >
+        Resolution synthetic SELL 150 'No' shares @ $1.00. Proceeds = 150 USDC.
+        CostLot consumed: 150 @ $0.35 = 52.50 USDC cost.
+        REDEEM recorded as memo.
+      expected: >
+        Realized PnL = +97.50 USDC ≈ +89.70 EUR.
+
+    - id: 11
+      title: "Case 3 — Partial Sell + Win"
+      description: >
+        SELL 40 shares @ $0.70 = 28 USDC proceeds. Cost: 40 @ $0.40 = 16 USDC → PnL = +12 USDC.
+        Resolution synthetic: SELL remaining 60 shares @ $1.00 = 60 USDC. Cost: 60 @ $0.40 = 24 → PnL = +36.
+        REDEEM recorded as memo.
+      expected: >
+        Total realized PnL = +12 + +36 = +48 USDC ≈ +44.16 EUR.
+
+    - id: 12
+      title: "Case 4 — Partial Sell + Loss"
+      description: >
+        SELL 40 shares @ $0.70 → PnL = +12 USDC (same as case 3 sell).
+        Synthetic CLOSE remaining 60 shares @ $0.00 → PnL = -24 USDC.
+      expected: >
+        Total realized PnL = +12 + (-24) = -12 USDC ≈ -11.04 EUR.
+
+    - id: 13
+      title: "Case 5 — Full Exit Before Resolution"
+      description: >
+        SELL 100 shares @ $0.60 = 60 USDC. Cost: 100 @ $0.40 = 40 USDC.
+        No resolution needed (position fully closed).
+      expected: >
+        Realized PnL = +20 USDC ≈ +18.40 EUR.
+
+    - id: 14
+      title: "Case 6 — Re-entry After Full Exit"
+      description: >
+        First trade: SELL 100 @ $0.60, cost 100 @ $0.40 → PnL = +20.
+        Re-entry: BUY 100 @ $0.70 = new cost lot.
+        Resolution: synthetic SELL 100 @ $1.00, cost 100 @ $0.70 → PnL = +30.
+        REDEEM recorded as memo.
+      expected: >
+        Total realized PnL = +20 + +30 = +50 USDC ≈ +46.00 EUR.
+
+    # ── Portfolio Totals ────────────────────────────────────────
+    - id: 11
+      title: "Aggregate PM realized PnL"
+      description: >
+        Open PnL / Portfolio tab. Sum of all PM realized PnL:
+        Rain Friday (+40) + ETH 5k (-100) + Superbowl (+97.50) = +37.50 USDC ≈ +34.50 EUR.
+        Verify the portfolio-level total includes these amounts.
+      expected: "Total PM realized PnL = +37.50 USDC ≈ +34.50 EUR."
+
+    # ── Isolation & Health ──────────────────────────────────────
+    - id: 12
+      title: "USDC card not polluted by PM PnL"
+      description: >
+        Open USDC asset card in PnL tab. It should NOT show any PM-related
+        realized PnL entries. PM gains/losses belong to their respective PM:* assets.
+      expected: "USDC card realized PnL = 0 (or only from direct USDC trades if any)."
+
+    - id: 13
+      title: "Data health — no duplicate or unlinked assets"
+      description: >
+        Check Data Health. All PM:* assets should be properly linked (defined in assets.yaml).
+        No duplicate RawAsset records for the same (symbol, source) pair.
+      expected: "0 data health issues. All PM:* raw assets mapped to their Asset records."

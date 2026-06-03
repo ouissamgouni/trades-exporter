@@ -48,6 +48,10 @@ class UnitCreate(BaseModel):
         None,
         description="Override taxability for all transactions (taxable or non_taxable)",
     )
+    metadata: Optional[dict] = Field(
+        None,
+        description="Pattern-specific data (e.g. spinoff: {spinoff_source_asset_id, spinoff_allocation_pct})",
+    )
 
 
 class UnitUpdate(BaseModel):
@@ -58,6 +62,10 @@ class UnitUpdate(BaseModel):
     notes: Optional[str] = Field(None, description="Notes")
     taxability_override: Optional[TaxabilityStatus] = Field(
         None, description="Override taxability (null to remove override)"
+    )
+    metadata: Optional[dict] = Field(
+        None,
+        description="Pattern-specific data (e.g. spinoff: {spinoff_source_asset_id, spinoff_allocation_pct})",
     )
 
 
@@ -72,6 +80,7 @@ class UnitResponse(BaseModel):
     pattern: Optional[UnitPattern]
     notes: Optional[str]
     taxability_override: Optional[TaxabilityStatus]
+    metadata: Optional[dict] = None
     created_at: str
     transaction_count: int
     transactions: List[TransactionSummary]
@@ -422,6 +431,7 @@ def create_bundle(
         pattern=request.pattern,
         notes=request.notes,
         taxability_override=request.taxability_override,
+        bundle_data=request.metadata,
     )
     session.add(bundle)
     session.flush()
@@ -472,6 +482,8 @@ def update_bundle(
         bundle.taxability_override = (
             request.taxability_override.value if request.taxability_override else None
         )
+    if 'metadata' in request.model_fields_set:
+        bundle.bundle_data = request.metadata
 
     bundle.updated_at = datetime.now(timezone.utc)
     session.add(bundle)
@@ -690,6 +702,7 @@ def _build_unit_response(bundle: UserCalculationBundle, session: Session) -> Uni
         pattern=bundle.pattern,
         notes=bundle.notes,
         taxability_override=bundle.taxability_override,
+        metadata=bundle.bundle_data,
         created_at=bundle.created_at.replace(tzinfo=timezone.utc).isoformat() if bundle.created_at else "",
         transaction_count=len(tx_summaries),
         transactions=tx_summaries,

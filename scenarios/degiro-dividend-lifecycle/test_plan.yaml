@@ -1,0 +1,168 @@
+# DeGiro Dividend Lifecycle Scenario — QA Test Plan
+# ====================================================
+# Tests the full dividend lifecycle: seeded transactions →
+# IncomeEvent creation → PFU tax computation → annual summary.
+#
+# Transactions are seeded directly via transactions.yaml (no connector
+# sync required). fixtures/Account.csv is kept as the original data
+# reference but is not used at runtime.
+#
+# Covers:
+#   - Multi-currency dividends (USD, EUR, CHF)
+#   - Quarterly dividend streams (MSFT: 4 payments in 2025)
+#   - Semi-annual dividends (TotalEnergies: 2 payments)
+#   - Single dividend events (AAPL: 1, Nestlé: 1)
+#   - Varying withholding rates by jurisdiction:
+#       US (30% treaty rate on gross): AAPL, MSFT
+#       FR (30% PFU): TotalEnergies
+#       CH (35%): Nestlé
+#   - Annual aggregation for Form 2042 / 2047
+
+test_plan:
+  name: "DeGiro Dividend Lifecycle — Full Workflow QA"
+  description: >
+    Seed 8 dividend transactions across 4 securities in 3 currencies,
+    verify IncomeEvent creation via PnL calculation, and run French tax
+    computation to verify PFU calculation with foreign WHT credits.
+
+  steps:
+    - id: 1
+      title: "Seed scenario and verify transactions"
+      description: >
+        Reset and seed using this scenario. Verify that 8 dividend
+        transactions are created from transactions.yaml.
+      expected: >
+        8 NormalizedTransaction records of type 'dividend':
+          AAPL×1, MSFT×4, TTE×2, NESN×1.
+        Each carries withholding info in tags (amount, jurisdiction, rate).
+
+    - id: 2
+      title: "Run PnL calculation and verify IncomeEvents"
+      description: >
+        Trigger PnL calculation. Check that IncomeEvent records are
+        created for each dividend. USD and CHF dividends should have
+        WHT converted to EUR using the broker FX rate from tags.
+      expected: >
+        8 IncomeEvent records created with:
+          income_type = 'dividend'
+          asset_id → EUR/USD/CHF (cash received)
+          attributed_asset_id → AAPL/MSFT/TOTAL/NESTLÉ (stock)
+          gross_amount_in_base in EUR (via FMV)
+          withholding_amount_in_base in EUR:
+            - USD dividends (AAPL, MSFT): WHT converted via fx_rate tag
+              e.g., AAPL: wht_source=0.25 USD / 1.092 = ~0.229 EUR
+            - EUR dividends (TTE): WHT used as-is
+            - CHF dividends (NESN): WHT converted proportionally
+          withholding_jurisdiction = 'US'/'FR'/'CH'
+
+    - id: 3
+      title: "Verify income metrics in hero bar"
+      description: >
+        Open the PnL view. Check the income metric card.
+      expected: >
+        Income card visible in teal:
+          - Total income = sum of net_amount_in_base for all 8 events
+          - Clicking opens the IncomeSlidePanel
+
+    - id: 4
+      title: "Verify IncomeSlidePanel"
+      description: >
+        Click the income metric card. Check the slide panel.
+      expected: >
+        8 income events listed with correct:
+          - Date, asset, type (dividend), gross, WHT, net
+          - Sortable by all columns
+          - Filterable by asset, jurisdiction
+          - MSFT appears 4 times (quarterly)
+
+    - id: 5
+      title: "Verify asset detail income tab"
+      description: >
+        Click on MSFT in the balances view. Check the income section.
+      expected: >
+        Income section shows 4 MSFT dividend events.
+        Summary strip: gross=4×$6.80/7.50, WHT, net totals.
+
+    - id: 6
+      title: "Compute French tax and verify PFU on income"
+      description: >
+        Click 'Compute French Tax'. Switch to the Income tab in
+        the tax panel.
+      expected: >
+        Income tax card (teal, "PFU 30%") visible.
+        Annual summary for 2025:
+          - Gross income: sum of all 8 dividends in EUR
+          - WHT credits: sum of min(WHT, 12.8% of gross) per event
+          - Tax = 30% of gross minus allowed WHT credits
+          - Event count: 8
+
+    - id: 7
+      title: "Verify per-event tax entries"
+      description: >
+        Check the income tax line items in the tax panel.
+      expected: >
+        8 DividendIncomeTaxEntry rows, one per IncomeEvent:
+          AAPL:   gross_in_EUR, credit=min(WHT_EUR, 12.8%×gross_EUR)
+          MSFT×4: each with USD-to-EUR converted amounts
+          TOTAL×2: EUR amounts directly
+          NESTLÉ: CHF-to-EUR converted amounts
+        WHT credit limited to 12.8% of gross (IR portion only).
+        Excess WHT (e.g., CH 35% > 12.8%) is not credited.
+
+    - id: 8
+      title: "Verify timeline chart includes income"
+      description: >
+        Check that the portfolio ROI chart includes income in the
+        total return calculation.
+      expected: >
+        ROI formula: (unrealized + realized + cumulative_income) / cost_basis × 100
+        cumulative_income grows with each dividend date.
+
+accounts:
+  - name: "DeGiro Dividends QA"
+    account_type: "broker"
+    owned: true
+    group: "Stock Brokers"
+    color: "#C56A00"
+    address_or_identifier: "degiro_dividends_qa"
+
+assets:
+  - symbol: "AAPL"
+    label: "Apple Inc"
+    isin: "US0378331005"
+    price_type: "stock"
+  - symbol: "MSFT"
+    label: "Microsoft Corp"
+    isin: "US5949181045"
+    price_type: "stock"
+  - symbol: "TTE"
+    label: "TotalEnergies SE"
+    isin: "FR0000120271"
+    price_type: "stock"
+  - symbol: "NESN"
+    label: "Nestlé SA"
+    isin: "CH0038863350"
+    price_type: "stock"
+  - symbol: "EUR"
+    label: "Euro"
+    price_type: "fiat"
+  - symbol: "USD"
+    label: "US Dollar"
+    price_type: "fiat"
+  - symbol: "CHF"
+    label: "Swiss Franc"
+    price_type: "fiat"
+
+# Expected FX rates for verification (approximate)
+fx_rates:
+  USD_EUR: 0.92  # approximate 2025 rate
+  CHF_EUR: 0.97  # approximate 2025 rate
+
+# Expected PFU tax calculation for 2025 (in EUR, approximate)
+expected_tax_summary:
+  fiscal_year: 2025
+  note: >
+    PFU = 30% of gross. WHT credit limited to 12.8% of gross.
+    US dividends: 30% WHT, fully creditable against 12.8% IR portion.
+    FR dividends: 30% WHT, fully creditable.
+    CH dividends: 35% WHT, only 12.8% creditable (excess 22.2% lost).

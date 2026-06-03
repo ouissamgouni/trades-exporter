@@ -1,22 +1,18 @@
-# Docker Compose - Unified Configuration (Test/Prod)
-# Environment-agnostic service definitions
-# Uses ENV_NAME and IMAGE_TAG from .env files
+# Docker Compose - Unified Configuration (Staging/Prod)
+# Environment-agnostic service definitions.
+# Uses ENV_NAME and IMAGE_TAG from config/*.env files.
 #
-# Usage: 
-#   Test:  docker compose -f docker-compose.unified.yml --env-file ../../.env.test up -d
-#   Prod:  docker compose -f docker-compose.unified.yml --env-file ../../.env.prod up -d
-#
-# Or use task commands:
-#   task start:test  # Uses .env + .env.test
-#   task start:prod  # Uses .env + .env.prod
+# Usage (via Taskfile):
+#   task start:staging  # config/base.env + config/staging.env + config/secrets*.env
+#   task start:prod     # config/base.env + config/prod.env    + config/secrets*.env
 
 services:
   postgres:
     image: postgres:15-alpine
     container_name: trades_db_${ENV_NAME}
     env_file:
-      - ../../.env
-      - ../../.env.${ENV_NAME}
+      - ../../config/base.env
+      - ../../config/${ENV_NAME}.env
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
@@ -34,8 +30,9 @@ services:
     image: trades-exporter-backend:${IMAGE_TAG}
     container_name: trades_backend_${ENV_NAME}
     env_file:
-      - ../../.env
-      - ../../.env.${ENV_NAME}
+      - ../../config/base.env
+      - ../../config/${ENV_NAME}.env
+      - ../../config/secrets.env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       CORS_ORIGINS: http://localhost:${FRONTEND_PORT},http://frontend:80

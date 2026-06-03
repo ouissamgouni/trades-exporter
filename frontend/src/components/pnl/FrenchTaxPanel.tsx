@@ -67,6 +67,36 @@ interface FrenchSecuritiesTaxReport {
     entries: unknown[];
 }
 
+interface FrenchIncomeTaxEntry {
+    id: number;
+    income_event_id: number | null;
+    fiscal_year: number;
+    asset_symbol: string;
+    income_type: string;
+    gross_income: number;
+    withholding_tax_credit: number;
+    net_taxable: number;
+    tax_amount: number;
+}
+
+interface FrenchIncomeTaxAnnualSummary {
+    id: number;
+    fiscal_year: number;
+    total_gross_income: number;
+    total_withholding_credits: number;
+    net_taxable: number;
+    tax_total: number;
+    event_count: number;
+}
+
+interface FrenchIncomeTaxReport {
+    version_id: number;
+    tax_jurisdiction: string | null;
+    total_tax: number;
+    annual_summaries: FrenchIncomeTaxAnnualSummary[];
+    entries: FrenchIncomeTaxEntry[];
+}
+
 interface RealizedPnLEntry {
     pnl_id: number;
     asset: { id: number; symbol: string; label?: string };
@@ -119,7 +149,7 @@ const GainBadge: React.FC<{ value: number; currency: string }> = ({ value, curre
     </Text>
 );
 
-type TaxCategory = 'crypto' | 'securities';
+type TaxCategory = 'crypto' | 'securities' | 'income';
 type TaxView = { type: 'year'; year: number } | { type: 'all' };
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -133,6 +163,7 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
 }) => {
     const [cryptoReport, setCryptoReport] = useState<FrenchTaxReport | null>(null);
     const [securitiesReport, setSecuritiesReport] = useState<FrenchSecuritiesTaxReport | null>(null);
+    const [incomeReport, setIncomeReport] = useState<FrenchIncomeTaxReport | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isComputing, setIsComputing] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -166,10 +197,14 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
             fetch(`${API_URL}/pnl/versions/${versionId}/fr-securities-tax`)
                 .then(res => res.ok ? res.json() : null)
                 .catch(() => null),
+            fetch(`${API_URL}/pnl/versions/${versionId}/fr-income-tax`)
+                .then(res => res.ok ? res.json() : null)
+                .catch(() => null),
         ])
-            .then(([crypto, securities]) => {
+            .then(([crypto, securities, income]) => {
                 setCryptoReport(crypto);
                 setSecuritiesReport(securities);
+                setIncomeReport(income);
                 setHasTaxResults(true);
             })
             .catch(err => {
@@ -248,8 +283,9 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
 
     const hasCrypto = cryptoReport && (cryptoReport.annual_summaries?.length > 0 || cryptoReport.entries?.length > 0);
     const hasSecurities = securitiesReport && (securitiesReport.annual_summaries?.length > 0 || securitiesReport.entries?.length > 0);
+    const hasIncome = incomeReport && (incomeReport.annual_summaries?.length > 0 || incomeReport.entries?.length > 0);
 
-    if (!hasCrypto && !hasSecurities) {
+    if (!hasCrypto && !hasSecurities && !hasIncome) {
         return (
             <Box py={8} textAlign="center">
                 <Text color="gray.400" fontSize="sm" mb={3}>No taxable disposals found for this version.</Text>
@@ -264,8 +300,10 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
         <TaxContent
             cryptoReport={cryptoReport}
             securitiesReport={securitiesReport}
+            incomeReport={incomeReport}
             hasCrypto={!!hasCrypto}
             hasSecurities={!!hasSecurities}
+            hasIncome={!!hasIncome}
             baseCurrency={baseCurrency}
             versionId={versionId}
             onRecompute={handleComputeTax}
@@ -283,8 +321,10 @@ export const FrenchTaxPanel: React.FC<FrenchTaxPanelProps> = ({
 const TaxContent: React.FC<{
     cryptoReport: FrenchTaxReport | null;
     securitiesReport: FrenchSecuritiesTaxReport | null;
+    incomeReport: FrenchIncomeTaxReport | null;
     hasCrypto: boolean;
     hasSecurities: boolean;
+    hasIncome: boolean;
     baseCurrency: string;
     versionId: number;
     onRecompute: () => void;
@@ -294,11 +334,11 @@ const TaxContent: React.FC<{
     onUnitClick?: (unitId: number) => void;
     onAssetClick?: (assetId: number) => void;
 }> = ({
-    cryptoReport, securitiesReport, hasCrypto, hasSecurities,
+    cryptoReport, securitiesReport, incomeReport, hasCrypto, hasSecurities, hasIncome,
     baseCurrency, versionId, onRecompute, onRefreshTaxData, isComputing,
     onTransactionClick, onUnitClick, onAssetClick,
 }) => {
-        const [activeCategory, setActiveCategory] = useState<TaxCategory>(hasCrypto ? 'crypto' : 'securities');
+        const [activeCategory, setActiveCategory] = useState<TaxCategory>(hasCrypto ? 'crypto' : hasSecurities ? 'securities' : 'income');
         const [view, setView] = useState<TaxView>({ type: 'year', year: 0 }); // will be set in effect
 
         // Derive all available years from both reports
@@ -306,8 +346,9 @@ const TaxContent: React.FC<{
             const yearSet = new Set<number>();
             cryptoReport?.annual_summaries?.forEach(s => yearSet.add(s.fiscal_year));
             securitiesReport?.annual_summaries?.forEach(s => yearSet.add(s.fiscal_year));
+            incomeReport?.annual_summaries?.forEach(s => yearSet.add(s.fiscal_year));
             return [...yearSet].sort((a, b) => b - a); // descending
-        }, [cryptoReport, securitiesReport]);
+        }, [cryptoReport, securitiesReport, incomeReport]);
 
         const last3Years = useMemo(() => allYears.slice(0, 3), [allYears]);
 
@@ -326,7 +367,7 @@ const TaxContent: React.FC<{
         // Palette: always gray for year-level wrapper (professional neutral)
         const wrapperPalette = 'gray';
 
-        const activeReport = activeCategory === 'crypto' ? cryptoReport : securitiesReport;
+        const activeReport = activeCategory === 'crypto' ? cryptoReport : activeCategory === 'securities' ? securitiesReport : null;
         const summaries = activeReport?.annual_summaries ?? [];
         const exportPath = activeCategory === 'crypto' ? 'fr-crypto-tax' : 'fr-securities-tax';
         const exportLabel = activeCategory === 'crypto' ? 'Cerfa 2086' : 'Form 2074';
@@ -352,27 +393,41 @@ const TaxContent: React.FC<{
                 : computeCardTotals(securitiesReport),
             [securitiesReport, view],
         );
+        const incomeTotals = useMemo(() =>
+            view.type === 'year' && view.year !== 0
+                ? computeIncomeTotalsForYear(incomeReport, view.year)
+                : computeIncomeTotals(incomeReport),
+            [incomeReport, view],
+        );
 
         // Compute combined totals per year for year metric cards
         const yearCardTotals = useMemo(() => {
             const map = new Map<number, CardTotals>();
             for (const year of last3Years) {
-                map.set(year, computeCombinedTotalsForYear(cryptoReport, securitiesReport, year));
+                const combined = computeCombinedTotalsForYear(cryptoReport, securitiesReport, year);
+                const inc = computeIncomeTotalsForYear(incomeReport, year);
+                map.set(year, {
+                    totalTax: combined.totalTax + inc.totalTax,
+                    taxableDisposals: combined.taxableDisposals + inc.taxableDisposals,
+                    totalGains: combined.totalGains + inc.totalGains,
+                    totalLosses: combined.totalLosses + inc.totalLosses,
+                });
             }
             return map;
-        }, [cryptoReport, securitiesReport, last3Years]);
+        }, [cryptoReport, securitiesReport, incomeReport, last3Years]);
 
         // All-years combined totals for "ALL" card
         const allTotals = useMemo<CardTotals>(() => {
             const c = computeCardTotals(cryptoReport);
             const s = computeCardTotals(securitiesReport);
+            const i = computeIncomeTotals(incomeReport);
             return {
-                totalTax: c.totalTax + s.totalTax,
-                taxableDisposals: c.taxableDisposals + s.taxableDisposals,
-                totalGains: c.totalGains + s.totalGains,
-                totalLosses: c.totalLosses + s.totalLosses,
+                totalTax: c.totalTax + s.totalTax + i.totalTax,
+                taxableDisposals: c.taxableDisposals + s.taxableDisposals + i.taxableDisposals,
+                totalGains: c.totalGains + s.totalGains + i.totalGains,
+                totalLosses: c.totalLosses + s.totalLosses + i.totalLosses,
             };
-        }, [cryptoReport, securitiesReport]);
+        }, [cryptoReport, securitiesReport, incomeReport]);
 
         // Combined annual summaries for ALL view (merge crypto + securities per year)
         const combinedSummaries = useMemo<FrenchTaxAnnualSummary[]>(() => {
@@ -541,12 +596,23 @@ const TaxContent: React.FC<{
                                             onClick={() => setActiveCategory('securities')}
                                         />
                                     )}
+                                    {hasIncome && (
+                                        <SummaryCard
+                                            label="Income"
+                                            subtitle="PFU 30%"
+                                            palette="teal"
+                                            totals={incomeTotals}
+                                            baseCurrency={baseCurrency}
+                                            active={activeCategory === 'income'}
+                                            onClick={() => setActiveCategory('income')}
+                                        />
+                                    )}
                                 </Flex>
 
                                 {/* Category content area — border merges with active sub-card tab */}
                                 {(() => {
-                                    const palette = activeCategory === 'crypto' ? 'blue' : 'purple';
-                                    const contentBg = activeCategory === 'crypto' ? 'blue.50/60' : 'purple.50/60';
+                                    const palette = activeCategory === 'crypto' ? 'blue' : activeCategory === 'securities' ? 'purple' : 'teal';
+                                    const contentBg = activeCategory === 'crypto' ? 'blue.50/60' : activeCategory === 'securities' ? 'purple.50/60' : 'teal.50/60';
                                     return (
                                         <Box
                                             bg={contentBg}
@@ -557,35 +623,46 @@ const TaxContent: React.FC<{
                                             p={4}
                                             transition="all 0.15s"
                                         >
-                                            {/* Export button */}
-                                            <Flex justify="flex-end" mb={3}>
-                                                <Button size="xs" variant="outline" colorPalette={palette} onClick={handleExport}>
-                                                    <FiDownload size={12} />
-                                                    <Text ml={1}>Export {exportLabel}</Text>
-                                                </Button>
-                                            </Flex>
-
-                                            {/* Annual summary table */}
-                                            {summaries.length > 0 && (
-                                                <AnnualSummaryTable
-                                                    summaries={summaries.filter(s => s.fiscal_year === selectedYear)}
+                                            {activeCategory === 'income' ? (
+                                                /* ── Income content: PFU entries table ── */
+                                                <IncomeTaxContent
+                                                    incomeReport={incomeReport}
                                                     selectedYear={selectedYear}
-                                                    onSelectYear={() => { }}
                                                     baseCurrency={baseCurrency}
                                                 />
-                                            )}
+                                            ) : (
+                                                <>
+                                                    {/* Export button */}
+                                                    <Flex justify="flex-end" mb={3}>
+                                                        <Button size="xs" variant="outline" colorPalette={palette} onClick={handleExport}>
+                                                            <FiDownload size={12} />
+                                                            <Text ml={1}>Export {exportLabel}</Text>
+                                                        </Button>
+                                                    </Flex>
 
-                                            {/* Disposal line items (server-paginated from /realized-pnl) */}
-                                            <DisposalTable
-                                                versionId={versionId}
-                                                baseCurrency={baseCurrency}
-                                                selectedYear={selectedYear}
-                                                frTaxCategory={activeCategory}
-                                                onTransactionClick={onTransactionClick}
-                                                onUnitClick={onUnitClick}
-                                                onAssetClick={onAssetClick}
-                                                onOverrideChange={handleOverrideChange}
-                                            />
+                                                    {/* Annual summary table */}
+                                                    {summaries.length > 0 && (
+                                                        <AnnualSummaryTable
+                                                            summaries={summaries.filter(s => s.fiscal_year === selectedYear)}
+                                                            selectedYear={selectedYear}
+                                                            onSelectYear={() => { }}
+                                                            baseCurrency={baseCurrency}
+                                                        />
+                                                    )}
+
+                                                    {/* Disposal line items (server-paginated from /realized-pnl) */}
+                                                    <DisposalTable
+                                                        versionId={versionId}
+                                                        baseCurrency={baseCurrency}
+                                                        selectedYear={selectedYear}
+                                                        frTaxCategory={activeCategory}
+                                                        onTransactionClick={onTransactionClick}
+                                                        onUnitClick={onUnitClick}
+                                                        onAssetClick={onAssetClick}
+                                                        onOverrideChange={handleOverrideChange}
+                                                    />
+                                                </>
+                                            )}
                                         </Box>
                                     );
                                 })()}
@@ -651,6 +728,38 @@ function computeCombinedTotalsForYear(
         totalGains: c.totalGains + s.totalGains,
         totalLosses: c.totalLosses + s.totalLosses,
     };
+}
+
+/** Map income tax report to CardTotals (gains=gross, losses=withholding credits) */
+function computeIncomeTotals(report: FrenchIncomeTaxReport | null): CardTotals {
+    if (!report || !report.annual_summaries) {
+        return { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 };
+    }
+    return report.annual_summaries.reduce(
+        (acc, s) => ({
+            totalTax: acc.totalTax + s.tax_total,
+            taxableDisposals: acc.taxableDisposals + s.event_count,
+            totalGains: acc.totalGains + s.total_gross_income,
+            totalLosses: acc.totalLosses + s.total_withholding_credits,
+        }),
+        { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 },
+    );
+}
+
+function computeIncomeTotalsForYear(report: FrenchIncomeTaxReport | null, year: number): CardTotals {
+    if (!report || !report.annual_summaries) {
+        return { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 };
+    }
+    const filtered = report.annual_summaries.filter(s => s.fiscal_year === year);
+    return filtered.reduce(
+        (acc, s) => ({
+            totalTax: acc.totalTax + s.tax_total,
+            taxableDisposals: acc.taxableDisposals + s.event_count,
+            totalGains: acc.totalGains + s.total_gross_income,
+            totalLosses: acc.totalLosses + s.total_withholding_credits,
+        }),
+        { totalTax: 0, taxableDisposals: 0, totalGains: 0, totalLosses: 0 },
+    );
 }
 
 const SummaryCard: React.FC<{
@@ -1305,3 +1414,118 @@ const DisposalTable: React.FC<{
     };
 
 export default FrenchTaxPanel;
+
+// ─── Income Tax Content ─────────────────────────────────────────────────────
+
+const IncomeTaxContent: React.FC<{
+    incomeReport: FrenchIncomeTaxReport | null;
+    selectedYear: number | null;
+    baseCurrency: string;
+}> = ({ incomeReport, selectedYear, baseCurrency }) => {
+    if (!incomeReport) return null;
+
+    const summaries = selectedYear
+        ? incomeReport.annual_summaries.filter(s => s.fiscal_year === selectedYear)
+        : incomeReport.annual_summaries;
+    const entries = selectedYear
+        ? incomeReport.entries.filter(e => e.fiscal_year === selectedYear)
+        : incomeReport.entries;
+
+    return (
+        <Box>
+            {/* Annual summary */}
+            {summaries.length > 0 && (
+                <Box mb={4}>
+                    <Text fontSize="xs" fontWeight="700" color="teal.700" mb={2}>
+                        Annual Summary — Form 2042
+                    </Text>
+                    <Box overflowX="auto">
+                        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid #d5dce6' }}>
+                                    <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 600 }}>Year</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>Gross (2DC)</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>WHT Credit</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>Net Taxable</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>PFU Tax</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>Events</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {summaries.map(s => (
+                                    <tr key={s.id} style={{ borderBottom: '1px solid #eef1f5' }}>
+                                        <td style={{ padding: '4px 6px', fontWeight: 600 }}>{s.fiscal_year}</td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                                            {formatCurrency(s.total_gross_income, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right', color: '#d97706' }}>
+                                            -{formatCurrency(s.total_withholding_credits, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                                            {formatCurrency(s.net_taxable, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, color: '#0d9488' }}>
+                                            {formatCurrency(s.tax_total, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right' }}>{s.event_count}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </Box>
+                </Box>
+            )}
+
+            {/* Line item entries */}
+            {entries.length > 0 && (
+                <Box>
+                    <Text fontSize="xs" fontWeight="700" color="teal.700" mb={2}>
+                        Income Events ({entries.length})
+                    </Text>
+                    <Box overflowX="auto">
+                        <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr style={{ borderBottom: '1px solid #d5dce6' }}>
+                                    <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 600 }}>Asset</th>
+                                    <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 600 }}>Type</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>Gross</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>WHT Credit</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>Net Taxable</th>
+                                    <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 600 }}>PFU Tax</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {entries.map(e => (
+                                    <tr key={e.id} style={{ borderBottom: '1px solid #eef1f5' }}>
+                                        <td style={{ padding: '4px 6px', fontWeight: 600 }}>{e.asset_symbol}</td>
+                                        <td style={{ padding: '4px 6px' }}>
+                                            <Badge size="sm" colorPalette="teal" variant="subtle">{e.income_type}</Badge>
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                                            {formatCurrency(e.gross_income, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right', color: '#d97706' }}>
+                                            {e.withholding_tax_credit > 0 ? `-${formatCurrency(e.withholding_tax_credit, baseCurrency)}` : '-'}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                                            {formatCurrency(e.net_taxable, baseCurrency)}
+                                        </td>
+                                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, color: '#0d9488' }}>
+                                            {formatCurrency(e.tax_amount, baseCurrency)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </Box>
+                </Box>
+            )}
+
+            {summaries.length === 0 && entries.length === 0 && (
+                <Text fontSize="xs" color="gray.400" textAlign="center" py={4}>
+                    No income tax entries for this period
+                </Text>
+            )}
+        </Box>
+    );
+};

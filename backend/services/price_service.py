@@ -198,6 +198,35 @@ class CurrencyConverter:
         )
         
         try:
+            # Prefer configured getter (e.g. mock) over forex when available.
+            # This ensures QA/test scenarios with seeded prices don't hit
+            # the real forex API for cross-currency conversion.
+            apg = session.exec(
+                select(AssetPriceGetter)
+                .where(AssetPriceGetter.asset_id == from_asset.asset_id)
+                .where(AssetPriceGetter.enabled == True)
+                .order_by(AssetPriceGetter.priority)
+            ).first()
+
+            if apg and apg.price_getter != "forex":
+                configured_getter = get_price_getter(apg.price_getter)
+                apg_config = PriceGetterConfig.from_db(apg.external_id, apg.params)
+                try:
+                    if dt:
+                        result = configured_getter.get_historical_price(from_asset, dt, apg_config)
+                    else:
+                        result = configured_getter.get_current_price(from_asset, apg_config)
+                    if result.quote_currency and result.quote_currency.upper() == to_upper:
+                        rate = result.price
+                        converted = price * rate
+                        log.debug(
+                            f"Converted {price} {from_upper} -> {converted} {to_upper} "
+                            f"(rate: {rate}, source: {apg.price_getter})"
+                        )
+                        return converted
+                except Exception:
+                    pass  # Fall through to forex
+
             forex_getter = self._get_forex_getter()
             
             if dt:

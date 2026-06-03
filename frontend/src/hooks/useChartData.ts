@@ -27,6 +27,7 @@ export interface TimelinePoint {
     cost_basis_in_base: number;
     unrealized_pnl: number;
     cumulative_realized_pnl: number;
+    cumulative_income: number;
     breakdown: TimelineBreakdownItem[];
 }
 
@@ -196,6 +197,7 @@ export interface MetricsRangeData {
     cost_basis_in_period: number;
     unrealized_in_period: number;
     fees_in_period: number;
+    total_invested?: number;
     top_performers: PerformerItem[];
     flop_performers: PerformerItem[];
 }
@@ -208,6 +210,7 @@ export interface MetricsSummary {
     taxable_realized_pnl: number;
     total_fees: number;
     fee_entry_count: number;
+    total_invested?: number;
 }
 
 export type RangeKey = 'all' | '3y' | '1y' | '6m' | '3m' | '1m' | '1w';
@@ -219,42 +222,49 @@ export interface VersionMetricsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Settled metrics types (cost-lot-based, no prices needed)
+// Book metrics types (cost-lot-based, no prices needed)
 // ---------------------------------------------------------------------------
 
-export interface SettledSummary {
+export interface BookSummary {
     cost_basis: number;
     realized_pnl: number;
     taxable_realized_pnl: number;
     total_fees: number;
     fee_entry_count: number;
+    total_invested: number;
+    total_income: number;
+    total_withholding: number;
+    income_event_count: number;
 }
 
-export interface SettledRangeData {
+export interface BookRangeData {
     cost_basis: number;
     realized_pnl: number;
     taxable_realized_pnl: number;
     realized_in_period: number;
     cost_basis_in_period: number;
     fees_in_period: number;
+    total_invested: number;
+    income_in_period: number;
+    withholding_in_period: number;
 }
 
-export interface SettledMetricsResponse {
+export interface BookMetricsResponse {
     version_id: number;
-    summary: SettledSummary;
-    ranges: Partial<Record<RangeKey, SettledRangeData>>;
+    summary: BookSummary;
+    ranges: Partial<Record<RangeKey, BookRangeData>>;
 }
 
 // ---------------------------------------------------------------------------
-// Market metrics types (price-dependent)
+// Live metrics types (price-dependent)
 // ---------------------------------------------------------------------------
 
-export interface MarketSummary {
+export interface LiveSummary {
     current_value: number;
     unrealized_pnl: number;
 }
 
-export interface MarketRangeData {
+export interface LiveRangeData {
     current_value: number;
     unrealized_pnl: number;
     unrealized_in_period: number;
@@ -262,10 +272,10 @@ export interface MarketRangeData {
     roi_pct: number;
 }
 
-export interface MarketMetricsResponse {
+export interface LiveMetricsResponse {
     version_id: number;
-    summary: MarketSummary;
-    ranges: Partial<Record<RangeKey, MarketRangeData>>;
+    summary: LiveSummary;
+    ranges: Partial<Record<RangeKey, LiveRangeData>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -398,23 +408,23 @@ export function useVersionMetrics(
 }
 
 // ---------------------------------------------------------------------------
-// useSettledMetrics  (React Query)
+// useBookMetrics  (React Query)
 // ---------------------------------------------------------------------------
 
-export interface SettledMetricsParams {
+export interface BookMetricsParams {
     assetIds?: number[];
     accountIds?: number[];
     categoryIds?: number[];
 }
 
-export function useSettledMetrics(
+export function useBookMetrics(
     versionId: number | null,
-    params: SettledMetricsParams = {},
+    params: BookMetricsParams = {},
     enabled = true,
 ) {
-    const result = useQuery<SettledMetricsResponse>({
+    const result = useQuery<BookMetricsResponse>({
         queryKey: [
-            'settled-metrics', versionId,
+            'book-metrics', versionId,
             params.assetIds?.join(','),
             params.accountIds?.join(','),
             params.categoryIds?.join(','),
@@ -426,7 +436,7 @@ export function useSettledMetrics(
             if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
             const qs = sp.toString() ? `?${sp.toString()}` : '';
             const res = await fetch(
-                `${API_URL}/pnl/versions/${versionId}/metrics/settled${qs}`,
+                `${API_URL}/pnl/versions/${versionId}/metrics/book${qs}`,
                 { signal },
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -445,10 +455,10 @@ export function useSettledMetrics(
 }
 
 // ---------------------------------------------------------------------------
-// useMarketMetrics  (React Query)
+// useLiveMetrics  (React Query)
 // ---------------------------------------------------------------------------
 
-export interface MarketMetricsParams {
+export interface LiveMetricsParams {
     assetIds?: number[];
     accountIds?: number[];
     categoryIds?: number[];
@@ -456,14 +466,14 @@ export interface MarketMetricsParams {
     pricesReady?: boolean;
 }
 
-export function useMarketMetrics(
+export function useLiveMetrics(
     versionId: number | null,
-    params: MarketMetricsParams = {},
+    params: LiveMetricsParams = {},
     enabled = true,
 ) {
-    const result = useQuery<MarketMetricsResponse>({
+    const result = useQuery<LiveMetricsResponse>({
         queryKey: [
-            'market-metrics', versionId,
+            'live-metrics', versionId,
             params.assetIds?.join(','),
             params.accountIds?.join(','),
             params.categoryIds?.join(','),
@@ -476,7 +486,7 @@ export function useMarketMetrics(
             if (params.categoryIds?.length) sp.set('category_ids', params.categoryIds.join(','));
             const qs = sp.toString() ? `?${sp.toString()}` : '';
             const res = await fetch(
-                `${API_URL}/pnl/versions/${versionId}/metrics/market${qs}`,
+                `${API_URL}/pnl/versions/${versionId}/metrics/live${qs}`,
                 { signal },
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -662,4 +672,135 @@ export function useMultiBenchmarkSeries(
         isLoading: r.isLoading,
         error: r.error ? (r.error as Error).message : null,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Income Events types & hooks
+// ---------------------------------------------------------------------------
+
+export interface IncomeAssetRef {
+    id: number;
+    symbol: string | null;
+    label: string | null;
+}
+
+export interface IncomeEventItem {
+    id: number;
+    income_type: string;
+    asset: IncomeAssetRef;
+    attributed_asset: IncomeAssetRef | null;
+    gross_amount_in_base: number;
+    withholding_amount_in_base: number;
+    net_amount_in_base: number;
+    withholding_jurisdiction: string | null;
+    withholding_rate: number | null;
+    income_at: string | null;
+    notes: string | null;
+    transaction_id: number | null;
+    unit_id: number | null;
+    account_id: number | null;
+    account_name: string | null;
+}
+
+export interface IncomeEventsResponse {
+    items: IncomeEventItem[];
+    total: number;
+    page: number;
+    limit: number;
+}
+
+export interface IncomeFilterOption {
+    value: string;
+    label: string;
+    count: number;
+}
+
+export interface IncomeFilterOptionsResponse {
+    assets: IncomeFilterOption[];
+    income_types: IncomeFilterOption[];
+    jurisdictions: IncomeFilterOption[];
+    accounts: IncomeFilterOption[];
+    date_range: { min: string; max: string } | null;
+}
+
+export interface IncomeEventsParams {
+    assetId?: number;
+    incomeType?: string;
+    accountId?: number;
+    jurisdiction?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    sortBy?: 'date' | 'amount';
+    order?: 'asc' | 'desc';
+    page?: number;
+    limit?: number;
+}
+
+export function useIncomeEvents(
+    versionId: number | null,
+    params: IncomeEventsParams = {},
+    enabled = true,
+) {
+    const result = useQuery<IncomeEventsResponse>({
+        queryKey: [
+            'income-events', versionId,
+            params.assetId, params.incomeType, params.accountId,
+            params.jurisdiction, params.dateFrom, params.dateTo,
+            params.sortBy, params.order, params.page, params.limit,
+        ],
+        queryFn: async ({ signal }) => {
+            const sp = new URLSearchParams();
+            if (params.assetId != null) sp.set('asset_id', String(params.assetId));
+            if (params.incomeType) sp.set('income_type', params.incomeType);
+            if (params.accountId != null) sp.set('account_id', String(params.accountId));
+            if (params.jurisdiction) sp.set('jurisdiction', params.jurisdiction);
+            if (params.dateFrom) sp.set('date_from', params.dateFrom);
+            if (params.dateTo) sp.set('date_to', params.dateTo);
+            if (params.sortBy) sp.set('sort_by', params.sortBy);
+            if (params.order) sp.set('order', params.order);
+            if (params.page != null) sp.set('page', String(params.page));
+            if (params.limit != null) sp.set('limit', String(params.limit));
+            const qs = sp.toString() ? `?${sp.toString()}` : '';
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/income-events${qs}`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+        refetch: result.refetch,
+    };
+}
+
+export function useIncomeFilterOptions(
+    versionId: number | null,
+    enabled = true,
+) {
+    const result = useQuery<IncomeFilterOptionsResponse>({
+        queryKey: ['income-filter-options', versionId],
+        queryFn: async ({ signal }) => {
+            const res = await fetch(
+                `${API_URL}/pnl/versions/${versionId}/income-events/filter-options`,
+                { signal },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        },
+        enabled: enabled && !!versionId,
+        staleTime: 5 * 60_000,
+    });
+
+    return {
+        data: result.data ?? null,
+        isLoading: result.isLoading,
+        error: result.error ? (result.error as Error).message : null,
+    };
 }

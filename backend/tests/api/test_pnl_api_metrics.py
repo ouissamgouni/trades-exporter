@@ -85,20 +85,24 @@ def _make_metrics(
     )
 
     all_range = RangeMetrics(
-        total_return=50000.0, roi_pct=142.86,
-        current_value=current_value, cost_basis=cost_basis,
-        unrealized_pnl=unrealized_pnl, realized_pnl=realized_pnl,
+        cost_basis=cost_basis, realized_pnl=realized_pnl,
         taxable_realized_pnl=taxable_realized_pnl,
         realized_in_period=realized_pnl,
+        cost_basis_in_period=cost_basis, fees_in_period=total_fees,
+        total_return=50000.0, roi_pct=142.86,
+        current_value=current_value,
+        unrealized_pnl=unrealized_pnl,
         top_performers=[top_btc], flop_performers=[flop_doge],
     )
 
     one_month_range = RangeMetrics(
-        total_return=11000.0, roi_pct=61.11,
-        current_value=current_value, cost_basis=cost_basis,
-        unrealized_pnl=unrealized_pnl, realized_pnl=realized_pnl,
+        cost_basis=cost_basis, realized_pnl=realized_pnl,
         taxable_realized_pnl=taxable_realized_pnl,
         realized_in_period=3000.0,
+        cost_basis_in_period=0.0, fees_in_period=0.0,
+        total_return=11000.0, roi_pct=61.11,
+        current_value=current_value,
+        unrealized_pnl=unrealized_pnl,
         top_performers=[top_btc], flop_performers=[],
     )
 
@@ -248,7 +252,13 @@ class TestMetricsEndpoint:
 
 
 class TestMetricsVersionConsistency:
-    """Verify /metrics summary and /versions/{id} return consistent data."""
+    """Verify /metrics summary and /versions/{id} return consistent data.
+
+    Note: /versions/{id} runs lightweight DB aggregates (realized P&L, fees)
+    and does NOT compute price-dependent fields (current_value, unrealized_pnl,
+    cost_basis) — those default to 0.0.  Only /metrics calls
+    compute_version_metrics.  This test verifies the DB-sourced fields match.
+    """
 
     @patch(MOCK_COMPUTE)
     @patch("backend.api.routes.pnl.fetch_version_entity_ids")
@@ -256,10 +266,21 @@ class TestMetricsVersionConsistency:
         self, mock_entity_ids, mock_compute, client, mock_session,
     ):
         """
-        Both endpoints call compute_version_metrics → the summary values
-        (realized, unrealized, current_value, cost_basis) must be identical.
+        DB-sourced fields (realized_pnl, taxable_realized_pnl, fees) from
+        /versions/{id} should agree with the same fields in /metrics summary.
         """
-        metrics = _make_metrics()
+        # Values we expect both endpoints to agree on
+        realized = 5000.0
+        taxable_realized = 4000.0
+        total_fees = 120.0
+        fee_count = 3
+
+        metrics = _make_metrics(
+            realized_pnl=realized,
+            taxable_realized_pnl=taxable_realized,
+            total_fees=total_fees,
+            fee_entry_count=fee_count,
+        )
         mock_compute.return_value = metrics
 
         # Mock version object for get_version()
@@ -281,7 +302,6 @@ class TestMetricsVersionConsistency:
         version.use_price_fallback = True
         version.price_staleness_window_days = 7
         version.account_ids = None
-        mock_session.get.return_value = version
 
         # Mock base currency asset
         asset_mock = MagicMock()
@@ -295,6 +315,22 @@ class TestMetricsVersionConsistency:
                 return asset_mock
             return None
         mock_session.get.side_effect = mock_get
+
+        # Mock SQL aggregates that get_version() executes
+        # session.exec(rpnl_query).one() is called twice:
+        #   1) total realized → realized
+        #   2) taxable realized → taxable_realized
+        # session.exec(fee_query).first() returns (total_fees, fee_count)
+        fee_row = MagicMock()
+        fee_row.total_fees = total_fees
+        fee_row.fee_count = fee_count
+
+        exec_results = iter([
+            MagicMock(one=MagicMock(return_value=realized)),        # rpnl total
+            MagicMock(one=MagicMock(return_value=taxable_realized)),  # rpnl taxable
+            MagicMock(first=MagicMock(return_value=fee_row)),        # fee summary
+        ])
+        mock_session.exec.side_effect = lambda q: next(exec_results)
 
         mock_entity_ids.return_value = {
             "calculation_unit_ids": [],
@@ -312,9 +348,14 @@ class TestMetricsVersionConsistency:
         # GET /versions/1
         version_resp = client.get("/pnl/versions/1").json()
 
-        # Both should use the same metrics → check realized_pnl matches
+        # DB-sourced fields should match
         assert version_resp["total_realized_pnl"] == ms["realized_pnl"]
-        assert version_resp["current_value"] == ms["current_value"]
-        assert version_resp["cost_basis"] == ms["cost_basis"]
-        assert version_resp["unrealized_pnl"] == ms["unrealized_pnl"]
         assert version_resp["taxable_realized_pnl"] == ms["taxable_realized_pnl"]
+        assert version_resp["total_fees_in_base"] == ms["total_fees"]
+        assert version_resp["fee_entry_count"] == ms["fee_entry_count"]
+
+        # Price-dependent fields: /versions/{id} doesn't compute these,
+        # so they default to 0.0.  Just verify they're present.
+        assert version_resp["current_value"] == 0.0
+        assert version_resp["unrealized_pnl"] == 0.0
+        assert version_resp["cost_basis"] == 0.0

@@ -1,0 +1,335 @@
+# Corporate Spin-Off Scenario — QA Test Plan
+# ==============================================
+# This scenario tests spinoff bundles in two complementary groups:
+#
+#   Group A — GE → GEV (Pre-seeded bundle, Interactive Brokers)
+#     A complete spinoff already bundled at seed time.
+#     Used to verify: existing spinoff display, cost lot inheritance, realized PnL.
+#
+#   Group B — APTV → VRSG (Manual bundle, DEGIRO CTO)
+#     The VRSG inflow has NO bundle. The tester creates it manually.
+#     Used to verify: PnL before/after bundle creation, UI bundle workflow.
+#
+# The test plan walks through 5 phases:
+#   Phase 1: Verify the pre-seeded GE → GEV spinoff (Group A)
+#   Phase 2: Check APTV/VRSG PnL BEFORE any bundle exists (Group B baseline)
+#   Phase 3: Create the APTV → VRSG spinoff bundle manually via the UI
+#   Phase 4: Verify APTV/VRSG PnL AFTER bundle creation (Group B post-spinoff)
+#   Phase 5: Cross-group checks and edge cases
+
+test_plan:
+  name: "Corporate Spin-Off — Full QA Workflow"
+  description: >
+    End-to-end QA for spinoff cost basis reallocation. Covers both a pre-existing
+    spinoff bundle (GE → GEV) and a manually-created one (APTV → VRSG).
+    Tests the UI workflow for creating spinoff bundles, and validates PnL/cost basis
+    before and after bundle creation.
+
+  steps:
+    # ═══════════════════════════════════════════════════════════════
+    # PHASE 1: Verify Pre-Seeded Spinoff (GE → GEV, Interactive Brokers)
+    # ═══════════════════════════════════════════════════════════════
+
+    - id: 1
+      title: "Phase 1 — GE: Existing spinoff bundle is visible"
+      description: >
+        Go to Bundles tab. The GE → GE Vernova bundle should already exist.
+      expected: >
+        Bundle "GE → GE Vernova Spin-Off" shown with:
+        - Pattern badge: Spin-Off
+        - Taxability: Non-Taxable
+        - Contains 1 transaction (the GEV inflow deposit)
+      verification: >
+        Click bundle row to expand. GEV inflow is listed.
+        Notes mention "12% cost basis allocation".
+
+    - id: 2
+      title: "Phase 1 — GE: Parent cost basis reduced"
+      description: >
+        Open P&L tab → GE asset on Interactive Brokers.
+        After PnL recalculation, GE cost should reflect 88% retained.
+      expected: >
+        GE: 40 shares, unit cost = €140.80 (€160 × 88%).
+        Total GE cost = 40 × €140.80 = €5,632.
+      verification: >
+        GE detail → Cost Lots tab shows 1 lot:
+        40 shares, acquired 2024-01-15, unit cost €140.80.
+
+    - id: 3
+      title: "Phase 1 — GEV: Child lots have inherited cost"
+      description: >
+        Open GEV detail on Interactive Brokers.
+        Check cost lots created by the spinoff engine.
+      expected: >
+        GEV: 10 shares (5 remaining after sale), unit cost = €76.80.
+        Total GEV cost at creation = 10 × €76.80 = €768.
+        Holding period inherited: acquired 2024-01-15 (from GE lot).
+      verification: >
+        GEV detail → Cost Lots tab shows lot with acquired_at = 2024-01-15.
+        Cost source = inherited.
+
+    - id: 4
+      title: "Phase 1 — GEV: Realized PnL on sold shares"
+      description: >
+        The sale of 5 GEV @ €150 should use the inherited cost basis of €76.80.
+      expected: >
+        Proceeds = 5 × €150 = €750.
+        Cost = 5 × €76.80 = €384.
+        Realized PnL = +€366 (gain).
+      verification: >
+        GEV detail → Realized PnL tab shows 1 entry with gain = €366.
+
+    - id: 5
+      title: "Phase 1 — GE+GEV: Total cost basis preserved"
+      description: >
+        Verify no cost basis was created or destroyed by the GE spinoff.
+      expected: >
+        GE cost (€5,632) + GEV total cost (€768) = €6,400 = original GE cost.
+      verification: >
+        Sum cost basis from GE + GEV detail views on IBKR.
+
+    # ═══════════════════════════════════════════════════════════════
+    # PHASE 2: Baseline — Check APTV/VRSG BEFORE Bundle (DEGIRO CTO)
+    # ═══════════════════════════════════════════════════════════════
+
+    - id: 6
+      title: "Phase 2 — APTV: Cost basis before spinoff bundle"
+      description: >
+        Open P&L tab → APTV on DEGIRO CTO. No spinoff bundle exists yet,
+        so cost basis should be the full original amounts.
+      expected: >
+        APTV Lot 1: 60 shares, unit cost €50.00, total €3,000.
+        APTV Lot 2: 40 shares, unit cost €48.00, total €1,920.
+        Total APTV cost = €4,920 (unchanged — no spinoff applied).
+      verification: >
+        APTV detail → Cost Lots tab shows 2 lots at original purchase prices.
+        No "inherited" or "spinoff" annotations.
+
+    - id: 7
+      title: "Phase 2 — VRSG: Appears as unexplained deposit"
+      description: >
+        Open VRSG detail on DEGIRO CTO. Without a spinoff bundle,
+        the 20 VRSG inflow is just a deposit with FMV-based cost.
+      expected: >
+        VRSG shows 20 shares (10 remaining after sale).
+        Cost basis = €194 (20 × €9.70 FMV at deposit date).
+        The inflow appears in the transaction list as a standalone deposit.
+      verification: >
+        VRSG detail → Cost Lots tab shows lot with unit cost €9.70.
+        Transaction list shows the VRSG deposit as unbundled.
+
+    - id: 8
+      title: "Phase 2 — VRSG sale: PnL with FMV cost basis (before spinoff)"
+      description: >
+        Check the realized PnL for the 10 VRSG sale BEFORE any bundle exists.
+        Without spinoff, cost basis comes from FMV at deposit date.
+      expected: >
+        Proceeds = 10 × €12 = €120.
+        Cost basis = 10 × €9.70 = €97 (FMV at deposit).
+        Realized PnL = +€23 (gain).
+      verification: >
+        VRSG detail → Realized PnL shows +€23 gain.
+        This value should change after the spinoff bundle is created
+        (inherited cost basis will replace FMV-based cost).
+
+    # ═══════════════════════════════════════════════════════════════
+    # PHASE 3: Create APTV → VRSG Spinoff Bundle via UI
+    # ═══════════════════════════════════════════════════════════════
+
+    - id: 9
+      title: "Phase 3 — Open Bundle Create Dialog"
+      description: >
+        Go to Bundles tab → click "Create Bundle" button.
+        The BundleCreateDialog should open.
+      expected: >
+        Dialog opens with fields: Label, Pattern dropdown, Notes, Taxability override.
+      verification: >
+        All fields are visible and editable.
+
+    - id: 10
+      title: "Phase 3 — Select spinoff pattern and fill metadata"
+      description: >
+        In the dialog:
+        1. Set Label = "Aptiv → Versigent Spin-Off"
+        2. Select Pattern = "Spin-Off" from dropdown
+        3. When spinoff is selected, extra fields should appear:
+           - Source Asset (select APTV)
+           - Allocation % (enter 15)
+        4. Set Taxability = Non-Taxable
+        5. Add note: "15% allocation based on FMV ratio"
+      expected: >
+        Pattern dropdown includes "Spin-Off" option.
+        Selecting it reveals the spinoff-specific metadata fields.
+        Source Asset is a searchable asset selector.
+        Allocation % accepts numeric input.
+      verification: >
+        All fields filled. Preview shows correct summary.
+
+    - id: 11
+      title: "Phase 3 — Save bundle and add VRSG inflow transaction"
+      description: >
+        1. Click Save/Create to create the bundle.
+        2. The bundle should appear in the Bundles tab.
+        3. Find the VRSG deposit transaction (2025-05-01, 20 VRSG, DEGIRO CTO).
+        4. Assign it to the new spinoff bundle (via transaction side panel or drag-drop).
+      expected: >
+        Bundle created with pattern = spinoff, bundle_data includes
+        spinoff_source_asset_id and spinoff_allocation_pct = 0.15.
+        VRSG inflow is now a member of the bundle.
+      verification: >
+        Bundles tab shows 2 bundles: "GE → GE Vernova" and "Aptiv → Versigent".
+        Click "Aptiv → Versigent" → the VRSG deposit is listed as a member.
+
+    - id: 12
+      title: "Phase 3 — Trigger PnL recalculation"
+      description: >
+        After assigning the VRSG transaction to the spinoff bundle,
+        trigger a PnL recalculation (via Recalculate button or automatic).
+      expected: >
+        PnL engine runs. Status shows "Calculating..." then "Complete".
+        The spinoff handler processes the new bundle and reallocates cost basis.
+      verification: >
+        Check PnL status indicator. No errors in the recalculation log.
+
+    # ═══════════════════════════════════════════════════════════════
+    # PHASE 4: Verify APTV/VRSG PnL AFTER Bundle Creation
+    # ═══════════════════════════════════════════════════════════════
+
+    - id: 13
+      title: "Phase 4 — APTV: Cost basis reduced by 15%"
+      description: >
+        Re-open APTV detail on DEGIRO CTO. Cost basis should now be reduced.
+      expected: >
+        APTV Lot 1: 60 shares, unit cost €42.50 (was €50 × 85%).
+        APTV Lot 2: 40 shares, unit cost €40.80 (was €48 × 85%).
+        Total APTV cost = €2,550 + €1,632 = €4,182 (was €4,920).
+        Holding periods preserved: 2024-03-10 and 2024-06-20.
+      verification: >
+        Compare with Phase 2 step 6 values. Cost decreased by exactly 15%.
+
+    - id: 14
+      title: "Phase 4 — VRSG: Lots created with inherited cost"
+      description: >
+        Re-open VRSG detail. Should now have cost lots from the spinoff.
+      expected: >
+        VRSG Lot A: 12 shares, unit cost €37.50 (from APTV lot 1).
+        VRSG Lot B: 8 shares, unit cost €36.00 (from APTV lot 2).
+        Total VRSG cost = €450 + €288 = €738.
+        Holding periods inherited: 2024-03-10 and 2024-06-20.
+      verification: >
+        Cost Lots tab now shows 2 lots (was empty in Phase 2).
+        Acquired dates match APTV purchase dates, not the spinoff date.
+
+    - id: 15
+      title: "Phase 4 — VRSG sale: Realized PnL now uses inherited cost"
+      description: >
+        Check the VRSG sale realized PnL AFTER the bundle exists.
+        Should change dramatically from Phase 2.
+      expected: >
+        Proceeds = 10 × €12 = €120.
+        Cost = 10 × €37.50 = €375 (FIFO from Lot A).
+        Realized PnL = -€255 (loss).
+        Compare: was +€120 in Phase 2 → now -€255.
+      verification: >
+        VRSG detail → Realized PnL tab shows -€255.
+        This confirms spinoff cost basis correctly affects subsequent sales.
+
+    - id: 16
+      title: "Phase 4 — Total cost basis preserved"
+      description: >
+        Verify the spinoff didn't create or destroy cost basis.
+      expected: >
+        APTV cost (€4,182) + VRSG cost (€738) = €4,920 = original APTV cost.
+        No realized PnL from the spinoff event itself.
+      verification: >
+        Sum cost basis across APTV + VRSG on DEGIRO CTO.
+
+    - id: 17
+      title: "Phase 4 — Spinoff bundle marked non-taxable"
+      description: >
+        The APTV → VRSG bundle should show as non-taxable with €0 realized PnL.
+      expected: >
+        Bundle row shows "Non-Taxable" badge.
+        Activity Feed: spinoff unit has €0 realized PnL.
+      verification: >
+        Filter Activity Feed by pattern = Spin-Off. Two entries (GE and APTV).
+        Both show €0 realized PnL for the spinoff event.
+
+    - id: 18
+      title: "Phase 4 — Cash-in-lieu is independent"
+      description: >
+        The €9.30 cash-in-lieu should remain a standalone taxable deposit.
+      expected: >
+        €9.30 EUR deposit on DEGIRO CTO (2025-05-01).
+        Taxable. NOT part of the spinoff bundle.
+      verification: >
+        Transaction is not listed as a bundle member.
+
+    # ═══════════════════════════════════════════════════════════════
+    # PHASE 5: Cross-Group Checks and Edge Cases
+    # ═══════════════════════════════════════════════════════════════
+
+    - id: 19
+      title: "Phase 5 — Two spinoff bundles coexist"
+      description: >
+        Bundles tab should show both spinoff bundles side by side.
+      expected: >
+        Bundle 1: "GE → GE Vernova Spin-Off" (IBKR, 12% allocation)
+        Bundle 2: "Aptiv → Versigent Spin-Off" (DEGIRO, 15% allocation)
+        Both show Spin-Off pattern badge.
+      verification: >
+        Both bundles visible. Click each to see its transactions.
+        Different source assets, accounts, and allocation percentages.
+
+    - id: 20
+      title: "Phase 5 — Account scoping: spinoffs don't cross accounts"
+      description: >
+        GE spinoff only affects IBKR. APTV spinoff only affects DEGIRO CTO.
+        Neither account has spinoff side-effects from the other.
+      expected: >
+        IBKR has no APTV or VRSG lots.
+        DEGIRO has no GE or GEV lots.
+        Each spinoff is fully isolated to its account.
+      verification: >
+        Filter P&L by account. Each account only shows its own assets.
+
+    - id: 21
+      title: "Phase 5 — Edit allocation: Change APTV bundle to 20%"
+      description: >
+        Edit the APTV → VRSG bundle allocation from 15% to 20%.
+        Recalculate and verify cost shifts.
+      expected: >
+        After recalculation with 20%:
+        APTV Lot 1: 60 × €40.00 = €2,400 (80% of €50).
+        APTV Lot 2: 40 × €38.40 = €1,536 (80% of €48).
+        VRSG Lot A: 12 × €50.00 = €600 (20% of lot 1 cost).
+        VRSG Lot B: 8 × €48.00 = €384 (20% of lot 2 cost).
+        Total = €2,400 + €1,536 + €600 + €384 = €4,920 ✓
+      verification: >
+        Edit bundle metadata. Recalculate PnL. Verify new lot costs.
+        GE → GEV bundle is unchanged (still 12%).
+        Revert to 15% after test.
+
+    - id: 22
+      title: "Phase 5 — VRSG remaining lots after sale"
+      description: >
+        After the 10-share sale (FIFO from Lot A of 12 shares), verify remaining.
+      expected: >
+        VRSG Lot A: 2 shares remaining, unit cost €37.50.
+        VRSG Lot B: 8 shares remaining, unit cost €36.00.
+        Total remaining VRSG = 10 shares.
+      verification: >
+        VRSG detail → Cost Lots tab shows 2 lots with correct remaining quantities.
+
+    - id: 23
+      title: "Phase 5 — Delete APTV bundle and verify rollback"
+      description: >
+        Delete the APTV → VRSG spinoff bundle. Recalculate PnL.
+        Everything should revert to Phase 2 baseline.
+      expected: >
+        APTV lots revert to original costs (€50 and €48).
+        VRSG has no inherited cost lots.
+        VRSG sale shows +€120 gain again (no cost basis).
+      verification: >
+        Same values as Phase 2 steps 6-8.
+        Recreate the bundle afterwards to restore Phase 4 state.

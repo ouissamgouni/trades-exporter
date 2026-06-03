@@ -246,25 +246,50 @@ class ConnectorEtherscanNormalTx(BaseConnector):
 
             tags = []
 
-            return NormalizedTransaction(
-                source=f"etherscan_normal_tx_{self.chain_name.lower()}",
-                account_id=self.account_id,
-                source_account=self.wallet_address,  # Raw account identifier for mapping
-                source_transaction_id=tx_hash,
-                date_time=dt,
-                direction=direction,
-                transaction_type="cost" if value == 0 else "transfer",
-                source_transaction_type="normal-tx",
-                source_asset_symbol=self.native_token,
-                quantity=float(value),
-                fee=float(fee),
-                source_fee_quote_asset_symbol=self.native_token,
-                include_fee=True if direction == "outflow" else False,
-                source_from_account=tx_from,
-                source_to_account=to_addr,
-                network=normalize_network(self.chain_name),
-                tags=tags,
-            )
+            is_cost = value == 0
+
+            if is_cost:
+                # COST: fee-only transaction — qty=fee, price=1, price_quote=native_token
+                return NormalizedTransaction(
+                    source=f"etherscan_normal_tx_{self.chain_name.lower()}",
+                    account_id=self.account_id,
+                    source_account=self.wallet_address,
+                    source_transaction_id=tx_hash,
+                    date_time=dt,
+                    direction="outflow",
+                    transaction_type="cost",
+                    source_transaction_type="normal-tx",
+                    source_asset_symbol=self.native_token,
+                    quantity=float(fee),
+                    price=1.0,
+                    source_price_quote_asset_symbol=self.native_token,
+                    include_fee=False,
+                    source_from_account=tx_from,
+                    source_to_account=to_addr,
+                    network=normalize_network(self.chain_name),
+                    tags=tags,
+                )
+            else:
+                # TRANSFER: normal transfer with optional embedded fee
+                return NormalizedTransaction(
+                    source=f"etherscan_normal_tx_{self.chain_name.lower()}",
+                    account_id=self.account_id,
+                    source_account=self.wallet_address,
+                    source_transaction_id=tx_hash,
+                    date_time=dt,
+                    direction=direction,
+                    transaction_type="transfer",
+                    source_transaction_type="normal-tx",
+                    source_asset_symbol=self.native_token,
+                    quantity=float(value),
+                    fee=float(fee),
+                    source_fee_quote_asset_symbol=self.native_token,
+                    include_fee=True if direction == "outflow" else False,
+                    source_from_account=tx_from,
+                    source_to_account=to_addr,
+                    network=normalize_network(self.chain_name),
+                    tags=tags,
+                )
         except Exception as e:
             log.error(f"   ⚠️ Error mapping normal transaction: {e}")
             raise

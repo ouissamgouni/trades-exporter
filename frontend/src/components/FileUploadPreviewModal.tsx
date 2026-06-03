@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Box,
     Button,
@@ -15,6 +15,29 @@ import {
 } from '@chakra-ui/react';
 import { LuCheck, LuTriangleAlert, LuChevronDown, LuChevronUp } from 'react-icons/lu';
 import { FileUploadDetailedPreview, API_URL } from '../types';
+
+// Color palette for group_id linking between raw and normalized panels
+const GROUP_COLORS = [
+    { bg: 'blue.50', hover: 'blue.100' },
+    { bg: 'green.50', hover: 'green.100' },
+    { bg: 'purple.50', hover: 'purple.100' },
+    { bg: 'orange.50', hover: 'orange.100' },
+    { bg: 'pink.50', hover: 'pink.100' },
+    { bg: 'teal.50', hover: 'teal.100' },
+    { bg: 'yellow.50', hover: 'yellow.100' },
+    { bg: 'cyan.50', hover: 'cyan.100' },
+];
+
+// Transaction type → badge color palette (matches TransactionRow.tsx)
+const getTypeColor = (type: string): string => {
+    const t = type.toLowerCase();
+    if (t === 'trade') return 'blue';
+    if (t === 'transfer' || t === 'deposit') return 'purple';
+    if (t === 'dividend') return 'teal';
+    if (t === 'cost') return 'orange';
+    if (t === 'margin') return 'yellow';
+    return 'gray';
+};
 
 interface FileUploadPreviewModalProps {
     open: boolean;
@@ -59,6 +82,30 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
     const rawScrollRef = React.useRef<HTMLDivElement>(null);
     const normalizedScrollRef = React.useRef<HTMLDivElement>(null);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null);
+
+    // Build a stable color map for group_ids
+    const groupColorMap = useMemo(() => {
+        if (!detailedPreview) return new Map<string, number>();
+        const map = new Map<string, number>();
+        let colorIdx = 0;
+        // Collect group_ids from raw rows
+        for (const row of detailedPreview.sample_rows) {
+            const gid = row.group_id as string | undefined;
+            if (gid && !map.has(gid)) {
+                map.set(gid, colorIdx % GROUP_COLORS.length);
+                colorIdx++;
+            }
+        }
+        // Also from normalized
+        for (const tx of detailedPreview.sample_normalized) {
+            if (tx.group_id && !map.has(tx.group_id)) {
+                map.set(tx.group_id, colorIdx % GROUP_COLORS.length);
+                colorIdx++;
+            }
+        }
+        return map;
+    }, [detailedPreview]);
 
     const formatFileSize = (bytes: number) => {
         if (bytes < 1024) return `${bytes} B`;
@@ -269,18 +316,55 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                                                     <Table.Header>
                                                         <Table.Row>
                                                             <Table.ColumnHeader width="40px">#</Table.ColumnHeader>
-                                                            {Object.keys(detailedPreview.sample_rows[0]).map((key) => (
+                                                            {Object.keys(detailedPreview.sample_rows[0])
+                                                                .filter((key) => key !== 'group_id' && key !== 'role')
+                                                                .map((key) => (
                                                                 <Table.ColumnHeader key={key} minW="80px" maxW="150px">{key}</Table.ColumnHeader>
                                                             ))}
                                                         </Table.Row>
                                                     </Table.Header>
                                                     <Table.Body>
-                                                        {detailedPreview.sample_rows.map((row, idx) => (
-                                                            <Table.Row key={idx}>
+                                                        {detailedPreview.sample_rows.map((row, idx) => {
+                                                            const gid = row.group_id as string | undefined;
+                                                            const role = row.role as string | undefined;
+                                                            const colorIdx = gid ? groupColorMap.get(gid) : undefined;
+                                                            const isHovered = gid != null && gid === hoveredGroupId;
+                                                            const isConsumed = role === 'consumed';
+                                                            const isSkipped = role === 'skipped';
+                                                            const bgColor = isSkipped
+                                                                ? 'gray.50'
+                                                                : isHovered && colorIdx != null
+                                                                    ? GROUP_COLORS[colorIdx].hover
+                                                                    : colorIdx != null
+                                                                        ? GROUP_COLORS[colorIdx].bg
+                                                                        : undefined;
+
+                                                            // Hide group_id and role columns from display
+                                                            const displayEntries = Object.entries(row).filter(
+                                                                ([key]) => key !== 'group_id' && key !== 'role'
+                                                            );
+
+                                                            return (
+                                                            <Table.Row
+                                                                key={idx}
+                                                                bg={bgColor}
+                                                                opacity={isConsumed || isSkipped ? 0.55 : 1}
+                                                                cursor="pointer"
+                                                                onMouseEnter={() => gid && setHoveredGroupId(gid)}
+                                                                onMouseLeave={() => setHoveredGroupId(null)}
+                                                            >
                                                                 <Table.Cell>
-                                                                    <Badge size="xs" colorPalette="gray">{idx + 1}</Badge>
+                                                                    <Flex align="center" gap={1}>
+                                                                        <Badge size="xs" colorPalette="gray">{idx + 1}</Badge>
+                                                                        {isConsumed && (
+                                                                            <Badge size="xs" colorPalette="orange" variant="subtle">sub</Badge>
+                                                                        )}
+                                                                        {isSkipped && (
+                                                                            <Badge size="xs" colorPalette="red" variant="subtle">skip</Badge>
+                                                                        )}
+                                                                    </Flex>
                                                                 </Table.Cell>
-                                                                {Object.entries(row).map(([key, value], colIdx) => {
+                                                                {displayEntries.map(([key, value], colIdx) => {
                                                                     const strValue = String(value);
                                                                     const shouldTruncate = strValue.length > 20 &&
                                                                         (key.toLowerCase().includes('id') ||
@@ -300,7 +384,8 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                                                                     );
                                                                 })}
                                                             </Table.Row>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </Table.Body>
                                                 </Table.Root>
                                             ) : (
@@ -357,8 +442,24 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                                                     </Table.Row>
                                                 </Table.Header>
                                                 <Table.Body>
-                                                    {detailedPreview.sample_normalized.map((tx, idx) => (
-                                                        <Table.Row key={idx}>
+                                                    {detailedPreview.sample_normalized.map((tx, idx) => {
+                                                        const gid = tx.group_id;
+                                                        const colorIdx = gid ? groupColorMap.get(gid) : undefined;
+                                                        const isHovered = gid != null && gid === hoveredGroupId;
+                                                        const bgColor = isHovered && colorIdx != null
+                                                            ? GROUP_COLORS[colorIdx].hover
+                                                            : colorIdx != null
+                                                                ? GROUP_COLORS[colorIdx].bg
+                                                                : undefined;
+
+                                                        return (
+                                                        <Table.Row
+                                                            key={idx}
+                                                            bg={bgColor}
+                                                            cursor="pointer"
+                                                            onMouseEnter={() => gid && setHoveredGroupId(gid)}
+                                                            onMouseLeave={() => setHoveredGroupId(null)}
+                                                        >
                                                             <Table.Cell>
                                                                 <Badge size="xs" colorPalette="gray">{idx + 1}</Badge>
                                                             </Table.Cell>
@@ -381,7 +482,12 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                                                                 </Text>
                                                             </Table.Cell>
                                                             <Table.Cell>
-                                                                <Badge size="xs">{tx.transaction_type}</Badge>
+                                                                <Flex align="center" gap={1}>
+                                                                    <Badge size="xs" colorPalette={getTypeColor(tx.transaction_type)} variant="subtle">{tx.transaction_type}</Badge>
+                                                                    {tx.source_transaction_type && tx.source_transaction_type !== tx.transaction_type && (
+                                                                        <Text fontSize="2xs" color="gray.500">{tx.source_transaction_type}</Text>
+                                                                    )}
+                                                                </Flex>
                                                             </Table.Cell>
                                                             <Table.Cell>
                                                                 <Badge
@@ -435,7 +541,8 @@ export const FileUploadPreviewModal: React.FC<FileUploadPreviewModalProps> = ({
                                                                 <Badge size="xs" variant="subtle">{tx.network || '-'}</Badge>
                                                             </Table.Cell>
                                                         </Table.Row>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </Table.Body>
                                             </Table.Root>
                                         </Box>

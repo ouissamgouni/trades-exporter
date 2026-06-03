@@ -303,7 +303,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
     } | null>(null);
 
     const [quickCreateAsset, setQuickCreateAsset] = useState<{
-        field: 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id';
+        field: 'asset_id' | 'price_quote_asset_id' | 'fee_quote_asset_id' | 'attributed_asset_id';
         prefill: AssetPrefill;
         rawSource?: string;
         rawSymbol?: string;
@@ -371,6 +371,22 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         const updates: Record<string, any> = { [field]: newValue };
         if (price > 0 && quantity > 0) {
             updates.total = (price * quantity).toFixed(2);
+        }
+        await saveFields(updates);
+    };
+
+    /**
+     * When total is saved, back-compute price = total / quantity
+     * and patch both total + price in one call.
+     */
+    const saveTotalDerivePrice = async (newValue: string) => {
+        const total = parseFloat(newValue);
+        if (isNaN(total)) { await saveField('total', newValue); return; }
+
+        const quantity = tx.quantity;
+        const updates: Record<string, any> = { total: newValue };
+        if (total > 0 && quantity > 0) {
+            updates.price = (total / quantity).toFixed(8);
         }
         await saveFields(updates);
     };
@@ -595,6 +611,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
         [UnitPattern.SWAP]: 'orange',
         [UnitPattern.SPLIT]: 'purple',
         [UnitPattern.FLOW]: 'cyan',
+        [UnitPattern.SPINOFF]: 'pink',
         [UnitPattern.CUSTOM]: 'purple',
     };
 
@@ -794,6 +811,30 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                         } : undefined}
                     />
 
+                    {/* Attributed Asset (LinkableAssetField) - always visible */}
+                    <LinkableAssetField
+                        label="Attributed Asset"
+                        sourceValue={tx.source_attributed_asset_symbol}
+                        linkedId={tx.attributed_asset_id}
+                        linkedAsset={tx.attributed_asset}
+                        assets={assets}
+                        onSourceChange={async (v) => {
+                            await saveFields({ source_attributed_asset_symbol: v, attributed_asset_id: null });
+                        }}
+                        onLink={async (id) => { await saveField('attributed_asset_id', id); }}
+                        colorPalette="orange"
+                        maxLength={18}
+                        source={tx.source}
+                        onCreateNew={!tx.attributed_asset_id ? () => {
+                            setQuickCreateAsset({
+                                field: 'attributed_asset_id',
+                                prefill: { symbol: tx.source_attributed_asset_symbol || '' },
+                                rawSource: tx.source,
+                                rawSymbol: tx.source_attributed_asset_symbol || undefined,
+                            });
+                        } : undefined}
+                    />
+
                     {/* Quantity */}
                     <EditableField
                         label="Quantity"
@@ -984,7 +1025,7 @@ export const TransactionSidePanel: React.FC<TransactionSidePanelProps> = ({
                             </Flex>
                         }
                         type="number"
-                        onSave={async (v) => { await saveField('total', v); }}
+                        onSave={async (v) => { await saveTotalDerivePrice(v); }}
                     />
 
                     {/* Fee + Quote (compound edit) */}

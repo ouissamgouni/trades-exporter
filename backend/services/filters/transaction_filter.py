@@ -274,6 +274,17 @@ def build_transaction_filter_predicates(
                 NormalizedTransaction.fee_quote_asset_id.in_(filters.fee_quote_asset_ids)
             )
 
+    # Attributed asset filter
+    if filters.attributed_asset_ids:
+        if len(filters.attributed_asset_ids) == 1:
+            predicates.append(
+                NormalizedTransaction.attributed_asset_id == filters.attributed_asset_ids[0]
+            )
+        else:
+            predicates.append(
+                NormalizedTransaction.attributed_asset_id.in_(filters.attributed_asset_ids)
+            )
+
     # Include fee filter (boolean on the model)
     if filters.include_fee is not None:
         predicates.append(
@@ -370,6 +381,7 @@ def has_active_filters(
         or filters.date_to
         or filters.price_quote_asset_ids
         or filters.fee_quote_asset_ids
+        or filters.attributed_asset_ids
         or filters.include_fee is not None
         or filters.has_bundle is not None
         or filters.bundle_patterns

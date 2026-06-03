@@ -1,0 +1,7 @@
+# DeGiro Account Normalization Scenario — Prices
+# =================================================
+# No prices needed. Dividends and fees are in face-value cash.
+# FX conversion rates (USD/EUR, GBP/EUR) would be fetched at runtime
+# if base-currency conversion is triggered.
+
+prices: []

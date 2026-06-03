@@ -21,6 +21,7 @@ class AssetEnrichmentStage(PipelineStage):
     - asset_id from source_asset_symbol
     - price_quote_asset_id from source_price_quote_asset_symbol
     - fee_quote_asset_id from source_fee_quote_asset_symbol
+    - attributed_asset_id from source_attributed_asset_symbol
     """
 
     @property
@@ -73,6 +74,14 @@ class AssetEnrichmentStage(PipelineStage):
                     )
                     if raw_asset.asset_id:
                         tx.fee_quote_asset_id = raw_asset.asset_id
+
+                # Enrich attributed asset
+                if tx.source_attributed_asset_symbol and not tx.attributed_asset_id:
+                    raw_asset = raw_asset_repo.get_or_create(
+                        tx.source_attributed_asset_symbol, source
+                    )
+                    if raw_asset.asset_id:
+                        tx.attributed_asset_id = raw_asset.asset_id
 
             except Exception as e:
                 warning_msg = (

@@ -4,15 +4,23 @@
 # ─────────────────────────────────────────────────────────────
 #
 # Usage:
-#   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run]
+#   ./db_copy.sh <src_env_file> <dst_env_file> [--dry-run] [--migrate]
 #
-# Each env file must define:
-#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB,
-#   POSTGRES_HOST, POSTGRES_PORT
+# Environment files are loaded using the same layered convention as Taskfile:
+#   config/base.env → config/<env>.env → config/secrets.env → config/secrets.<env>.env
+# The final resolved configuration must define:
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT
+#
+# Flags:
+#   --dry-run     Preview what would happen without making changes
+#   --migrate     After restore, run Alembic migrations on the target
+#                 to bring the schema up to HEAD. Requires BACKEND_DIR
+#                 and ROOT_DIR env vars (set by Taskfile).
 #
 # Examples:
-#   ./db_copy.sh .env.dev .env.test
-#   ./db_copy.sh .env.test .env.prod --dry-run
+#   ./db_copy.sh config/dev.env config/staging.env
+#   ./db_copy.sh config/staging.env config/dev.env --migrate
+#   ./db_copy.sh config/staging.env config/prod.env --dry-run
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -21,23 +29,58 @@ set -euo pipefail
 die()  { echo "❌ $*" >&2; exit 1; }
 info() { echo "   $*"; }
 
+env_name_from_file() {
+  local file="$1" name
+  name="$(basename "$file")"
+  name="${name%.env}"
+  # staging.remote/prod.remote share the staging/prod secret layer.
+  name="${name%%.remote}"
+  printf '%s' "$name"
+}
+
+env_value_from_layers() {
+  # env_value_from_layers <key> <env_file> — prints the last value found across layers.
+  local key="$1" env_file="$2"
+  local config_dir env_name layers value layer line
+
+  config_dir="$(cd "$(dirname "$env_file")" && pwd)"
+  env_name="$(env_name_from_file "$env_file")"
+  layers=(
+    "$config_dir/base.env"
+    "$env_file"
+    "$config_dir/secrets.env"
+    "$config_dir/secrets.$env_name.env"
+  )
+
+  value=""
+  for layer in "${layers[@]}"; do
+    [[ -f "$layer" ]] || continue
+    line=$(grep -E "^[[:space:]]*${key}=" "$layer" | tail -1 || true)
+    [[ -n "$line" ]] || continue
+    value="${line#*=}"
+    value="${value%$'\r'}"
+  done
+
+  printf '%s' "$value"
+}
+
 parse_env() {
-  # parse_env <file> <prefix>  — sets PREFIX_USER, PREFIX_PASS, etc.
+  # parse_env <file> <prefix> — sets PREFIX_USER, PREFIX_PASS, etc.
   local file="$1" prefix="$2"
   [[ -f "$file" ]] || die "Env file not found: $file"
 
   local user pass db host port
-  user=$(grep '^POSTGRES_USER='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  pass=$(grep '^POSTGRES_PASSWORD=' "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  db=$(grep   '^POSTGRES_DB='       "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  host=$(grep '^POSTGRES_HOST='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
-  port=$(grep '^POSTGRES_PORT='     "$file" | head -1 | cut -d= -f2 | tr -d '\r')
+  user=$(env_value_from_layers POSTGRES_USER "$file")
+  pass=$(env_value_from_layers POSTGRES_PASSWORD "$file")
+  db=$(env_value_from_layers POSTGRES_DB "$file")
+  host=$(env_value_from_layers POSTGRES_HOST "$file")
+  port=$(env_value_from_layers POSTGRES_PORT "$file")
 
-  [[ -n "$user" ]] || die "POSTGRES_USER missing in $file"
-  [[ -n "$pass" ]] || die "POSTGRES_PASSWORD missing in $file"
-  [[ -n "$db"   ]] || die "POSTGRES_DB missing in $file"
-  [[ -n "$host" ]] || die "POSTGRES_HOST missing in $file"
-  [[ -n "$port" ]] || die "POSTGRES_PORT missing in $file"
+  [[ -n "$user" ]] || die "POSTGRES_USER missing after loading config layers for $file"
+  [[ -n "$pass" ]] || die "POSTGRES_PASSWORD missing after loading config layers for $file"
+  [[ -n "$db"   ]] || die "POSTGRES_DB missing after loading config layers for $file"
+  [[ -n "$host" ]] || die "POSTGRES_HOST missing after loading config layers for $file"
+  [[ -n "$port" ]] || die "POSTGRES_PORT missing after loading config layers for $file"
 
   eval "${prefix}_USER='$user'"
   eval "${prefix}_PASS='$pass'"
@@ -61,12 +104,14 @@ test_connection() {
 # ── Parse arguments ──────────────────────────────────────────
 
 DRY_RUN=false
+MIGRATE=false
 SRC_ENV=""
 DST_ENV=""
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
+    --migrate) MIGRATE=true ;;
     *)
       if [[ -z "$SRC_ENV" ]]; then
         SRC_ENV="$arg"
@@ -79,8 +124,8 @@ for arg in "$@"; do
   esac
 done
 
-[[ -n "$SRC_ENV" ]] || die "Missing source env file.\nUsage: $0 <src_env> <dst_env> [--dry-run]"
-[[ -n "$DST_ENV" ]] || die "Missing target env file.\nUsage: $0 <src_env> <dst_env> [--dry-run]"
+[[ -n "$SRC_ENV" ]] || die "Missing source env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
+[[ -n "$DST_ENV" ]] || die "Missing target env file.\nUsage: $0 <src_env> <dst_env> [--dry-run] [--migrate]"
 
 # ── Parse env files ──────────────────────────────────────────
 
@@ -97,6 +142,9 @@ echo "🔄 Database Copy"
 echo "═══════════════════════════════════════════════════"
 echo "   Source:  $SRC_HOST:$SRC_PORT/$SRC_DB"
 echo "   Target:  $DST_HOST:$DST_PORT/$DST_DB"
+if $MIGRATE; then
+  echo "   Migrate: yes (alembic upgrade head after restore)"
+fi
 echo "═══════════════════════════════════════════════════"
 echo ""
 
@@ -194,6 +242,52 @@ if [[ "$SRC_TABLES" == "$DST_TABLES_AFTER" ]]; then
 else
   info "⚠️  Table count mismatch — check for errors above"
 fi
-
 echo ""
+
+# ── Step 5 (optional): Migrate target to HEAD ───────────────
+
+if $MIGRATE; then
+  # Resolve paths: BACKEND_DIR and ROOT_DIR are passed by Taskfile.
+  # Fall back to reasonable defaults relative to this script.
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  _BACKEND_DIR="${BACKEND_DIR:-$(dirname "$SCRIPT_DIR")}"
+  _ROOT_DIR="${ROOT_DIR:-$(dirname "$_BACKEND_DIR")}"
+  ALEMBIC_INI="$_BACKEND_DIR/alembic.ini"
+  ALEMBIC_BIN="$_BACKEND_DIR/.venv/bin/alembic"
+
+  if [[ ! -f "$ALEMBIC_INI" ]]; then
+    echo "⚠️  Cannot migrate: alembic.ini not found at $ALEMBIC_INI"
+  elif [[ ! -x "$ALEMBIC_BIN" ]]; then
+    echo "⚠️  Cannot migrate: alembic not found at $ALEMBIC_BIN"
+  else
+    # Read current version from restored DB
+    RESTORED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+      --no-password -d "$DST_DB" -tAq \
+      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
+
+    echo "🔀 Running Alembic migrations on target..."
+    info "Current version: $RESTORED_VER"
+
+    PYTHONPATH="$_ROOT_DIR" \
+    DATABASE_URL="postgresql://$DST_USER:$DST_PASS@$DST_HOST:$DST_PORT/$DST_DB" \
+      "$ALEMBIC_BIN" -c "$ALEMBIC_INI" upgrade head 2>&1 | while IFS= read -r line; do
+        echo "   $line"
+      done
+
+    MIGRATED_VER=$(PGPASSWORD="$DST_PASS" psql -h "$DST_HOST" -p "$DST_PORT" -U "$DST_USER" \
+      --no-password -d "$DST_DB" -tAq \
+      -c "SELECT version_num FROM alembic_version LIMIT 1;" 2>/dev/null || echo "unknown")
+
+    if [[ "$RESTORED_VER" == "$MIGRATED_VER" ]]; then
+      info "✅ Already at HEAD ($MIGRATED_VER)"
+    else
+      info "✅ Migrated: $RESTORED_VER → $MIGRATED_VER"
+    fi
+
+    DST_TABLES_FINAL=$(table_count "$DST_HOST" "$DST_PORT" "$DST_USER" "$DST_PASS" "$DST_DB")
+    info "Target tables (after migration): $DST_TABLES_FINAL"
+    echo ""
+  fi
+fi
+
 echo "✅ Done — $SRC_HOST:$SRC_PORT/$SRC_DB  →  $DST_HOST:$DST_PORT/$DST_DB"

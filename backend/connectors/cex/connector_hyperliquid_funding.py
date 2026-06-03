@@ -250,6 +250,7 @@ class HyperliquidFundingConnector(BaseConnector):
                 transaction_type="margin",
                 source_transaction_type="funding",
                 source_asset_symbol="USDC",
+                source_attributed_asset_symbol=coin,
                 quantity=quantity,
                 network_transaction_id=tx_hash,
                 taxability_status="non_taxable",

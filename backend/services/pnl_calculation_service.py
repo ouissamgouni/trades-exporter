@@ -134,6 +134,11 @@ class PnLCalculationService:
             
             self._status = PnLCalcStatus.CALCULATING
             self._error_message = None
+            # Clear pre-existing stale flag so end-of-calculation check
+            # only detects NEW changes that arrive during calculation.
+            self._is_stale = False
+            self._stale_since = None
+            self._stale_reasons = []
         
         # Start background thread
         self._calculation_thread = threading.Thread(

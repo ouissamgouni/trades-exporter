@@ -59,13 +59,17 @@ def get_next_available_color(used: set[str], palette: list[str]) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Inject colors into accounts & connectors")
-    parser.add_argument("--test", action="store_true", help="Use test database")
+    parser.add_argument("--test", action="store_true", help="Use test database (sets DATABASE_URL)")
     parser.add_argument("--dry-run", action="store_true", help="Show changes without committing")
     args = parser.parse_args()
 
     if args.test:
         import os
-        os.environ["TEST_MODE"] = "1"
+        from dotenv import load_dotenv
+        load_dotenv(project_root / ".env")
+        load_dotenv(project_root / ".env.test", override=True)
+        db_url = f"postgresql://{os.environ['POSTGRES_USER']}:{os.environ['POSTGRES_PASSWORD']}@{os.environ['POSTGRES_HOST']}:{os.environ['POSTGRES_PORT']}/{os.environ['POSTGRES_DB']}"
+        os.environ["DATABASE_URL"] = db_url
 
     engine = get_engine()
 

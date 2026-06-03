@@ -22,6 +22,7 @@ class AppInfoResponse(BaseModel):
     backend_version: str
     frontend_version: str | None = None
     db_schema_version: str | None = None
+    qa_scenarios: list[str] = []
 
 
 class AppSettingsResponse(BaseModel):
@@ -83,29 +84,43 @@ def get_or_create_app_settings(session: Session) -> AppSettings:
 
 
 @router.get("/info", response_model=AppInfoResponse)
-def get_app_info():
+def get_app_info(session: Session = Depends(get_db)):
     """
     Get application information including environment and versions.
-
-    Returns:
-    - environment: Current environment (dev/test/prod) from ENV_NAME
-    - backend_version: Backend API version
-    - frontend_version: Frontend app version (if available)
-    - db_schema_version: Database schema version from Alembic (if available)
     """
     environment = os.getenv("ENV_NAME", "unknown")
-    backend_version = "1.0.0"  # From backend/__init__.py or main.py
-    
-    # TODO: Add database schema version from Alembic if needed
-    # from alembic import script
-    # from alembic.runtime import migration
-    
+    backend_version = "1.0.0"
+
+    settings = get_or_create_app_settings(session)
+    qa_scenarios = [
+        p["scenario"] for p in (settings.qa_test_plans or [])
+        if isinstance(p, dict) and "scenario" in p
+    ]
+
     return AppInfoResponse(
         environment=environment,
         backend_version=backend_version,
         frontend_version=None,
         db_schema_version=None,
+        qa_scenarios=qa_scenarios,
     )
+
+
+@router.get("/test-plan")
+def get_test_plan(scenario: str, session: Session = Depends(get_db)):
+    """
+    Get the QA test plan for a given scenario.
+    Served from test plans ingested into DB at seed time.
+    """
+    if not scenario:
+        raise HTTPException(status_code=400, detail="scenario parameter required")
+
+    settings = get_or_create_app_settings(session)
+    for plan in (settings.qa_test_plans or []):
+        if isinstance(plan, dict) and plan.get("scenario") == scenario:
+            return plan
+
+    raise HTTPException(status_code=404, detail=f"No test plan found for scenario '{scenario}'")
 
 
 @router.get("/settings", response_model=AppSettingsResponse)

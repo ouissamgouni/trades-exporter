@@ -2,14 +2,15 @@
 # Only runs database, code runs locally with VSCode debugger
 #
 # Usage: docker compose -f docker-compose.dev.yml up -d
-#        or: task start:dev
+#        or: task start:dev:db
 
 services:
   postgres_dev:
     image: postgres:15-alpine
     container_name: trades_db_${ENV_NAME}
     env_file:
-      - ../../.env.dev
+      - ../../config/base.env
+      - ../../config/dev.env
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:

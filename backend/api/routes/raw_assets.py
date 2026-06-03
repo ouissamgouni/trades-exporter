@@ -126,6 +126,17 @@ def bulk_map_assets(
                 )
                 session.exec(stmt_fee)
                 
+                # Update attributed_asset_id for transactions matching source_attributed_asset_symbol
+                stmt_attr = (
+                    update(NormalizedTransaction)
+                    .where(
+                        NormalizedTransaction.source == item.source,
+                        NormalizedTransaction.source_attributed_asset_symbol == item.symbol,
+                    )
+                    .values(attributed_asset_id=item.asset_id)
+                )
+                session.exec(stmt_attr)
+                
                 success_count += 1
                 
             except Exception as e:
@@ -341,6 +352,17 @@ def update_raw_asset(
                 .values(fee_quote_asset_id=new_asset_id)
             )
             session.exec(stmt_fee)
+
+            # Update attributed_asset_id for transactions matching source_attributed_asset_symbol
+            stmt_attr = (
+                update(NormalizedTransaction)
+                .where(
+                    NormalizedTransaction.source == source,
+                    NormalizedTransaction.source_attributed_asset_symbol == symbol,
+                )
+                .values(attributed_asset_id=new_asset_id)
+            )
+            session.exec(stmt_attr)
 
         session.add(existing)
         session.commit()

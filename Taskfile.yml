@@ -1,9 +1,7 @@
 # https://taskfile.dev
 version: "3"
 
-# Note: Individual taskfiles override this with specific env files
-# Common pattern: dotenv: [".env", ".env.dev"] for dev tasks
-dotenv: [".env"]
+dotenv: ["config/base.env"]
 
 vars:
   ROOT_DIR:
@@ -13,68 +11,177 @@ vars:
   WORKTREE_DIR: .worktrees
   WORKTREE_MAIN: .worktrees/main
   WORKTREE_DEVELOP: .worktrees/develop
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
 
 includes:
-  branch:
-    taskfile: .taskfiles/branch.yml
-    dir: "{{.ROOT_DIR}}"
   build:
     taskfile: .taskfiles/build.yml
     dir: "{{.ROOT_DIR}}"
-  clean:
-    taskfile: .taskfiles/clean.yml
-    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   db:
     taskfile: .taskfiles/db.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
   deploy:
     taskfile: .taskfiles/deploy.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+  fly:
+    taskfile: .taskfiles/fly.yml
+    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   git:
     taskfile: .taskfiles/git.yml
     dir: "{{.ROOT_DIR}}"
   logs:
     taskfile: .taskfiles/logs.yml
     dir: "{{.ROOT_DIR}}"
-  pr:
-    taskfile: .taskfiles/pr.yml
-    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   release:
     taskfile: .taskfiles/release.yml
     dir: "{{.ROOT_DIR}}"
+  open:
+    taskfile: .taskfiles/open.yml
+    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   start:
     taskfile: .taskfiles/start.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
+      FRONTEND_DIR: "{{.FRONTEND_DIR}}"
   stop:
     taskfile: .taskfiles/stop.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
   test:
     taskfile: .taskfiles/test.yml
     dir: "{{.ROOT_DIR}}"
-  worktree:
-    taskfile: .taskfiles/worktree.yml
-    dir: "{{.ROOT_DIR}}"
-  qa:
-    taskfile: .taskfiles/qa.yml
-    dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      BACKEND_DIR: "{{.BACKEND_DIR}}"
+      FRONTEND_DIR: "{{.FRONTEND_DIR}}"
 
 tasks:
   install:
-    desc: Install all dependencies
+    desc: Install all dependencies (backend + frontend)
     cmds:
-      - |
-        echo "Installing backend dependencies..."
-        cd {{.BACKEND_DIR}} && .venv/bin/pip install -r requirements.txt
-        echo ""
-        echo "Installing frontend dependencies..."
-        cd {{.FRONTEND_DIR}} && npm install
-        echo ""
-        echo "✅ All dependencies installed"
+      - task: install:backend
+      - task: install:frontend
+
+  install:backend:
+    desc: Install backend Python dependencies
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - .venv/bin/pip install -r requirements.txt
+    sources:
+      - requirements.txt
+
+  install:frontend:
+    desc: Install frontend Node dependencies
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm install
+    sources:
+      - package.json
 
   status:
-    desc: Show all running containers
+    desc: Show all running containers across all environments
     cmds:
-      - docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+      - |
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "  Environment Status"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+        docker ps --filter "name=trades_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  No containers running"
+        echo ""
+
+  scenarios:
+    desc: List all scenarios with hash-based ports, seed data, and running status
+    cmds:
+      - |
+        SCENARIOS_DIR="{{.ROOT_DIR}}/scenarios"
+
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "  Scenarios"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+        printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "Name" "Offset" "DB" "API" "WEB" "Status"
+        printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "──────────────────────────────────" "──────" "─────" "─────" "─────" "──────────"
+
+        # Collect running scenario containers (Docker mode)
+        RUNNING_DOCKER=$(docker ps --filter "name=trades_db_qa" --format '{{`{{.Names}}`}}' 2>/dev/null || true)
+
+        # Track offsets for collision detection
+        ALL_OFFSETS=""
+
+        # ── Default scenario (always offset 0) ──
+        STATUS="—"
+        if echo "$RUNNING_DOCKER" | grep -qx "trades_db_qa" 2>/dev/null; then
+          STATUS="🟢 docker"
+        elif lsof -iTCP:8002 -sTCP:LISTEN >/dev/null 2>&1; then
+          STATUS="🟢 local"
+        fi
+        printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "default" "0" "5435" "8002" "3002" "$STATUS"
+
+        # ── Named scenarios from seed directories ──
+        if [ -d "$SCENARIOS_DIR" ]; then
+          for DIR in "$SCENARIOS_DIR"/*/; do
+            [ -d "$DIR" ] || continue
+            NAME=$(basename "$DIR")
+            [ "$NAME" = "default" ] && continue
+
+            # Hash-based offset: cksum of name mod 9999 + 1
+            OFFSET=$(printf '%s' "$NAME" | cksum | awk '{print ($1 % 9999) + 1}')
+            DB=$((5435 + OFFSET))
+            API=$((8002 + OFFSET))
+            WEB=$((3002 + OFFSET))
+
+            # Check running status
+            STATUS="—"
+            DB_CONTAINER="trades_db_qa-${NAME}"
+            if echo "$RUNNING_DOCKER" | grep -qx "$DB_CONTAINER" 2>/dev/null; then
+              STATUS="🟢 docker"
+            elif lsof -iTCP:"$API" -sTCP:LISTEN >/dev/null 2>&1; then
+              STATUS="🟢 local"
+            fi
+
+            printf "  %-34s  %6s  %-5s  %-5s  %-5s  %s\n" "$NAME" "$OFFSET" "$DB" "$API" "$WEB" "$STATUS"
+
+            # Track for collision detection
+            ALL_OFFSETS="$ALL_OFFSETS $OFFSET:$NAME"
+          done
+        fi
+
+        # ── Collision detection ──
+        COLLISIONS=$(echo "$ALL_OFFSETS" | tr ' ' '\n' | sort | awk -F: 'NF{a[$1]=a[$1]" "$2} END{for(k in a){n=split(a[k],b," "); if(n>1) print k": "a[k]}}')
+        if [ -n "$COLLISIONS" ]; then
+          echo ""
+          echo "  ⚠️  Hash collisions detected (use PORT_OFFSET=N to resolve):"
+          echo "$COLLISIONS" | while IFS= read -r line; do
+            echo "    Offset $line"
+          done
+        fi
+
+        echo ""
+        echo "Ports are derived from scenario name hash (deterministic)."
+        echo "Override with PORT_OFFSET=N for custom offset."
+        echo ""
+        echo "Usage:"
+        echo "  task start:scenario SCENARIO=fr_tax"
+        echo "  task start:scenario:ref -- feature/branch SCENARIO=fr_tax"
+        echo "  task start:scenario SCENARIO=custom PORT_OFFSET=42"
+        echo "  task scenarios                                          # ← this list"
+        echo "═══════════════════════════════════════════════════════════════"
 
   default:
     cmds:
@@ -89,30 +196,58 @@ tasks:
         echo "═══════════════════════════════════════════════════════════════"
         echo ""
         echo "BRANCHING"
-        echo "  task branch:feature -- <name>   Create feature branch from develop"
-        echo "  task branch:fix -- <name>       Create fix branch from develop"
-        echo "  task branch:hotfix -- <name>    Create hotfix branch from main"
+        echo "  task git:feature -- <name>      Create feature branch from develop"
+        echo "  task git:fix -- <name>          Create fix branch from develop"
+        echo "  task git:hotfix -- <name>       Create hotfix branch from main"
+        echo ""
+        echo "PULL REQUESTS"
+        echo "  task git:pr -- <title>          Push + create draft PR"
+        echo "  task git:pr:publish -- <title>  Push + create ready PR"
+        echo "  task git:pr:ready              Mark draft PR as ready"
+        echo "  task git:pr:merge              Merge current PR"
+        echo "  task git:pr:view               Open PR in browser"
+        echo "  task git:pr:checks             Show PR check status"
         echo ""
         echo "DEVELOPMENT"
-        echo "  task start:dev          Start dev DB"
-        echo "  task start:dev:debug    Start DB + backend + frontend (debug)"
-        echo "  task stop:dev           Stop dev services"
+        echo "  task start:dev                  Start full dev stack (DB + API + Web)"
+        echo "  task start:dev:debug            Start full dev stack with debugger"
+        echo "  task start:dev:db               Start dev database only"
+        echo "  task open:shared:dev            Focus/open dev in default Chrome"
+        echo "  task open:isolated:dev          Open isolated dev browser session"
+        echo "  task stop:dev                   Stop all dev services"
         echo ""
         echo "TESTING"
-        echo "  task test               Run unit tests"
-        echo "  task test:int:local     Integration tests (trades_db_integ)"
-        echo "  task test:int:dev       Integration tests (dev)"
-        echo "  task deploy:test:local  Deploy to test stack"
+        echo "  task test                       Run unit tests"
+        echo "  task test:int                   Integration tests (trades_db_integ)"
+        echo "  task test:int:full              Full integration cycle (setup → test → cleanup)"
         echo ""
-        echo "QA ENVIRONMENT"
-        echo "  task qa:spin -- <ref>   Build + deploy isolated QA from git ref"
-        echo "  task qa:spin:current    Build + deploy QA from working directory"
-        echo "  task qa:spin:dev        QA with local code + live reload"
-        echo "  task qa:stop            Stop + cleanup QA (containers + DB)"
+        echo "STAGING"
+        echo "  task deploy:staging:local       Build from develop + deploy local staging"
+        echo "  task deploy:staging:local:cwd   Deploy local staging from working directory"
+        echo "  task deploy:staging:remote      Deploy Fly + Cloudflare remote staging"
+        echo "  task start:staging:local        Start local staging (existing images)"
+        echo "  task stop:staging:local         Stop local staging stack"
+        echo ""
+        echo "SCENARIO (Isolated QA)"
+        echo "  task start:scenario              Local code + Docker DB + live reload"
+        echo "  task start:scenario:ref -- <ref>  Build + deploy scenario from git ref"
+        echo "  task stop:scenario               Stop scenario instance"
+        echo "  task stop:scenario:all           Stop all scenario instances"
         echo ""
         echo "PRODUCTION"
-        echo "  task release:tag v1.0   Tag release"
-        echo "  task deploy:prod:local  Deploy to local prod"
+        echo "  task release                    Tag release + deploy to prod"
+        echo "  task git:release:prepare        Check develop is ahead of main"
+        echo "  task git:release:tag v1.0       Tag release on main"
+        echo "  task deploy:prod:local -- v1.2.0 Deploy to local prod"
+        echo "  task deploy:prod:remote         Deploy Fly + Cloudflare remote prod"
+        echo "  task start:prod:local           Start local prod (existing images)"
+        echo ""
+        echo "UTILITIES"
+        echo "  task status                     Show all running containers"
+        echo "  task logs:dev                   Tail dev logs"
+        echo "  task logs:staging:local         Tail local staging logs"
+        echo "  task fly:staging:status         Show staging Fly app status"
+        echo "  task db:reset:dev               Reset dev database"
         echo ""
         echo "Run 'task --list' for all commands"
         echo "═══════════════════════════════════════════════════════════════"

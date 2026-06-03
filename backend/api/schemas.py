@@ -116,6 +116,7 @@ class AppliedFilters(BaseModel):
     date_to: Optional[str] = None
     price_quote_asset_ids: List[int] = Field(default_factory=list)
     fee_quote_asset_ids: List[int] = Field(default_factory=list)
+    attributed_asset_ids: List[int] = Field(default_factory=list)
     include_fee: Optional[bool] = None  # None=all, True=included, False=not included
     has_bundle: Optional[bool] = None  # None=all, True=has bundle, False=no bundle
     bundle_patterns: List[str] = Field(default_factory=list)
@@ -163,6 +164,7 @@ class TransactionUpdate(BaseModel):
     asset_id: Optional[int] = None
     price_quote_asset_id: Optional[int] = None
     fee_quote_asset_id: Optional[int] = None
+    attributed_asset_id: Optional[int] = None
     account_id: Optional[int] = None
     source: Optional[str] = None
     source_transaction_id: Optional[str] = Field(
@@ -176,11 +178,15 @@ class TransactionUpdate(BaseModel):
     source_fee_quote_asset_symbol: Optional[str] = Field(
         None, description="Source fee quote asset symbol"
     )
+    source_attributed_asset_symbol: Optional[str] = Field(
+        None, description="Source attributed asset symbol (e.g., underlying for derivative)"
+    )
     source_transaction_type: Optional[str] = Field(
         None, description="Source transaction type (e.g., airdrop, buy, sell)"
     )
     quantity: Optional[float] = None
     price: Optional[float] = None
+    total: Optional[float] = Field(None, ge=0, description="Total value — back-computes price = total / quantity")
     fee: Optional[float] = None
     include_fee: Optional[bool] = None
     transaction_type: Optional[str] = Field(
@@ -278,6 +284,7 @@ class TransactionResponse(BaseModel):
     source_asset_symbol: Optional[str] = None
     source_price_quote_asset_symbol: Optional[str] = None
     source_fee_quote_asset_symbol: Optional[str] = None
+    source_attributed_asset_symbol: Optional[str] = None
 
     # Account fields
     account_id: Optional[int] = None
@@ -287,6 +294,7 @@ class TransactionResponse(BaseModel):
     asset_id: Optional[int] = None
     price_quote_asset_id: Optional[int] = None
     fee_quote_asset_id: Optional[int] = None
+    attributed_asset_id: Optional[int] = None
     user_calculation_unit_id: Optional[int] = None
 
     # Normalized fields
@@ -332,6 +340,7 @@ class TransactionResponse(BaseModel):
     linked_asset: Optional[AssetRef] = None
     price_quote_asset: Optional[AssetRef] = None
     fee_quote_asset: Optional[AssetRef] = None
+    attributed_asset: Optional[AssetRef] = None
 
     # Backward compatibility: flat symbol fields (deprecated, prefer nested objects)
     linked_asset_symbol: Optional[str] = None
@@ -647,6 +656,7 @@ class IssueType(str, Enum):
     UNLINKED_ACCOUNT = "unlinked_account"
     UNLINKED_PRICE_QUOTE = "unlinked_price_quote"
     UNLINKED_FEE_QUOTE = "unlinked_fee_quote"
+    UNLINKED_ATTRIBUTED_ASSET = "unlinked_attributed_asset"
     # Transfer issues - missing source data from connector
     MISSING_TRANSFER_FROM_ACCOUNT = "missing_transfer_from_account"
     MISSING_TRANSFER_TO_ACCOUNT = "missing_transfer_to_account"
@@ -1015,6 +1025,48 @@ class FeeSummaryByPeriodResponse(BaseModel):
 
 
 # =============================================================================
+# Income Events
+# =============================================================================
+
+
+class IncomeEventResponse(BaseModel):
+    """Income event (dividend, interest, etc.) for display."""
+
+    id: int
+    income_type: str  # dividend, interest, staking, funding, airdrop, other
+    asset: AssetRef  # Cash asset received (e.g., EUR, USD)
+    attributed_asset: Optional[AssetRef] = None  # Stock paying dividend (e.g., AAPL)
+    gross_amount_in_base: float
+    withholding_amount_in_base: float
+    net_amount_in_base: float  # gross - withholding
+    withholding_jurisdiction: Optional[str] = None
+    withholding_rate: Optional[float] = None
+    income_at: datetime
+    notes: Optional[str] = None
+    transaction_id: Optional[int] = None
+    unit_id: Optional[int] = None
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
+
+
+class IncomeFilterOption(BaseModel):
+    """A single filter option with a count."""
+    value: str
+    label: Optional[str] = None
+    count: int = 0
+
+
+class IncomeFilterOptionsResponse(BaseModel):
+    """Filter options for income events endpoint."""
+
+    assets: List[IncomeFilterOption] = []
+    income_types: List[IncomeFilterOption] = []
+    jurisdictions: List[IncomeFilterOption] = []
+    accounts: List[IncomeFilterOption] = []
+    date_range: Optional[Dict[str, str]] = None  # {"min": iso, "max": iso}
+
+
+# =============================================================================
 # Exports
 # =============================================================================
 
@@ -1073,4 +1125,7 @@ __all__ = [
     "FeeBreakdownItemResponse",
     "FeePeriodBucketResponse",
     "FeeSummaryByPeriodResponse",
+    # Income events
+    "IncomeEventResponse",
+    "IncomeFilterOptionsResponse",
 ]

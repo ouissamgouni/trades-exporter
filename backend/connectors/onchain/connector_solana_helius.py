@@ -770,14 +770,12 @@ class ConnectorSolanaHelius(BaseConnector):
                     transaction_type="cost",
                     source_transaction_type=tx_type,
                     
-                    # Asset and amounts (quantity=0 for fee transaction)
+                    # Asset and amounts — qty=fee, price=1, price_quote=native
                     source_asset_symbol="SOL",
-                    quantity=Decimal(0),
-                    
-                    # Fee information
-                    fee=fee_sol,
-                    source_fee_quote_asset_symbol="SOL",
-                    include_fee=True,
+                    quantity=fee_sol,
+                    price=Decimal(1),
+                    source_price_quote_asset_symbol="SOL",
+                    include_fee=False,
                     
                     # Addresses
                     source_from_account=self.wallet_address,

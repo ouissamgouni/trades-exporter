@@ -20,6 +20,7 @@ import { GapFixPanel } from './GapFixPanel';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { AssetPnLOverviewSection } from './AssetPnLOverviewSection';
 import { AssetPnLAuditSection } from './AssetPnLAuditSection';
+import { AssetIncomeSection } from './pnl/AssetIncomeSection';
 import { TransactionsTable } from './TransactionsTable';
 import { defaultFilterState, type TransactionFilterState } from './TransactionFilters';
 
@@ -237,6 +238,9 @@ const PnLSections: React.FC<{ assetId: number; assetSymbol?: string; assetLabel?
             </Section>
             <Section title="PnL Audit" icon="🔍" colorScheme="orange" defaultOpen={fromPnlView}>
                 <AssetPnLAuditSection assetId={assetId} assetSymbol={assetSymbol} assetLabel={assetLabel} versionId={versionId} />
+            </Section>
+            <Section title="Income" icon="💰" colorScheme="teal" defaultOpen={false}>
+                <AssetIncomeSection assetId={assetId} versionId={versionId} />
             </Section>
         </>
     );

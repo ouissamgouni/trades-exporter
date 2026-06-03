@@ -1,0 +1,177 @@
+# DeGiro File Connector Scenario — Transactions
+# =================================================
+# No pre-seeded transactions. The test is to upload the sample CSV
+# via the connector and verify the imported data.
+
+transactions: []
+
+transactions:
+  # ── Trade 1: Buy 14 RGTI ─────────────────────────────────────
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_01_buy_rgti"
+    account_name: "DeGiro"
+    asset_symbol: RGTI
+    quantity: "14.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: buy
+    date_time: "2025-10-31T16:51:00"
+    price: "39.162142857142857143"
+    price_quote_asset_symbol: EUR
+    fee: "0.390000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T1"
+      - goal: "Buy RGTI — USD-priced, converted to EUR unit price"
+
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_01b_buy_rgti_outflow"
+    account_name: "DeGiro"
+    asset_symbol: EUR
+    quantity: "548.660000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-10-31T16:51:00"
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T1"
+      - leg_type: disposed
+
+  # ── Trade 2: Buy 5 ASML ──────────────────────────────────────
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_02_buy_asml"
+    account_name: "DeGiro"
+    asset_symbol: ASML
+    quantity: "5.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: buy
+    date_time: "2025-09-15T10:30:00"
+    price: "685.400000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "4.900000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T2"
+      - goal: "Buy ASML — EUR-priced, no FX conversion"
+
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_02b_buy_asml_outflow"
+    account_name: "DeGiro"
+    asset_symbol: EUR
+    quantity: "3431.900000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-09-15T10:30:00"
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T2"
+      - leg_type: disposed
+
+  # ── Trade 3: Buy 100 RR ──────────────────────────────────────
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_03_buy_rr"
+    account_name: "DeGiro"
+    asset_symbol: RR
+    quantity: "100.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: buy
+    date_time: "2025-08-01T14:00:00"
+    price: "5.900000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "3.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T3"
+      - goal: "Buy RR — GBP-priced, AutoFX + transaction fee"
+
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_03b_buy_rr_outflow"
+    account_name: "DeGiro"
+    asset_symbol: EUR
+    quantity: "593.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-08-01T14:00:00"
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T3"
+      - leg_type: disposed
+
+  # ── Trade 4: Sell 50 RR ──────────────────────────────────────
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_04_sell_rr"
+    account_name: "DeGiro"
+    asset_symbol: RR
+    quantity: "50.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    source_transaction_type: sell
+    date_time: "2025-11-20T11:15:00"
+    price: "6.500000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "2.300000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T4"
+      - goal: "Sell RR — realized PnL test (gain)"
+
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_04b_sell_rr_inflow"
+    account_name: "DeGiro"
+    asset_symbol: EUR
+    quantity: "325.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2025-11-20T11:15:00"
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T4"
+      - leg_type: acquired
+
+  # ── Trade 5: Buy 3 AMZN ──────────────────────────────────────
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_05_buy_amzn"
+    account_name: "DeGiro"
+    asset_symbol: AMZN
+    quantity: "3.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    source_transaction_type: buy
+    date_time: "2025-07-10T15:45:00"
+    price: "167.333333333333333333"
+    price_quote_asset_symbol: EUR
+    fee: "0.570000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T5"
+      - goal: "Buy AMZN — USD-priced, transaction fee only"
+
+  - source: "degiro-file"
+    source_transaction_id: "degiro_qa_05b_buy_amzn_outflow"
+    account_name: "DeGiro"
+    asset_symbol: EUR
+    quantity: "502.570000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2025-07-10T15:45:00"
+    review_status: valid
+    tags:
+      - scenario: degiro-file
+      - step: "T5"
+      - leg_type: disposed

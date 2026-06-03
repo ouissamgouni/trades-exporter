@@ -20,7 +20,10 @@ import {
 } from '@chakra-ui/react';
 import { ResponsivePie } from '@nivo/pie';
 import { DimensionWithCategories, Category } from '../../types';
-import { AssetPnLRow, PieChartDataPoint, aggregateMarketValueByCategory } from './types';
+import { AssetPnLRow, PieChartDataPoint, aggregateMarketValueByCategory, aggregateMarketValueByCurrency } from './types';
+
+/** Sentinel value for the "Currency" pseudo-dimension in the selector */
+const CURRENCY_DIMENSION_ID = -1;
 
 export interface MarketValuePieChartProps {
     /** Assets with market value and category_ids */
@@ -33,6 +36,8 @@ export interface MarketValuePieChartProps {
     selectedCategoryIds?: number[];
     /** Callback when a pie slice is clicked */
     onCategoryClick?: (categoryId: number | null) => void;
+    /** Per-asset denomination currency map: assetId → currency symbol */
+    assetCurrencyMap?: Record<number, string>;
 }
 
 /**
@@ -66,6 +71,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
     baseCurrency,
     selectedCategoryIds = [],
     onCategoryClick,
+    assetCurrencyMap = {},
 }) => {
     // Default to first dimension
     const [selectedDimensionId, setSelectedDimensionId] = useState<number | null>(null);
@@ -91,7 +97,9 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
         if (selectedDimensionId === null || assets.length === 0) {
             return [];
         }
-        const rawData = aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
+        const rawData = selectedDimensionId === CURRENCY_DIMENSION_ID
+            ? aggregateMarketValueByCurrency(assets, assetCurrencyMap)
+            : aggregateMarketValueByCategory(assets, selectedDimensionId, allCategories);
         return rawData.map((d: PieChartDataPoint) => ({
             id: d.label,
             label: d.label,
@@ -101,7 +109,7 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
             percentage: d.percentage,
             assetCount: d.assetCount,
         }));
-    }, [assets, selectedDimensionId, allCategories]);
+    }, [assets, selectedDimensionId, allCategories, assetCurrencyMap]);
 
     // Total market value for display
     const totalMarketValue = useMemo(() => {
@@ -153,12 +161,15 @@ export const MarketValuePieChart: React.FC<MarketValuePieChartProps> = ({
         >
             {/* Header with dimension selector */}
             <Flex justify="space-between" align="center" mb={4}>
-                <Heading size="sm">Market Value by Category</Heading>
+                <Heading size="sm">
+                    {selectedDimensionId === CURRENCY_DIMENSION_ID ? 'Market Value by Currency' : 'Market Value by Category'}
+                </Heading>
                 <NativeSelect.Root size="sm" width="180px">
                     <NativeSelect.Field
                         value={selectedDimensionId !== null ? String(selectedDimensionId) : ''}
                         onChange={handleDimensionChange}
                     >
+                        <option value={String(CURRENCY_DIMENSION_ID)}>Currency</option>
                         {dimensions.map(dim => (
                             <option key={dim.id} value={String(dim.id)}>
                                 {dim.label}

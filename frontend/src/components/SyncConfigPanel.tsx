@@ -5,11 +5,13 @@ import {
     Card,
     Checkbox,
     Collapsible,
+    Dialog,
     Flex,
     Grid,
     HStack,
     IconButton,
     Input,
+    Portal,
     Spinner,
     Stack,
     Switch,
@@ -18,7 +20,7 @@ import {
     VStack,
 } from '@chakra-ui/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown, LuPlus } from 'react-icons/lu';
+import { LuRotateCcw, LuX, LuChevronRight, LuChevronDown, LuPlus, LuEye, LuTrash2, LuUpload } from 'react-icons/lu';
 import { FiPieChart } from 'react-icons/fi';
 import {
     API_URL,
@@ -120,6 +122,11 @@ const AccountCard: React.FC<{
     onAccountToggle: (enabled: boolean) => void;
     onConnectorEnabledChange: (connectorId: number, enabled: boolean, defaultEnabled: boolean) => void;
     onTestModeChange: (connectorId: number, testMode: boolean, defaultTestMode: boolean) => void;
+    onTestFileUpload: (connectorId: number, file: File) => void;
+    onTestFileRemove: (connectorId: number) => void;
+    testFixtures: Map<number, { filename: string; path: string; itemCount: number }>;
+    fixtureUploading: number | null;
+    onPreviewFixture: (connectorId: number) => void;
     onSinceChange: (connectorId: number, since: string | null, defaultSince: string | null) => void;
     onSinceReset: (connectorId: number) => void;
     onSinceClear: (connectorId: number) => void;
@@ -141,6 +148,11 @@ const AccountCard: React.FC<{
     onAccountToggle,
     onConnectorEnabledChange,
     onTestModeChange,
+    onTestFileUpload,
+    onTestFileRemove,
+    testFixtures,
+    fixtureUploading,
+    onPreviewFixture,
     onSinceChange,
     onSinceReset,
     onSinceClear,
@@ -432,8 +444,89 @@ const AccountCard: React.FC<{
                                         </Flex>
                                     </Flex>
 
+                                    {/* Row 1b: Test fixture upload/display (when test mode is on) */}
+                                    {isTestMode && isEnabled && (() => {
+                                        const fixture = testFixtures.get(connector.connector_id);
+                                        const isUploading = fixtureUploading === connector.connector_id;
+                                        return (
+                                            <Flex align="center" gap={2} mt={2} pl={6}>
+                                                {fixture ? (
+                                                    <>
+                                                        <Badge colorPalette="orange" size="xs" variant="subtle">
+                                                            🧪 {fixture.itemCount} items
+                                                        </Badge>
+                                                        <Text fontSize="2xs" color="orange.700" maxW="100px" truncate title={fixture.filename}>
+                                                            {fixture.filename}
+                                                        </Text>
+                                                        <IconButton
+                                                            aria-label="Preview fixture"
+                                                            size="xs"
+                                                            variant="ghost"
+                                                            colorPalette="blue"
+                                                            onClick={() => onPreviewFixture(connector.connector_id)}
+                                                            title="Preview fixture content"
+                                                        >
+                                                            <LuEye size={12} />
+                                                        </IconButton>
+                                                        <IconButton
+                                                            aria-label="Remove fixture"
+                                                            size="xs"
+                                                            variant="ghost"
+                                                            colorPalette="red"
+                                                            onClick={() => onTestFileRemove(connector.connector_id)}
+                                                            disabled={isUploading}
+                                                            title="Remove test fixture"
+                                                        >
+                                                            <LuTrash2 size={12} />
+                                                        </IconButton>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Text fontSize="2xs" color="orange.600">Fixture:</Text>
+                                                        {isUploading ? (
+                                                            <Spinner size="xs" />
+                                                        ) : (
+                                                            <>
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".json"
+                                                                    style={{ display: 'none' }}
+                                                                    id={`fixture-input-${connector.connector_id}`}
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (file) onTestFileUpload(connector.connector_id, file);
+                                                                        e.target.value = '';
+                                                                    }}
+                                                                />
+                                                                <label htmlFor={`fixture-input-${connector.connector_id}`}>
+                                                                    <Flex
+                                                                        as="span"
+                                                                        align="center"
+                                                                        gap={1}
+                                                                        px={2}
+                                                                        py={1}
+                                                                        borderWidth="1px"
+                                                                        borderColor="orange.300"
+                                                                        borderRadius="md"
+                                                                        cursor="pointer"
+                                                                        fontSize="xs"
+                                                                        color="orange.600"
+                                                                        _hover={{ bg: 'orange.50' }}
+                                                                    >
+                                                                        <LuUpload size={10} />
+                                                                        Upload JSON
+                                                                    </Flex>
+                                                                </label>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </Flex>
+                                        );
+                                    })()}
+
                                     {/* Row 2: Since datetime picker (only for incremental sync connectors when enabled) */}
-                                    {supportsIncremental && isEnabled && (
+                                    {supportsIncremental && isEnabled && !isTestMode && (
                                         <Flex align="center" gap={2} mt={2} pl={6}>
                                             <Text fontSize="xs" color="gray.500" minW="35px">Since:</Text>
                                             <Input
@@ -487,7 +580,7 @@ const AccountCard: React.FC<{
                                     )}
 
                                     {/* Special Note for Binance Deposits/Withdrawals */}
-                                    {isEnabled && (connector.connector_type === 'binance-deposits' || connector.connector_type === 'binance-withdrawals') && (
+                                    {isEnabled && !isTestMode && (connector.connector_type === 'binance-deposits' || connector.connector_type === 'binance-withdrawals') && (
                                         <Flex gap={2} mt={1} pl={6} align="start">
                                             <Text fontSize="2xs" color="orange.600" fontStyle="italic">
                                                 Note: Default start date is 90 days ago. If start date is set, end date is start date + 90 days.
@@ -496,7 +589,7 @@ const AccountCard: React.FC<{
                                     )}
 
                                     {/* Special Note for MEXC API Connectors (Transactions, Deposits, Withdrawals) */}
-                                    {isEnabled && !connector.is_file_connector && (connector.connector_type === 'mexc-transactions' || connector.connector_type === 'mexc-deposits' || connector.connector_type === 'mexc-withdrawals') && (
+                                    {isEnabled && !isTestMode && !connector.is_file_connector && (connector.connector_type === 'mexc-transactions' || connector.connector_type === 'mexc-deposits' || connector.connector_type === 'mexc-withdrawals') && (
                                         <Flex gap={2} mt={1} pl={6} align="start">
                                             <Text fontSize="2xs" color="orange.600" fontStyle="italic">
                                                 ⚠️ Note: MEXC API cannot retrieve data older than 90 days.
@@ -505,7 +598,7 @@ const AccountCard: React.FC<{
                                     )}
 
                                     {/* Row 3: Symbols filter (for trade connectors) */}
-                                    {supportsSymbols && isEnabled && (
+                                    {supportsSymbols && isEnabled && !isTestMode && (
                                         <Flex align="center" gap={2} mt={2} pl={6}>
                                             <Text fontSize="xs" color="gray.500" minW="50px">Symbols:</Text>
                                             <CommaSeparatedInput
@@ -533,7 +626,7 @@ const AccountCard: React.FC<{
                                     )}
 
                                     {/* Row 4: Currencies filter (for deposit/withdrawal connectors) */}
-                                    {supportsCurrencies && isEnabled && (
+                                    {supportsCurrencies && isEnabled && !isTestMode && (
                                         <Flex align="center" gap={2} mt={2} pl={6}>
                                             <Text fontSize="xs" color="gray.500" minW="50px">Currencies:</Text>
                                             <CommaSeparatedInput
@@ -562,7 +655,7 @@ const AccountCard: React.FC<{
                                     )}
 
                                     {/* Row 5: File Upload (for file connectors) */}
-                                    {connector.is_file_connector && isEnabled && (
+                                    {connector.is_file_connector && isEnabled && !isTestMode && (
                                         <ConnectorFileUpload
                                             connectorId={connector.connector_id}
                                             connectorType={connector.connector_type}
@@ -671,6 +764,123 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         setBalanceDrawerOpen(true);
     }, []);
 
+    // Test fixture state: connector_id -> { filename, path, itemCount }
+    const [testFixtures, setTestFixtures] = useState<Map<number, { filename: string; path: string; itemCount: number }>>(new Map());
+    const [fixtureUploading, setFixtureUploading] = useState<number | null>(null);
+    // JSON preview dialog state
+    const [previewConnectorId, setPreviewConnectorId] = useState<number | null>(null);
+    const [previewData, setPreviewData] = useState<any[] | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+
+    // Load existing fixture status when test_mode is active on a connector
+    useEffect(() => {
+        const loadFixtureStatuses = async () => {
+            const connectorsWithTestMode = connectors.filter(c => {
+                const override = overrides.get(c.connector_id);
+                return (override?.test_mode ?? c.test_mode) && !testFixtures.has(c.connector_id);
+            });
+            for (const c of connectorsWithTestMode) {
+                try {
+                    const resp = await fetch(`${API_URL}/fixtures/connectors/${c.connector_id}/test-fixture`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data.has_fixture) {
+                            setTestFixtures(prev => {
+                                const next = new Map(prev);
+                                next.set(c.connector_id, {
+                                    filename: `${c.connector_id}.json`,
+                                    path: data.test_file_path || `data/input/fixtures/${c.connector_id}.json`,
+                                    itemCount: data.item_count ?? 0,
+                                });
+                                return next;
+                            });
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+        };
+        loadFixtureStatuses();
+    }, [connectors, overrides]);
+
+    const handleTestFileUpload = useCallback(async (connectorId: number, file: File) => {
+        setFixtureUploading(connectorId);
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const resp = await fetch(`${API_URL}/fixtures/connectors/${connectorId}/test-fixture`, {
+                method: 'POST',
+                body: fd,
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.detail || 'Upload failed');
+            }
+            const result = await resp.json();
+            setTestFixtures(prev => {
+                const next = new Map(prev);
+                next.set(connectorId, {
+                    filename: file.name,
+                    path: result.path,
+                    itemCount: result.item_count,
+                });
+                return next;
+            });
+            // Add test_file_path to override
+            setOverrides(prev => {
+                const next = new Map(prev);
+                const existing = next.get(connectorId) || { connector_id: connectorId };
+                next.set(connectorId, { ...existing, test_mode: true, test_file_path: result.path });
+                return next;
+            });
+        } catch (err) {
+            console.error('Failed to upload test fixture:', err);
+        } finally {
+            setFixtureUploading(null);
+        }
+    }, []);
+
+    const handleTestFileRemove = useCallback(async (connectorId: number) => {
+        setFixtureUploading(connectorId);
+        try {
+            await fetch(`${API_URL}/fixtures/connectors/${connectorId}/test-fixture`, { method: 'DELETE' });
+            setTestFixtures(prev => {
+                const next = new Map(prev);
+                next.delete(connectorId);
+                return next;
+            });
+            // Remove test_file_path from override
+            setOverrides(prev => {
+                const next = new Map(prev);
+                const existing = next.get(connectorId);
+                if (existing) {
+                    const { test_file_path: _, ...rest } = existing;
+                    next.set(connectorId, rest as ConnectorOverride);
+                }
+                return next;
+            });
+        } catch (err) {
+            console.error('Failed to remove test fixture:', err);
+        } finally {
+            setFixtureUploading(null);
+        }
+    }, []);
+
+    const handlePreviewFixture = useCallback(async (connectorId: number) => {
+        setPreviewConnectorId(connectorId);
+        setPreviewLoading(true);
+        setPreviewData(null);
+        try {
+            // Fetch the fixture file content via a dedicated endpoint
+            const resp = await fetch(`${API_URL}/fixtures/connectors/${connectorId}/test-fixture/content`);
+            if (resp.ok) {
+                const data = await resp.json();
+                setPreviewData(data);
+            }
+        } catch { /* ignore */ } finally {
+            setPreviewLoading(false);
+        }
+    }, []);
+
     // Initialize collapsed state for disabled accounts (all disabled accounts collapsed by default)
     useEffect(() => {
         // Only initialize if collapsedAccounts is empty (first load)
@@ -763,7 +973,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
             if (!configStore.selectedIds.has(connectorId)) continue;
             if (override.enabled !== undefined || override.test_mode !== undefined ||
                 override.since_datetime !== undefined || override.symbols !== undefined ||
-                override.currencies !== undefined) {
+                override.currencies !== undefined || override.test_file_path !== undefined) {
                 overrideList.push(override);
             }
         }
@@ -1419,6 +1629,11 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                                                                 onAccountToggle={(enabled) => handleAccountToggle(account.id, enabled)}
                                                                 onConnectorEnabledChange={handleConnectorEnabledChange}
                                                                 onTestModeChange={handleTestModeChange}
+                                                                onTestFileUpload={handleTestFileUpload}
+                                                                onTestFileRemove={handleTestFileRemove}
+                                                                testFixtures={testFixtures}
+                                                                fixtureUploading={fixtureUploading}
+                                                                onPreviewFixture={handlePreviewFixture}
                                                                 onSinceChange={handleSinceChange}
                                                                 onSinceReset={handleSinceReset}
                                                                 onSinceClear={handleSinceClear}
@@ -1474,6 +1689,49 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
                 allAccounts={allAccounts}
                 alreadySelected={configStore.selectedIds}
             />
+
+            {/* Test Fixture Preview Dialog */}
+            <Dialog.Root open={previewConnectorId !== null} onOpenChange={(e) => { if (!e.open) { setPreviewConnectorId(null); setPreviewData(null); } }}>
+                <Portal>
+                    <Dialog.Backdrop />
+                    <Dialog.Positioner>
+                        <Dialog.Content maxW="600px" maxH="80vh">
+                            <Dialog.Header>
+                                <Dialog.Title fontSize="sm">🧪 Test Fixture Preview</Dialog.Title>
+                            </Dialog.Header>
+                            <Dialog.Body overflowY="auto">
+                                {previewLoading ? (
+                                    <Flex justify="center" py={4}><Spinner size="sm" /></Flex>
+                                ) : previewData ? (
+                                    <Box>
+                                        <Text fontSize="xs" color="gray.500" mb={2}>{previewData.length} items</Text>
+                                        <Box
+                                            as="pre"
+                                            fontSize="xs"
+                                            bg="gray.50"
+                                            p={3}
+                                            borderRadius="md"
+                                            overflowX="auto"
+                                            maxH="60vh"
+                                            whiteSpace="pre-wrap"
+                                            wordBreak="break-all"
+                                        >
+                                            {JSON.stringify(previewData, null, 2)}
+                                        </Box>
+                                    </Box>
+                                ) : (
+                                    <Text fontSize="sm" color="gray.500">No data available</Text>
+                                )}
+                            </Dialog.Body>
+                            <Dialog.Footer>
+                                <Button size="sm" variant="outline" onClick={() => { setPreviewConnectorId(null); setPreviewData(null); }}>
+                                    Close
+                                </Button>
+                            </Dialog.Footer>
+                        </Dialog.Content>
+                    </Dialog.Positioner>
+                </Portal>
+            </Dialog.Root>
         </Box>
     );
 };

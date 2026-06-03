@@ -1,0 +1,29 @@
+# Corporate Spin-Off Scenario — Assets
+# =======================================
+# Two spin-off cases to test both pre-existing bundles and manual bundle creation.
+#
+# Group A (pre-seeded bundle):  GE → GEV  (General Electric → GE Vernova)
+# Group B (manual creation):    APTV → VRSG (Aptiv PLC → Versigent PLC)
+
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  # ── Group A: Pre-seeded spinoff (Interactive Brokers) ──
+  - symbol: GE
+    label: General Electric
+    price_type: stock
+
+  - symbol: GEV
+    label: GE Vernova
+    price_type: stock
+
+  # ── Group B: Manual spinoff (DEGIRO CTO) ──
+  - symbol: APTV
+    label: Aptiv PLC
+    price_type: stock
+
+  - symbol: VRSG
+    label: Versigent PLC
+    price_type: stock

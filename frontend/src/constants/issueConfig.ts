@@ -13,6 +13,7 @@ export const ISSUE_CONFIG: Record<IssueType, { color: string; label: string }> =
     unlinked_account: { color: 'orange', label: 'Unlinked Account' },
     unlinked_price_quote: { color: 'purple', label: 'Unlinked Price Asset' },
     unlinked_fee_quote: { color: 'yellow', label: 'Unlinked Fee Asset' },
+    unlinked_attributed_asset: { color: 'orange', label: 'Unlinked Attributed Asset' },
     missing_transfer_from_account: { color: 'blue', label: 'Missing From Account' },
     missing_transfer_to_account: { color: 'blue', label: 'Missing To Account' },
     unlinked_transfer_from_account: { color: 'cyan', label: 'Unlinked From Account' },

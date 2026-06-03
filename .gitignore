@@ -4,6 +4,14 @@
 !.env.example
 !.env.*.example
 
+# Config secrets (gitignored, kept locally only). Examples (*.example) are committed.
+config/secrets.env
+config/secrets.*.env
+!config/*.example
+
+# Per-scenario secrets (gitignored globally; commit *.example if a scenario needs them).
+scenarios/*/secrets.env
+
 # Python
 __pycache__/
 *.py[cod]
@@ -62,7 +70,6 @@ pip-delete-this-directory.txt
 .vscode/
 !.vscode/settings.json
 !.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
 

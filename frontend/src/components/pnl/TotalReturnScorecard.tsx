@@ -13,12 +13,12 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { Badge, Box, Card, Collapsible, Flex, SimpleGrid, Slider, Text } from '@chakra-ui/react';
 import { FiTrendingUp, FiTrendingDown, FiDollarSign, FiChevronDown, FiChevronRight } from 'react-icons/fi';
-import { LuReceipt, LuInfo } from 'react-icons/lu';
+import { LuReceipt, LuInfo, LuBanknote } from 'react-icons/lu';
 import { AssetDetailPanelContext } from '../../contexts/AssetDetailPanelContext';
 import { Tooltip } from '../ui/tooltip';
 import { HeroMetricsBar } from './HeroMetricsBar';
 import { PeriodChartPanel } from './PeriodChartPanel';
-import type { TimelinePoint, VersionMetricsResponse, SettledMetricsResponse, MarketMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
+import type { TimelinePoint, VersionMetricsResponse, BookMetricsResponse, LiveMetricsResponse, PerformersResponse, RangeKey, PerformerItem as BackendPerformerItem, GroupBy } from '../../hooks/useChartData';
 import type { DimensionWithCategories } from '../../types';
 import type { AssetPnLRow } from './types';
 
@@ -80,6 +80,7 @@ export interface RangeMetrics {
     roi: number;
     currentValue: number;
     costBasis: number;
+    totalInvested: number;
     unrealizedPnl: number;
     realizedPnl: number;
     taxableRealizedPnl: number;
@@ -90,6 +91,11 @@ export interface RangeMetrics {
     costBasisInPeriod: number;
     unrealizedInPeriod: number;
     feesInPeriod: number;
+    totalIncome: number;
+    totalWithholding: number;
+    incomeEventCount: number;
+    incomeInPeriod: number;
+    withholdingInPeriod: number;
 }
 
 /** Compute metrics for a given range from timeline points + optional authoritative summary */
@@ -106,6 +112,7 @@ export function computeMetricsForRange(
             roi,
             currentValue: summary.portfolioValue,
             costBasis: summary.costBasis,
+            totalInvested: summary.costBasis,
             unrealizedPnl: summary.unrealizedPnl,
             realizedPnl: summary.realizedPnl,
             taxableRealizedPnl: summary.taxableRealizedPnl,
@@ -116,6 +123,11 @@ export function computeMetricsForRange(
             costBasisInPeriod: summary.costBasis,
             unrealizedInPeriod: summary.unrealizedPnl,
             feesInPeriod: summary.totalFees,
+            totalIncome: 0,
+            totalWithholding: 0,
+            incomeEventCount: 0,
+            incomeInPeriod: 0,
+            withholdingInPeriod: 0,
         };
     }
 
@@ -153,6 +165,7 @@ export function computeMetricsForRange(
         roi,
         currentValue: last.total_value_in_base,
         costBasis,
+        totalInvested: costBasis,
         unrealizedPnl,
         realizedPnl,
         taxableRealizedPnl: summary?.taxableRealizedPnl ?? 0,
@@ -163,6 +176,11 @@ export function computeMetricsForRange(
         costBasisInPeriod: costBasis - (first.cost_basis_in_base || 0),
         unrealizedInPeriod: unrealizedChange,
         feesInPeriod: 0,
+        totalIncome: 0,
+        totalWithholding: 0,
+        incomeEventCount: 0,
+        incomeInPeriod: 0,
+        withholdingInPeriod: 0,
     };
 }
 
@@ -188,12 +206,12 @@ interface TimeframeIndicatorsProps {
     onRangeChange: (range: Range) => void;
     /** Backend version metrics — used when available instead of client computation */
     periodSummaryData?: VersionMetricsResponse;
-    /** Settled metrics (cost-lot-based, instant) */
-    settledData?: SettledMetricsResponse;
-    /** Market metrics (price-dependent, after prices) */
-    marketData?: MarketMetricsResponse;
-    /** Whether market metrics are still loading */
-    isMarketLoading?: boolean;
+    /** Book metrics (cost-lot-based, instant) */
+    bookData?: BookMetricsResponse;
+    /** Live metrics (price-dependent, after prices) */
+    liveData?: LiveMetricsResponse;
+    /** Whether live metrics are still loading */
+    isLiveLoading?: boolean;
     /** Standalone performers data */
     performersData?: PerformersResponse;
     /** Whether performers are still loading */
@@ -218,6 +236,8 @@ interface TimeframeIndicatorsProps {
     onDimensionChange?: (dimensionId: number) => void;
     /** Callback when user clicks the fees metric */
     onFeesClick?: () => void;
+    /** Callback when user clicks the income metric */
+    onIncomeClick?: () => void;
     /** Unified performer click callback (replaces separate asset/category/account clicks) */
     onPerformerClick?: (id: number, groupType: string, name: string) => void;
     /** Version ID for fullscreen performance chart */
@@ -273,9 +293,9 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     range,
     onRangeChange,
     periodSummaryData,
-    settledData,
-    marketData,
-    isMarketLoading,
+    bookData,
+    liveData,
+    isLiveLoading,
     performersData,
     isPerformersLoading,
     groupBy = 'asset',
@@ -288,6 +308,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     selectedDimensionId,
     onDimensionChange,
     onFeesClick,
+    onIncomeClick,
     onPerformerClick,
     versionId,
     assets: assetsProp,
@@ -310,39 +331,45 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
     // Map sortMetric to PerformerSort for internal helpers
     const performerSort: PerformerSort = sortMetric === 'U' ? 'unrealized' : sortMetric === 'MV' ? 'market_value' : sortMetric === 'Eff' ? 'efficiency' : 'return';
 
-    // Pre-compute ROI% for all ranges: must use marketData (live-price-dependent)
+    // Pre-compute ROI% for all ranges: must use liveData (live-price-dependent)
     const allRangeRois = useMemo(() => {
         const result: Record<Range, number | null> = { all: null, '3y': null, '1y': null, '6m': null, '3m': null, '1m': null, '1w': null };
         for (const r of RANGES) {
-            const mkt = marketData?.ranges?.[r.key as RangeKey];
+            const mkt = liveData?.ranges?.[r.key as RangeKey];
             if (mkt) {
                 result[r.key] = mkt.roi_pct;
             }
             // Don't fall back to periodSummaryData — its ROI uses stale prices
         }
         return result;
-    }, [marketData]);
+    }, [liveData]);
 
-    // Active range metrics: build from settledData + marketData (groupBy-independent)
+    // Active range metrics: build from bookData + liveData (groupBy-independent)
     const metrics = useMemo(() => {
-        const settled = settledData?.ranges?.[range as RangeKey];
-        const market = marketData?.ranges?.[range as RangeKey];
-        if (settled) {
+        const book = bookData?.ranges?.[range as RangeKey];
+        const live = liveData?.ranges?.[range as RangeKey];
+        if (book) {
             return {
-                totalReturn: market?.total_return ?? settled.realized_pnl,
-                roi: market?.roi_pct ?? 0,
-                currentValue: market?.current_value ?? 0,
-                costBasis: settled.cost_basis,
-                unrealizedPnl: market?.unrealized_pnl ?? 0,
-                realizedPnl: settled.realized_pnl,
-                taxableRealizedPnl: settled.taxable_realized_pnl ?? 0,
-                realizedInPeriod: settled.realized_in_period,
-                taxableRealizedInPeriod: (settled as any).taxable_realized_in_period ?? 0,
-                totalFees: settled.fees_in_period ?? summary?.totalFees ?? 0,
+                totalReturn: live?.total_return ?? book.realized_pnl,
+                roi: live?.roi_pct ?? 0,
+                currentValue: live?.current_value ?? 0,
+                costBasis: book.cost_basis,
+                totalInvested: book.total_invested ?? book.cost_basis,
+                unrealizedPnl: live?.unrealized_pnl ?? 0,
+                realizedPnl: book.realized_pnl,
+                taxableRealizedPnl: book.taxable_realized_pnl ?? 0,
+                realizedInPeriod: book.realized_in_period,
+                taxableRealizedInPeriod: (book as any).taxable_realized_in_period ?? 0,
+                totalFees: book.fees_in_period ?? summary?.totalFees ?? 0,
                 feeEntryCount: summary?.feeEntryCount ?? 0,
-                costBasisInPeriod: settled.cost_basis_in_period ?? 0,
-                unrealizedInPeriod: market?.unrealized_in_period ?? 0,
-                feesInPeriod: settled.fees_in_period ?? 0,
+                costBasisInPeriod: book.cost_basis_in_period ?? 0,
+                unrealizedInPeriod: live?.unrealized_in_period ?? 0,
+                feesInPeriod: book.fees_in_period ?? 0,
+                totalIncome: bookData?.summary?.total_income ?? 0,
+                totalWithholding: bookData?.summary?.total_withholding ?? 0,
+                incomeEventCount: bookData?.summary?.income_event_count ?? 0,
+                incomeInPeriod: book.income_in_period ?? 0,
+                withholdingInPeriod: book.withholding_in_period ?? 0,
             } as RangeMetrics;
         }
         // Legacy fallback: use periodSummaryData or client computation
@@ -353,6 +380,7 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 roi: backendRange.roi_pct,
                 currentValue: backendRange.current_value,
                 costBasis: backendRange.cost_basis,
+                totalInvested: backendRange.total_invested ?? backendRange.cost_basis,
                 unrealizedPnl: backendRange.unrealized_pnl,
                 realizedPnl: backendRange.realized_pnl,
                 taxableRealizedPnl: backendRange.taxable_realized_pnl ?? 0,
@@ -363,10 +391,15 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                 costBasisInPeriod: backendRange.cost_basis_in_period ?? 0,
                 unrealizedInPeriod: backendRange.unrealized_in_period ?? 0,
                 feesInPeriod: backendRange.fees_in_period ?? 0,
+                totalIncome: 0,
+                totalWithholding: 0,
+                incomeEventCount: 0,
+                incomeInPeriod: 0,
+                withholdingInPeriod: 0,
             } as RangeMetrics;
         }
         return computeMetricsForRange(range, points, summary);
-    }, [points, range, summary, settledData, marketData, periodSummaryData]);
+    }, [points, range, summary, bookData, liveData, periodSummaryData]);
 
     const color = (val: number) => (val >= 0 ? 'green.600' : 'red.600');
 
@@ -483,8 +516,8 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                 <>
                                     <MetricItem
                                         label="Value Δ"
-                                        value={isMarketLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod + metrics.costBasisInPeriod, baseCurrency)}
-                                        color={isMarketLoading ? 'gray.400' : color(metrics.unrealizedInPeriod + metrics.costBasisInPeriod)}
+                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod + metrics.costBasisInPeriod, baseCurrency)}
+                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedInPeriod + metrics.costBasisInPeriod)}
                                         icon={<FiDollarSign size={14} />}
                                         bg="blue.50"
                                         onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
@@ -496,11 +529,12 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                         icon={<LuReceipt size={14} />}
                                         bg="gray.100"
                                         onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined}
+                                        subValue={Math.abs(metrics.totalInvested - metrics.costBasisInPeriod) > 0.01 ? `invested ${fmtCurrencySigned(metrics.totalInvested, baseCurrency)}` : undefined}
                                     />
                                     <MetricItem
                                         label="Unrealized Δ"
-                                        value={isMarketLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod, baseCurrency)}
-                                        color={isMarketLoading ? 'gray.400' : color(metrics.unrealizedInPeriod)}
+                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedInPeriod, baseCurrency)}
+                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedInPeriod)}
                                         icon={metrics.unrealizedInPeriod >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
                                         bg={metrics.unrealizedInPeriod >= 0 ? 'green.50' : 'red.50'}
                                         onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
@@ -527,23 +561,26 @@ export const TimeframeIndicators: React.FC<TimeframeIndicatorsProps> = ({
                                 <>
                                     <MetricItem
                                         label="Value"
-                                        value={isMarketLoading ? '...' : fmtCurrency(metrics.currentValue, baseCurrency)}
-                                        color={isMarketLoading ? 'gray.400' : 'gray.800'}
+                                        value={isLiveLoading ? '...' : fmtCurrency(metrics.currentValue, baseCurrency)}
+                                        color={isLiveLoading ? 'gray.400' : 'gray.800'}
                                         icon={<FiDollarSign size={14} />}
                                         bg="blue.50"
                                         onClick={onMetricClick ? () => onMetricClick('total_return') : undefined}
                                     />
-                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} />
+                                    <MetricItem label="Cost" value={fmtCurrency(metrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" onClick={onMetricClick ? () => onMetricClick('cost_basis') : undefined} subValue={Math.abs(metrics.totalInvested - metrics.costBasis) > 0.01 ? `invested ${fmtCurrency(metrics.totalInvested, baseCurrency)}` : undefined} />
                                     <MetricItem
                                         label="Unrealized"
-                                        value={isMarketLoading ? '...' : fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)}
-                                        color={isMarketLoading ? 'gray.400' : color(metrics.unrealizedPnl)}
+                                        value={isLiveLoading ? '...' : fmtCurrencySigned(metrics.unrealizedPnl, baseCurrency)}
+                                        color={isLiveLoading ? 'gray.400' : color(metrics.unrealizedPnl)}
                                         icon={metrics.unrealizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />}
                                         bg={metrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'}
                                         onClick={onMetricClick ? () => onMetricClick('unrealized') : undefined}
                                     />
                                     <MetricItem label="Realized" value={fmtCurrencySigned(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} icon={metrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={metrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} subValue={`Taxable: ${fmtCurrencySigned(metrics.taxableRealizedPnl, baseCurrency)}`} onClick={onMetricClick ? () => onMetricClick('realized') : undefined} />
                                     <MetricItem label="Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" subValue={`${metrics.feeEntryCount} events`} onClick={onFeesClick} />
+                                    {metrics.incomeEventCount > 0 && (
+                                        <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
+                                    )}
                                 </>
                             )}
                         </HeroMetricsBar>
@@ -927,6 +964,9 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
                         <MetricItem label="Unrealized P&L" value={fmtCurrency(metrics.unrealizedPnl, baseCurrency)} color={color(metrics.unrealizedPnl)} />
                         <MetricItem label="Realized P&L" value={fmtCurrency(metrics.realizedPnl, baseCurrency)} color={color(metrics.realizedPnl)} subValue={`Taxable: ${fmtCurrency(metrics.taxableRealizedPnl, baseCurrency)}`} />
                         <MetricItem label="Total Fees" value={fmtCurrency(metrics.totalFees, baseCurrency)} subValue={`${metrics.feeEntryCount} fee events`} color="gray.600" onClick={onFeesClick} />
+                        {metrics.incomeEventCount > 0 && (
+                            <MetricItem label="Income" value={fmtCurrencySigned(metrics.totalIncome - metrics.totalWithholding, baseCurrency)} color="teal.600" icon={<LuBanknote size={14} />} bg="teal.50" subValue={`${metrics.incomeEventCount} events`} onClick={onIncomeClick} />
+                        )}
                     </SimpleGrid>
                 </>
             ) : null}
@@ -934,7 +974,7 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
     );
 };
 
-/* Reusable metric display component — single-line: icon label value */
+/* Reusable metric display component — icon label value, with optional sub-value below */
 export const MetricItem: React.FC<{
     label: string;
     value: string;
@@ -946,8 +986,7 @@ export const MetricItem: React.FC<{
     compact?: boolean;
 }> = ({ label, value, color, subValue, icon, bg, onClick, compact }) => (
     <Flex
-        align="center"
-        gap={1}
+        direction="column"
         cursor={onClick ? 'pointer' : 'default'}
         onClick={onClick}
         _hover={onClick ? { opacity: 0.85 } : undefined}
@@ -958,8 +997,11 @@ export const MetricItem: React.FC<{
         flex={1}
         minW={0}
     >
-        {icon && <Box color={color} flexShrink={0}>{icon}</Box>}
-        <Text fontSize={compact ? '2xs' : 'xs'} color="gray.500" fontWeight="medium" whiteSpace="nowrap">{label}</Text>
-        <Text fontSize={compact ? 'xs' : 'sm'} fontWeight="bold" color={color} whiteSpace="nowrap">{value}</Text>
+        <Flex align="center" gap={1}>
+            {icon && <Box color={color} flexShrink={0}>{icon}</Box>}
+            <Text fontSize={compact ? '2xs' : 'xs'} color="gray.500" fontWeight="medium" whiteSpace="nowrap">{label}</Text>
+            <Text fontSize={compact ? 'xs' : 'sm'} fontWeight="bold" color={color} whiteSpace="nowrap">{value}</Text>
+        </Flex>
+        {subValue && <Text fontSize="2xs" color="gray.400" whiteSpace="nowrap" mt={0.5}>{subValue}</Text>}
     </Flex>
 );

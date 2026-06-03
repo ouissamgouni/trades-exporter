@@ -131,7 +131,11 @@ export const PeriodChartPanel: React.FC<PeriodChartPanelProps> = ({
                     <Flex align="center" justify="center" h="200px" direction="column" gap={1}>
                         <FiAlertTriangle size={16} color="var(--chakra-colors-red-400)" />
                         <Text fontSize="xs" color="red.500">Failed to load chart data</Text>
-                        <Text fontSize="2xs" color="gray.400">{error}</Text>
+                        <Text fontSize="xs" color="red.400">{error}</Text>
+                    </Flex>
+                ) : !isLoading && points.length === 0 && chartMode !== 'price' ? (
+                    <Flex align="center" justify="center" h="200px" direction="column" gap={1}>
+                        <Text fontSize="xs" color="gray.400">No chart data available for this period</Text>
                     </Flex>
                 ) : chartMode === 'performance' ? (
                     <PortfolioPerformanceChart

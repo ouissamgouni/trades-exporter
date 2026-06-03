@@ -1,0 +1,24 @@
+assets:
+  - symbol: EUR
+    label: Euro
+    price_type: fiat
+
+  - symbol: USDC
+    label: USD Coin
+    price_type: crypto
+
+  - symbol: USDT
+    label: Tether
+    price_type: crypto
+
+  - symbol: ETH
+    label: Ethereum
+    price_type: crypto
+
+  - symbol: BTC
+    label: Bitcoin
+    price_type: crypto
+
+  # NOTE: SOL intentionally omitted — deriv_009 uses source_attributed_asset_symbol: SOL
+  # so the seeder cannot resolve attributed_asset_id, triggering the "Unlinked Attributed Asset"
+  # data health issue (test step 7).

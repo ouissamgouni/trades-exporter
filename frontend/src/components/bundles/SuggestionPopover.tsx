@@ -183,6 +183,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                                                 [UnitPattern.SWAP]: '#FEEBC8',
                                                 [UnitPattern.SPLIT]: '#E9D8FD',
                                                 [UnitPattern.FLOW]: '#C6F6D5',
+                                                [UnitPattern.SPINOFF]: '#FED7E2',
                                                 [UnitPattern.CUSTOM]: '#E2E8F0',
                                                 [UnitPattern.UNKNOWN]: '#EDF2F7',
                                             }[selectedPattern] || '#EDF2F7',
@@ -193,6 +194,7 @@ export const SuggestionPopover: React.FC<SuggestionPopoverProps> = ({
                                         <option value={UnitPattern.INTERNAL_TRANSFER}>Internal Transfer</option>
                                         <option value={UnitPattern.SPLIT}>Split</option>
                                         <option value={UnitPattern.FLOW}>Flow</option>
+                                        <option value={UnitPattern.SPINOFF}>Spin-Off</option>
                                         <option value={UnitPattern.CUSTOM}>Custom</option>
                                         <option value={UnitPattern.UNKNOWN}>Unknown</option>
                                     </NativeSelect.Field>

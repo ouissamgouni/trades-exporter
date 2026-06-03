@@ -1,0 +1,21 @@
+# Corporate Spin-Off Scenario — Accounts
+# =========================================
+# Two broker accounts — one per spinoff group.
+# Group A (GE → GEV):   Interactive Brokers
+# Group B (APTV → VRSG): DEGIRO CTO
+# This tests account scoping: each spinoff only affects its own account's lots.
+
+accounts:
+  - name: "DEGIRO CTO"
+    account_type: "broker"
+    owned: true
+    group: "Investing"
+    color: "#0066CC"
+    address_or_identifier: "degiro_cto_spinoff_qa"
+
+  - name: "Interactive Brokers"
+    account_type: "broker"
+    owned: true
+    group: "Investing"
+    color: "#D32F2F"
+    address_or_identifier: "ibkr_spinoff_qa"

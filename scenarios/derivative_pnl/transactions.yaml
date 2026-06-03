@@ -1,0 +1,173 @@
+transactions:
+  # ── Step 1: Buy USDC on Binance ───────────────────────────────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_001_buy_usdc"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "5000.000000000000000000"
+    direction: inflow
+    transaction_type: trade
+    date_time: "2024-01-10T10:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "5.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: unknown
+    tags:
+      - scenario: derivative_pnl
+      - step: "1"
+
+  # ── Step 2: Transfer USDC from Binance to Hyperliquid ─────────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_002_transfer_usdc_out"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "4000.000000000000000000"
+    direction: outflow
+    transaction_type: withdrawal
+    date_time: "2024-01-12T14:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: derivative_pnl
+      - step: "2"
+      - leg_type: disposed
+
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_003_transfer_usdc_in"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "4000.000000000000000000"
+    direction: inflow
+    transaction_type: deposit
+    date_time: "2024-01-12T14:00:00"
+    review_status: valid
+    taxability_status: non_taxable
+    tags:
+      - scenario: derivative_pnl
+      - step: "2"
+      - leg_type: acquired
+
+  # ── Step 3: ETH Perp Close — Gain (attributed to USDC) ───────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_004_perp_close_eth_gain"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "350.000000000000000000"
+    direction: inflow
+    transaction_type: perp_close
+    source_transaction_type: "perp_close"
+    date_time: "2024-02-05T09:30:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    source_attributed_asset_symbol: ETH
+    tags:
+      - scenario: derivative_pnl
+      - step: "3"
+      - goal: "ETH perp gain attributed to USDC"
+
+  # ── Step 4: BTC Perp Close — Loss (attributed to USDC) ───────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_005_perp_close_btc_loss"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "120.000000000000000000"
+    direction: outflow
+    transaction_type: perp_close
+    source_transaction_type: "perp_close"
+    date_time: "2024-02-20T16:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    source_attributed_asset_symbol: BTC
+    tags:
+      - scenario: derivative_pnl
+      - step: "4"
+      - goal: "BTC perp loss attributed to USDC"
+
+  # ── Step 5: ETH Funding Payment (attributed to USDC) ─────────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_006_funding_eth"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "15.500000000000000000"
+    direction: inflow
+    transaction_type: funding
+    source_transaction_type: "funding"
+    date_time: "2024-03-01T00:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    source_attributed_asset_symbol: ETH
+    tags:
+      - scenario: derivative_pnl
+      - step: "5"
+      - goal: "ETH funding attributed to USDC"
+
+  # ── Step 6: ETH Perp Close with fee (attributed to USDC) ─────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_007_perp_close_eth_with_fee"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "200.000000000000000000"
+    direction: inflow
+    transaction_type: perp_close
+    source_transaction_type: "perp_close"
+    date_time: "2024-03-15T11:00:00"
+    price: "0.920000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "2.500000000000000000"
+    fee_quote_asset_symbol: USDC
+    review_status: valid
+    taxability_status: taxable
+    source_attributed_asset_symbol: ETH
+    tags:
+      - scenario: derivative_pnl
+      - step: "6"
+      - goal: "ETH perp gain with USDC fee"
+
+  # ── Step 7: Normal sell — no attributed asset ─────────────────
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_008_sell_usdc_normal"
+    account_name: Binance
+    asset_symbol: USDC
+    quantity: "500.000000000000000000"
+    direction: outflow
+    transaction_type: trade
+    date_time: "2024-04-01T10:00:00"
+    price: "0.930000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "1.000000000000000000"
+    fee_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    tags:
+      - scenario: derivative_pnl
+      - step: "7"
+      - goal: "Normal USDC sale — no attributed asset"
+
+  # ── Step 8: SOL Perp Close — UNLINKED attributed asset ────────
+  # SOL is intentionally NOT in assets.yaml mapping to test unlinked detection
+  - source: "scenario-derivative-pnl"
+    source_transaction_id: "deriv_009_perp_close_sol_unlinked"
+    account_name: Hyperliquid
+    asset_symbol: USDC
+    quantity: "80.000000000000000000"
+    direction: inflow
+    transaction_type: perp_close
+    source_transaction_type: "perp_close"
+    date_time: "2024-04-10T08:00:00"
+    price: "0.930000000000000000"
+    price_quote_asset_symbol: EUR
+    review_status: valid
+    taxability_status: taxable
+    source_attributed_asset_symbol: SOL
+    tags:
+      - scenario: derivative_pnl
+      - step: "8"
+      - goal: "SOL perp — unlinked attributed asset for data health check"

@@ -536,6 +536,9 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             if (filters.relatedAssetIds && filters.relatedAssetIds.length > 0) {
                 params.append('related_asset_id', filters.relatedAssetIds.join(','));
             }
+            if (filters.attributedAssetIds && filters.attributedAssetIds.length > 0) {
+                params.append('attributed_asset_id', filters.attributedAssetIds.join(','));
+            }
             if (filters.categoryIds.length > 0) {
                 params.append('category_id', filters.categoryIds.join(','));
             }
@@ -1023,10 +1026,15 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             return;
         }
 
+        const selectedTxsForDefaults = transactions.filter(tx => selectedIds.has(tx.id));
+        const getSymbolForDefaults = (tx: Transaction) => tx.linked_asset?.symbol || tx.source_asset_symbol || '?';
+        const uniqueAssetSymbols = [...new Set(selectedTxsForDefaults.map(getSymbolForDefaults))];
+
         setBundleCreateDefaults({
             pattern,
             label: generateBundleLabel(pattern, selectedIds),
             transactionIds: Array.from(selectedIds),
+            selectedAssetSymbols: uniqueAssetSymbols,
         });
         setShowBundleCreateDialog(true);
     };
@@ -1191,6 +1199,32 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
             setSelectedIds(new Set());
         } catch (err) {
             toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to unbundle' });
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const bulkClearAccounts = async () => {
+        if (selectedIds.size === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const response = await fetch(`${API_URL}/transactions/bulk/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transaction_ids: Array.from(selectedIds),
+                    clear_from_account: true,
+                    clear_to_account: true,
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to clear accounts');
+            const result = await response.json();
+            toaster.success({ title: 'Cleared', description: `From/To accounts cleared on ${result.affected_count} transaction(s)` });
+            invalidateTransactionData();
+            onDataChange?.();
+            setSelectedIds(new Set());
+        } catch (err) {
+            toaster.error({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to clear accounts' });
         } finally {
             setBulkActionLoading(false);
         }
@@ -1827,6 +1861,17 @@ export const TransactionsTable = <T extends Transaction = Transaction>({
                                             🔗 Auto-Link
                                         </Button>
                                     )}
+                                    <Button
+                                        size="2xs"
+                                        fontSize="xs"
+                                        colorPalette="orange"
+                                        variant="outline"
+                                        onClick={bulkClearAccounts}
+                                        disabled={bulkActionLoading}
+                                        title="Clear From/To account links on selected transactions"
+                                    >
+                                        ✕ Accounts
+                                    </Button>
                                     <Button
                                         size="2xs"
                                         fontSize="xs"

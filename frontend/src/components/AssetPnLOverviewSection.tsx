@@ -96,6 +96,7 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
             roi: rangeData.roi_pct,
             currentValue: rangeData.current_value,
             costBasis: rangeData.cost_basis,
+            totalInvested: rangeData.total_invested ?? rangeData.cost_basis,
             unrealizedPnl: rangeData.unrealized_pnl,
             realizedPnl: rangeData.realized_pnl,
             feesInPeriod: rangeData.fees_in_period ?? 0,
@@ -180,7 +181,7 @@ export const AssetPnLOverviewSection: React.FC<AssetPnLOverviewSectionProps> = (
                 color={color}
             >
                 <MetricItem label="Value" value={fmtCurrency(scopedMetrics.currentValue, baseCurrency)} color="gray.800" icon={<FiDollarSign size={14} />} bg="blue.50" />
-                <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" />
+                <MetricItem label="Cost" value={fmtCurrency(scopedMetrics.costBasis, baseCurrency)} color="gray.700" icon={<LuReceipt size={14} />} bg="gray.100" subValue={Math.abs(scopedMetrics.totalInvested - scopedMetrics.costBasis) > 0.01 ? `invested ${fmtCurrency(scopedMetrics.totalInvested, baseCurrency)}` : undefined} />
                 <MetricItem label="Unrealized" value={fmtCurrencySigned(scopedMetrics.unrealizedPnl, baseCurrency)} color={color(scopedMetrics.unrealizedPnl)} icon={scopedMetrics.unrealizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.unrealizedPnl >= 0 ? 'green.50' : 'red.50'} />
                 <MetricItem label="Realized" value={fmtCurrencySigned(scopedMetrics.realizedPnl, baseCurrency)} color={color(scopedMetrics.realizedPnl)} icon={scopedMetrics.realizedPnl >= 0 ? <FiTrendingUp size={14} /> : <FiTrendingDown size={14} />} bg={scopedMetrics.realizedPnl >= 0 ? 'green.50' : 'red.50'} />
                 <MetricItem label="Fees" value={fmtCurrency(scopedMetrics.totalFees, baseCurrency)} color="orange.700" icon={<LuReceipt size={14} />} bg="orange.50" />

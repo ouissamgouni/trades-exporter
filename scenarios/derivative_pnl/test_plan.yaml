@@ -1,0 +1,63 @@
+test_plan:
+  name: "Derivative PnL — Attributed Asset"
+  description: "Verify that derivative (perp_close, funding) realized P&L is correctly attributed to the underlying asset rather than the settlement asset (USDC)."
+  steps:
+    - id: 1
+      title: "USDC card shows only normal realized PnL"
+      description: "Open P&L tab → USDC asset card. The realized PnL should reflect only direct USDC trades (step 7 sell), NOT derivative gains/losses."
+      expected: "USDC card realized PnL ≈ small gain from the 500 USDC sell (buy at 0.92, sell at 0.93)."
+      verification: "Compare card value against the USDC detail view. Both should match."
+
+    - id: 2
+      title: "ETH card shows attributed derivative PnL"
+      description: "Open P&L tab → ETH asset card. Even though no ETH was directly traded, realized PnL should appear from perp_close and funding transactions attributed to ETH."
+      expected: "ETH realized PnL = gain from deriv_004 (350 USDC × 0.92) + funding deriv_006 (15.5 × 0.92) + deriv_007 (200 × 0.92) ≈ €520.66."
+      verification: "Click into ETH detail → Realized PnL tab shows 3 entries (2× perp_close, 1× funding)."
+
+    - id: 3
+      title: "BTC card shows attributed derivative loss"
+      description: "Open P&L tab → BTC asset card. Should show the perp_close loss attributed to BTC."
+      expected: "BTC realized PnL = loss from deriv_005 (120 USDC × 0.92) ≈ -€110.40."
+      verification: "Click into BTC detail → Realized PnL tab shows 1 entry (perp_close loss)."
+
+    - id: 4
+      title: "Transaction filter: Attributed Asset"
+      description: "Go to All Transactions tab → open filters → select 'Attributed Asset' filter → choose ETH."
+      expected: "Only transactions with source_attributed_asset_symbol=ETH shown (deriv_004, deriv_006, deriv_007)."
+      verification: "3 rows visible. Clear filter to see all again."
+
+    - id: 5
+      title: "Transaction detail: Attributed Asset badge"
+      description: "Click on deriv_004 (ETH perp close gain) in the transaction table."
+      expected: "Attributed Asset field shows 'ETH' badge/link. Clicking it opens ETH asset detail."
+      verification: "Badge is orange-tinted. Field is editable via asset selector."
+
+    - id: 6
+      title: "Transaction inline edit: change attributed asset"
+      description: "In the transaction table, click the attributed asset cell for deriv_004 → change from ETH to BTC → undo (change back to ETH)."
+      expected: "Inline dropdown shows all assets. Change saves immediately. PnL recalculates after change."
+      verification: "After changing to BTC, ETH card PnL decreases and BTC card PnL changes. Revert to ETH."
+
+    - id: 7
+      title: "Data Health: Unlinked Attributed Asset"
+      description: "Open Data Health badge (top right) → Asset Linkage tab."
+      expected: "SOL appears as 'Unlinked Attributed Asset' issue (orange badge) for deriv_009."
+      verification: "Issue count increments. Clicking 'Fix' or mapping SOL resolves the issue."
+
+    - id: 8
+      title: "Normal trade has no attributed asset"
+      description: "Click on deriv_008 (USDC normal sell on Binance) in the transaction table."
+      expected: "Attributed Asset field is empty/blank — this is a regular trade, not a derivative."
+      verification: "No attributed asset badge in the table row or side panel."
+
+    - id: 9
+      title: "PnL detail drilldown matches card"
+      description: "For ETH: compare the card's realized PnL value with the detail view's realized PnL sum."
+      expected: "Card value = sum of all realized PnL entries in detail view (both use COALESCE on attributed_asset_id)."
+      verification: "No discrepancy between card and detail. This was the original bug."
+
+    - id: 10
+      title: "Fee attribution"
+      description: "Open ETH detail → Realized PnL tab → find deriv_007 entry."
+      expected: "The fee (2.5 USDC) should be visible and attributed to the ETH perp close."
+      verification: "Fee column shows 2.5 USDC. Net gain accounts for fee deduction."

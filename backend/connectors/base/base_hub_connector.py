@@ -52,7 +52,7 @@ class BaseHubConnector(BaseConnector):
             progress_callback: Optional callback for progress reporting
             abort_event: Optional threading.Event for abort signaling
 
-        Note: Test mode is determined by the TEST_MODE environment variable.
+        Note: Test mode is determined by config["test_mode"] passed in the connector config dict.
         """
         self.child_connectors = child_connectors
         self.parallel_strategy = parallel_strategy
@@ -99,6 +99,12 @@ class BaseHubConnector(BaseConnector):
         else:
             raise ValueError(f"Unknown parallel strategy: {self.parallel_strategy}")
 
+    def _check_child_failures(self, child_errors: List[str]):
+        """Raise if any child connectors failed, so sync status reflects the failure."""
+        if child_errors:
+            summary = "; ".join(child_errors)
+            raise RuntimeError(f"Child connector error(s): {summary}")
+
     def _parallel_queue_strategy(
         self, child_connectors: List[Tuple[str, BaseConnector]]
     ) -> Generator[Dict[str, Any], None, None]:
@@ -107,6 +113,7 @@ class BaseHubConnector(BaseConnector):
         Best for smaller number of children with real-time streaming needs.
         """
         queue = Queue()
+        child_errors: List[str] = []  # Track child failures
 
         def fetch_and_queue(connector_name: str, connector: BaseConnector):
             """Fetch from connector and put each item in queue as it arrives."""
@@ -136,6 +143,7 @@ class BaseHubConnector(BaseConnector):
                 log.error(
                     f"   ❌ [{connector.connector_name}] Traceback: {traceback.format_exc()}"
                 )
+                child_errors.append(f"{connector.connector_name}: {str(e)}")
                 queue.put(
                     {
                         "connector_name": connector.connector_name,
@@ -201,6 +209,9 @@ class BaseHubConnector(BaseConnector):
             f"✅ [{self.connector_name}] Completed fetching from all {total_connectors} child connector(s)"
         )
 
+        # Raise if any child failed so the sync service records the error
+        self._check_child_failures(child_errors)
+
     def _parallel_futures_strategy(
         self, child_connectors: List[Tuple[str, BaseConnector]]
     ) -> Generator[Dict[str, Any], None, None]:
@@ -256,6 +267,7 @@ class BaseHubConnector(BaseConnector):
 
         # Process all connectors in parallel with limited workers
         max_workers = min(len(child_connectors), 3)
+        child_errors: List[str] = []  # Track child failures
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all connector tasks
             futures = {
@@ -268,12 +280,15 @@ class BaseHubConnector(BaseConnector):
                 connector_name = futures[future]
                 try:
                     results = future.result()
-                    # Yield all results from this connector
+                    # Check if this connector produced a failure item
                     for wrapped_raw in results:
+                        if wrapped_raw.get("raw_item", {}).get("error_type") == "connector_failure":
+                            child_errors.append(wrapped_raw.get("error", connector_name))
                         yield wrapped_raw
 
                 except Exception as e:
                     log.error(f"❌ Future failed for {connector_name}: {e}")
+                    child_errors.append(f"{connector_name}: {str(e)}")
                     yield {
                         "connector_name": connector_name,
                         "_connector_id": None,
@@ -282,6 +297,9 @@ class BaseHubConnector(BaseConnector):
                         "normalized_item": None,
                         "error": f"Future failed for {connector_name}: {str(e)}",
                     }
+
+        # Raise if any child failed so the sync service records the error
+        self._check_child_failures(child_errors)
 
     def raw_to_normalized(self, raw_item: Dict[str, Any]) -> "NormalizedTransaction":
         """

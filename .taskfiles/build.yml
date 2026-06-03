@@ -1,20 +1,29 @@
 version: "3"
 
-includes:
-  worktree: worktree.yml
-
 tasks:
-  test:
+  staging:
     desc: Build both backend and frontend images from develop branch
-    dotenv: [.env, .env.test]
-    deps: [worktree:setup, test:backend, test:frontend]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    deps: [":git:worktree:setup", staging:backend, staging:frontend]
     cmds:
-      - echo "✅ All test images built (:develop)"
+      - echo "✅ All staging images built (:develop)"
 
-  test:backend:
+  staging:backend:
     desc: Build backend image from develop branch
-    dotenv: [.env, .env.test]
-    deps: [worktree:setup]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    deps: [":git:worktree:setup"]
     cmds:
       - |
         echo "Updating develop worktree..."
@@ -24,10 +33,16 @@ tasks:
         docker build -t trades-exporter-backend:develop -f {{.WORKTREE_DEVELOP}}/backend/Dockerfile {{.WORKTREE_DEVELOP}}
         echo "✅ Backend image built: :develop"
 
-  test:frontend:
+  staging:frontend:
     desc: Build frontend image from develop branch
-    dotenv: [.env, .env.test]
-    deps: [worktree:setup]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    deps: [":git:worktree:setup"]
     cmds:
       - |
         echo "Updating develop worktree..."
@@ -41,7 +56,13 @@ tasks:
 
   prod:
     desc: Build both backend and frontend images from main branch (e.g., task build:prod v1.2.0)
-    dotenv: [.env, .env.prod]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
       - task: prod:backend
         vars: { VERSION: "{{.CLI_ARGS}}" }
@@ -51,8 +72,14 @@ tasks:
 
   prod:backend:
     desc: Build backend image from main branch (e.g., task build:prod:backend v1.2.0)
-    dotenv: [.env, .env.prod]
-    deps: [worktree:setup]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
+    deps: [":git:worktree:setup"]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -73,8 +100,14 @@ tasks:
 
   prod:frontend:
     desc: Build frontend image from main branch (e.g., task build:prod:frontend v1.2.0)
-    dotenv: [.env, .env.prod]
-    deps: [worktree:setup]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
+    deps: [":git:worktree:setup"]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -97,7 +130,13 @@ tasks:
 
   ref:
     desc: Build images from any git ref (e.g., task build:ref -- feature/my-branch)
-    dotenv: [.env, .env.test]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     vars:
       REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
     prompt: |
@@ -118,7 +157,7 @@ tasks:
           echo "   task build:ref REF=feature/my-branch"
           exit 1
         fi
-      - task: worktree:setup:ref
+      - task: :git:worktree:setup:ref
         vars: { REF: "{{.REF}}" }
       - |
         REF="{{.REF}}"
@@ -146,11 +185,19 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:test:tag -- $TAG"
+        echo "Deploy with: task deploy:staging:local -- $TAG"
 
-  current:
+  dirty:
     desc: Build images from current working directory (uncommitted changes)
-    dotenv: [.env, .env.test]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      TAG: '{{.TAG | default ""}}'
     prompt: |
       ⚠️  BUILD FROM WORKING DIRECTORY
 
@@ -163,8 +210,11 @@ tasks:
       Continue?
     cmds:
       - |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        TAG="current-$TIMESTAMP"
+        TAG="{{.TAG}}"
+        if [ -z "$TAG" ]; then
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          TAG="dirty-$TIMESTAMP"
+        fi
 
         echo ""
         echo "Building from current working directory..."
@@ -186,7 +236,7 @@ tasks:
         echo "   Backend:  trades-exporter-backend:$TAG"
         echo "   Frontend: trades-exporter-frontend:$TAG"
         echo ""
-        echo "Deploy with: task deploy:test:tag -- $TAG"
+        echo "Deploy with: task deploy:staging:local -- $TAG"
 
   list:
     desc: List all trades-exporter Docker images
@@ -209,8 +259,16 @@ tasks:
         docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
 
   clean:all:
-    desc: "⚠️ Remove ALL trades-exporter Docker images"
+    desc: "⚠️ Remove ALL trades-exporter Docker images. DRY_RUN=1 to preview."
     prompt: This will remove ALL trades-exporter images. Continue?
+    vars:
+      DRY_RUN: '{{.DRY_RUN | default "0"}}'
     cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "1" ]; then
+          echo "🔍 DRY RUN — would remove these images:"
+          docker images trades-exporter-* --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" 2>/dev/null || echo "  (none found)"
+          exit 0
+        fi
       - docker rmi $(docker images trades-exporter-* -q) --force 2>/dev/null || true
       - echo "✅ All trades-exporter images removed"

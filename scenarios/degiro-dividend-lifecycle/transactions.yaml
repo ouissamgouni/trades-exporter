@@ -1,0 +1,209 @@
+# DeGiro Dividend Lifecycle Scenario — Seeded Transactions
+# =============================================================
+# 8 dividend transactions seeded directly (no connector sync needed).
+# Derived from fixtures/Account.csv (kept as reference).
+#
+# Coverage:
+#   - AAPL:  1 dividend  (USD, US jurisdiction, ~30.5% WHT)
+#   - MSFT:  4 quarterly (USD, US jurisdiction, 30% WHT)
+#   - TTE:   2 semi-annual (EUR, FR jurisdiction, 30% WHT)
+#   - NESN:  1 dividend  (CHF, CH jurisdiction, 35% WHT)
+
+transactions:
+  # ── D1: APPLE dividend (2025-01-03) ──────────────────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d1_aapl"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: USD
+    quantity: "0.820000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-01-03T09:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: USD
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D1"
+      - goal: "AAPL single dividend — USD, US 30% WHT"
+      - withholding_amount: "0.25"
+      - withholding_jurisdiction: "US"
+      - withholding_rate: "0.3048780487804878048780487805"
+      - fx_rate: "1.0920"
+      - net_amount_base: "0.52"
+      - base_currency: "EUR"
+      - source_currency: "USD"
+      - gross_amount_source: "0.82"
+      - wht_amount_source: "0.25"
+      - attributed_asset: "APPLE INC (US0378331005)"
+
+  # ── D2: MICROSOFT Q1 dividend (2025-03-15) ───────────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d2_msft_q1"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: USD
+    quantity: "6.800000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-03-15T08:30:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: USD
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D2"
+      - goal: "MSFT Q1 dividend — USD, US 30% WHT"
+      - withholding_amount: "2.04"
+      - withholding_jurisdiction: "US"
+      - withholding_rate: "0.3"
+      - fx_rate: "1.0850"
+      - net_amount_base: "4.39"
+      - base_currency: "EUR"
+      - source_currency: "USD"
+      - gross_amount_source: "6.80"
+      - wht_amount_source: "2.04"
+      - attributed_asset: "MICROSOFT CORP (US5949181045)"
+
+  # ── D3: MICROSOFT Q2 dividend (2025-06-15) ───────────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d3_msft_q2"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: USD
+    quantity: "6.800000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-06-15T08:30:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: USD
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D3"
+      - goal: "MSFT Q2 dividend — USD, US 30% WHT"
+      - withholding_amount: "2.04"
+      - withholding_jurisdiction: "US"
+      - withholding_rate: "0.3"
+      - attributed_asset: "MICROSOFT CORP (US5949181045)"
+
+  # ── D4: MICROSOFT Q3 dividend (2025-09-15) ───────────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d4_msft_q3"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: USD
+    quantity: "7.500000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-09-15T08:30:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: USD
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D4"
+      - goal: "MSFT Q3 dividend — USD, US 30% WHT, increased payout"
+      - withholding_amount: "2.25"
+      - withholding_jurisdiction: "US"
+      - withholding_rate: "0.3"
+      - attributed_asset: "MICROSOFT CORP (US5949181045)"
+
+  # ── D5: MICROSOFT Q4 dividend (2025-12-15) ───────────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d5_msft_q4"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: USD
+    quantity: "7.500000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-12-15T08:30:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: USD
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D5"
+      - goal: "MSFT Q4 dividend — USD, US 30% WHT, increased payout"
+      - withholding_amount: "2.25"
+      - withholding_jurisdiction: "US"
+      - withholding_rate: "0.3"
+      - attributed_asset: "MICROSOFT CORP (US5949181045)"
+
+  # ── D6: TOTALENERGIES H1 dividend (2025-05-20) ──────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d6_tte_h1"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: EUR
+    quantity: "12.600000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-05-20T07:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D6"
+      - goal: "TTE H1 dividend — EUR, FR 30% WHT (no FX conversion)"
+      - withholding_amount: "3.78"
+      - withholding_jurisdiction: "FR"
+      - withholding_rate: "0.3"
+      - attributed_asset: "TOTAL ENERGIES SE (FR0000120271)"
+
+  # ── D7: TOTALENERGIES H2 dividend (2025-11-20) ──────────────
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d7_tte_h2"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: EUR
+    quantity: "12.600000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-11-20T07:00:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: EUR
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D7"
+      - goal: "TTE H2 dividend — EUR, FR 30% WHT (no FX conversion)"
+      - withholding_amount: "3.78"
+      - withholding_jurisdiction: "FR"
+      - withholding_rate: "0.3"
+      - attributed_asset: "TOTAL ENERGIES SE (FR0000120271)"
+
+  # ── D8: NESTLÉ dividend (2025-04-10) ─────────────────────────
+  # CHF dividend with 35% Swiss WHT. The 12.8% IR credit cap for
+  # PFU means only 12.8% is creditable, excess 22.2% is lost.
+  - source: "degiro-account-file"
+    source_transaction_id: "div_lifecycle_d8_nesn"
+    account_name: "DeGiro Dividends QA"
+    asset_symbol: CHF
+    quantity: "18.000000000000000000"
+    direction: inflow
+    transaction_type: dividend
+    source_transaction_type: dividend
+    date_time: "2025-04-10T06:30:00"
+    price: "1.000000000000000000"
+    price_quote_asset_symbol: CHF
+    fee: "0.000000000000000000"
+    review_status: valid
+    tags:
+      - scenario: degiro-dividend-lifecycle
+      - step: "D8"
+      - goal: "NESN dividend — CHF, CH 35% WHT"
+      - withholding_amount: "6.30"
+      - withholding_jurisdiction: "CH"
+      - withholding_rate: "0.35"
+      - attributed_asset: "NESTLÉ SA (CH0038863350)"

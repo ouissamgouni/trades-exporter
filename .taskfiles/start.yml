@@ -4,8 +4,10 @@ vars:
   DONT_RELOAD: false
   AUTO_START_DB: true
   DOCKER_COMPOSE_DEV: infra/docker/docker-compose.dev.yml
-  LOG_LEVEL: '{{.LOG_LEVEL | default "INFO"}}' # DEBUG, INFO, WARNING, ERROR
-  UVICORN_ACCESS_LOG_EXCLUDE_PATHS: '{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS | default ""}}' # JSON list or empty for settings.yaml default
+  DOCKER_COMPOSE_SCENARIO_DB: infra/docker/docker-compose.scenario-db.yml
+  SCENARIO_PORTS_SH: .taskfiles/scenario_ports.sh
+  LOG_LEVEL: '{{.LOG_LEVEL | default "INFO"}}'
+  UVICORN_ACCESS_LOG_EXCLUDE_PATHS: '{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS | default ""}}'
 
 tasks:
   # ════════════════════════════════════════════════════════════════
@@ -14,8 +16,21 @@ tasks:
 
   dev:db:
     desc: Start dev database only
-    dotenv: [.env, .env.dev]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
+    vars:
+      RESET: '{{.RESET | default "0"}}'
     cmds:
+      - |
+        if [ "{{.RESET}}" = "1" ]; then
+          echo "🔄 RESET: tearing down dev database..."
+          ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter down -v 2>/dev/null || true
+        fi
       - ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter up -d postgres_dev
       - sleep 2
       - echo ""
@@ -25,8 +40,8 @@ tasks:
       - echo "  task start:dev:backend         - Start backend"
       - echo "  task start:dev:backend:debug   - Start backend with debugger"
       - echo "  task start:dev:frontend        - Start frontend"
-      - echo "  task start:dev:all             - Start all services"
-      - echo "  task start:dev:all:debug       - Start all with debugging"
+      - echo "  task start:dev                 - Start all services"
+      - echo "  task start:dev:debug           - Start all with debugging"
 
   dev:db:check:
     internal: true
@@ -43,12 +58,21 @@ tasks:
   # Dev Environment: Full Stack
   # ════════════════════════════════════════════════════════════════
 
-  dev:all:
-    desc: Start full dev environment (DB + backend + frontend)
-    dotenv: [.env, .env.dev]
+  dev:
+    desc: Start full dev environment (DB + backend + frontend). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     deps: [dev:db]
     vars:
       RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - echo ""
       - echo "═══════════════════════════════════════════════════════════════"
@@ -64,20 +88,30 @@ tasks:
       - echo ""
       - |
         npx concurrently \
-          --names "DB,API,WEB" \
-          --prefix-colors "blue.bold,yellow.bold,green.bold" \
+          --names "DB,API,WEB,OPEN" \
+          --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
+          "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
 
-  dev:all:debug:
-    desc: Start full dev environment with debugging (DB + backend + frontend)
-    dotenv: [.env, .env.dev]
+  dev:debug:
+    desc: Start full dev environment with debugging. BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     deps: [dev:db]
     vars:
       RELOAD_FLAG: "{{if .DONT_RELOAD}}{{else}}--reload{{end}}"
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
       - echo ""
       - echo "═══════════════════════════════════════════════════════════════"
@@ -94,13 +128,14 @@ tasks:
       - echo ""
       - |
         npx concurrently \
-          --names "DB,API,WEB" \
-          --prefix-colors "blue.bold,yellow.bold,green.bold" \
+          --names "DB,API,WEB,OPEN" \
+          --prefix-colors "blue.bold,yellow.bold,green.bold,magenta.bold" \
           --prefix "[{name}] " \
           --kill-others-on-fail \
           "ENV_NAME=dev docker compose -f {{.DOCKER_COMPOSE_DEV}} -p trades-exporter logs -f postgres_dev" \
-          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS={{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
-          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT"
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} UVICORN_ACCESS_LOG_EXCLUDE_PATHS='{{.UVICORN_ACCESS_LOG_EXCLUDE_PATHS}}' DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$POSTGRES_PORT/$POSTGRES_DB .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m uvicorn backend.api.main:app {{.RELOAD_FLAG}} --port $BACKEND_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT" \
+          "until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}"
 
   # ════════════════════════════════════════════════════════════════
   # Dev Environment: Individual Components
@@ -108,7 +143,13 @@ tasks:
 
   dev:backend:
     desc: Start backend locally (no debugger)
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -123,7 +164,13 @@ tasks:
 
   dev:backend:debug:
     desc: Start backend with debugger
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     deps:
       - task: dev:db
         vars: { AUTO_START_DB: "{{.AUTO_START_DB}}" }
@@ -139,36 +186,365 @@ tasks:
       - .venv/bin/python -m debugpy --listen $DEBUGPY_PORT -m backend.api.run
 
   dev:frontend:
-    desc: Start frontend locally (Vite)
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/.env.dev"]
+    desc: Start frontend locally (Vite). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     dir: "{{.FRONTEND_DIR}}"
+    vars:
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
-      - VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT
+      - |
+        (until curl -sf http://localhost:$FRONTEND_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$FRONTEND_PORT {{.BROWSER}} {{.COUNT}} dev {{.RESET_BROWSER}}) &
+        VITE_API_URL=http://localhost:$BACKEND_PORT npm run dev -- --port $FRONTEND_PORT
 
   # ════════════════════════════════════════════════════════════════
-  # Test & Prod Environments: Full Stacks
+  # Staging & Prod: Full Stacks (existing images)
   # ════════════════════════════════════════════════════════════════
 
-  test:
-    desc: Start test stack (existing images)
-    dotenv: [.env, .env.test]
+  staging:local:
+    desc: Start staging stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
+    vars:
+      RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
-      - ENV_NAME=test docker compose -f infra/docker/docker-compose.test.yml -p trades-exporter up -d
+      - |
+        if [ "{{.RESET}}" = "1" ]; then
+          echo "🔄 RESET: tearing down staging stack..."
+          ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down -v 2>/dev/null || true
+        fi
+      - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging up -d
       - sleep 3
       - 'echo ""'
-      - 'echo "✅ Test stack running"'
+      - 'echo "✅ Staging stack running"'
       - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
+      - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "staging-local" "{{.RESET_BROWSER}}"'
 
-  prod:
-    desc: Start prod stack (existing images)
-    dotenv: [.env, .env.prod]
+  prod:local:
+    desc: Start prod stack (existing images). BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1.
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
+    vars:
+      RESET: '{{.RESET | default "0"}}'
+      FORCE: '{{.FORCE | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
     cmds:
-      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.prod.yml -p trades-exporter up -d
+      - |
+        if [ "{{.RESET}}" = "1" ]; then
+          if [ "{{.FORCE}}" != "1" ]; then
+            echo "🚨 RESET on prod requires FORCE=1. Usage: task start:prod:local RESET=1 FORCE=1"
+            exit 1
+          fi
+          echo "🚨 RESET: tearing down PRODUCTION stack..."
+          ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down -v 2>/dev/null || true
+        fi
+      - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod up -d
       - sleep 3
       - 'echo ""'
       - 'echo "✅ Prod stack running"'
       - 'echo "   Frontend: http://localhost:$FRONTEND_PORT"'
       - 'echo "   Backend:  http://localhost:$BACKEND_PORT"'
       - 'echo "   Database: localhost:$POSTGRES_PORT"'
+      - './.taskfiles/open-browsers.sh "http://localhost:$FRONTEND_PORT" "{{.BROWSER}}" "{{.COUNT}}" "prod-local" "{{.RESET_BROWSER}}"'
+
+  # ════════════════════════════════════════════════════════════════
+  # Scenario: Full Docker from git ref
+  # ════════════════════════════════════════════════════════════════
+
+  scenario:ref:
+    desc: "Build from git ref and start isolated scenario stack. SCENARIO=<name>, BROWSER=none|shared|isolated, COUNT=N, RESET_BROWSER=1."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      REF: "{{if .REF}}{{.REF}}{{else}}{{.CLI_ARGS}}{{end}}"
+      SEED_DIR: "{{.SEED_DIR}}"
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+      RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+    cmds:
+      - |
+        REF="{{.REF}}"
+        if [ -z "$REF" ]; then
+          echo "❌ Usage:"
+          echo "   task start:scenario:ref -- feature/my-branch"
+          echo "   task start:scenario:ref -- feature/my-branch SCENARIO=fr_tax"
+          echo "   task start:scenario:ref REF=v1.2.0 SCENARIO=polymarket_pnl"
+          exit 1
+        fi
+      # Build images from ref
+      - task: :build:ref
+        vars: { REF: "{{.REF}}" }
+      # Tag + deploy
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        TAG="ref-$SHA"
+        docker tag trades-exporter-backend:$TAG trades-exporter-backend:$QA_ENV_NAME
+        docker tag trades-exporter-frontend:$TAG trades-exporter-frontend:$QA_ENV_NAME
+
+        # Ensure env file exists for docker compose (symlink to config/scenario.env)
+        if [ "$QA_ENV_NAME" != "qa" ]; then
+          ln -sf config/scenario.env ".env.${QA_ENV_NAME}"
+        fi
+
+        echo "Cleaning up previous scenario environment ($QA_ENV_NAME)..."
+        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT down -v 2>/dev/null || true
+
+        echo "Starting scenario stack ($QA_ENV_NAME)..."
+        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT up -d
+      # Wait for healthy backend
+      - task: _wait_healthy
+        vars: { SCENARIO: "{{.SCENARIO}}" }
+      # Create tables from models + stamp migrations
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        echo "Creating tables from models..."
+        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+        echo "Stamping database to current migration..."
+        docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m alembic stamp head
+      # Seed data
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        if [ -z "$SEED_DIR" ] && [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
+          CANDIDATE="{{.ROOT_DIR}}/scenarios/{{.SCENARIO}}"
+          if [ -d "$CANDIDATE" ]; then
+            SEED_DIR="$CANDIDATE"
+            echo "Auto-resolved SEED_DIR from SCENARIO={{.SCENARIO}}"
+          fi
+        fi
+        if [ -n "$SEED_DIR" ]; then
+          if [ "$WITH_DEFAULTS" = "1" ]; then
+            echo "Seeding default data first (WITH_DEFAULTS=1)..."
+            docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed
+          fi
+          echo "Seeding scenario from $SEED_DIR..."
+          docker cp "$SEED_DIR/." $QA_BACKEND_CONTAINER:/tmp/scenario/
+          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed --seed-dir /tmp/scenario
+        else
+          echo "Seeding default data..."
+          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec backend python -m backend.scripts.seed
+        fi
+      # Summary
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        REF="{{.REF}}"
+        SHA=$(git rev-parse --short=7 "$REF")
+        SEED_DIR="{{.SEED_DIR}}"
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Scenario environment ready ($QA_ENV_NAME)"
+        echo ""
+        echo "   Source:   $REF ($SHA)"
+        if [ -n "$SEED_DIR" ]; then
+          echo "   Scenario: $SEED_DIR"
+        elif [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
+          echo "   Scenario: {{.SCENARIO}}"
+        fi
+        echo ""
+        echo "   Frontend: http://localhost:$QA_WEB_PORT"
+        echo "   Backend:  http://localhost:$QA_API_PORT"
+        echo "   Database: localhost:$QA_DB_PORT"
+        echo ""
+        echo "Commands:"
+        echo "   task status                                 → All environments"
+        echo "   task logs:scenario SCENARIO={{.SCENARIO}}    → Tail logs"
+        echo "   task stop:scenario SCENARIO={{.SCENARIO}}    → Stop this instance"
+        echo "   task stop:scenario:all                       → Stop all scenarios"
+        echo "═══════════════════════════════════════════════════════════════"
+        ./.taskfiles/open-browsers.sh "http://localhost:$QA_WEB_PORT" "{{.BROWSER}}" "{{.COUNT}}" "scenario-$QA_ENV_NAME" "{{.RESET_BROWSER}}"
+
+  # ════════════════════════════════════════════════════════════════
+  # Scenario: Local code + Docker DB (default, like start:dev)
+  # ════════════════════════════════════════════════════════════════
+
+  scenario:
+    desc: "Start scenario with local code (DB Docker, backend+frontend local, live reload). SCENARIO=<name>, BROWSER=none|shared|isolated."
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SEED_DIR: "{{.SEED_DIR}}"
+      SCENARIO: '{{.SCENARIO | default ""}}'
+      WITH_DEFAULTS: '{{.WITH_DEFAULTS | default "0"}}'
+      RESET: '{{.RESET | default "0"}}'
+      BROWSER: '{{.BROWSER | default "none"}}'
+      COUNT: '{{.COUNT | default "1"}}'
+      RESET_BROWSER: '{{.RESET_BROWSER | default "0"}}'
+    cmds:
+      # Phase 1: Setup DB + schema + seed
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+
+        # ── RESET cleanup ──
+        if [ "{{.RESET}}" = "1" ]; then
+          echo "🔄 Restarting: stopping existing scenario environment ($QA_ENV_NAME) first..."
+          docker compose -f {{.DOCKER_COMPOSE_SCENARIO_DB}} -p $QA_PROJECT down -v 2>/dev/null || true
+          pkill -f "uvicorn.*--port $QA_API_PORT" 2>/dev/null || true
+          pkill -f "vite.*--port $QA_WEB_PORT" 2>/dev/null || true
+          echo "✅ Previous environment cleaned"
+        fi
+
+        # ── Start scenario database ──
+        echo "Starting scenario database ($QA_ENV_NAME on port $QA_DB_PORT)..."
+        docker compose -f {{.DOCKER_COMPOSE_SCENARIO_DB}} -p $QA_PROJECT up -d postgres
+
+        # ── Wait for DB healthy ──
+        echo "Waiting for scenario database..."
+        RETRIES=15
+        while [ $RETRIES -gt 0 ]; do
+          if docker ps --filter "name=$QA_DB_CONTAINER" --filter "health=healthy" --format '{{`{{.Names}}`}}' | grep -q "$QA_DB_CONTAINER"; then
+            echo "✅ Scenario database healthy"
+            break
+          fi
+          RETRIES=$((RETRIES - 1))
+          echo "   Waiting... ($RETRIES retries left)"
+          sleep 2
+        done
+        if [ $RETRIES -eq 0 ]; then
+          echo "❌ Scenario database failed to become healthy"
+          exit 1
+        fi
+
+        # ── Ensure database exists ──
+        echo "Ensuring database $POSTGRES_DB exists..."
+        PGPASSWORD=$POSTGRES_PASSWORD docker exec $QA_DB_CONTAINER \
+          psql -U $POSTGRES_USER -d postgres -tc \
+          "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'" | grep -q 1 || \
+        PGPASSWORD=$POSTGRES_PASSWORD docker exec $QA_DB_CONTAINER \
+          psql -U $POSTGRES_USER -d postgres -c "CREATE DATABASE $POSTGRES_DB"
+
+        # ── Create tables ──
+        echo "Creating tables from models..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/python -c "from backend.db.database import get_engine; from backend.db.models import SQLModel; SQLModel.metadata.create_all(get_engine())"
+
+        # ── Stamp migrations ──
+        echo "Stamping database to current migration..."
+        PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
+          {{.BACKEND_DIR}}/.venv/bin/alembic -c {{.BACKEND_DIR}}/alembic.ini stamp head
+
+        # ── Seed data ──
+        SEED_DIR="{{.SEED_DIR}}"
+        WITH_DEFAULTS="{{.WITH_DEFAULTS}}"
+        if [ -z "$SEED_DIR" ] && [ -n "{{.SCENARIO}}" ] && [ "{{.SCENARIO}}" != "default" ]; then
+          CANDIDATE="{{.ROOT_DIR}}/scenarios/{{.SCENARIO}}"
+          if [ -d "$CANDIDATE" ]; then
+            SEED_DIR="$CANDIDATE"
+            echo "Auto-resolved SEED_DIR from SCENARIO={{.SCENARIO}}"
+          fi
+        fi
+        if [ -n "$SEED_DIR" ]; then
+          if [ "$WITH_DEFAULTS" = "1" ]; then
+            echo "Seeding default data first (WITH_DEFAULTS=1)..."
+            PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
+              {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+          fi
+          echo "Seeding scenario from $SEED_DIR..."
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed --seed-dir "$SEED_DIR"
+        else
+          echo "Seeding default data..."
+          PYTHONPATH="{{.ROOT_DIR}}" DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB" \
+            {{.BACKEND_DIR}}/.venv/bin/python -m backend.scripts.seed
+        fi
+
+        # ── Summary ──
+        echo ""
+        echo "═══════════════════════════════════════════════════════════════"
+        echo "✅ Starting scenario dev mode ($QA_ENV_NAME) with live reload"
+        echo ""
+        echo "   [DB]  Scenario Database on localhost:$QA_DB_PORT"
+        echo "   [API] Backend on localhost:$QA_API_PORT"
+        echo "   [WEB] Frontend on localhost:$QA_WEB_PORT"
+        echo ""
+        echo "Press Ctrl+C to stop backend + frontend (DB stays running)"
+        echo "Run 'task stop:scenario SCENARIO={{.SCENARIO}}' to stop everything"
+        echo "═══════════════════════════════════════════════════════════════"
+        echo ""
+      # Phase 2: Run backend + frontend with live reload
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        SCENARIO_LABEL="{{.SCENARIO}}"
+        [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+        npx concurrently \
+          --names "API:$SCENARIO_LABEL,WEB:$SCENARIO_LABEL,OPEN:$SCENARIO_LABEL" \
+          --prefix-colors "yellow.bold,green.bold,magenta.bold" \
+          --prefix "[{name}] " \
+          --kill-others-on-fail \
+          "cd {{.BACKEND_DIR}} && PYTHONPATH={{.ROOT_DIR}} LOG_LEVEL={{.LOG_LEVEL}} DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:$QA_DB_PORT/$POSTGRES_DB .venv/bin/uvicorn backend.api.main:app --reload --port $QA_API_PORT" \
+          "cd {{.FRONTEND_DIR}} && VITE_API_URL=http://localhost:$QA_API_PORT npm run dev -- --port $QA_WEB_PORT" \
+          "until curl -sf http://localhost:$QA_WEB_PORT >/dev/null 2>&1; do sleep 1; done && {{.ROOT_DIR}}/.taskfiles/open-browsers.sh http://localhost:$QA_WEB_PORT {{.BROWSER}} {{.COUNT}} scenario-$SCENARIO_LABEL {{.RESET_BROWSER}}"
+
+  # ════════════════════════════════════════════════════════════════
+  # Internal helpers
+  # ════════════════════════════════════════════════════════════════
+
+  _wait_healthy:
+    internal: true
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      SCENARIO: '{{.SCENARIO | default ""}}'
+    cmds:
+      - |
+        source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
+        echo "Waiting for backend to be healthy..."
+        RETRIES=30
+        while [ $RETRIES -gt 0 ]; do
+          if docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" 2>/dev/null; then
+            echo "✅ Backend healthy"
+            break
+          fi
+          RETRIES=$((RETRIES - 1))
+          echo "   Waiting... ($RETRIES retries left)"
+          sleep 3
+        done
+        if [ $RETRIES -eq 0 ]; then
+          echo "❌ Backend failed to become healthy"
+          docker compose -f infra/docker/docker-compose.unified.yml -p $QA_PROJECT logs backend --tail 20
+          exit 1
+        fi

@@ -167,11 +167,11 @@ class TestGetCurrentFromCostLots:
         """Multiple lots for same asset are summed correctly."""
         session = MagicMock()
         # Simulate SQL result: two assets
-        row1 = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0)  # EUR
-        row2 = MagicMock(asset_id=275, total_qty=10.0, total_cost=4000.0)     # Gold
+        row1 = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0)  # EUR
+        row2 = MagicMock(asset_id=275, total_qty=10.0, total_cost=4000.0, total_invested=4000.0)     # Gold
         session.exec.return_value.all.return_value = [row1, row2]
 
-        balances, costs = _get_current_from_cost_lots(session, version_id=92)
+        balances, costs, acquired = _get_current_from_cost_lots(session, version_id=92)
 
         assert balances[221] == pytest.approx(50000.0)
         assert costs[221] == pytest.approx(50000.0)
@@ -181,10 +181,10 @@ class TestGetCurrentFromCostLots:
     def test_filters_near_zero(self):
         """Assets with negligible qty and cost are excluded."""
         session = MagicMock()
-        row = MagicMock(asset_id=999, total_qty=1e-15, total_cost=1e-15)
+        row = MagicMock(asset_id=999, total_qty=1e-15, total_cost=1e-15, total_invested=1e-15)
         session.exec.return_value.all.return_value = [row]
 
-        balances, costs = _get_current_from_cost_lots(session, version_id=1)
+        balances, costs, acquired = _get_current_from_cost_lots(session, version_id=1)
         assert 999 not in balances
         assert 999 not in costs
 
@@ -193,7 +193,7 @@ class TestGetCurrentFromCostLots:
         session = MagicMock()
         session.exec.return_value.all.return_value = []
 
-        balances, costs = _get_current_from_cost_lots(session, version_id=1)
+        balances, costs, acquired = _get_current_from_cost_lots(session, version_id=1)
         assert balances == {}
         assert costs == {}
 
@@ -289,10 +289,10 @@ class TestGetCurrentFromCostLotsUnsettledNegativeFilter:
     def test_default_excludes_unsettled_negatives(self):
         """Default (include_unsettled_negative=False) excludes them."""
         session = MagicMock()
-        row = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0)
+        row = MagicMock(asset_id=221, total_qty=50000.0, total_cost=50000.0, total_invested=50000.0)
         session.exec.return_value.all.return_value = [row]
 
-        balances, costs = _get_current_from_cost_lots(session, version_id=92)
+        balances, costs, acquired = _get_current_from_cost_lots(session, version_id=92)
         assert balances[221] == pytest.approx(50000.0)
 
         # Verify that session.exec was called (i.e. query was built)
@@ -302,10 +302,10 @@ class TestGetCurrentFromCostLotsUnsettledNegativeFilter:
         """include_unsettled_negative=True does not add the filter clause."""
         session = MagicMock()
         # Simulate raw CostLot aggregation including unsettled negatives
-        row = MagicMock(asset_id=221, total_qty=-142000.0, total_cost=-142000.0)
+        row = MagicMock(asset_id=221, total_qty=-142000.0, total_cost=-142000.0, total_invested=-142000.0)
         session.exec.return_value.all.return_value = [row]
 
-        balances, costs = _get_current_from_cost_lots(
+        balances, costs, acquired = _get_current_from_cost_lots(
             session, version_id=92, include_unsettled_negative=True,
         )
         assert balances[221] == pytest.approx(-142000.0)

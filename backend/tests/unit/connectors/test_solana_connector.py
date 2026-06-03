@@ -65,14 +65,14 @@ class TestSolanaConnector:
         assert transfer.transaction_type == "transfer"
         assert transfer.source_transaction_type == "TRANSFER"
         
-        # Check fee transaction
+        # Check fee transaction (new COST format: qty=fee, price=1)
         fee_tx = normalized[1]
         assert fee_tx.source_transaction_id == f"{raw_txs[0]['signature']}_fee"
         assert fee_tx.direction == "outflow"
         assert fee_tx.transaction_type == "cost"
-        assert fee_tx.quantity == Decimal(0)
-        assert fee_tx.fee == Decimal("0.000005")  # 5000 lamports
-        assert fee_tx.include_fee is True
+        assert fee_tx.quantity == Decimal("0.000005")  # 5000 lamports
+        assert fee_tx.price == Decimal(1)
+        assert fee_tx.include_fee is False
         assert fee_tx.source_asset_symbol == "SOL"
 
     def test_normalization_token_transfers_swap(self, connector):
@@ -281,9 +281,9 @@ class TestSolanaConnector:
         assert avo_in[0].direction == "inflow"
         assert avo_in[0].quantity == Decimal("4949.877725022")
 
-        # Fee transaction
+        # Fee transaction (new COST format)
         assert len(fee_txs) == 1
-        assert fee_txs[0].fee == Decimal(11774) / Decimal(10**9)
+        assert fee_txs[0].quantity == Decimal(11774) / Decimal(10**9)
 
     def test_wsol_swap_no_sol_double_counting(self, connector):
         """Verify the total SOL outflow from a wSOL SWAP is not double-counted.
