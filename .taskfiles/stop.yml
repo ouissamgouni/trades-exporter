@@ -6,14 +6,26 @@ vars:
 tasks:
   dev:
     desc: Stop all dev services (db + backend + frontend)
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     deps: [dev:db, dev:backend, dev:frontend]
     cmds:
       - echo "✅ All dev services stopped"
 
   dev:db:
     desc: Stop dev database
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down
@@ -28,7 +40,13 @@ tasks:
 
   dev:backend:
     desc: Stop dev backend
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         if pkill -f "backend.api.main" 2>/dev/null; then
@@ -53,7 +71,13 @@ tasks:
 
   dev:frontend:
     desc: Stop dev frontend
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     cmds:
       - |
         if pkill -f "vite" 2>/dev/null; then
@@ -62,16 +86,28 @@ tasks:
           echo "ℹ️  Frontend not running"
         fi
 
-  staging:
+  staging:local:
     desc: Stop staging stack
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     cmds:
       - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down
       - echo "✅ Staging stack stopped"
 
-  prod:
+  prod:local:
     desc: Stop prod stack
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     cmds:
       - ENV_NAME=prod docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-prod down
       - echo "✅ Prod stack stopped"
@@ -80,7 +116,13 @@ tasks:
 
   dev:volumes:
     desc: "⚠️ Remove dev containers and volumes (data lost). DRY_RUN=1 to preview."
-    dotenv: [config/base.env, config/dev.env, config/secrets.env, config/secrets.dev.env]
+    dotenv:
+      [
+        config/base.env,
+        config/dev.env,
+        config/secrets.env,
+        config/secrets.dev.env,
+      ]
     prompt: This will DELETE dev database data. Continue?
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -94,9 +136,15 @@ tasks:
       - ENV_NAME=dev docker compose -f infra/docker/docker-compose.dev.yml -p trades-exporter-dev down -v
       - echo "✅ Dev containers and volumes removed"
 
-  staging:volumes:
+  staging:local:volumes:
     desc: "⚠️ Remove staging containers and volumes (data lost). DRY_RUN=1 to preview."
-    dotenv: [config/base.env, config/staging.env, config/secrets.env, config/secrets.staging.env]
+    dotenv:
+      [
+        config/base.env,
+        config/staging.env,
+        config/secrets.env,
+        config/secrets.staging.env,
+      ]
     prompt: This will DELETE staging database data. Continue?
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -110,9 +158,15 @@ tasks:
       - ENV_NAME=staging docker compose -f infra/docker/docker-compose.unified.yml -p trades-exporter-staging down -v
       - echo "✅ Staging containers and volumes removed"
 
-  prod:volumes:
+  prod:local:volumes:
     desc: "🚨 Remove prod containers and volumes (DANGEROUS!). DRY_RUN=1 to preview."
-    dotenv: [config/base.env, config/prod.env, config/secrets.env, config/secrets.prod.env]
+    dotenv:
+      [
+        config/base.env,
+        config/prod.env,
+        config/secrets.env,
+        config/secrets.prod.env,
+      ]
     prompt: "🚨 This will DELETE PRODUCTION DATA. Are you absolutely sure?"
     vars:
       DRY_RUN: '{{.DRY_RUN | default "0"}}'
@@ -129,11 +183,18 @@ tasks:
   # === Scenario lifecycle ===
 
   scenario:
-    desc: "Stop a scenario instance. SCENARIO=<name> to target, or omit for default."
+    desc: "Stop a scenario instance. SCENARIO=<name> to target, or omit for default. KEEP_BROWSER=1 skips browser cleanup."
     prompt: "This will stop and remove the scenario instance (including DB volume). Continue?"
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
     vars:
       SCENARIO: '{{.SCENARIO | default ""}}'
+      KEEP_BROWSER: '{{.KEEP_BROWSER | default "0"}}'
     cmds:
       - |
         source {{.SCENARIO_PORTS_SH}} "{{.SCENARIO}}"
@@ -155,6 +216,13 @@ tasks:
           rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
         fi
 
+        # Cleanup isolated browser sessions unless explicitly kept.
+        if [ "{{.KEEP_BROWSER}}" != "1" ]; then
+          SCENARIO_LABEL="{{.SCENARIO}}"
+          [ -z "$SCENARIO_LABEL" ] && SCENARIO_LABEL="default"
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-$SCENARIO_LABEL" || true
+        fi
+
         echo ""
         echo "✅ Scenario environment stopped ($QA_ENV_NAME)"
         echo "   Containers: removed"
@@ -162,9 +230,17 @@ tasks:
         echo "   Ports:      $QA_DB_PORT, $QA_API_PORT, $QA_WEB_PORT freed"
 
   scenario:all:
-    desc: "Stop ALL running scenario instances"
+    desc: "Stop ALL running scenario instances. KEEP_BROWSER=1 skips browser cleanup."
     prompt: "This will stop ALL running scenario instances. Continue?"
-    dotenv: [config/base.env, config/scenario.env, config/secrets.env, config/secrets.scenario.env]
+    dotenv:
+      [
+        config/base.env,
+        config/scenario.env,
+        config/secrets.env,
+        config/secrets.scenario.env,
+      ]
+    vars:
+      KEEP_BROWSER: '{{.KEEP_BROWSER | default "0"}}'
     cmds:
       - |
         echo "Scanning for running scenario instances..."
@@ -189,6 +265,10 @@ tasks:
             rm -f ".env.${QA_ENV_NAME}" 2>/dev/null || true
           fi
         done
+
+        if [ "{{.KEEP_BROWSER}}" != "1" ]; then
+          {{.ROOT_DIR}}/.taskfiles/_browser_cleanup.sh "scenario-" || true
+        fi
 
         if [ $FOUND -eq 0 ]; then
           echo "No running scenario instances found."

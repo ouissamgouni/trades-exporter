@@ -1,0 +1,124 @@
+version: "3"
+
+# Fly.io operational tasks. Run `fly auth login` once before using these.
+
+tasks:
+  secrets:
+    desc: Push prod secrets from config/secrets.env + config/secrets.prod.env to Fly.io
+    cmds:
+      - |
+        if [ ! -f config/secrets.prod.env ]; then
+          echo "ERROR: config/secrets.prod.env not found. Copy config/secrets.prod.env.example and fill in values."
+          exit 1
+        fi
+      - |
+        echo "Pushing prod secrets to Fly.io..."
+        cat config/secrets.env config/secrets.prod.env \
+          | grep -vE '^[[:space:]]*$|^[[:space:]]*#|^VITE_|^CLOUDFLARE_|^FLY_API_TOKEN' \
+          | fly secrets import -c fly.toml --stage
+        echo "Core prod secrets staged. Deploy to apply them."
+
+  secrets:list:
+    desc: List prod Fly.io secrets (names only)
+    cmds:
+      - fly secrets list -c fly.toml
+
+  deploy:
+    desc: Deploy prod backend to Fly.io
+    cmds:
+      - |
+        echo "Deploying prod backend to Fly.io..."
+        fly deploy --remote-only -c fly.toml
+      - task: health
+
+  health:
+    desc: Smoke test prod backend health endpoint
+    cmds:
+      - |
+        HEALTH_URL="https://trades-exporter.fly.dev/api/v1/health"
+        echo "Smoke test: GET $HEALTH_URL"
+        if curl -sf --retry 6 --retry-delay 5 --retry-connrefused "$HEALTH_URL" >/dev/null; then
+          echo "Backend health check passed"
+        else
+          echo "WARNING: Health check failed. Check: task fly:logs"
+        fi
+
+  logs:
+    desc: Stream prod Fly.io backend logs
+    cmds:
+      - fly logs -c fly.toml
+
+  ssh:
+    desc: Open SSH console on prod Fly.io machine
+    cmds:
+      - fly ssh console -c fly.toml
+
+  open:
+    desc: Open prod Fly.io app in browser
+    cmds:
+      - fly open -c fly.toml
+
+  status:
+    desc: Show prod Fly.io app status and machines
+    cmds:
+      - fly status -c fly.toml
+
+  staging:secrets:
+    desc: Push staging secrets from config/secrets.env + config/secrets.staging.env to Fly.io
+    cmds:
+      - |
+        if [ ! -f config/secrets.staging.env ]; then
+          echo "ERROR: config/secrets.staging.env not found. Copy config/secrets.staging.env.example and fill in values."
+          exit 1
+        fi
+      - |
+        echo "Pushing staging secrets to Fly.io..."
+        cat config/secrets.env config/secrets.staging.env \
+          | grep -vE '^[[:space:]]*$|^[[:space:]]*#|^VITE_|^CLOUDFLARE_|^FLY_API_TOKEN' \
+          | fly secrets import -c fly.staging.toml --stage
+        echo "Core staging secrets staged. Deploy to apply them."
+
+  staging:secrets:list:
+    desc: List staging Fly.io secrets (names only)
+    cmds:
+      - fly secrets list -c fly.staging.toml
+
+  staging:deploy:
+    desc: Deploy staging backend to Fly.io
+    cmds:
+      - |
+        echo "Deploying staging backend to Fly.io..."
+        fly deploy --remote-only -c fly.staging.toml
+      - task: staging:health
+
+  staging:health:
+    desc: Smoke test staging backend health endpoint
+    cmds:
+      - |
+        HEALTH_URL="https://trades-exporter-staging.fly.dev/api/v1/health"
+        echo "Smoke test: GET $HEALTH_URL"
+        if curl -sf --retry 6 --retry-delay 5 --retry-connrefused "$HEALTH_URL" >/dev/null; then
+          echo "Backend health check passed"
+        else
+          echo "WARNING: Health check failed. Check: task fly:staging:logs"
+        fi
+
+  staging:logs:
+    desc: Stream staging Fly.io backend logs
+    cmds:
+      - fly logs -c fly.staging.toml
+
+  staging:ssh:
+    desc: Open SSH console on staging Fly.io machine
+    cmds:
+      - fly ssh console -c fly.staging.toml
+
+  staging:open:
+    desc: Open staging Fly.io app in browser
+    cmds:
+      - fly open -c fly.staging.toml
+
+  staging:status:
+    desc: Show staging Fly.io app status and machines
+    cmds:
+      - fly status -c fly.staging.toml

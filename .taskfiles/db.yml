@@ -313,9 +313,15 @@ tasks:
         EXTRA_FLAGS=""
 
         for arg in $ARGS; do
+          arg="${arg#\'}"
+          arg="${arg%\'}"
+          arg="${arg#\"}"
+          arg="${arg%\"}"
           case "$arg" in
             --migrate) EXTRA_FLAGS="$EXTRA_FLAGS --migrate" ;;
             --dry-run) EXTRA_FLAGS="$EXTRA_FLAGS --dry-run" ;;
+            DRY_RUN=1) EXTRA_FLAGS="$EXTRA_FLAGS --dry-run" ;;
+            DRY_RUN=0) ;;
             *)
               if [ -z "$SRC" ]; then
                 SRC="$arg"

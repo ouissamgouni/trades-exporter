@@ -9,5 +9,5 @@ tasks:
     cmds:
       - task: ":git:release:tag"
         vars: { VERSION: "{{.VERSION}}" }
-      - task: ":deploy:prod"
+      - task: ":deploy:prod:local"
         vars: { CLI_ARGS: "{{.VERSION}}" }

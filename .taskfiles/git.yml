@@ -165,14 +165,14 @@ tasks:
         if [ "$TARGET" = "main" ]; then
           echo "Next steps:"
           echo "   task git:release:tag -- vX.Y.Z     → Tag the release"
-          echo "   task deploy:prod -- vX.Y.Z         → Deploy to prod"
+          echo "   task deploy:prod:local -- vX.Y.Z   → Deploy to local prod"
           echo "   task release -- vX.Y.Z             → Tag + deploy combined"
           echo ""
           echo "⚠️  Don't forget to cherry-pick into develop if needed:"
           echo "   git checkout develop && git cherry-pick <commit>"
         else
           echo "Next steps:"
-          echo "   task deploy:staging                 → Deploy to staging"
+          echo "   task deploy:staging:local           → Deploy to local staging"
         fi
 
   # ════════════════════════════════════════════════════════════════
@@ -253,7 +253,7 @@ tasks:
         echo ""
         echo "Next steps:"
         echo "   task git:release:tag -- vX.Y.Z      → Tag the release"
-        echo "   task deploy:prod -- vX.Y.Z          → Deploy to prod"
+        echo "   task deploy:prod:local -- vX.Y.Z    → Deploy to local prod"
         echo "   task release -- vX.Y.Z              → Tag + deploy combined"
 
   release:tag:
@@ -302,7 +302,7 @@ tasks:
         echo "✅ Tagged $VERSION"
         echo ""
         echo "Next steps:"
-        echo "   task deploy:prod -- $VERSION         → Build + deploy to prod"
+        echo "   task deploy:prod:local -- $VERSION   → Build + deploy to local prod"
         echo "   task release -- $VERSION             → Deploy to prod (combined)"
 
   tags:
