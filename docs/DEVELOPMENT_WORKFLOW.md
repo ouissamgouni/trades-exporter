@@ -278,6 +278,8 @@ Integration tests use a separate `trades_db_integ` database on the dev Postgres 
 
 Validates Docker images in a fully containerized stack.
 
+This path builds from a detached `.worktrees/develop` snapshot of `origin/develop`; it does not switch or mutate your current checkout.
+
 ```bash
 task deploy:staging:local                   # build from develop branch
 task deploy:staging:local:ref -- feature/x  # build from any git ref
@@ -294,6 +296,8 @@ The local staging stack uses `config/base.env`, `config/staging.env`, `config/se
 ### Production Local
 
 Production-local is a local Docker Compose stack using versioned images from `main`.
+
+Release tagging and production builds use detached `.worktrees/main` snapshots of `origin/main`; they do not require checking out `main` in your current working tree.
 
 ```bash
 task git:release:prepare
@@ -669,10 +673,10 @@ Git worktree commands used by builds:
 
 | Command | Description |
 |---------|-------------|
-| `task git:worktree:setup` | Create persistent `.worktrees/main` and `.worktrees/develop` |
-| `task git:worktree:setup:ref -- <ref>` | Create `.worktrees/ref-<sha>` for a git ref |
+| `task git:worktree:setup` | Create detached `.worktrees/main` and `.worktrees/develop` snapshots from origin refs |
+| `task git:worktree:setup:ref -- <ref>` | Create detached `.worktrees/ref-<sha>` snapshot for a git ref |
 | `task git:worktree:status` | List active worktrees and disk usage |
-| `task git:worktree:update` | Pull persistent main/develop worktrees |
+| `task git:worktree:update` | Refresh detached main/develop snapshots from origin refs |
 | `task git:worktree:clean:ref` | Remove temporary ref worktrees only |
 | `task git:worktree:clean` | Remove all managed worktrees |
 

@@ -937,7 +937,7 @@ export const CostLotEventsTable: React.FC<CostLotEventsTableProps> = ({
                     opacity={isRefreshing ? 0.5 : 1}
                     transition="opacity 0.2s"
                 >
-                    <Table.Root size="s">
+                    <Table.Root size="sm">
                         <Table.Header>
                             <Table.Row>
                                 <Table.ColumnHeader width="50px">ID</Table.ColumnHeader>

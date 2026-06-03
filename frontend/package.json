@@ -12,6 +12,7 @@
         "@nivo/core": "^0.99.0",
         "@nivo/line": "^0.99.0",
         "@nivo/pie": "^0.99.0",
+        "@nivo/treemap": "^0.99.0",
         "@tanstack/react-query": "^5.90.16",
         "@tanstack/react-table": "^8.21.3",
         "next-themes": "^0.4.6",

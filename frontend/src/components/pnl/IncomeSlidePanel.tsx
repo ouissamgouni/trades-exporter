@@ -105,7 +105,7 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
         fetch(`${API_URL}/pnl/versions/${versionId}/income-events/filter-options`)
             .then(r => r.json())
             .then(setFilterOpts)
-            .catch(() => {});
+            .catch(() => { });
     }, [versionId, isOpen]);
 
     const hasAnyFilter = !!assetFilter || !!typeFilter || !!accountFilter || !!jurisdictionFilter || !!dateFrom || !!dateTo;
@@ -165,40 +165,44 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                 <Flex gap={2} mb={3} wrap="wrap" align="center">
                     <LuFilter size={14} />
                     {filterOpts?.assets && filterOpts.assets.length > 0 && (
-                        <Box as="select" fontSize="xs" px={2} py={1} borderRadius="md" border="1px solid" borderColor="gray.200"
-                            value={assetFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAssetFilter(e.target.value)}>
+                        <select
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            value={assetFilter} onChange={(e) => setAssetFilter(e.target.value)}>
                             <option value="">All Assets</option>
                             {filterOpts.assets.map(o => (
                                 <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
                             ))}
-                        </Box>
+                        </select>
                     )}
                     {filterOpts?.income_types && filterOpts.income_types.length > 1 && (
-                        <Box as="select" fontSize="xs" px={2} py={1} borderRadius="md" border="1px solid" borderColor="gray.200"
-                            value={typeFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTypeFilter(e.target.value)}>
+                        <select
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
                             <option value="">All Types</option>
                             {filterOpts.income_types.map(o => (
                                 <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
                             ))}
-                        </Box>
+                        </select>
                     )}
                     {filterOpts?.accounts && filterOpts.accounts.length > 1 && (
-                        <Box as="select" fontSize="xs" px={2} py={1} borderRadius="md" border="1px solid" borderColor="gray.200"
-                            value={accountFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setAccountFilter(e.target.value)}>
+                        <select
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}>
                             <option value="">All Accounts</option>
                             {filterOpts.accounts.map(o => (
                                 <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
                             ))}
-                        </Box>
+                        </select>
                     )}
                     {filterOpts?.jurisdictions && filterOpts.jurisdictions.length > 0 && (
-                        <Box as="select" fontSize="xs" px={2} py={1} borderRadius="md" border="1px solid" borderColor="gray.200"
-                            value={jurisdictionFilter} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setJurisdictionFilter(e.target.value)}>
+                        <select
+                            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--chakra-colors-gray-200)' }}
+                            value={jurisdictionFilter} onChange={(e) => setJurisdictionFilter(e.target.value)}>
                             <option value="">All Countries</option>
                             {filterOpts.jurisdictions.map(o => (
                                 <option key={o.value} value={o.value}>{o.label} ({o.count})</option>
                             ))}
-                        </Box>
+                        </select>
                     )}
                     {hasAnyFilter && (
                         <Box as="button" fontSize="xs" color="red.500" onClick={clearFilters} cursor="pointer" display="flex" alignItems="center" gap={1}>
@@ -211,9 +215,9 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                 {isLoading ? (
                     <TabLoadingState message="Loading income events..." />
                 ) : error ? (
-                    <TabErrorState message={error} />
+                    <TabErrorState error={error} />
                 ) : entries.length === 0 ? (
-                    <TabEmptyState message="No income events found." icon={<LuBanknote size={24} />} />
+                    <TabEmptyState title="No income events found" description="No income events match the current filters." />
                 ) : (
                     <>
                         <Box overflowX="auto" mb={3}>
@@ -301,12 +305,12 @@ export const IncomeSlidePanel: React.FC<IncomeSlidePanelProps> = ({
                                     {Math.min(pagination.page * (pagination.pageSize || PAGE_SIZE), total)} of {total}
                                 </Text>
                                 <Flex gap={1}>
-                                    <Box as="button" disabled={pagination.page <= 1} onClick={() => pagination.setPage(pagination.page - 1)}
+                                    <Box as="button" aria-disabled={pagination.page <= 1} onClick={() => pagination.page > 1 && pagination.setPage(pagination.page - 1)}
                                         opacity={pagination.page <= 1 ? 0.3 : 1} cursor={pagination.page <= 1 ? 'not-allowed' : 'pointer'}>
                                         <FiChevronLeft size={14} />
                                     </Box>
                                     <Text>Page {pagination.page} / {pageCount}</Text>
-                                    <Box as="button" disabled={pagination.page >= pageCount} onClick={() => pagination.setPage(pagination.page + 1)}
+                                    <Box as="button" aria-disabled={pagination.page >= pageCount} onClick={() => pagination.page < pageCount && pagination.setPage(pagination.page + 1)}
                                         opacity={pagination.page >= pageCount ? 0.3 : 1} cursor={pagination.page >= pageCount ? 'not-allowed' : 'pointer'}>
                                         <FiChevronRight size={14} />
                                     </Box>

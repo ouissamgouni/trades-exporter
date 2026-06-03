@@ -10,8 +10,9 @@ tasks:
         config/secrets.env,
         config/secrets.staging.env,
       ]
-    deps: [":git:worktree:setup", staging:backend, staging:frontend]
     cmds:
+      - task: staging:backend
+      - task: staging:frontend
       - echo "✅ All staging images built (:develop)"
 
   staging:backend:
@@ -23,11 +24,8 @@ tasks:
         config/secrets.env,
         config/secrets.staging.env,
       ]
-    deps: [":git:worktree:setup"]
+    deps: [":git:_provision-develop-worktree"]
     cmds:
-      - |
-        echo "Updating develop worktree..."
-        cd {{.WORKTREE_DEVELOP}} && git pull origin develop
       - |
         echo "Building backend from develop..."
         docker build -t trades-exporter-backend:develop -f {{.WORKTREE_DEVELOP}}/backend/Dockerfile {{.WORKTREE_DEVELOP}}
@@ -42,11 +40,8 @@ tasks:
         config/secrets.env,
         config/secrets.staging.env,
       ]
-    deps: [":git:worktree:setup"]
+    deps: [":git:_provision-develop-worktree"]
     cmds:
-      - |
-        echo "Updating develop worktree..."
-        cd {{.WORKTREE_DEVELOP}} && git pull origin develop
       - |
         echo "Building frontend from develop..."
         docker build -t trades-exporter-frontend:develop \
@@ -79,7 +74,7 @@ tasks:
         config/secrets.env,
         config/secrets.prod.env,
       ]
-    deps: [":git:worktree:setup"]
+    deps: [":git:_provision-main-worktree"]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -87,10 +82,6 @@ tasks:
           echo "❌ Usage: task build:prod:backend v1.2.0"
           exit 1
         fi
-      - |
-        VERSION={{.VERSION}}{{.CLI_ARGS}}
-        echo "Updating main worktree..."
-        cd {{.WORKTREE_MAIN}} && git pull origin main
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
         echo "Building backend from main as $VERSION..."
@@ -107,7 +98,7 @@ tasks:
         config/secrets.env,
         config/secrets.prod.env,
       ]
-    deps: [":git:worktree:setup"]
+    deps: [":git:_provision-main-worktree"]
     cmds:
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
@@ -115,10 +106,6 @@ tasks:
           echo "❌ Usage: task build:prod:frontend v1.2.0"
           exit 1
         fi
-      - |
-        VERSION={{.VERSION}}{{.CLI_ARGS}}
-        echo "Updating main worktree..."
-        cd {{.WORKTREE_MAIN}} && git pull origin main
       - |
         VERSION={{.VERSION}}{{.CLI_ARGS}}
         echo "Building frontend from main as $VERSION..."

@@ -414,7 +414,7 @@ export const RawAssetsEditor: React.FC = () => {
                         </Flex>
                     </Box>
                 )}
-                <Table.Root size="xs">
+                <Table.Root size="sm">
                     <Table.Header>
                         <Table.Row>
                             <Table.ColumnHeader>Source Symbol</Table.ColumnHeader>

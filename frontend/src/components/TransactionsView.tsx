@@ -21,6 +21,7 @@ const EMPTY_FILTERS: TransactionFilterState = {
     relatedAccountIds: [],
     assetIds: [],
     relatedAssetIds: [],
+    attributedAssetIds: [],
     categoryIds: [],
     transactionTypes: [],
     directions: [],

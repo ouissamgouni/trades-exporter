@@ -260,6 +260,7 @@ tasks:
     desc: Tag a release on main and push (e.g., task git:release:tag -- v1.2.0)
     vars:
       VERSION: "{{if .VERSION}}{{.VERSION}}{{else}}{{.CLI_ARGS}}{{end}}"
+    deps: [_provision-main-worktree]
     preconditions:
       - sh: '[ -n "{{.VERSION}}" ]'
         msg: |
@@ -291,10 +292,11 @@ tasks:
     cmds:
       - |
         VERSION="{{.VERSION}}"
-        echo "Updating main worktree..."
-        cd {{.WORKTREE_MAIN}} && git pull origin main
-      - |
-        VERSION="{{.VERSION}}"
+        if [ ! -d "{{.WORKTREE_MAIN}}" ]; then
+          echo "❌ Missing {{.WORKTREE_MAIN}} after worktree setup."
+          echo "   Refusing to use current checkout for release tagging."
+          exit 1
+        fi
         cd {{.WORKTREE_MAIN}}
         git tag -a "$VERSION" -m "Release $VERSION"
         git push origin "$VERSION"
@@ -317,42 +319,18 @@ tasks:
   worktree:setup:
     desc: Create persistent worktrees for main and develop branches
     cmds:
-      - mkdir -p {{.WORKTREE_DIR}}
-      - |
-        # Setup main worktree
-        if [ ! -d "{{.WORKTREE_MAIN}}" ]; then
-          echo "Creating worktree for main branch..."
-          git worktree add {{.WORKTREE_MAIN}} main
-          echo "✅ Created {{.WORKTREE_MAIN}}"
-        else
-          echo "✅ Worktree {{.WORKTREE_MAIN}} already exists"
-        fi
-      - |
-        # Setup develop worktree
-        if [ ! -d "{{.WORKTREE_DEVELOP}}" ]; then
-          echo "Creating worktree for develop branch..."
-
-          # Check if develop branch exists
-          if ! git rev-parse --verify develop >/dev/null 2>&1; then
-            echo "⚠️  develop branch doesn't exist, creating from main..."
-            git branch develop main
-          fi
-
-          git worktree add {{.WORKTREE_DEVELOP}} develop
-          echo "✅ Created {{.WORKTREE_DEVELOP}}"
-        else
-          echo "✅ Worktree {{.WORKTREE_DEVELOP}} already exists"
-        fi
+      - task: _provision-main-worktree
+      - task: _provision-develop-worktree
       - |
         echo ""
         echo "═══════════════════════════════════════════════════════════════"
         echo "✅ Worktrees ready"
         echo ""
-        echo "   {{.WORKTREE_MAIN}}     → main branch"
-        echo "   {{.WORKTREE_DEVELOP}} → develop branch"
+        echo "   {{.WORKTREE_MAIN}}     → origin/main snapshot"
+        echo "   {{.WORKTREE_DEVELOP}} → origin/develop snapshot"
         echo ""
-        echo "These directories are used for safe builds/deploys without"
-        echo "disrupting your current working directory."
+        echo "These detached snapshots are used for safe builds/deploys"
+        echo "without disrupting your current working directory."
         echo "═══════════════════════════════════════════════════════════════"
 
   worktree:setup:ref:
@@ -365,19 +343,96 @@ tasks:
     cmds:
       - mkdir -p {{.WORKTREE_DIR}}
       - |
+        set -e
         REF="{{.REF}}"
-        SHA=$(git rev-parse --short=7 "$REF")
+        FULL_SHA=$(git rev-parse "$REF^{commit}")
+        SHA=$(git rev-parse --short=7 "$FULL_SHA")
         WORKTREE_PATH="{{.WORKTREE_DIR}}/ref-$SHA"
 
         if [ -d "$WORKTREE_PATH" ]; then
-          echo "✅ Worktree for $REF ($SHA) already exists at $WORKTREE_PATH"
-        else
-          echo "Creating temporary worktree for $REF ($SHA)..."
-          git worktree add "$WORKTREE_PATH" "$REF"
-          echo "✅ Created $WORKTREE_PATH"
+          WT_SHA=$(git -C "$WORKTREE_PATH" rev-parse HEAD 2>/dev/null || echo "")
+          if [ "$WT_SHA" = "$FULL_SHA" ]; then
+            echo "✅ Worktree for $REF ($SHA) already exists at $WORKTREE_PATH"
+            exit 0
+          fi
+          echo "Recreating stale worktree $WORKTREE_PATH..."
+          git worktree remove --force "$WORKTREE_PATH" >/dev/null 2>&1 || rm -rf "$WORKTREE_PATH"
+          git worktree prune >/dev/null 2>&1 || true
+        elif [ -e "$WORKTREE_PATH" ]; then
+          echo "Removing invalid worktree path $WORKTREE_PATH..."
+          rm -rf "$WORKTREE_PATH"
+          git worktree prune >/dev/null 2>&1 || true
         fi
 
+        echo "Creating temporary worktree for $REF ($SHA)..."
+        git worktree add --detach "$WORKTREE_PATH" "$FULL_SHA"
+        echo "✅ Created $WORKTREE_PATH"
+
         echo "$WORKTREE_PATH"
+
+  _provision-main-worktree:
+    internal: true
+    desc: Provision main worktree without touching current checkout
+    cmds:
+      - task: _provision-branch-worktree
+        vars: { BRANCH: main, PATH: "{{.WORKTREE_MAIN}}" }
+
+  _provision-develop-worktree:
+    internal: true
+    desc: Provision develop worktree without touching current checkout
+    cmds:
+      - task: _provision-branch-worktree
+        vars: { BRANCH: develop, PATH: "{{.WORKTREE_DEVELOP}}" }
+
+  _provision-branch-worktree:
+    internal: true
+    vars:
+      BRANCH: "{{.BRANCH}}"
+      PATH: "{{.PATH}}"
+    cmds:
+      - mkdir -p {{.WORKTREE_DIR}}
+      - |
+        set -e
+        BRANCH="{{.BRANCH}}"
+        WORKTREE_PATH="{{.PATH}}"
+        REMOTE_REF="origin/$BRANCH"
+
+        if [ -z "$BRANCH" ] || [ -z "$WORKTREE_PATH" ]; then
+          echo "❌ Internal error: BRANCH and PATH are required"
+          exit 1
+        fi
+
+        echo "Fetching $REMOTE_REF..."
+        git fetch origin "$BRANCH" --quiet
+        TARGET_SHA=$(git rev-parse "$REMOTE_REF^{commit}")
+
+        if [ -d "$WORKTREE_PATH" ]; then
+          if git -C "$WORKTREE_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            WT_SHA=$(git -C "$WORKTREE_PATH" rev-parse HEAD 2>/dev/null || echo "")
+            if [ "$WT_SHA" = "$TARGET_SHA" ]; then
+              echo "✅ $BRANCH worktree already at $REMOTE_REF ($(git rev-parse --short=7 "$TARGET_SHA"))"
+              exit 0
+            fi
+            echo "Updating $BRANCH worktree to $REMOTE_REF..."
+            git -C "$WORKTREE_PATH" fetch origin "$BRANCH" --quiet
+            git -C "$WORKTREE_PATH" reset --hard "$REMOTE_REF" --quiet
+            git -C "$WORKTREE_PATH" clean -fd --quiet
+            echo "✅ $BRANCH worktree updated"
+            exit 0
+          fi
+
+          echo "Removing invalid worktree directory $WORKTREE_PATH..."
+          git worktree remove --force "$WORKTREE_PATH" >/dev/null 2>&1 || rm -rf "$WORKTREE_PATH"
+          git worktree prune >/dev/null 2>&1 || true
+        elif [ -e "$WORKTREE_PATH" ]; then
+          echo "Removing invalid worktree path $WORKTREE_PATH..."
+          rm -rf "$WORKTREE_PATH"
+          git worktree prune >/dev/null 2>&1 || true
+        fi
+
+        echo "Creating $BRANCH worktree from $REMOTE_REF..."
+        git worktree add --detach "$WORKTREE_PATH" "$REMOTE_REF"
+        echo "✅ Created $WORKTREE_PATH at $REMOTE_REF"
 
   worktree:status:
     desc: Show all active worktrees
@@ -439,22 +494,11 @@ tasks:
         [ -d "{{.WORKTREE_DEVELOP}}" ] && echo "  ✅ {{.WORKTREE_DEVELOP}}"
 
   worktree:update:
-    desc: Update persistent worktrees (git pull)
+    desc: Update persistent worktrees from origin/main and origin/develop
     cmds:
-      - |
-        echo "Updating worktrees..."
-
-        if [ -d "{{.WORKTREE_MAIN}}" ]; then
-          echo "Updating main..."
-          cd {{.WORKTREE_MAIN}} && git pull origin main
-        fi
-
-        if [ -d "{{.WORKTREE_DEVELOP}}" ]; then
-          echo "Updating develop..."
-          cd {{.WORKTREE_DEVELOP}} && git pull origin develop
-        fi
-
-        echo "✅ Worktrees updated"
+      - task: _provision-main-worktree
+      - task: _provision-develop-worktree
+      - echo "✅ Worktree snapshots updated"
 
   # ════════════════════════════════════════════════════════════════
   # Internal Utilities

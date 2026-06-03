@@ -717,14 +717,10 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                         [UnitPattern.UNKNOWN]: <FiHelpCircle size={11} />,
                                     }[bundle.pattern || UnitPattern.UNKNOWN] || <FiHelpCircle size={11} />}
                                 </Box>
-                                <Box
-                                    as="select"
-                                    position="absolute"
-                                    inset={0}
-                                    opacity={0}
-                                    cursor="pointer"
+                                <select
+                                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
                                     value={bundle.pattern || UnitPattern.UNKNOWN}
-                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handlePatternChange(e.target.value)}
+                                    onChange={(e) => handlePatternChange(e.target.value)}
                                 >
                                     <option value={UnitPattern.SWAP}>Swap</option>
                                     <option value={UnitPattern.INTERNAL_TRANSFER}>Transfer</option>
@@ -733,7 +729,7 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                     <option value={UnitPattern.SPINOFF}>Spin-Off</option>
                                     <option value={UnitPattern.CUSTOM}>Custom</option>
                                     <option value={UnitPattern.UNKNOWN}>Unknown</option>
-                                </Box>
+                                </select>
                             </Box>
                         </Tooltip>
                         <Tooltip content={{
@@ -757,19 +753,15 @@ const BundleRow: React.FC<BundleRowProps> = ({
                                         bundle.taxability_override === TaxabilityEnum.NON_TAXABLE ? <FiShield size={11} /> :
                                             <FiHelpCircle size={11} />}
                                 </Box>
-                                <Box
-                                    as="select"
-                                    position="absolute"
-                                    inset={0}
-                                    opacity={0}
-                                    cursor="pointer"
+                                <select
+                                    style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }}
                                     value={bundle.taxability_override || TaxabilityEnum.UNKNOWN}
-                                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleTaxabilityChange(e.target.value)}
+                                    onChange={(e) => handleTaxabilityChange(e.target.value)}
                                 >
                                     <option value={TaxabilityEnum.UNKNOWN}>Unknown</option>
                                     <option value={TaxabilityEnum.TAXABLE}>Taxable</option>
                                     <option value={TaxabilityEnum.NON_TAXABLE}>Non-Taxable</option>
-                                </Box>
+                                </select>
                             </Box>
                         </Tooltip>
                         <Box flex={1} />

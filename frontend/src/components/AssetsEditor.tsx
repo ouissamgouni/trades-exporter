@@ -1497,7 +1497,7 @@ export const AssetsEditor: React.FC = () => {
                         </Flex>
                     </Box>
                 )}
-                <Table.Root size="xs">
+                <Table.Root size="sm">
                     <Table.Header>
                         <Table.Row>
                             <Table.ColumnHeader width="30px">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Box, Flex, Spinner, Text } from '@chakra-ui/react';
-import { ResponsiveLine, CustomLayerProps } from '@nivo/line';
+import { ResponsiveLine } from '@nivo/line';
 import { API_URL, GapRange } from '../types';
 import { useBaseCurrency } from '../hooks/useBaseCurrency';
 
@@ -163,7 +163,7 @@ export const AssetPriceChart: React.FC<AssetPriceChartProps> = ({ assetId, symbo
     const gapLayer = useMemo(() => {
         if (!gaps || gaps.length === 0) return undefined;
 
-        return (props: CustomLayerProps) => {
+        return (props: any) => {
             const { xScale, innerHeight } = props;
             const scale = xScale as unknown as (v: Date) => number;
 

@@ -901,6 +901,7 @@ interface TotalReturnScorecardProps {
     isLoading?: boolean;
     summary?: ScorecardSummary | null;
     onFeesClick?: () => void;
+    onIncomeClick?: () => void;
 }
 
 export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
@@ -909,6 +910,7 @@ export const TotalReturnScorecard: React.FC<TotalReturnScorecardProps> = ({
     isLoading,
     summary,
     onFeesClick,
+    onIncomeClick,
 }) => {
     const [range, setRange] = useState<Range>('all');
     const metrics = useMemo(() => computeMetricsForRange(range, points, summary), [points, range, summary]);

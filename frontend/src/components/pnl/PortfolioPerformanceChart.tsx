@@ -10,7 +10,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Badge, Box, Flex, Text } from '@chakra-ui/react';
-import { ResponsiveLine, type CustomLayerProps } from '@nivo/line';
+import { ResponsiveLine } from '@nivo/line';
 import {
     useMultiBenchmarkSeries,
     type TimelinePoint,
@@ -34,12 +34,12 @@ const BENCHMARK_COLOR = '#d4b872'; // muted gold
 // Custom line layer: strong portfolio line, thin dashed benchmark
 // ---------------------------------------------------------------------------
 
-const CustomLineLayer = ({ series, lineGenerator, xScale, yScale }: CustomLayerProps) => {
+const CustomLineLayer = ({ series, lineGenerator, xScale, yScale }: any) => {
     return (
         <>
-            {series.map((s) => {
+            {series.map((s: any) => {
                 const isBenchmark = s.id === 'S&P 500';
-                const lineData = s.data.filter(d => d.data.x != null && d.data.y != null);
+                const lineData = s.data.filter((d: any) => d.data.x != null && d.data.y != null);
                 if (!lineData.length) return null;
                 lineGenerator.x((d: any) => (xScale as any)(d.data.x));
                 lineGenerator.y((d: any) => (yScale as any)(d.data.y));

@@ -38,6 +38,11 @@ includes:
   git:
     taskfile: .taskfiles/git.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      WORKTREE_DIR: "{{.WORKTREE_DIR}}"
+      WORKTREE_MAIN: "{{.WORKTREE_MAIN}}"
+      WORKTREE_DEVELOP: "{{.WORKTREE_DEVELOP}}"
   logs:
     taskfile: .taskfiles/logs.yml
     dir: "{{.ROOT_DIR}}"
@@ -46,6 +51,11 @@ includes:
   release:
     taskfile: .taskfiles/release.yml
     dir: "{{.ROOT_DIR}}"
+    vars:
+      ROOT_DIR: "{{.ROOT_DIR}}"
+      WORKTREE_DIR: "{{.WORKTREE_DIR}}"
+      WORKTREE_MAIN: "{{.WORKTREE_MAIN}}"
+      WORKTREE_DEVELOP: "{{.WORKTREE_DEVELOP}}"
   open:
     taskfile: .taskfiles/open.yml
     dir: "{{.ROOT_DIR}}"
