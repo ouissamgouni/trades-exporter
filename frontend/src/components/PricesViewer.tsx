@@ -17,6 +17,7 @@ import { TablePagination } from './TablePagination';
 import { PriceHealthCards } from './PriceHealthCards';
 import { PriceSetterDialog } from './pnl/PriceSetterDialog';
 import { GapFixPanel } from './GapFixPanel';
+import { PriceGapBulkFix } from './PriceGapBulkFix';
 import { useBaseCurrency } from '../hooks/useBaseCurrency';
 import { FiArrowLeft } from 'react-icons/fi';
 import { usePriceHealth } from '../hooks/usePriceHealth';
@@ -257,6 +258,10 @@ export const PricesViewer: React.FC = () => {
                     </Text>
                 </Box>
                 <Flex gap={2} align="center">
+                    <PriceGapBulkFix
+                        quoteAssetId={baseCurrency.assetId ?? null}
+                        onComplete={viewMode === 'table' ? fetchPrices : undefined}
+                    />
                     {/* View mode toggle */}
                     <Flex borderRadius="md" border="1px solid" borderColor="gray.200" overflow="hidden" display="inline-flex">
                         {([{ value: 'health' as const, label: '🩺 Health' }, { value: 'table' as const, label: '📋 Table' }]).map(opt => (

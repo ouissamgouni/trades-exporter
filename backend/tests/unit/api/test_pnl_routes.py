@@ -22,8 +22,8 @@ from backend.services.pnl_calculation_service import PnLCalculationService
 
 from fastapi.testclient import TestClient
 
-from api.schemas import AppliedFilters
-from api.routes.pnl_filter_depends import PnLTransactionFilters
+from backend.api.schemas import AppliedFilters
+from backend.api.routes.pnl_filter_depends import PnLTransactionFilters
 
 
 @pytest.fixture
@@ -298,6 +298,58 @@ class TestGetVersionBalances:
         # Cost should be qty_remaining * unit_cost = 8 * 100 = 800
         assert balance.cost_basis_in_base == 800.0
         assert balance.lot_count == 1
+
+    def test_grouped_balances_include_realized_only_assets_without_total_invested_key_error(self, mock_session, mock_version, no_filters):
+        """Test realized-only grouped assets serialize with zero total invested."""
+        from backend.api.routes.pnl import get_version_balances
+
+        mock_session.get.return_value = mock_version
+
+        realized_row = MagicMock()
+        realized_row.effective_asset_id = 7
+        realized_row.total_pnl = Decimal("12.34")
+        realized_row.event_count = 1
+
+        realized_asset = MagicMock()
+        realized_asset.asset_id = 7
+        realized_asset.symbol = "YES"
+        realized_asset.label = "Prediction Market YES"
+
+        lots_result = MagicMock()
+        lots_result.all.return_value = []
+        realized_result = MagicMock()
+        realized_result.all.return_value = [realized_row]
+        empty_result = MagicMock()
+        empty_result.all.return_value = []
+        missing_assets_result = MagicMock()
+        missing_assets_result.all.return_value = [realized_asset]
+
+        mock_session.exec.side_effect = [
+            lots_result,
+            realized_result,
+            empty_result,
+            empty_result,
+            empty_result,
+            empty_result,
+            missing_assets_result,
+            empty_result,
+        ]
+
+        result = get_version_balances(
+            version_id=1,
+            group_by_asset=True,
+            tx_filters=no_filters,
+            session=mock_session,
+        )
+
+        assert len(result) == 1
+        balance = result[0]
+        assert balance.asset.id == 7
+        assert balance.qty == 0.0
+        assert balance.cost_basis_in_base == 0.0
+        assert balance.total_invested_in_base == 0.0
+        assert balance.realized_pnl_in_base == 12.34
+        assert balance.realized_event_count == 1
 
 
 class TestGetVersionRealizedPnl:

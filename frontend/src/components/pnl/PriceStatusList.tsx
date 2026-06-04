@@ -17,6 +17,7 @@ import { formatRelativeTime } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/tooltip';
 import { PriceSetterDialog } from './PriceSetterDialog';
 import { GapFixPanel } from '../GapFixPanel';
+import { PriceGapBulkFix } from '../PriceGapBulkFix';
 import { usePriceGapsSummary } from '../../hooks/usePriceGaps';
 
 interface PriceStatusListProps {
@@ -25,6 +26,7 @@ interface PriceStatusListProps {
     quoteAssetId?: number;  // Base currency asset ID for manual price entry
     onPriceAdded?: (assetId: number) => void;  // Callback after manual price is saved
     onRetryFailed?: () => void;  // Callback to retry all failed price fetches
+    onBulkGapFixComplete?: () => void | Promise<void>;  // Callback after global gap backfill completes
     loadingAssetIds?: Set<number>;  // Asset IDs currently being fetched
     assetNameMap?: Map<number, string>;  // id → display name for loading placeholders
     totalAssetCount?: number;  // Total assets in table (including non-PnL)
@@ -51,6 +53,7 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
     quoteAssetId,
     onPriceAdded,
     onRetryFailed,
+    onBulkGapFixComplete,
     loadingAssetIds,
     assetNameMap,
     totalAssetCount,
@@ -221,6 +224,11 @@ export const PriceStatusList: React.FC<PriceStatusListProps> = ({
                             )}
                         </Flex>
                     </Box>
+                    <PriceGapBulkFix
+                        quoteAssetId={quoteAssetId ?? null}
+                        onComplete={onBulkGapFixComplete}
+                        compact
+                    />
                 </Flex>
 
                 <Box position="relative">

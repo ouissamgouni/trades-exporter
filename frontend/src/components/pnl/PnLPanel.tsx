@@ -34,7 +34,7 @@ import { usePnLPrices } from '../../hooks/usePnLPrices';
 // Types
 import type { PnLImpactEvent, RealizedPnLRow } from './types';
 import type { DrillEntityType } from './pnlState';
-import { computeContextScope } from './pnlState';
+import { computeContextScope, PNL_STATUS } from './pnlState';
 
 
 interface PnLPanelProps {
@@ -267,6 +267,14 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
         }
     }, [assets, dispatch, drill.level]);
 
+    const statusBadgeStatus = status === PNL_STATUS.ERROR
+        ? 'error'
+        : calcServiceStatus === 'idle' && currentVersionId != null
+            ? 'completed'
+            : calcServiceStatus;
+
+    const statusBadgeError = status === PNL_STATUS.ERROR ? error : calcServiceError;
+
     return (
         <Box p={2} pt={1}>
             {/* Header: Title + Status Badge + Action Buttons */}
@@ -274,15 +282,11 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                 <Flex align="center" gap={3} flex={1} minW={0}>
                     <Heading size="lg" flexShrink={0}>📊 P&L</Heading>
                     <PnLStatusBadge
-                        status={
-                            calcServiceStatus === 'idle' && currentVersionId != null
-                                ? 'completed'
-                                : calcServiceStatus
-                        }
+                        status={statusBadgeStatus}
                         staleReasons={staleReasons}
                         lastCalculatedAt={lastCalculatedAt ?? loadedVersionCreatedAt}
                         currentVersionId={serviceVersionId ?? currentVersionId}
-                        errorMessage={calcServiceError}
+                        errorMessage={statusBadgeError}
                         compactWhenCompleted
                     />
                 </Flex>
@@ -320,6 +324,13 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                     </Button>
                 </Flex>
             </Flex>
+
+            {status === PNL_STATUS.ERROR && error && (
+                <Box mb={2} borderWidth="1px" borderColor="red.200" bg="red.50" color="red.700" px={3} py={2}>
+                    <Text fontSize="sm" fontWeight="medium">Unable to load P&L data</Text>
+                    <Text fontSize="xs" mt={0.5}>{error}</Text>
+                </Box>
+            )}
 
             {/* Show loading state while auto-loading initial version */}
             {status === 'idle' && !hasAutoLoaded.current && (
@@ -465,6 +476,7 @@ const PnLContent: React.FC<PnLPanelProps> = ({ isActive = true, onOpenHealthChec
                     quoteAssetId={config.base_currency_id ?? undefined}
                     onPriceAdded={(assetId) => handlePriceAdded(assetId)}
                     onRetryFailed={retryFailedPrices}
+                    onBulkGapFixComplete={handleRefreshPrices}
                     loadingAssetIds={loadingPriceAssetIds}
                     assetNameMap={new Map(pnlAssets.map(a => [a.asset.id!, a.asset.symbol ?? `#${a.asset.id}`]))}
                     totalAssetCount={displayAssets.length}

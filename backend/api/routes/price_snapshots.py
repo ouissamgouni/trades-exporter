@@ -132,6 +132,10 @@ class GapSummaryResponse(BaseModel):
     items: List[GapSummaryItem]
 
 
+class GapCandidatesResponse(BaseModel):
+    items: List[GapDetectionResponse]
+
+
 class BackfillRequest(BaseModel):
     asset_id: int
     date_from: str  # ISO date
@@ -377,6 +381,62 @@ def get_price_gaps_summary(
     return GapSummaryResponse(items=items)
 
 
+@router.get("/gaps/candidates", response_model=GapCandidatesResponse)
+def get_price_gap_candidates(
+    quote_asset_id: Optional[int] = Query(None, description="Filter by quote asset ID"),
+    session: Session = Depends(get_db),
+):
+    """Get transaction-backed assets with at least one price gap."""
+    if quote_asset_id is None:
+        settings = _get_app_settings(session)
+        base_asset = session.exec(
+            select(Asset).where(Asset.symbol == settings.base_currency)
+        ).first()
+        if base_asset:
+            quote_asset_id = base_asset.asset_id
+
+    rows = session.exec(
+        select(NormalizedTransaction.asset_id)
+        .where(NormalizedTransaction.asset_id.isnot(None))
+        .distinct()
+    ).all()
+    asset_ids = set()
+    for row in rows:
+        aid = row[0] if isinstance(row, tuple) else row
+        if aid is not None:
+            asset_ids.add(aid)
+
+    items: List[GapDetectionResponse] = []
+    for aid in sorted(asset_ids):
+        try:
+            result = detect_gaps(session, aid, quote_asset_id=quote_asset_id)
+        except ValueError:
+            continue
+        if not result.gaps:
+            continue
+        items.append(GapDetectionResponse(
+            asset_id=result.asset_id,
+            symbol=result.symbol,
+            price_type=result.price_type,
+            total_expected=result.total_expected,
+            total_covered=result.total_covered,
+            coverage_pct=result.coverage_pct,
+            gaps=[
+                GapRangeResponse(
+                    start_date=g.start_date,
+                    end_date=g.end_date,
+                    missing_days_count=g.missing_days_count,
+                    last_known_price=g.last_known_price,
+                    last_known_price_date=g.last_known_price_date,
+                    last_known_source=g.last_known_source,
+                )
+                for g in result.gaps
+            ],
+        ))
+
+    return GapCandidatesResponse(items=items)
+
+
 @router.post("/backfill", response_model=BackfillResponse)
 def backfill_prices(
     req: BackfillRequest,
@@ -403,8 +463,9 @@ def backfill_prices(
     # Resolve quote_asset_id: use request param or fall back to base currency
     quote_id = req.quote_asset_id
     if quote_id is None:
+        app_settings = _get_app_settings(session)
         base_asset = session.exec(
-            select(Asset).where(Asset.symbol == settings.get("base_currency", "EUR"))
+            select(Asset).where(Asset.symbol == app_settings.base_currency)
         ).first()
         if base_asset:
             quote_id = base_asset.asset_id
@@ -424,8 +485,8 @@ def backfill_prices(
     # Lazy-import to avoid circular imports
     from backend.services.price_service import PriceService
     from backend.config.loader import load_settings as _load
-    settings = _load()
-    svc = PriceService(session=session, base_currency=settings.get("base_currency", "EUR"))
+    config_settings = _load()
+    svc = PriceService(session=session, base_currency=config_settings.get("base_currency", "EUR"))
 
     fetched: List[BackfillFetchedItem] = []
     failed: List[BackfillFailedItem] = []

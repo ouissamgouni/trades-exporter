@@ -3566,13 +3566,7 @@ def get_version_balances(
                 select(Asset).where(Asset.asset_id.in_(list(realized_only_ids)))
             ).all()
             for asset_obj in missing_assets:
-                balance_map[asset_obj.asset_id] = {
-                    "qty": Decimal(0),
-                    "cost": Decimal(0),
-                    "lots": 0,
-                    "asset": asset_obj,
-                    "account_ids": set(),
-                }
+                balance_map[asset_obj.asset_id]["asset"] = asset_obj
 
         # Query category IDs for all assets in the balance
         asset_ids_in_balance = list(balance_map.keys())

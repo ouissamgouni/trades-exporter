@@ -469,6 +469,10 @@ export interface GapSummaryResponse {
     items: GapSummaryItem[];
 }
 
+export interface GapCandidatesResponse {
+    items: GapDetectionResponse[];
+}
+
 export interface BackfillRequest {
     asset_id: number;
     date_from: string;

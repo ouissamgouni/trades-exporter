@@ -50,6 +50,15 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
     const availableVersions = versionsQuery.data ?? [];
     const isLoadingVersions = versionsQuery.isLoading;
 
+    const getResponseErrorMessage = useCallback(async (response: Response, fallback: string): Promise<string> => {
+        const body = await response.json().catch(() => null);
+        if (body && typeof body === 'object' && 'detail' in body) {
+            const detail = (body as { detail?: unknown }).detail;
+            if (typeof detail === 'string') return detail;
+        }
+        return `${fallback} (${response.status} ${response.statusText})`;
+    }, []);
+
     // ══════════════════════════════════════════════════════════
     // Core callbacks
     // ══════════════════════════════════════════════════════════
@@ -63,7 +72,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                 include_unsettled_negative: includeUnsettledNegative.toString(),
             });
             const response = await fetch(`${API_URL}/pnl/versions/${versionId}/balances?${params}`);
-            if (!response.ok) throw new Error('Failed to load balances');
+            if (!response.ok) throw new Error(await getResponseErrorMessage(response, 'Failed to load balances'));
             const balances: AggregatedBalanceItem[] = await response.json();
             console.log('Loaded aggregated balances:', balances.length, 'includeUnsettledNegative:', includeUnsettledNegative);
 
@@ -76,11 +85,11 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                 title: 'Balance Load Failed',
                 description: err instanceof Error ? err.message : 'Failed to load balances',
             });
-            return [];
+            throw err;
         } finally {
             dispatch({ type: 'SET_IS_LOADING_BALANCES', value: false });
         }
-    }, [dispatch]);
+    }, [dispatch, getResponseErrorMessage]);
 
     // Transform aggregated balances to AssetPnLRow array
     const transformBalances = useCallback((balances: AggregatedBalanceItem[]): AssetPnLRow[] => {
@@ -114,7 +123,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                 include_unsettled_negative: 'true',
             });
             const response = await fetch(`${API_URL}/pnl/versions/${versionId}/balances?${params}`);
-            if (!response.ok) throw new Error('Failed to load account balances');
+            if (!response.ok) throw new Error(await getResponseErrorMessage(response, 'Failed to load account balances'));
             const balances: PerAccountBalanceItem[] = await response.json();
             console.log('Loaded per-account balances:', balances.length);
 
@@ -426,6 +435,7 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             toaster.success({ title: 'Version Loaded', description: `Loaded version ${versionId} (${versionData.status})` });
         } catch (err) {
             dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : 'Failed to load version' });
+            dispatch({ type: 'SET_STATUS', status: PNL_STATUS.ERROR });
             toaster.error({ title: 'Load Failed', description: err instanceof Error ? err.message : 'Failed to load version' });
         } finally {
             dispatch({ type: 'SET_IS_CALCULATING', value: false });
@@ -628,6 +638,9 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                         total_portfolio_value: totalMarketValue > 0 ? totalMarketValue : totalCostBasis,
                     } : null,
                 });
+            }).catch(err => {
+                dispatch({ type: 'SET_ERROR', error: err instanceof Error ? err.message : 'Failed to load balances' });
+                dispatch({ type: 'SET_STATUS', status: PNL_STATUS.ERROR });
             });
         }
     }, [showUnsettledNegative, currentVersionId]); // eslint-disable-line react-hooks/exhaustive-deps
