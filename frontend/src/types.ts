@@ -789,6 +789,8 @@ export interface ConnectorDefaultInfo {
 
 // Request payload for starting sync job with overrides
 export interface SyncJobStartRequest {
+    // Explicit manual trigger guard; config changes/uploads must not start sync jobs
+    trigger_source: 'manual';
     // Per-connector overrides (enable/disable, test mode, since datetime, symbols/currencies)
     connector_overrides?: ConnectorOverride[];
     // If true, re-normalize from stored raw data instead of fetching from APIs

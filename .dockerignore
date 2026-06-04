@@ -14,6 +14,9 @@ backend/__pycache__
 **/.mypy_cache
 **/.ruff_cache
 data/output
+backend/data/input/uploads
+backend/data/input/defaults
+backend/data/output
 *.pyc
 *.pyo
 *.log

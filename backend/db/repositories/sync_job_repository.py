@@ -27,10 +27,11 @@ class SyncJobRepository:
     def create_job(
         self,
         config_snapshot: Optional[Dict[str, Any]] = None,
+        status: SyncJobStatus = SyncJobStatus.PENDING,
     ) -> SyncJob:
         """Create a new sync job."""
         job = SyncJob(
-            status=SyncJobStatus.IDLE,
+            status=status,
             started_at=datetime.now(timezone.utc),
             config_snapshot=config_snapshot or {},
             total_connectors=0,
@@ -44,6 +45,20 @@ class SyncJobRepository:
         self.session.flush()
         self.session.refresh(job)
         return job
+
+    def get_active_job(self) -> Optional[SyncJob]:
+        """Get the newest pending/running sync job, if one exists."""
+        statement = (
+            select(SyncJob)
+            .where(
+                col(SyncJob.status).in_(
+                    [SyncJobStatus.PENDING.value, SyncJobStatus.RUNNING.value]
+                )
+            )
+            .order_by(col(SyncJob.started_at).desc())
+            .limit(1)
+        )
+        return self.session.exec(statement).first()
 
     def get_job(self, job_id: int) -> Optional[SyncJob]:
         """Get a sync job by ID."""
@@ -202,7 +217,9 @@ class SyncJobRepository:
         )
         return list(self.session.exec(statement).all())
 
-    def get_latest_run_by_connector(self, connector_id: int) -> Optional[SyncJobConnectorRun]:
+    def get_latest_run_by_connector(
+        self, connector_id: int
+    ) -> Optional[SyncJobConnectorRun]:
         """Get the most recent connector run for a specific connector."""
         statement = (
             select(SyncJobConnectorRun)
@@ -213,7 +230,9 @@ class SyncJobRepository:
         result = self.session.exec(statement).first()
         return result
 
-    def get_latest_transaction_for_run(self, run_id: int) -> Optional[NormalizedTransaction]:
+    def get_latest_transaction_for_run(
+        self, run_id: int
+    ) -> Optional[NormalizedTransaction]:
         """Get the most recent transaction from a connector run."""
         statement = (
             select(NormalizedTransaction)
@@ -223,19 +242,21 @@ class SyncJobRepository:
         )
         return self.session.exec(statement).first()
 
-    def get_latest_synced_transaction_for_connector(self, connector_id: int) -> Optional[NormalizedTransaction]:
+    def get_latest_synced_transaction_for_connector(
+        self, connector_id: int
+    ) -> Optional[NormalizedTransaction]:
         """Get the most recent successfully synced transaction for a connector across all completed runs."""
         # Join with SyncJobConnectorRun to filter by connector and successful status
         statement = (
             select(NormalizedTransaction)
             .join(
                 SyncJobConnectorRun,
-                NormalizedTransaction.sync_connector_run_id == SyncJobConnectorRun.id
+                NormalizedTransaction.sync_connector_run_id == SyncJobConnectorRun.id,
             )
             .where(
                 SyncJobConnectorRun.connector_id == connector_id,
                 SyncJobConnectorRun.status == SyncJobConnectorStatus.COMPLETED,
-                NormalizedTransaction.date_time.is_not(None)
+                NormalizedTransaction.date_time.is_not(None),
             )
             .order_by(col(NormalizedTransaction.date_time).desc())
             .limit(1)
@@ -311,7 +332,7 @@ class SyncJobRepository:
             run.skipped_count = skipped_count
         if error_count is not None:
             run.error_count = error_count
-        
+
         # Update outcome tracking if provided
         if synced_ids is not None:
             run.synced_ids = synced_ids
@@ -498,7 +519,7 @@ class SyncJobRepository:
         job = self.get_job(job_id)
         if not job:
             return None
-        
+
         job.last_heartbeat = datetime.now(timezone.utc)
         self.session.add(job)
         self.session.flush()
@@ -507,63 +528,69 @@ class SyncJobRepository:
     def cleanup_orphaned_jobs(self, stale_minutes: int = 5) -> Dict[str, int]:
         """
         Clean up jobs that are stuck in 'running' status after a server crash.
-        
+
         Marks running jobs as 'aborted' if:
         - last_heartbeat is older than stale_minutes, OR
         - last_heartbeat is NULL (legacy jobs or heartbeat never set)
-        
+
         Also marks their connector runs with 'running' or 'queued' status as 'failed'.
-        
+
         Returns a dict with counts of affected jobs and connector runs.
         """
         from sqlmodel import func, or_
         from datetime import timedelta
-        
+
         now = datetime.now(timezone.utc)
         stale_threshold = now - timedelta(minutes=stale_minutes)
-        
+
         # Find stale running jobs
         stale_jobs_statement = select(SyncJob).where(
-            SyncJob.status == SyncJobStatus.RUNNING,
+            col(SyncJob.status).in_(
+                [SyncJobStatus.PENDING.value, SyncJobStatus.RUNNING.value]
+            ),
             or_(
                 SyncJob.last_heartbeat.is_(None),
                 SyncJob.last_heartbeat < stale_threshold,
-            )
+            ),
         )
         stale_jobs = list(self.session.exec(stale_jobs_statement).all())
-        
+
         if not stale_jobs:
             return {"jobs_aborted": 0, "connector_runs_failed": 0}
-        
+
         job_ids = [job.id for job in stale_jobs]
         connector_runs_updated = 0
-        
+
         # Mark stale jobs as aborted
         for job in stale_jobs:
             job.status = SyncJobStatus.ABORTED
             job.finished_at = now
-            job.error_message = "Job aborted: Server restarted unexpectedly or job became stale"
+            job.error_message = (
+                "Job aborted: Server restarted unexpectedly or job became stale"
+            )
             self.session.add(job)
-        
+
         # Mark their running/queued connector runs as failed
         connector_runs_statement = select(SyncJobConnectorRun).where(
             SyncJobConnectorRun.job_id.in_(job_ids),
-            SyncJobConnectorRun.status.in_([
-                SyncJobConnectorStatus.RUNNING,
-                SyncJobConnectorStatus.QUEUED,
-            ])
+            SyncJobConnectorRun.status.in_(
+                [
+                    SyncJobConnectorStatus.RUNNING,
+                    SyncJobConnectorStatus.QUEUED,
+                ]
+            ),
         )
         connector_runs = list(self.session.exec(connector_runs_statement).all())
-        
+
         for run in connector_runs:
             run.status = SyncJobConnectorStatus.FAILED
             run.finished_at = now
             run.error_message = "Connector run failed: Job was aborted due to server restart or stale state"
             self.session.add(run)
             connector_runs_updated += 1
-        
+
         self.session.flush()
-        
+
         return {
             "jobs_aborted": len(stale_jobs),
             "connector_runs_failed": connector_runs_updated,

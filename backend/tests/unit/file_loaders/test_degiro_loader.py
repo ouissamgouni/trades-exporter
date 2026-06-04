@@ -25,15 +25,15 @@ SAMPLE_CSV = (
     "Transaction and/or third party fees EUR,Total EUR,Order ID\n"
     # Buy: 14 shares of RIGETTI at 42.385 USD
     "31-10-2025,16:51,RIGETTI COMPUTING INC,US76655K1034,NDQ,CDED,"
-    "-14,\"42,385\",USD,\"-593,39\",USD,\"-548,27\",\"0,9239\",,\"-0,39\",\"-548,66\","
+    '-14,"42,385",USD,"-593,39",USD,"-548,27","0,9239",,"-0,39","-548,66",'
     "baa19ae8-1111-2222-3333-444455556666\n"
     # Sell: 10 shares of ASML at 685.40 EUR
     "15-09-2025,10:30,ASML HOLDING,NL0010273215,AMS,XAMS,"
-    "10,\"685,40\",EUR,\"6854,00\",EUR,\"6854,00\",,,\"-4,90\",\"6849,10\","
+    '10,"685,40",EUR,"6854,00",EUR,"6854,00",,,"-4,90","6849,10",'
     "ccdd1122-aaaa-bbbb-cccc-ddddeeeeffff\n"
     # Buy: 5 shares, EUR-priced, with autofx fee
     "01-01-2025,09:00,TEST PRODUCT,GB0000000001,LSE,XLON,"
-    "-5,\"100,50\",GBP,\"-502,50\",GBP,\"-590,00\",\"1,1741\",\"-2,50\",\"-0,50\",\"-593,00\","
+    '-5,"100,50",GBP,"-502,50",GBP,"-590,00","1,1741","-2,50","-0,50","-593,00",'
     "aabb0011-1111-2222-3333-000011112222\n"
 )
 
@@ -46,7 +46,6 @@ SAMPLE_CSV_BYTES = SAMPLE_CSV.encode("utf-8")
 
 
 class TestParseEuropeanNumber:
-
     def test_simple_decimal(self):
         assert parse_european_number("42,385") == Decimal("42.385")
 
@@ -84,7 +83,6 @@ class TestParseEuropeanNumber:
 
 
 class TestGenerateTransactionId:
-
     def setup_method(self):
         _reset_sequence_counter()
 
@@ -114,8 +112,8 @@ class TestGenerateTransactionId:
         second = generate_transaction_id(row)
         assert first == second
 
-    def test_duplicate_rows_get_sequence(self):
-        """Identical rows should get different IDs via sequence counter."""
+    def test_generate_transaction_id_has_no_global_sequence(self):
+        """Identical direct calls should return the same deterministic ID."""
         row = {
             "datetime": datetime(2025, 10, 31, 16, 51, tzinfo=timezone.utc),
             "isin": "US76655K1034",
@@ -125,8 +123,7 @@ class TestGenerateTransactionId:
         }
         first = generate_transaction_id(row)
         second = generate_transaction_id(row)
-        assert first != second
-        assert "_seq_" in second
+        assert first == second
 
     def test_different_isins_get_different_ids(self):
         row1 = {
@@ -146,7 +143,6 @@ class TestGenerateTransactionId:
 
 
 class TestLoadDegiroFile:
-
     def test_load_from_content(self):
         df = load_degiro_file(content=SAMPLE_CSV_BYTES)
         assert len(df) == 3
@@ -154,10 +150,23 @@ class TestLoadDegiroFile:
     def test_expected_columns(self):
         df = load_degiro_file(content=SAMPLE_CSV_BYTES)
         expected = {
-            "datetime", "product", "isin", "exchange", "venue",
-            "quantity", "price", "price_currency", "local_value",
-            "value_eur", "exchange_rate", "autofx_fee", "transaction_fee",
-            "fee", "total_eur", "order_id", "direction",
+            "datetime",
+            "product",
+            "isin",
+            "exchange",
+            "venue",
+            "quantity",
+            "price",
+            "price_currency",
+            "local_value",
+            "value_eur",
+            "exchange_rate",
+            "autofx_fee",
+            "transaction_fee",
+            "fee",
+            "total_eur",
+            "order_id",
+            "direction",
         }
         assert expected.issubset(set(df.columns))
 
@@ -241,7 +250,6 @@ class TestLoadDegiroFile:
 
 
 class TestPreview:
-
     def test_row_count(self):
         preview = get_degiro_file_preview(SAMPLE_CSV_BYTES)
         assert preview["row_count"] == 3
@@ -275,7 +283,6 @@ class TestPreview:
 
 
 class TestIdempotency:
-
     def test_same_csv_produces_same_ids(self):
         """Loading the same CSV twice should produce identical transaction IDs."""
         df1 = load_degiro_file(content=SAMPLE_CSV_BYTES)
@@ -293,3 +300,18 @@ class TestIdempotency:
         df = load_degiro_file(content=SAMPLE_CSV_BYTES)
         ids = [generate_transaction_id(row) for _, row in df.iterrows()]
         assert len(ids) == len(set(ids))
+
+    def test_duplicate_rows_get_deterministic_sequence_within_load(self):
+        """Identical rows in one file should get stable per-file sequence suffixes."""
+        lines = SAMPLE_CSV.splitlines()
+        duplicate_csv = "\n".join([lines[0], lines[1], lines[1]]) + "\n"
+
+        df1 = load_degiro_file(content=duplicate_csv.encode("utf-8"))
+        ids1 = [generate_transaction_id(row) for _, row in df1.iterrows()]
+
+        df2 = load_degiro_file(content=duplicate_csv.encode("utf-8"))
+        ids2 = [generate_transaction_id(row) for _, row in df2.iterrows()]
+
+        assert ids1 == ids2
+        assert ids1[0] != ids1[1]
+        assert ids1[1].endswith("_seq_1")

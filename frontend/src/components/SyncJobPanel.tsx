@@ -179,7 +179,7 @@ export const SyncJobPanel: React.FC<{ isActive?: boolean }> = ({ isActive = true
         try {
             // Build request with connector overrides from SyncConfigPanel
             // (includes enable/disable, test_mode, and since_datetime)
-            const requestBody: SyncJobStartRequest = {};
+            const requestBody: SyncJobStartRequest = { trigger_source: 'manual' };
 
             if (syncOverrides.length > 0) {
                 requestBody.connector_overrides = syncOverrides;

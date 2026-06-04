@@ -60,7 +60,9 @@ class DeGiroFileConnector(BaseConnector):
         self._skipped_count = 0
 
         if self._file_path:
-            log.info(f"📁 DeGiro file connector initialized with file: {self._file_path}")
+            log.info(
+                f"📁 DeGiro file connector initialized with file: {self._file_path}"
+            )
         else:
             log.warning("⚠️ DeGiro file connector initialized without file_path")
 
@@ -102,6 +104,8 @@ class DeGiroFileConnector(BaseConnector):
 
         total = len(data)
         log.info(f"🔄 Processing {total} trades from file")
+        if self._file_import_id:
+            self._update_file_import_status("processing")
 
         self.update_progress(
             operation="Loading file",
@@ -116,7 +120,9 @@ class DeGiroFileConnector(BaseConnector):
                 log.info("⚠️ Abort requested, stopping file processing")
                 break
 
-            row["_generated_id"] = generate_transaction_id(row)
+            row["_generated_id"] = row.get("_generated_id") or generate_transaction_id(
+                row
+            )
             yield row
 
             if (idx + 1) % 50 == 0 or idx == total - 1:
@@ -188,6 +194,7 @@ class DeGiroFileConnector(BaseConnector):
             transaction_id = raw_item.get("_generated_id", "")
             if not transaction_id:
                 from backend.file_loaders.degiro_loader import generate_transaction_id
+
                 transaction_id = generate_transaction_id(raw_item)
 
             # Content hash for cross-source deduplication
@@ -224,7 +231,9 @@ class DeGiroFileConnector(BaseConnector):
             log.error(error_msg)
             raise ValueError(error_msg) from e
 
-    def set_processing_metrics(self, new_count: int, updated_count: int, skipped_count: int):
+    def set_processing_metrics(
+        self, new_count: int, updated_count: int, skipped_count: int
+    ):
         """Set processing metrics from the pipeline."""
         self._new_count = new_count
         self._updated_count = updated_count
@@ -245,6 +254,8 @@ class DeGiroFileConnector(BaseConnector):
             from backend.db.database import get_engine
             from sqlmodel import Session
             from backend.db.repositories import FileImportRepository
+            from backend.db.models import AccountConnector
+            from sqlalchemy.orm.attributes import flag_modified
 
             engine = get_engine()
             with Session(engine) as session:
@@ -257,15 +268,32 @@ class DeGiroFileConnector(BaseConnector):
                         updated_count=self._updated_count,
                         skipped_count=self._skipped_count,
                     )
+                    account_connector = (
+                        session.get(AccountConnector, self.connector_id)
+                        if self.connector_id
+                        else None
+                    )
+                    if account_connector:
+                        config = dict(account_connector.config or {})
+                        if config.get("file_import_id") == self._file_import_id:
+                            config.pop("file_path", None)
+                            config.pop("file_import_id", None)
+                            account_connector.config = config
+                            flag_modified(account_connector, "config")
+                            session.add(account_connector)
                 elif status == "failed":
-                    repo.mark_failed(self._file_import_id, error_message or "Unknown error")
+                    repo.mark_failed(
+                        self._file_import_id, error_message or "Unknown error"
+                    )
                 elif status == "processing":
                     repo.mark_processing(self._file_import_id)
                 else:
                     repo.update_status(self._file_import_id, status)
 
                 session.commit()
-                log.info(f"📝 Updated FileImport {self._file_import_id} status to: {status}")
+                log.info(
+                    f"📝 Updated FileImport {self._file_import_id} status to: {status}"
+                )
         except Exception as e:
             log.error(f"❌ Failed to update FileImport status: {e}")
 

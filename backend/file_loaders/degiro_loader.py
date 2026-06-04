@@ -56,8 +56,9 @@ def generate_transaction_id(row: Dict[str, Any]) -> str:
 
     Hash of: datetime + isin + quantity + price + order_id
 
-    For partial order fills (same order_id, different rows), appends
-    a sequence counter (_seq_N) to ensure uniqueness.
+    For partial order fills (same order_id, different rows), load_degiro_file
+    assigns a per-file _duplicate_sequence so repeated file loads generate the
+    same IDs.
     """
     dt_val = row.get("datetime")
     if hasattr(dt_val, "isoformat"):
@@ -76,24 +77,23 @@ def generate_transaction_id(row: Dict[str, Any]) -> str:
     )
     order_id = str(row.get("order_id", ""))
 
+    duplicate_sequence_value = row.get("_duplicate_sequence")
+    duplicate_sequence = (
+        0 if pd.isna(duplicate_sequence_value) else int(duplicate_sequence_value or 0)
+    )
     unique_str = f"{dt_str}_{isin}_{quantity}_{price}_{order_id}"
+    if duplicate_sequence:
+        unique_str = f"{unique_str}_seq_{duplicate_sequence}"
     base_hash = hashlib.md5(unique_str.encode()).hexdigest()
 
-    sequence = _transaction_id_sequence[base_hash]
-    _transaction_id_sequence[base_hash] += 1
-
-    if sequence == 0:
-        return base_hash
-    return f"{base_hash}_seq_{sequence}"
-
-
-# Global sequence counter for within-file duplicate detection
-_transaction_id_sequence: Dict[str, int] = defaultdict(int)
+    if duplicate_sequence:
+        return f"{base_hash}_seq_{duplicate_sequence}"
+    return base_hash
 
 
 def _reset_sequence_counter():
-    """Reset the global sequence counter (for testing)."""
-    _transaction_id_sequence.clear()
+    """Kept for backwards-compatible tests; IDs no longer use global state."""
+    return None
 
 
 def load_degiro_file(
@@ -118,7 +118,7 @@ def load_degiro_file(
     if not file_path and content is None:
         raise ValueError("Either file_path or content must be provided")
 
-    _reset_sequence_counter()
+    duplicate_sequences: Dict[str, int] = defaultdict(int)
 
     # Read CSV with European format
     if content is not None:
@@ -221,16 +221,30 @@ def load_degiro_file(
             "quantity": float(quantity) if quantity is not None else 0.0,
             "price": float(abs(price)) if price is not None else 0.0,
             "price_currency": price_currency,
-            "local_value": float(row.get("Local value", "0").replace(".", "").replace(",", ".") or 0) if "Local value" in row.index else 0.0,
+            "local_value": float(
+                row.get("Local value", "0").replace(".", "").replace(",", ".") or 0
+            )
+            if "Local value" in row.index
+            else 0.0,
             "value_eur": float(value_eur) if value_eur is not None else 0.0,
-            "exchange_rate": float(exchange_rate) if exchange_rate is not None else None,
+            "exchange_rate": float(exchange_rate)
+            if exchange_rate is not None
+            else None,
             "autofx_fee": float(abs(autofx_fee)) if autofx_fee is not None else 0.0,
-            "transaction_fee": float(abs(transaction_fee)) if transaction_fee is not None else 0.0,
+            "transaction_fee": float(abs(transaction_fee))
+            if transaction_fee is not None
+            else 0.0,
             "fee": float(total_fee_eur),
             "total_eur": float(abs(total_eur)) if total_eur is not None else 0.0,
             "order_id": order_id,
             "direction": direction,
         }
+
+        base_id = generate_transaction_id(record)
+        duplicate_sequence = duplicate_sequences[base_id]
+        duplicate_sequences[base_id] += 1
+        if duplicate_sequence:
+            record["_duplicate_sequence"] = duplicate_sequence
 
         records.append(record)
 
@@ -272,15 +286,21 @@ def get_degiro_file_preview(content: bytes) -> dict:
 
     sample_df = df.head(5).copy()
     sample_df["datetime"] = sample_df["datetime"].apply(
-        lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(dt, "strftime") else str(dt)
+        lambda dt: (
+            dt.strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(dt, "strftime") else str(dt)
+        )
     )
     sample_rows = sample_df.to_dict("records")
 
     return {
         "row_count": len(df),
         "date_range": {
-            "min_date": min_date.strftime("%Y-%m-%dT%H:%M:%SZ") if pd.notna(min_date) else None,
-            "max_date": max_date.strftime("%Y-%m-%dT%H:%M:%SZ") if pd.notna(max_date) else None,
+            "min_date": min_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if pd.notna(min_date)
+            else None,
+            "max_date": max_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if pd.notna(max_date)
+            else None,
         },
         "pairs": pairs,
         "sample_rows": sample_rows,

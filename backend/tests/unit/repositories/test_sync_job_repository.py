@@ -90,7 +90,7 @@ class TestSyncJobCRUD:
         mock_session.refresh = MagicMock()
 
         # Call create_job
-        with patch.object(repo, 'create_job', wraps=repo.create_job):
+        with patch.object(repo, "create_job", wraps=repo.create_job):
             result = repo.create_job(config_snapshot={"test": True})
 
         mock_session.add.assert_called_once()
@@ -99,7 +99,7 @@ class TestSyncJobCRUD:
 
         # Verify the job was created with correct initial values
         created_job = mock_session.add.call_args[0][0]
-        assert created_job.status == SyncJobStatus.IDLE
+        assert created_job.status == SyncJobStatus.PENDING
         assert created_job.config_snapshot == {"test": True}
         assert created_job.total_connectors == 0
 
@@ -197,7 +197,9 @@ class TestSyncJobConnectorRunCRUD:
         assert created_run.connector_id == 10
         assert created_run.status == SyncJobConnectorStatus.QUEUED
         assert created_run.test_mode is True
-        assert created_run.processed == 0  # Model uses 'processed' not 'processed_count'
+        assert (
+            created_run.processed == 0
+        )  # Model uses 'processed' not 'processed_count'
 
     def test_get_connector_run(self, repo, mock_session, sample_connector_run):
         """Test getting a connector run by ID."""
@@ -272,9 +274,7 @@ class TestSyncJobConnectorRunCRUD:
         assert len(result.error_details) == 1
         assert result.error_details[0]["error"] == "Invalid data"
 
-    def test_append_connector_run_log(
-        self, repo, mock_session, sample_connector_run
-    ):
+    def test_append_connector_run_log(self, repo, mock_session, sample_connector_run):
         """Test appending log entries to a connector run."""
         mock_session.get.return_value = sample_connector_run
 
@@ -287,9 +287,7 @@ class TestSyncJobConnectorRunCRUD:
         assert result.logs[0]["message"] == "Starting sync..."
         assert "timestamp" in result.logs[0]
 
-    def test_complete_connector_run(
-        self, repo, mock_session, sample_connector_run
-    ):
+    def test_complete_connector_run(self, repo, mock_session, sample_connector_run):
         """Test completing a connector run with all final data."""
         mock_session.get.return_value = sample_connector_run
 
@@ -415,7 +413,7 @@ class TestHeartbeatAndCleanup:
             started_at=datetime.now(timezone.utc) - timedelta(hours=1),
             last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=10),
         )
-        
+
         # Create a stale connector run
         stale_run = SyncJobConnectorRun(
             id=1,
@@ -427,10 +425,10 @@ class TestHeartbeatAndCleanup:
         # Mock the queries
         mock_exec_jobs = MagicMock()
         mock_exec_jobs.all.return_value = [stale_job]
-        
+
         mock_exec_runs = MagicMock()
         mock_exec_runs.all.return_value = [stale_run]
-        
+
         # Return different results for the two exec calls
         mock_session.exec.side_effect = [mock_exec_jobs, mock_exec_runs]
 
@@ -455,10 +453,10 @@ class TestHeartbeatAndCleanup:
 
         mock_exec_jobs = MagicMock()
         mock_exec_jobs.all.return_value = [stale_job]
-        
+
         mock_exec_runs = MagicMock()
         mock_exec_runs.all.return_value = []
-        
+
         mock_session.exec.side_effect = [mock_exec_jobs, mock_exec_runs]
 
         result = repo.cleanup_orphaned_jobs(stale_minutes=5)
@@ -476,7 +474,7 @@ class TestHeartbeatAndCleanup:
             status=SyncJobStatus.RUNNING,
             last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=10),
         )
-        
+
         # One running, one queued connector run
         running_run = SyncJobConnectorRun(
             id=1, job_id=3, connector_id=10, status=SyncJobConnectorStatus.RUNNING
@@ -487,10 +485,10 @@ class TestHeartbeatAndCleanup:
 
         mock_exec_jobs = MagicMock()
         mock_exec_jobs.all.return_value = [stale_job]
-        
+
         mock_exec_runs = MagicMock()
         mock_exec_runs.all.return_value = [running_run, queued_run]
-        
+
         mock_session.exec.side_effect = [mock_exec_jobs, mock_exec_runs]
 
         result = repo.cleanup_orphaned_jobs(stale_minutes=5)
