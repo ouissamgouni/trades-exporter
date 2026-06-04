@@ -15,8 +15,10 @@ WALLET = "0x2222222222222222222222222222222222222222"
 
 def _make_connector(wallet=WALLET, **extra_config):
     config = {
-        "clob_api_key": "test-key", "clob_api_secret": "test-secret",
-        "clob_passphrase": "test-pass", "signer_address": "0xTEST_SIGNER",
+        "clob_api_key": "test-key",
+        "clob_api_secret": "test-secret",
+        "clob_passphrase": "test-pass",
+        "signer_address": "0xTEST_SIGNER",
         **extra_config,
     }
     return ConnectorPolymarket(
@@ -26,28 +28,51 @@ def _make_connector(wallet=WALLET, **extra_config):
 
 def _trade_buy(usdc=10, shares=100, price=0.10, condition_id="0xabc", tx_hash="0x111"):
     return {
-        "type": "TRADE", "side": "BUY", "usdcSize": usdc, "size": shares,
-        "price": price, "transactionHash": tx_hash, "conditionId": condition_id,
-        "timestamp": 1762301363, "title": "Will BTC hit 200k?", "outcome": "Yes",
-        "outcomeIndex": 0, "slug": "will-btc-hit-200k", "eventSlug": "btc-200k",
+        "type": "TRADE",
+        "side": "BUY",
+        "usdcSize": usdc,
+        "size": shares,
+        "price": price,
+        "transactionHash": tx_hash,
+        "conditionId": condition_id,
+        "timestamp": 1762301363,
+        "title": "Will BTC hit 200k?",
+        "outcome": "Yes",
+        "outcomeIndex": 0,
+        "slug": "will-btc-hit-200k",
+        "eventSlug": "btc-200k",
         "asset": "12345",
     }
 
 
 def _trade_sell(usdc=15, shares=100, price=0.15, condition_id="0xdef", tx_hash="0x222"):
-    item = _trade_buy(usdc=usdc, shares=shares, price=price, condition_id=condition_id, tx_hash=tx_hash)
+    item = _trade_buy(
+        usdc=usdc,
+        shares=shares,
+        price=price,
+        condition_id=condition_id,
+        tx_hash=tx_hash,
+    )
     item["side"] = "SELL"
     return item
 
 
 def _redeem(usdc=50, shares=50, condition_id="0xghi", tx_hash="0x333"):
     return {
-        "type": "REDEEM", "side": "", "usdcSize": usdc, "size": shares,
-        "price": 0, "transactionHash": tx_hash, "conditionId": condition_id,
-        "timestamp": 1772452383, "title": "Will Israel strike Gaza on November 8?",
-        "outcome": "", "outcomeIndex": 999,
+        "type": "REDEEM",
+        "side": "",
+        "usdcSize": usdc,
+        "size": shares,
+        "price": 0,
+        "transactionHash": tx_hash,
+        "conditionId": condition_id,
+        "timestamp": 1772452383,
+        "title": "Will Israel strike Gaza on November 8?",
+        "outcome": "",
+        "outcomeIndex": 999,
         "slug": "will-israel-strike-gaza-on-november-8",
-        "eventSlug": "will-israel-strike-gaza-on-379", "asset": "",
+        "eventSlug": "will-israel-strike-gaza-on-379",
+        "asset": "",
     }
 
 
@@ -136,10 +161,14 @@ class TestNormalization:
         c._condition_outcome_map = {"0xghi": "Yes"}
         norm = c.raw_to_normalized(_redeem())
         assert "Yes" in norm.source_asset_symbol
-        assert norm.source_asset_symbol == "PM:will-israel-strike-gaza-on-november-8-Yes"
+        assert (
+            norm.source_asset_symbol == "PM:will-israel-strike-gaza-on-november-8-Yes"
+        )
 
     def test_source_transaction_id_includes_condition(self):
-        norm = _make_connector().raw_to_normalized(_trade_buy(tx_hash="0xAAA", condition_id="0xBBB"))
+        norm = _make_connector().raw_to_normalized(
+            _trade_buy(tx_hash="0xAAA", condition_id="0xBBB")
+        )
         assert norm.source_transaction_id == "0xAAA_0xBBB"
 
     def test_same_tx_different_conditions_unique(self):
@@ -174,7 +203,9 @@ class TestNormalization:
         synthetic["side"] = "CLOSE"
         synthetic["_synthetic"] = True
         assert c.raw_to_normalized(synthetic).transaction_type == "trade"
-        assert c.raw_to_normalized(synthetic).source_transaction_type == "synthetic-close"
+        assert (
+            c.raw_to_normalized(synthetic).source_transaction_type == "synthetic-close"
+        )
 
     def test_redeem_transaction_type_is_memo(self):
         """REDEEM produces transaction_type='memo' — audit-only, no PnL."""
@@ -188,8 +219,15 @@ class TestNormalization:
 class TestSyntheticCloses:
     """Losing positions with no REDEEM get synthetic SELL at price=0 (via Gamma resolution)."""
 
-    def _setup_gamma(self, connector, condition_id, is_winner, outcome="Yes",
-                     slug="will-btc-hit-200k", closed_time="2025-11-08T00:00:00Z"):
+    def _setup_gamma(
+        self,
+        connector,
+        condition_id,
+        is_winner,
+        outcome="Yes",
+        slug="will-btc-hit-200k",
+        closed_time="2025-11-08T00:00:00Z",
+    ):
         """Set up Gamma cache for a resolved market."""
         if is_winner:
             outcome_prices = '["1","0"]' if outcome == "Yes" else '["0","1"]'
@@ -214,6 +252,7 @@ class TestSyntheticCloses:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, "0xabc", is_winner=False)
+
         mock_clob.return_value = trades
         mock_gamma.side_effect = gamma_side_effect
 
@@ -236,6 +275,7 @@ class TestSyntheticCloses:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, "0xabc", is_winner=True)
+
         mock_clob.return_value = trades
         mock_gamma.side_effect = gamma_side_effect
 
@@ -279,6 +319,7 @@ class TestSyntheticCloses:
                 "slug": "will-btc-hit-200k",
                 "condition_id": "0xabc",
             }
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -287,27 +328,33 @@ class TestSyntheticCloses:
 
     @patch.object(ConnectorPolymarket, "_fetch_gamma_markets")
     @patch.object(ConnectorPolymarket, "_fetch_clob_trades")
-    def test_synthetic_timestamp_from_gamma_closed_time(self, mock_clob, mock_gamma):
-        """Synthetic close timestamp = Gamma closedTime when available."""
-        from datetime import datetime, timezone as tz
-        mock_clob.return_value = [_trade_buy(condition_id="0xabc")]  # timestamp=1762301363
+    def test_synthetic_timestamp_from_latest_activity(self, mock_clob, mock_gamma):
+        """Synthetic close timestamp = latest activity + 1 when available."""
+        mock_clob.return_value = [
+            _trade_buy(condition_id="0xabc")
+        ]  # timestamp=1762301363
 
         def gamma_side_effect(condition_ids):
-            self._setup_gamma(c, "0xabc", is_winner=False,
-                              closed_time="2025-11-08T00:00:00Z")
+            self._setup_gamma(
+                c, "0xabc", is_winner=False, closed_time="2025-11-08T00:00:00Z"
+            )
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
         raws = list(c.yield_raws())
         synthetic = raws[1]
-        expected_ts = int(datetime(2025, 11, 8, tzinfo=tz.utc).timestamp())
-        assert synthetic["timestamp"] == expected_ts
+        assert synthetic["timestamp"] == 1762301363 + 1
 
     @patch.object(ConnectorPolymarket, "_fetch_gamma_markets")
     @patch.object(ConnectorPolymarket, "_fetch_clob_trades")
-    def test_synthetic_timestamp_falls_back_to_activity(self, mock_clob, mock_gamma):
-        """If Gamma closedTime is missing, fall back to latest activity + 1."""
-        mock_clob.return_value = [_trade_buy(condition_id="0xother")]
+    def test_synthetic_timestamp_falls_back_to_closed_time(self, mock_clob, mock_gamma):
+        """If activity timestamp is missing, fall back to Gamma closedTime."""
+        from datetime import datetime, timezone as tz
+
+        trade = _trade_buy(condition_id="0xother")
+        trade["timestamp"] = None
+        mock_clob.return_value = [trade]
 
         def gamma_side_effect(condition_ids):
             c._gamma_cache["0xother"] = {
@@ -316,17 +363,18 @@ class TestSyntheticCloses:
                 "outcomes": '["Yes","No"]',
                 "slug": "will-btc-hit-200k",
                 "question": "Will BTC hit 200k?",
-                "closedTime": "",  # No closedTime
+                "closedTime": "2025-11-08T00:00:00Z",
                 "condition_id": "0xother",
             }
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
         raws = list(c.yield_raws())
         synthetics = [r for r in raws if r.get("_synthetic")]
         assert len(synthetics) == 1
-        # Fallback: latest activity timestamp (1762301363) + 1
-        assert synthetics[0]["timestamp"] == 1762301363 + 1
+        expected_ts = int(datetime(2025, 11, 8, tzinfo=tz.utc).timestamp())
+        assert synthetics[0]["timestamp"] == expected_ts
 
 
 # ── Normalization Flow ─────────────────────────────────────────────
@@ -335,16 +383,26 @@ class TestSyntheticCloses:
 class TestNormalizationFlow:
     """End-to-end: yield_raws → raw_to_normalized produces correct NTs."""
 
-    def _setup_gamma(self, connector, condition_id, is_winner, outcome="Yes",
-                     slug="will-btc-hit-200k", closed_time="2025-11-08T00:00:00Z"):
+    def _setup_gamma(
+        self,
+        connector,
+        condition_id,
+        is_winner,
+        outcome="Yes",
+        slug="will-btc-hit-200k",
+        closed_time="2025-11-08T00:00:00Z",
+    ):
         if is_winner:
             outcome_prices = '["1","0"]' if outcome == "Yes" else '["0","1"]'
         else:
             outcome_prices = '["0","1"]' if outcome == "Yes" else '["1","0"]'
         connector._gamma_cache[condition_id] = {
-            "closed": True, "outcomePrices": outcome_prices,
-            "outcomes": '["Yes","No"]', "slug": slug,
-            "question": f"Market {slug}", "closedTime": closed_time,
+            "closed": True,
+            "outcomePrices": outcome_prices,
+            "outcomes": '["Yes","No"]',
+            "slug": slug,
+            "question": f"Market {slug}",
+            "closedTime": closed_time,
             "condition_id": condition_id,
         }
 
@@ -355,11 +413,20 @@ class TestNormalizationFlow:
         mock_clob.return_value = [
             _trade_buy(usdc=60, shares=100, price=0.60, condition_id="0xabc"),
             {
-                "type": "REDEEM", "side": "", "usdcSize": 100, "size": 100,
-                "price": 0, "transactionHash": "0x333", "conditionId": "0xabc",
-                "timestamp": 1772452383, "title": "Will BTC hit 200k?",
-                "outcome": "", "outcomeIndex": 999,
-                "slug": "will-btc-hit-200k", "eventSlug": "btc-200k", "asset": "",
+                "type": "REDEEM",
+                "side": "",
+                "usdcSize": 100,
+                "size": 100,
+                "price": 0,
+                "transactionHash": "0x333",
+                "conditionId": "0xabc",
+                "timestamp": 1772452383,
+                "title": "Will BTC hit 200k?",
+                "outcome": "",
+                "outcomeIndex": 999,
+                "slug": "will-btc-hit-200k",
+                "eventSlug": "btc-200k",
+                "asset": "",
             },
         ]
         mock_gamma.return_value = None
@@ -388,6 +455,37 @@ class TestNormalizationFlow:
 
     @patch.object(ConnectorPolymarket, "_fetch_gamma_markets")
     @patch.object(ConnectorPolymarket, "_fetch_clob_trades")
+    def test_redeem_before_buy_keeps_close_on_outcome_asset(
+        self, mock_clob, mock_gamma
+    ):
+        """CLOB can return newest first; REDEEM close must still target the bought outcome asset."""
+        mock_clob.return_value = [
+            _make_redeem_item(
+                100,
+                100,
+                "0xabc",
+                "0xredeem",
+                "will-btc-hit-200k",
+                ts=1772452383,
+            ),
+            _trade_buy(usdc=60, shares=100, price=0.60, condition_id="0xabc"),
+        ]
+        mock_gamma.return_value = None
+
+        c = _make_connector()
+        raws = list(c.yield_raws())
+        nts = [c.raw_to_normalized(r) for r in raws]
+
+        assert len(nts) == 3
+        assert nts[0].source_transaction_type == "synthetic-close"
+        assert nts[0].source_asset_symbol == "PM:will-btc-hit-200k-Yes"
+        assert nts[1].source_transaction_type == "redeem"
+        assert nts[1].source_asset_symbol == "PM:will-btc-hit-200k-Yes"
+        assert nts[2].source_transaction_type == "buy"
+        assert nts[2].source_asset_symbol == "PM:will-btc-hit-200k-Yes"
+
+    @patch.object(ConnectorPolymarket, "_fetch_gamma_markets")
+    @patch.object(ConnectorPolymarket, "_fetch_clob_trades")
     def test_buy_then_synthetic_loss_flow(self, mock_clob, mock_gamma):
         """BUY 100 @ 0.50 → synthetic close at price=0 (loss via Gamma)."""
         mock_clob.return_value = [
@@ -396,6 +494,7 @@ class TestNormalizationFlow:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, "0xdef", is_winner=False)
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -416,11 +515,15 @@ class TestNormalizationFlow:
     @patch.object(ConnectorPolymarket, "_fetch_clob_trades")
     def test_multiple_markets_independent(self, mock_clob, mock_gamma):
         """Two markets: different asset symbols, synthetic only for loser."""
-        buy_a = _trade_buy(usdc=60, shares=100, price=0.60, condition_id="0xA", tx_hash="0x1")
+        buy_a = _trade_buy(
+            usdc=60, shares=100, price=0.60, condition_id="0xA", tx_hash="0x1"
+        )
         buy_a["slug"] = "market-a"
         buy_a["outcome"] = "Yes"
 
-        buy_b = _trade_buy(usdc=50, shares=100, price=0.50, condition_id="0xB", tx_hash="0x2")
+        buy_b = _trade_buy(
+            usdc=50, shares=100, price=0.50, condition_id="0xB", tx_hash="0x2"
+        )
         buy_b["slug"] = "market-b"
         buy_b["outcome"] = "No"
 
@@ -429,11 +532,15 @@ class TestNormalizationFlow:
         def gamma_side_effect(condition_ids):
             # Only market-b lost (No outcome lost when Yes wins)
             c._gamma_cache["0xB"] = {
-                "closed": True, "outcomePrices": '["1","0"]',
-                "outcomes": '["Yes","No"]', "slug": "market-b",
-                "question": "Market B", "closedTime": "2025-12-01T00:00:00Z",
+                "closed": True,
+                "outcomePrices": '["1","0"]',
+                "outcomes": '["Yes","No"]',
+                "slug": "market-b",
+                "question": "Market B",
+                "closedTime": "2025-12-01T00:00:00Z",
                 "condition_id": "0xB",
             }
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -451,30 +558,59 @@ class TestNormalizationFlow:
 # ── Spec Test Matrix (Cases 3-7) ────────────────────────────────────
 
 
-def _make_trade(side, usdc, shares, price, condition_id, tx_hash, slug, outcome, ts=1762301363):
+def _make_trade(
+    side, usdc, shares, price, condition_id, tx_hash, slug, outcome, ts=1762301363
+):
     """Helper to build trade items for spec test cases."""
     return {
-        "type": "TRADE", "side": side, "usdcSize": usdc, "size": shares,
-        "price": price, "transactionHash": tx_hash, "conditionId": condition_id,
-        "timestamp": ts, "title": f"Market {slug}", "outcome": outcome,
-        "outcomeIndex": 0, "slug": slug, "eventSlug": f"{slug}-event", "asset": "",
+        "type": "TRADE",
+        "side": side,
+        "usdcSize": usdc,
+        "size": shares,
+        "price": price,
+        "transactionHash": tx_hash,
+        "conditionId": condition_id,
+        "timestamp": ts,
+        "title": f"Market {slug}",
+        "outcome": outcome,
+        "outcomeIndex": 0,
+        "slug": slug,
+        "eventSlug": f"{slug}-event",
+        "asset": "",
     }
 
 
 def _make_redeem_item(usdc, shares, condition_id, tx_hash, slug, ts):
     return {
-        "type": "REDEEM", "side": "", "usdcSize": usdc, "size": shares,
-        "price": 0, "transactionHash": tx_hash, "conditionId": condition_id,
-        "timestamp": ts, "title": f"Market {slug}", "outcome": "",
-        "outcomeIndex": 999, "slug": slug, "eventSlug": f"{slug}-event", "asset": "",
+        "type": "REDEEM",
+        "side": "",
+        "usdcSize": usdc,
+        "size": shares,
+        "price": 0,
+        "transactionHash": tx_hash,
+        "conditionId": condition_id,
+        "timestamp": ts,
+        "title": f"Market {slug}",
+        "outcome": "",
+        "outcomeIndex": 999,
+        "slug": slug,
+        "eventSlug": f"{slug}-event",
+        "asset": "",
     }
 
 
 class TestSpecCases:
     """Spec test matrix: Cases 3-7 covering partial sell, full exit, and re-entry."""
 
-    def _setup_gamma(self, connector, condition_id, is_winner, outcome="Yes",
-                     slug=None, closed_time="2025-11-08T00:00:00Z"):
+    def _setup_gamma(
+        self,
+        connector,
+        condition_id,
+        is_winner,
+        outcome="Yes",
+        slug=None,
+        closed_time="2025-11-08T00:00:00Z",
+    ):
         if slug is None:
             slug = condition_id.replace("0x", "")
         if is_winner:
@@ -482,9 +618,12 @@ class TestSpecCases:
         else:
             outcome_prices = '["0","1"]' if outcome == "Yes" else '["1","0"]'
         connector._gamma_cache[condition_id] = {
-            "closed": True, "outcomePrices": outcome_prices,
-            "outcomes": '["Yes","No"]', "slug": slug,
-            "question": f"Market {slug}", "closedTime": closed_time,
+            "closed": True,
+            "outcomePrices": outcome_prices,
+            "outcomes": '["Yes","No"]',
+            "slug": slug,
+            "question": f"Market {slug}",
+            "closedTime": closed_time,
             "condition_id": condition_id,
         }
 
@@ -500,6 +639,7 @@ class TestSpecCases:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, cid, is_winner=True, slug="case3")
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -530,6 +670,7 @@ class TestSpecCases:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, cid, is_winner=False, slug="case4")
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -554,6 +695,7 @@ class TestSpecCases:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, cid, is_winner=True, slug="case5")
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -582,6 +724,7 @@ class TestSpecCases:
 
         def gamma_side_effect(condition_ids):
             self._setup_gamma(c, cid, is_winner=True, slug="case6")
+
         mock_gamma.side_effect = gamma_side_effect
 
         c = _make_connector()
@@ -630,7 +773,6 @@ class TestSpecCases:
 
 
 class TestConstructor:
-
     def test_missing_wallet_raises(self):
         with pytest.raises(ValueError, match="Missing wallet address"):
             ConnectorPolymarket(wallet_address="", config={})
@@ -640,7 +782,6 @@ class TestConstructor:
 
 
 class TestBalance:
-
     def test_balance_not_supported(self):
         """Balance is not available via CLOB/Gamma APIs."""
         c = _make_connector()
@@ -652,11 +793,15 @@ class TestBalance:
 
 
 class TestHub:
-
     def test_hub_creates_children(self):
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
+
         hub = ConnectorPolymarketHub(
-            wallet_address=WALLET, account_id=1, connector_id=1,
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
             config={"test_mode": True},
         )
         assert len(hub.child_connectors) == 2
@@ -665,22 +810,32 @@ class TestHub:
         assert "polymarket polygon transfers" in names
 
     def test_hub_missing_wallet_raises(self):
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
+
         with pytest.raises(ValueError, match="Missing wallet address"):
             ConnectorPolymarketHub(wallet_address="", config={"test_mode": True})
 
     def test_hub_propagates_test_file_path_to_activity_child(self):
         """Hub must pass test_file_path only to the activity child (not polygon)."""
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
+
         hub = ConnectorPolymarketHub(
-            wallet_address=WALLET, account_id=1, connector_id=1,
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
             config={"test_mode": True, "test_file_path": "data/input/fixtures/42.json"},
         )
-        activity_child = hub.child_connectors[0][1]   # polymarket activity
-        polygon_child = hub.child_connectors[1][1]     # polymarket polygon transfers
+        activity_child = hub.child_connectors[0][1]  # polymarket activity
+        polygon_child = hub.child_connectors[1][1]  # polymarket polygon transfers
 
         assert activity_child.config.get("test_mode") is True
-        assert activity_child.config.get("test_file_path") == "data/input/fixtures/42.json"
+        assert (
+            activity_child.config.get("test_file_path") == "data/input/fixtures/42.json"
+        )
         assert polygon_child.config.get("test_mode") is True
         assert polygon_child.config.get("test_file_path") is None
 
@@ -688,24 +843,33 @@ class TestHub:
     def test_hub_balance_includes_wallet_cash(self, mock_registry):
         """Hub balance should include on-chain USDC cash from Blockscout."""
         from unittest.mock import MagicMock
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
 
         mock_chain = MagicMock()
         mock_chain.base_url = "https://polygon.blockscout.com/api/v2"
         mock_registry.return_value.get_chain_config.return_value = mock_chain
 
         hub = ConnectorPolymarketHub(
-            wallet_address=WALLET, account_id=1, connector_id=1,
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
             config={"test_mode": True},
         )
 
         # Mock Polymarket child: no positions
-        with patch.object(type(hub.child_connectors[0][1]), "get_balance", return_value=[]):
+        with patch.object(
+            type(hub.child_connectors[0][1]), "get_balance", return_value=[]
+        ):
             # Mock Blockscout HTTP call: 150.49 USDC on-chain
             mock_resp = MagicMock()
             mock_resp.json.return_value = [
                 {"value": "150490000", "token": {"symbol": "USDC.e", "decimals": "6"}},
-                {"value": "1000000000000000", "token": {"symbol": "MATIC", "decimals": "18"}},
+                {
+                    "value": "1000000000000000",
+                    "token": {"symbol": "MATIC", "decimals": "18"},
+                },
             ]
             mock_resp.raise_for_status = MagicMock()
 
@@ -723,19 +887,25 @@ class TestHub:
         """Hub balance should combine position value and wallet USDC cash."""
         from unittest.mock import MagicMock
         from backend.connectors.base.base_connector import BalanceEntry
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
 
         mock_chain = MagicMock()
         mock_chain.base_url = "https://polygon.blockscout.com/api/v2"
         mock_registry.return_value.get_chain_config.return_value = mock_chain
 
         hub = ConnectorPolymarketHub(
-            wallet_address=WALLET, account_id=1, connector_id=1,
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
             config={"test_mode": True},
         )
 
         # Polymarket child now returns empty (balance not supported via CLOB/Gamma)
-        with patch.object(type(hub.child_connectors[0][1]), "get_balance", return_value=[]):
+        with patch.object(
+            type(hub.child_connectors[0][1]), "get_balance", return_value=[]
+        ):
             mock_resp = MagicMock()
             mock_resp.json.return_value = [
                 {"value": "100000000", "token": {"symbol": "USDC", "decimals": "6"}},
@@ -760,42 +930,82 @@ class TestTestMode:
 
     FIXTURE_DATA = [
         {
-            "type": "TRADE", "side": "BUY", "usdcSize": 60, "size": 100,
-            "price": 0.60, "transactionHash": "0xbuy1", "conditionId": "0xcond_a",
-            "timestamp": 1728993600, "title": "Rain Friday?", "outcome": "Yes",
-            "outcomeIndex": 0, "slug": "rain-friday", "eventSlug": "rain-friday-event",
+            "type": "TRADE",
+            "side": "BUY",
+            "usdcSize": 60,
+            "size": 100,
+            "price": 0.60,
+            "transactionHash": "0xbuy1",
+            "conditionId": "0xcond_a",
+            "timestamp": 1728993600,
+            "title": "Rain Friday?",
+            "outcome": "Yes",
+            "outcomeIndex": 0,
+            "slug": "rain-friday",
+            "eventSlug": "rain-friday-event",
             "asset": "tok_a",
         },
         {
-            "type": "TRADE", "side": "BUY", "usdcSize": 100, "size": 200,
-            "price": 0.50, "transactionHash": "0xbuy2", "conditionId": "0xcond_b",
-            "timestamp": 1728993600, "title": "ETH 5k?", "outcome": "Yes",
-            "outcomeIndex": 0, "slug": "eth-5k", "eventSlug": "eth-5k-event",
+            "type": "TRADE",
+            "side": "BUY",
+            "usdcSize": 100,
+            "size": 200,
+            "price": 0.50,
+            "transactionHash": "0xbuy2",
+            "conditionId": "0xcond_b",
+            "timestamp": 1728993600,
+            "title": "ETH 5k?",
+            "outcome": "Yes",
+            "outcomeIndex": 0,
+            "slug": "eth-5k",
+            "eventSlug": "eth-5k-event",
             "asset": "tok_b",
         },
         {
-            "type": "REDEEM", "side": "", "usdcSize": 100, "size": 100,
-            "price": 0, "transactionHash": "0xredeem1", "conditionId": "0xcond_a",
-            "timestamp": 1731024000, "title": "Rain Friday?", "outcome": "",
-            "outcomeIndex": 999, "slug": "rain-friday", "eventSlug": "rain-friday-event",
+            "type": "REDEEM",
+            "side": "",
+            "usdcSize": 100,
+            "size": 100,
+            "price": 0,
+            "transactionHash": "0xredeem1",
+            "conditionId": "0xcond_a",
+            "timestamp": 1731024000,
+            "title": "Rain Friday?",
+            "outcome": "",
+            "outcomeIndex": 999,
+            "slug": "rain-friday",
+            "eventSlug": "rain-friday-event",
             "asset": "",
         },
         {
-            "type": "SYNTHETIC_CLOSE", "side": "CLOSE", "usdcSize": 0, "size": 200,
-            "price": 0, "transactionHash": "synthetic_0xcond_b", "conditionId": "0xcond_b",
-            "timestamp": 1731024000, "title": "ETH 5k?", "outcome": "Yes",
-            "outcomeIndex": 0, "slug": "eth-5k", "eventSlug": "eth-5k-event",
-            "asset": "", "_synthetic": True,
+            "type": "SYNTHETIC_CLOSE",
+            "side": "CLOSE",
+            "usdcSize": 0,
+            "size": 200,
+            "price": 0,
+            "transactionHash": "synthetic_0xcond_b",
+            "conditionId": "0xcond_b",
+            "timestamp": 1731024000,
+            "title": "ETH 5k?",
+            "outcome": "Yes",
+            "outcomeIndex": 0,
+            "slug": "eth-5k",
+            "eventSlug": "eth-5k-event",
+            "asset": "",
+            "_synthetic": True,
         },
     ]
 
     def _make_test_connector(self, tmp_path):
         """Create connector in test mode with fixture written to tmp_path."""
         import json
+
         fixture_file = tmp_path / "polymarket.json"
         fixture_file.write_text(json.dumps(self.FIXTURE_DATA))
         return ConnectorPolymarket(
-            wallet_address=WALLET, account_id=1, connector_id=1,
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
             config={"test_mode": True, "test_file_path": str(fixture_file)},
         )
 
@@ -809,8 +1019,10 @@ class TestTestMode:
     def test_no_api_calls_in_test_mode(self, tmp_path):
         """Ensure CLOB/Gamma APIs are never called when test_mode=True."""
         c = self._make_test_connector(tmp_path)
-        with patch.object(c, "_clob_request") as mock_clob, \
-             patch.object(c, "_gamma_request") as mock_gamma:
+        with (
+            patch.object(c, "_clob_request") as mock_clob,
+            patch.object(c, "_gamma_request") as mock_gamma,
+        ):
             list(c.yield_raws())
             mock_clob.assert_not_called()
             mock_gamma.assert_not_called()
@@ -892,8 +1104,13 @@ class TestTestMode:
     def test_missing_fixture_yields_nothing(self, tmp_path):
         """If fixture file doesn't exist, yield_raws returns empty."""
         c = ConnectorPolymarket(
-            wallet_address=WALLET, account_id=1, connector_id=1,
-            config={"test_mode": True, "test_file_path": str(tmp_path / "missing.json")},
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
+            config={
+                "test_mode": True,
+                "test_file_path": str(tmp_path / "missing.json"),
+            },
         )
         raws = list(c.yield_raws())
         assert raws == []
@@ -909,6 +1126,7 @@ class TestClobHmac:
         """Same inputs produce same signature."""
         from backend.connectors.onchain.clob_hmac import build_hmac_signature
         import base64
+
         secret = base64.urlsafe_b64encode(b"testsecret").decode()
         sig1 = build_hmac_signature(secret, "1000", "GET", "/data/trades")
         sig2 = build_hmac_signature(secret, "1000", "GET", "/data/trades")
@@ -918,6 +1136,7 @@ class TestClobHmac:
         """Different timestamps produce different signatures."""
         from backend.connectors.onchain.clob_hmac import build_hmac_signature
         import base64
+
         secret = base64.urlsafe_b64encode(b"testsecret").decode()
         sig1 = build_hmac_signature(secret, "1000", "GET", "/data/trades")
         sig2 = build_hmac_signature(secret, "2000", "GET", "/data/trades")
@@ -926,6 +1145,7 @@ class TestClobHmac:
     def test_hmac_signature_changes_with_path(self):
         from backend.connectors.onchain.clob_hmac import build_hmac_signature
         import base64
+
         secret = base64.urlsafe_b64encode(b"testsecret").decode()
         sig1 = build_hmac_signature(secret, "1000", "GET", "/data/trades")
         sig2 = build_hmac_signature(secret, "1000", "GET", "/markets")
@@ -935,10 +1155,15 @@ class TestClobHmac:
         """Headers dict contains all required POLY_* keys."""
         from backend.connectors.onchain.clob_hmac import build_clob_headers
         import base64
+
         secret = base64.urlsafe_b64encode(b"testsecret").decode()
         headers = build_clob_headers(
-            api_key="key123", api_secret=secret, passphrase="pass456",
-            address="0xABC", method="GET", path="/data/trades",
+            api_key="key123",
+            api_secret=secret,
+            passphrase="pass456",
+            address="0xABC",
+            method="GET",
+            path="/data/trades",
         )
         assert headers["POLY_API_KEY"] == "key123"
         assert headers["POLY_PASSPHRASE"] == "pass456"
@@ -979,9 +1204,13 @@ class TestClobTradeConversion:
     def test_clob_trade_to_raw_sell(self):
         c = _make_connector()
         clob_trade = {
-            "id": "trade456", "market": "0xcond_def",
-            "side": "sell", "size": "100", "price": "0.80",
-            "match_time": "1748779200", "asset_id": "token_no_def",
+            "id": "trade456",
+            "market": "0xcond_def",
+            "side": "sell",
+            "size": "100",
+            "price": "0.80",
+            "match_time": "1748779200",
+            "asset_id": "token_no_def",
         }
         raw = c._clob_trade_to_raw(clob_trade)
         assert raw["side"] == "SELL"
@@ -1031,8 +1260,14 @@ class TestGammaTokenMapping:
                 "slug": "rain-friday",
             }
         }
-        item = {"asset": "tok_abc", "conditionId": "0xcond",
-                "slug": "", "outcome": "", "title": "", "eventSlug": ""}
+        item = {
+            "asset": "tok_abc",
+            "conditionId": "0xcond",
+            "slug": "",
+            "outcome": "",
+            "title": "",
+            "eventSlug": "",
+        }
         c._enrich_with_gamma(item)
         assert item["slug"] == "rain-friday"
         assert item["outcome"] == "Yes"
@@ -1041,8 +1276,14 @@ class TestGammaTokenMapping:
     def test_enrich_without_gamma_data_preserves_existing(self):
         """If no Gamma data, existing slug/outcome untouched."""
         c = _make_connector()
-        item = {"asset": "unknown", "conditionId": "missing",
-                "slug": "original", "outcome": "No", "title": "Orig", "eventSlug": "e"}
+        item = {
+            "asset": "unknown",
+            "conditionId": "missing",
+            "slug": "original",
+            "outcome": "No",
+            "title": "Orig",
+            "eventSlug": "e",
+        }
         c._enrich_with_gamma(item)
         assert item["slug"] == "original"
         assert item["outcome"] == "No"
@@ -1056,9 +1297,15 @@ class TestClobCredentials:
 
     def test_credentials_from_config(self):
         c = ConnectorPolymarket(
-            wallet_address=WALLET, account_id=1, connector_id=1,
-            config={"clob_api_key": "k1", "clob_api_secret": "s1", "clob_passphrase": "p1",
-                    "signer_address": "0xSIGNER"},
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
+            config={
+                "clob_api_key": "k1",
+                "clob_api_secret": "s1",
+                "clob_passphrase": "p1",
+                "signer_address": "0xSIGNER",
+            },
         )
         assert c.clob_api_key == "k1"
         assert c.clob_api_secret == "s1"
@@ -1067,14 +1314,20 @@ class TestClobCredentials:
 
     def test_credentials_default_empty(self):
         """Without config, falls back to env vars (empty if unset)."""
-        with patch.dict(os.environ, {
-            "POLYMARKET_CLOB_API_KEY": "",
-            "POLYMARKET_CLOB_SECRET": "",
-            "POLYMARKET_CLOB_PASSPHRASE": "",
-            "POLYMARKET_SIGNER_ADDRESS": "",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "POLYMARKET_CLOB_API_KEY": "",
+                "POLYMARKET_CLOB_SECRET": "",
+                "POLYMARKET_CLOB_PASSPHRASE": "",
+                "POLYMARKET_SIGNER_ADDRESS": "",
+            },
+        ):
             c = ConnectorPolymarket(
-                wallet_address=WALLET, account_id=1, connector_id=1, config={},
+                wallet_address=WALLET,
+                account_id=1,
+                connector_id=1,
+                config={},
             )
             assert c.clob_api_key == ""
             assert c.clob_api_secret == ""
@@ -1082,11 +1335,21 @@ class TestClobCredentials:
             assert c.signer_address == ""
 
     def test_hub_propagates_clob_creds(self):
-        from backend.connectors.onchain.connector_polymarket_hub import ConnectorPolymarketHub
+        from backend.connectors.onchain.connector_polymarket_hub import (
+            ConnectorPolymarketHub,
+        )
+
         hub = ConnectorPolymarketHub(
-            wallet_address=WALLET, account_id=1, connector_id=1,
-            config={"test_mode": True, "clob_api_key": "hk", "clob_api_secret": "hs",
-                    "clob_passphrase": "hp", "signer_address": "0xHUB_SIGNER"},
+            wallet_address=WALLET,
+            account_id=1,
+            connector_id=1,
+            config={
+                "test_mode": True,
+                "clob_api_key": "hk",
+                "clob_api_secret": "hs",
+                "clob_passphrase": "hp",
+                "signer_address": "0xHUB_SIGNER",
+            },
         )
         activity_child = hub.child_connectors[0][1]
         assert activity_child.clob_api_key == "hk"

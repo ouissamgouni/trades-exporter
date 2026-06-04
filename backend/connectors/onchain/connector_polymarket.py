@@ -80,23 +80,19 @@ class ConnectorPolymarket(BaseConnector):
         self.max_retries = web3_config.get("max_retries", 7)
 
         # CLOB API credentials (from connector config or env vars)
-        self.clob_api_key = (
-            (config or {}).get("clob_api_key")
-            or os.environ.get("POLYMARKET_CLOB_API_KEY", "")
+        self.clob_api_key = (config or {}).get("clob_api_key") or os.environ.get(
+            "POLYMARKET_CLOB_API_KEY", ""
         )
-        self.clob_api_secret = (
-            (config or {}).get("clob_api_secret")
-            or os.environ.get("POLYMARKET_CLOB_SECRET", "")
+        self.clob_api_secret = (config or {}).get("clob_api_secret") or os.environ.get(
+            "POLYMARKET_CLOB_SECRET", ""
         )
-        self.clob_passphrase = (
-            (config or {}).get("clob_passphrase")
-            or os.environ.get("POLYMARKET_CLOB_PASSPHRASE", "")
+        self.clob_passphrase = (config or {}).get("clob_passphrase") or os.environ.get(
+            "POLYMARKET_CLOB_PASSPHRASE", ""
         )
         # Signer address (Magic Link EOA) — used for POLY_ADDRESS auth header.
         # Different from wallet_address (proxy wallet) used for maker_address queries.
-        self.signer_address = (
-            (config or {}).get("signer_address")
-            or os.environ.get("POLYMARKET_SIGNER_ADDRESS", "")
+        self.signer_address = (config or {}).get("signer_address") or os.environ.get(
+            "POLYMARKET_SIGNER_ADDRESS", ""
         )
 
         # Gamma market cache: conditionId → market data (built during sync)
@@ -147,7 +143,9 @@ class ConnectorPolymarket(BaseConnector):
                         f"CLOB auth failed (HTTP {response.status_code}): {response.text[:200]}"
                     )
                 elif response.status_code >= 400:
-                    log.error(f"⚠️ CLOB HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}")
+                    log.error(
+                        f"⚠️ CLOB HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}"
+                    )
                     delay *= 2
                     continue
 
@@ -194,7 +192,9 @@ class ConnectorPolymarket(BaseConnector):
                     delay *= 2
                     continue
                 elif response.status_code >= 400:
-                    log.error(f"⚠️ Gamma HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}")
+                    log.error(
+                        f"⚠️ Gamma HTTP {response.status_code} (attempt {attempt}): {response.text[:200]}"
+                    )
                     delay *= 2
                     continue
 
@@ -303,14 +303,21 @@ class ConnectorPolymarket(BaseConnector):
         # ------ Live mode: fetch from CLOB + Gamma ------
         try:
             # Validate CLOB credentials before making any requests
-            if not self.clob_api_key or not self.clob_api_secret or not self.clob_passphrase or not self.signer_address:
+            if (
+                not self.clob_api_key
+                or not self.clob_api_secret
+                or not self.clob_passphrase
+                or not self.signer_address
+            ):
                 missing = [
-                    name for name, val in [
+                    name
+                    for name, val in [
                         ("clob_api_key", self.clob_api_key),
                         ("clob_api_secret", self.clob_api_secret),
                         ("clob_passphrase", self.clob_passphrase),
                         ("signer_address", self.signer_address),
-                    ] if not val
+                    ]
+                    if not val
                 ]
                 raise RuntimeError(
                     f"Missing CLOB API credentials: {', '.join(missing)}. "
@@ -339,15 +346,15 @@ class ConnectorPolymarket(BaseConnector):
                 self._fetch_gamma_markets(condition_ids)
                 log.info(f"   Fetched Gamma data for {len(self._gamma_cache)} markets")
 
-            # Phase C: Enrich trades with Gamma data (slug, outcome) and yield
+            # Phase C: Enrich trades with Gamma data (slug, outcome) and build maps
             self._condition_outcome_map: Dict[str, str] = {}
             self._redeemed_conditions: set = set()
             self._condition_latest_timestamp: Dict[str, int] = {}
-            self._condition_net_shares: Dict[str, float] = {}  # Net shares per conditionId
+            self._condition_net_shares: Dict[
+                str, float
+            ] = {}  # Net shares per conditionId
 
-            total_items = 0
             for item in raw_trades:
-                # Enrich with Gamma data
                 self._enrich_with_gamma(item)
 
                 activity_type = item.get("type", "").upper()
@@ -362,22 +369,24 @@ class ConnectorPolymarket(BaseConnector):
                 elif activity_type == "REDEEM" and condition_id:
                     self._redeemed_conditions.add(condition_id)
 
-                # Track net shares per conditionId (BUY adds, SELL subtracts)
                 if condition_id and activity_type == "TRADE":
                     if side == "BUY":
-                        self._condition_net_shares[condition_id] = self._condition_net_shares.get(condition_id, 0) + size
+                        self._condition_net_shares[condition_id] = (
+                            self._condition_net_shares.get(condition_id, 0) + size
+                        )
                     elif side == "SELL":
-                        self._condition_net_shares[condition_id] = self._condition_net_shares.get(condition_id, 0) - size
-
-                if activity_type == "TRADE" and outcome and condition_id:
-                    self._condition_outcome_map[condition_id] = outcome
-                elif activity_type == "REDEEM" and condition_id:
-                    self._redeemed_conditions.add(condition_id)
+                        self._condition_net_shares[condition_id] = (
+                            self._condition_net_shares.get(condition_id, 0) - size
+                        )
 
                 if condition_id and ts and activity_type in ("TRADE", "REDEEM"):
                     prev = self._condition_latest_timestamp.get(condition_id, 0)
                     if ts > prev:
                         self._condition_latest_timestamp[condition_id] = ts
+
+            total_items = 0
+            for item in raw_trades:
+                activity_type = item.get("type", "").upper()
 
                 # Generate resolution synthetic BEFORE yielding REDEEMs
                 if activity_type == "REDEEM":
@@ -399,7 +408,9 @@ class ConnectorPolymarket(BaseConnector):
                 yield synthetic
 
             if synthetic_count:
-                log.info(f"   ✅ Generated {synthetic_count} synthetic closes for resolved positions")
+                log.info(
+                    f"   ✅ Generated {synthetic_count} synthetic closes for resolved positions"
+                )
 
             self.update_progress(
                 operation="Completed",
@@ -521,7 +532,9 @@ class ConnectorPolymarket(BaseConnector):
                 url = f"{CLOB_BASE_URL}/markets/{cid}"
                 resp = requests.get(url, timeout=15)
                 if resp.status_code != 200:
-                    log.debug(f"CLOB market fetch {cid[:16]}... → HTTP {resp.status_code}")
+                    log.debug(
+                        f"CLOB market fetch {cid[:16]}... → HTTP {resp.status_code}"
+                    )
                     continue
                 market = resp.json()
             except Exception as e:
@@ -615,7 +628,9 @@ class ConnectorPolymarket(BaseConnector):
             if not item.get("eventSlug"):
                 item["eventSlug"] = gm.get("event_slug", "") or gm.get("slug", "")
 
-    def _synthetic_from_redeem(self, redeem_item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _synthetic_from_redeem(
+        self, redeem_item: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """
         Generate a SYNTHETIC_CLOSE resolution item from a REDEEM activity.
 
@@ -645,7 +660,11 @@ class ConnectorPolymarket(BaseConnector):
         else:
             # Fallback: use REDEEM timestamp - 1 (ensure synthetic is before REDEEM)
             redeem_ts = redeem_item.get("timestamp")
-            timestamp = (redeem_ts - 1) if redeem_ts else int(datetime.now(timezone.utc).timestamp())
+            timestamp = (
+                (redeem_ts - 1)
+                if redeem_ts
+                else int(datetime.now(timezone.utc).timestamp())
+            )
 
         return {
             "type": "SYNTHETIC_CLOSE",
@@ -672,7 +691,7 @@ class ConnectorPolymarket(BaseConnector):
         For each closed market in _gamma_cache:
         - Determine winner from outcomePrices (e.g. ["1","0"] → index 0 won)
         - Map user's token_ids to outcome index → winner/loser
-        - Generate SYNTHETIC_CLOSE at closedTime timestamp
+        - Generate SYNTHETIC_CLOSE after the latest activity timestamp
         Only generates synthetics for conditionIds NOT already covered by a REDEEM.
         """
         for condition_id, market in self._gamma_cache.items():
@@ -725,22 +744,19 @@ class ConnectorPolymarket(BaseConnector):
 
             is_winner = (user_idx == winning_idx) if winning_idx is not None else False
 
-            # Parse closedTime for timestamp
-            closed_time = market.get("closedTime", "")
-            timestamp = None
-            if closed_time:
-                try:
-                    dt = datetime.fromisoformat(closed_time.replace("Z", "+00:00"))
-                    timestamp = int(dt.timestamp())
-                except (ValueError, TypeError):
-                    pass
-
-            # Fallback: latest activity + 1
-            if timestamp is None:
-                latest_ts = self._condition_latest_timestamp.get(condition_id)
-                if latest_ts:
-                    timestamp = latest_ts + 1
-                else:
+            latest_ts = self._condition_latest_timestamp.get(condition_id)
+            if latest_ts:
+                timestamp = latest_ts + 1
+            else:
+                closed_time = market.get("closedTime", "")
+                timestamp = None
+                if closed_time:
+                    try:
+                        dt = datetime.fromisoformat(closed_time.replace("Z", "+00:00"))
+                        timestamp = int(dt.timestamp())
+                    except (ValueError, TypeError):
+                        pass
+                if timestamp is None:
                     timestamp = int(datetime.now(timezone.utc).timestamp())
 
             slug = market.get("slug", "")
@@ -806,10 +822,14 @@ class ConnectorPolymarket(BaseConnector):
             elif slug:
                 asset_symbol = f"PM:{slug}-{condition_id[:8]}"
             else:
-                asset_symbol = f"PM:{condition_id[:16]}" if condition_id else "PM:unknown"
+                asset_symbol = (
+                    f"PM:{condition_id[:16]}" if condition_id else "PM:unknown"
+                )
 
             # Unique ID: tx_hash + condition_id (same tx can have multiple redemptions)
-            source_transaction_id = f"{tx_hash}_{condition_id}" if condition_id else tx_hash
+            source_transaction_id = (
+                f"{tx_hash}_{condition_id}" if condition_id else tx_hash
+            )
 
             # Parse timestamp
             dt = None
@@ -833,13 +853,17 @@ class ConnectorPolymarket(BaseConnector):
                 direction = "outflow"  # synthetic close for losing position
                 source_transaction_type = "synthetic-close"
             elif activity_type == "REDEEM":
-                direction = "neutral"  # audit-only (PnL handled by resolution synthetic)
+                direction = (
+                    "neutral"  # audit-only (PnL handled by resolution synthetic)
+                )
                 transaction_type = "memo"
                 source_transaction_type = "redeem"
             else:
                 direction = "neutral"
                 transaction_type = "cost"
-                source_transaction_type = activity_type.lower() if activity_type else "unknown"
+                source_transaction_type = (
+                    activity_type.lower() if activity_type else "unknown"
+                )
 
             # Price per share in USDC
             if activity_type == "REDEEM" and shares > 0:
