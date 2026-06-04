@@ -123,6 +123,7 @@ tasks:
       - |
         echo "🧪 Running DB integration tests..."
         TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
           .venv/bin/python -m pytest \
             tests/integration/test_int_data_health_detectors.py \
             tests/integration/test_int_transfer_dismiss.py \
@@ -149,6 +150,7 @@ tasks:
       - |
         echo "🧪 Running ALL integration tests against trades_db_integ..."
         TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
           .venv/bin/python -m pytest tests/integration/ -v -m integration \
             --ignore=tests/integration/cex/test_int_connector_coinbase_deposits_withdrawals.py \
             --timeout=120
@@ -178,11 +180,19 @@ tasks:
   e2e:
     desc: Run end-to-end tests (requires running database)
     dir: "{{.BACKEND_DIR}}"
-    dotenv: ["{{.ROOT_DIR}}/.env", "{{.ROOT_DIR}}/config/dev.env"]
+    dotenv:
+      [
+        "{{.ROOT_DIR}}/config/base.env",
+        "{{.ROOT_DIR}}/config/dev.env",
+        "{{.ROOT_DIR}}/config/secrets.env",
+        "{{.ROOT_DIR}}/config/secrets.dev.env",
+      ]
     cmds:
       - |
         echo "🧪 Running E2E tests..."
-        .venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
+        TEST_DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+        DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/trades_db_integ" \
+          .venv/bin/python -m pytest tests/e2e/ -v -m e2e --timeout=30
 
   # =========================================================================
   # Run a specific chunk by name

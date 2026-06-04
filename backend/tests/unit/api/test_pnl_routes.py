@@ -45,12 +45,12 @@ def mock_session():
     session.commit = MagicMock()
     session.flush = MagicMock()
     session.delete = MagicMock()
-    
+
     mock_exec_result = MagicMock()
     mock_exec_result.all.return_value = []
     mock_exec_result.first.return_value = None
     session.exec = MagicMock(return_value=mock_exec_result)
-    
+
     return session
 
 
@@ -109,7 +109,7 @@ def mock_cost_lot():
     lot.is_zero_cost = False
     lot.is_negative = False
     lot.notes = None
-    
+
     # Mock asset relationship
     lot.asset = MagicMock()
     lot.asset.asset_id = 2
@@ -117,23 +117,23 @@ def mock_cost_lot():
     lot.asset.label = "Bitcoin"
     lot.account = MagicMock()
     lot.account.name = "Binance"
-    
+
     # Mock unit relationship
     lot.unit = MagicMock()
     lot.unit.label = "Buy BTC with EUR"
     lot.unit_id = 1  # Add unit_id for the origin_unit_id mapping
-    
+
     # Mock computed properties
     lot.qty_consumed = Decimal("2")
     lot.remaining_cost_in_base = Decimal("800")
-    
+
     # Cost provenance fields
     lot.cost_source = "fmv"
     lot.cost_fmv_price = Decimal("50000.00")
     lot.cost_fmv_source = "coingecko"
     lot.cost_fmv_timestamp = datetime.utcnow()
     lot.cost_fmv_stale = False
-    
+
     return lot
 
 
@@ -149,16 +149,16 @@ def mock_balance():
     balance.cost_basis_in_base = Decimal("5000")
     balance.lot_count = 5
     balance.avg_unit_cost_in_base = Decimal("50")
-    
+
     # Mock asset relationship
     balance.asset = MagicMock()
     balance.asset.asset_id = 2
     balance.asset.symbol = "BTC"
     balance.asset.label = "Bitcoin"
-    
+
     # Mock account relationship
     balance.account = None
-    
+
     return balance
 
 
@@ -178,63 +178,71 @@ def mock_realized_pnl():
     entry.origin_unit_id = 1
     entry.realized_at = datetime.utcnow()
     entry.holding_period_days = 400
-    
+
     # Proceeds tracking metadata
     entry.proceeds_source = "inflow_value"
     entry.proceeds_price = Decimal("2000")
     entry.proceeds_price_source = "price_service"
     entry.proceeds_price_timestamp = datetime.utcnow()
-    
+
     # Derivative/attributed asset
     entry.attributed_asset = None
-    
+
     # Mock asset relationship
     entry.asset = MagicMock()
     entry.asset.asset_id = 2
     entry.asset.symbol = "BTC"
     entry.asset.label = "Bitcoin"
-    
+
     # Mock transaction relationship (for account_id/account_name)
     entry.transaction = MagicMock()
     entry.transaction.account_id = 1
     entry.transaction.account_rel = MagicMock()
     entry.transaction.account_rel.name = "TestAccount"
     entry.transaction.account_rel.envelope = None
-    
+
     return entry
 
 
 class TestGetVersionLots:
     """Tests for GET /pnl/versions/{id}/lots endpoint."""
 
-    def test_get_lots_returns_empty_for_new_version(self, mock_session, mock_version, no_filters):
+    def test_get_lots_returns_empty_for_new_version(
+        self, mock_session, mock_version, no_filters
+    ):
         """Test getting lots for a version with no lots."""
         from backend.api.routes.pnl import get_version_lots
-        
+
         # Setup: version exists but has no lots
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = []
         mock_exec_result.one.return_value = 0  # total count
         mock_session.exec.return_value = mock_exec_result
-        
-        result = get_version_lots(version_id=1, tx_filters=no_filters, session=mock_session)
-        
+
+        result = get_version_lots(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
+
         assert result["items"] == []
         assert result["total"] == 0
 
-    def test_get_lots_returns_formatted_lots(self, mock_session, mock_version, mock_cost_lot, no_filters):
+    def test_get_lots_returns_formatted_lots(
+        self, mock_session, mock_version, mock_cost_lot, no_filters
+    ):
         """Test getting lots returns properly formatted response."""
         from backend.api.routes.pnl import get_version_lots
-        
+
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = [mock_cost_lot]
         mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
-        
-        result = get_version_lots(version_id=1, tx_filters=no_filters, session=mock_session)
-        
+
+        result = get_version_lots(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
+
         assert len(result["items"]) == 1
         lot = result["items"][0]
         assert lot.asset.id == 2
@@ -247,29 +255,33 @@ class TestGetVersionLots:
         """Test getting lots for non-existent version raises 404."""
         from backend.api.routes.pnl import get_version_lots
         from fastapi import HTTPException
-        
+
         mock_session.get.return_value = None
-        
+
         with pytest.raises(HTTPException) as exc_info:
             get_version_lots(version_id=999, session=mock_session)
-        
+
         assert exc_info.value.status_code == 404
 
-    def test_get_lots_filters_by_asset_id(self, mock_session, mock_version, mock_cost_lot, no_filters):
+    def test_get_lots_filters_by_asset_id(
+        self, mock_session, mock_version, mock_cost_lot, no_filters
+    ):
         """Test getting lots with asset_id filter."""
         from backend.api.routes.pnl import get_version_lots
-        
+
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = [mock_cost_lot]
         mock_exec_result.one.return_value = 1  # total count
         mock_session.exec.return_value = mock_exec_result
-        
-        result = get_version_lots(version_id=1, asset_id=2, tx_filters=no_filters, session=mock_session)
-        
+
+        result = get_version_lots(
+            version_id=1, asset_id=2, tx_filters=no_filters, session=mock_session
+        )
+
         # Verify the query was built with asset_id filter
         mock_session.exec.assert_called()
-        
+
         assert len(result["items"]) == 1
         lot = result["items"][0]
         assert lot.asset.id == 2
@@ -278,17 +290,23 @@ class TestGetVersionLots:
 class TestGetVersionBalances:
     """Tests for GET /pnl/versions/{id}/balances endpoint."""
 
-    def test_get_balances_returns_formatted_balances(self, mock_session, mock_version, mock_cost_lot, no_filters):
+    def test_get_balances_returns_formatted_balances(
+        self, mock_session, mock_version, mock_cost_lot, no_filters
+    ):
         """Test getting balances returns properly formatted response."""
         from backend.api.routes.pnl import get_version_balances
-        
+
         mock_session.get.return_value = mock_version
-        mock_exec_result = MagicMock()
-        mock_exec_result.all.return_value = [mock_cost_lot]
-        mock_session.exec.return_value = mock_exec_result
-        
-        result = get_version_balances(version_id=1, tx_filters=no_filters, session=mock_session)
-        
+        lots_result = MagicMock()
+        lots_result.all.return_value = [mock_cost_lot]
+        empty_result = MagicMock()
+        empty_result.all.return_value = []
+        mock_session.exec.side_effect = [lots_result, empty_result]
+
+        result = get_version_balances(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
+
         assert len(result) == 1
         balance = result[0]
         assert balance.asset.id == 2
@@ -299,7 +317,9 @@ class TestGetVersionBalances:
         assert balance.cost_basis_in_base == 800.0
         assert balance.lot_count == 1
 
-    def test_grouped_balances_include_realized_only_assets_without_total_invested_key_error(self, mock_session, mock_version, no_filters):
+    def test_grouped_balances_include_realized_only_assets_without_total_invested_key_error(
+        self, mock_session, mock_version, no_filters
+    ):
         """Test realized-only grouped assets serialize with zero total invested."""
         from backend.api.routes.pnl import get_version_balances
 
@@ -333,6 +353,7 @@ class TestGetVersionBalances:
             empty_result,
             missing_assets_result,
             empty_result,
+            empty_result,
         ]
 
         result = get_version_balances(
@@ -355,10 +376,12 @@ class TestGetVersionBalances:
 class TestGetVersionRealizedPnl:
     """Tests for GET /pnl/versions/{id}/realized-pnl endpoint."""
 
-    def test_get_realized_pnl_returns_formatted_entries(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+    def test_get_realized_pnl_returns_formatted_entries(
+        self, mock_session, mock_version, mock_realized_pnl, no_filters
+    ):
         """Test getting realized P&L returns properly formatted response."""
         from backend.api.routes.pnl import get_version_realized_pnl
-        
+
         mock_session.get.return_value = mock_version
 
         # session.exec() is called 4 times: count, entries, fee-linked ids, FR overrides
@@ -368,10 +391,17 @@ class TestGetVersionRealizedPnl:
         entries_result.all.return_value = [mock_realized_pnl]
         empty_result = MagicMock()
         empty_result.all.return_value = []
-        mock_session.exec.side_effect = [count_result, entries_result, empty_result, empty_result]
-        
-        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
-        
+        mock_session.exec.side_effect = [
+            count_result,
+            entries_result,
+            empty_result,
+            empty_result,
+        ]
+
+        result = get_version_realized_pnl(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
+
         assert len(result["items"]) == 1
         entry = result["items"][0]
         assert entry.asset.id == 2
@@ -382,7 +412,9 @@ class TestGetVersionRealizedPnl:
         assert entry.holding_period_days == 400
 
     @pytest.mark.parametrize("category", ["crypto", "securities", None])
-    def test_get_realized_pnl_accepts_fr_tax_category(self, mock_session, mock_version, mock_realized_pnl, no_filters, category):
+    def test_get_realized_pnl_accepts_fr_tax_category(
+        self, mock_session, mock_version, mock_realized_pnl, no_filters, category
+    ):
         """Test that fr_tax_category param is accepted for all valid values."""
         from backend.api.routes.pnl import get_version_realized_pnl
 
@@ -396,10 +428,18 @@ class TestGetVersionRealizedPnl:
         empty_result_1.all.return_value = []
         empty_result_2 = MagicMock()
         empty_result_2.all.return_value = []
-        mock_session.exec.side_effect = [count_result, entries_result, empty_result_1, empty_result_2]
+        mock_session.exec.side_effect = [
+            count_result,
+            entries_result,
+            empty_result_1,
+            empty_result_2,
+        ]
 
         result = get_version_realized_pnl(
-            version_id=1, fr_tax_category=category, tx_filters=no_filters, session=mock_session
+            version_id=1,
+            fr_tax_category=category,
+            tx_filters=no_filters,
+            session=mock_session,
         )
 
         assert "items" in result
@@ -412,12 +452,12 @@ class TestCommitVersion:
     def test_commit_draft_success(self, mock_session, mock_version):
         """Test committing a draft version."""
         from backend.api.routes.pnl import commit_version
-        
+
         mock_version.status = "draft"
         mock_session.get.return_value = mock_version
-        
+
         result = commit_version(version_id=1, session=mock_session)
-        
+
         assert result["status"] == "committed"
         assert result["version_id"] == 1
         assert mock_version.status == "committed"
@@ -428,13 +468,13 @@ class TestCommitVersion:
         """Test committing a non-draft version raises 400."""
         from backend.api.routes.pnl import commit_version
         from fastapi import HTTPException
-        
+
         mock_version.status = "committed"
         mock_session.get.return_value = mock_version
-        
+
         with pytest.raises(HTTPException) as exc_info:
             commit_version(version_id=1, session=mock_session)
-        
+
         assert exc_info.value.status_code == 400
         assert "not 'draft'" in str(exc_info.value.detail)
 
@@ -442,28 +482,30 @@ class TestCommitVersion:
         """Test committing non-existent version raises 404."""
         from backend.api.routes.pnl import commit_version
         from fastapi import HTTPException
-        
+
         mock_session.get.return_value = None
-        
+
         with pytest.raises(HTTPException) as exc_info:
             commit_version(version_id=999, session=mock_session)
-        
+
         assert exc_info.value.status_code == 404
 
 
 class TestListVersions:
     """Tests for GET /pnl/versions endpoint."""
 
-    def test_list_versions_returns_formatted_list(self, mock_session, mock_version, mock_base_currency):
+    def test_list_versions_returns_formatted_list(
+        self, mock_session, mock_version, mock_base_currency
+    ):
         """Test listing versions returns properly formatted response."""
         from backend.api.routes.pnl import list_versions
-        
+
         mock_exec_result = MagicMock()
         mock_exec_result.all.side_effect = [[mock_version], [mock_base_currency]]
         mock_session.exec.return_value = mock_exec_result
-        
+
         result = list_versions(session=mock_session)
-        
+
         assert len(result) == 1
         version = result[0]
         assert version.version_id == 1
@@ -473,13 +515,13 @@ class TestListVersions:
     def test_list_versions_filters_by_status(self, mock_session):
         """Test listing versions with status filter."""
         from backend.api.routes.pnl import list_versions
-        
+
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = []
         mock_session.exec.return_value = mock_exec_result
-        
+
         result = list_versions(status="committed", session=mock_session)
-        
+
         assert result == []
         # Verify exec was called (the filter is applied in the query)
         mock_session.exec.assert_called()
@@ -491,14 +533,14 @@ class TestDeleteVersion:
     def test_delete_version_success(self, mock_session, mock_version):
         """Test deleting a version."""
         from backend.api.routes.pnl import delete_version
-        
+
         mock_session.get.return_value = mock_version
         mock_exec_result = MagicMock()
         mock_exec_result.all.return_value = []
         mock_session.exec.return_value = mock_exec_result
-        
+
         result = delete_version(version_id=1, session=mock_session)
-        
+
         assert result["status"] == "deleted"
         assert result["version_id"] == 1
         mock_session.delete.assert_called()
@@ -508,12 +550,12 @@ class TestDeleteVersion:
         """Test deleting non-existent version raises 404."""
         from backend.api.routes.pnl import delete_version
         from fastapi import HTTPException
-        
+
         mock_session.get.return_value = None
-        
+
         with pytest.raises(HTTPException) as exc_info:
             delete_version(version_id=999, session=mock_session)
-        
+
         assert exc_info.value.status_code == 404
 
 
@@ -654,6 +696,7 @@ class TestOverrideFrTax:
 
     def _make_body(self, is_taxable):
         from backend.api.routes.pnl import FrTaxOverrideRequest
+
         return FrTaxOverrideRequest(is_taxable=is_taxable)
 
     # --- SET override (true / false) ---
@@ -670,7 +713,8 @@ class TestOverrideFrTax:
         mock_session.get.return_value = mock_unit
 
         result = override_fr_tax(
-            version_id=1, pnl_id=10,
+            version_id=1,
+            pnl_id=10,
             body=self._make_body(is_taxable=False),
             session=mock_session,
         )
@@ -684,7 +728,9 @@ class TestOverrideFrTax:
         assert added.is_taxable is False
         mock_session.commit.assert_called_once()
 
-    def test_set_override_updates_existing_row(self, mock_session, mock_rpnl, mock_unit):
+    def test_set_override_updates_existing_row(
+        self, mock_session, mock_rpnl, mock_unit
+    ):
         """Changing override updates the existing TransactionTaxOverride row in place."""
         from backend.api.routes.pnl import override_fr_tax
 
@@ -698,7 +744,8 @@ class TestOverrideFrTax:
         mock_session.get.return_value = mock_unit
 
         result = override_fr_tax(
-            version_id=1, pnl_id=10,
+            version_id=1,
+            pnl_id=10,
             body=self._make_body(is_taxable=True),
             session=mock_session,
         )
@@ -710,7 +757,9 @@ class TestOverrideFrTax:
 
     # --- CLEAR override (null) ---
 
-    def test_clear_override_deletes_existing_row(self, mock_session, mock_rpnl, mock_unit):
+    def test_clear_override_deletes_existing_row(
+        self, mock_session, mock_rpnl, mock_unit
+    ):
         """Sending is_taxable=null deletes the override row and returns computed default."""
         from backend.api.routes.pnl import override_fr_tax
 
@@ -723,7 +772,8 @@ class TestOverrideFrTax:
         mock_session.get.return_value = mock_unit
 
         result = override_fr_tax(
-            version_id=1, pnl_id=10,
+            version_id=1,
+            pnl_id=10,
             body=self._make_body(is_taxable=None),
             session=mock_session,
         )
@@ -732,7 +782,9 @@ class TestOverrideFrTax:
         mock_session.delete.assert_called_once_with(existing_override)
         mock_session.commit.assert_called_once()
 
-    def test_clear_override_noop_when_no_existing(self, mock_session, mock_rpnl, mock_unit):
+    def test_clear_override_noop_when_no_existing(
+        self, mock_session, mock_rpnl, mock_unit
+    ):
         """Clearing when no override exists is a no-op (no error, no delete)."""
         from backend.api.routes.pnl import override_fr_tax
 
@@ -743,7 +795,8 @@ class TestOverrideFrTax:
         mock_session.get.return_value = mock_unit
 
         result = override_fr_tax(
-            version_id=1, pnl_id=10,
+            version_id=1,
+            pnl_id=10,
             body=self._make_body(is_taxable=None),
             session=mock_session,
         )
@@ -765,7 +818,8 @@ class TestOverrideFrTax:
 
         with pytest.raises(HTTPException) as exc:
             override_fr_tax(
-                version_id=1, pnl_id=999,
+                version_id=1,
+                pnl_id=999,
                 body=self._make_body(is_taxable=False),
                 session=mock_session,
             )
@@ -786,7 +840,8 @@ class TestOverrideFrTax:
 
         with pytest.raises(HTTPException) as exc:
             override_fr_tax(
-                version_id=1, pnl_id=10,
+                version_id=1,
+                pnl_id=10,
                 body=self._make_body(is_taxable=False),
                 session=mock_session,
             )
@@ -809,7 +864,8 @@ class TestOverrideFrTax:
 
         with pytest.raises(HTTPException) as exc:
             override_fr_tax(
-                version_id=1, pnl_id=10,
+                version_id=1,
+                pnl_id=10,
                 body=self._make_body(is_taxable=True),
                 session=mock_session,
             )
@@ -825,25 +881,35 @@ class TestOverrideFrTax:
 class TestFrTaxEffectiveInResponse:
     """Verify fr_tax_effective resolves from override > disposal_taxable."""
 
-    def test_no_override_uses_disposal_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+    def test_no_override_uses_disposal_taxable(
+        self, mock_session, mock_version, mock_realized_pnl, no_filters
+    ):
         """When no FR override exists, fr_tax_effective == disposal_taxable."""
         from backend.api.routes.pnl import get_version_realized_pnl
 
         mock_realized_pnl.disposal_taxable = True
         mock_session.get.return_value = mock_version
 
-        count_r = MagicMock(); count_r.one.return_value = 1
-        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
-        fee_r = MagicMock(); fee_r.all.return_value = []
-        override_r = MagicMock(); override_r.all.return_value = []  # no overrides
+        count_r = MagicMock()
+        count_r.one.return_value = 1
+        entries_r = MagicMock()
+        entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock()
+        fee_r.all.return_value = []
+        override_r = MagicMock()
+        override_r.all.return_value = []  # no overrides
         mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
 
-        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        result = get_version_realized_pnl(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
         entry = result["items"][0]
         assert entry.fr_tax_effective is True
         assert entry.taxable is True
 
-    def test_override_false_overrides_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+    def test_override_false_overrides_taxable(
+        self, mock_session, mock_version, mock_realized_pnl, no_filters
+    ):
         """FR override is_taxable=False overrides disposal_taxable=True."""
         from backend.api.routes.pnl import get_version_realized_pnl
 
@@ -851,19 +917,27 @@ class TestFrTaxEffectiveInResponse:
         mock_realized_pnl.transaction_id = 100
         mock_session.get.return_value = mock_version
 
-        count_r = MagicMock(); count_r.one.return_value = 1
-        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
-        fee_r = MagicMock(); fee_r.all.return_value = []
+        count_r = MagicMock()
+        count_r.one.return_value = 1
+        entries_r = MagicMock()
+        entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock()
+        fee_r.all.return_value = []
         # Override: tx 100 → not taxable for FR
-        override_r = MagicMock(); override_r.all.return_value = [(100, False)]
+        override_r = MagicMock()
+        override_r.all.return_value = [(100, False)]
         mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
 
-        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        result = get_version_realized_pnl(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
         entry = result["items"][0]
-        assert entry.taxable is True   # raw disposal_taxable unchanged
+        assert entry.taxable is True  # raw disposal_taxable unchanged
         assert entry.fr_tax_effective is False  # overridden for FR
 
-    def test_override_true_overrides_non_taxable(self, mock_session, mock_version, mock_realized_pnl, no_filters):
+    def test_override_true_overrides_non_taxable(
+        self, mock_session, mock_version, mock_realized_pnl, no_filters
+    ):
         """FR override is_taxable=True overrides disposal_taxable=False."""
         from backend.api.routes.pnl import get_version_realized_pnl
 
@@ -871,61 +945,99 @@ class TestFrTaxEffectiveInResponse:
         mock_realized_pnl.transaction_id = 100
         mock_session.get.return_value = mock_version
 
-        count_r = MagicMock(); count_r.one.return_value = 1
-        entries_r = MagicMock(); entries_r.all.return_value = [mock_realized_pnl]
-        fee_r = MagicMock(); fee_r.all.return_value = []
-        override_r = MagicMock(); override_r.all.return_value = [(100, True)]
+        count_r = MagicMock()
+        count_r.one.return_value = 1
+        entries_r = MagicMock()
+        entries_r.all.return_value = [mock_realized_pnl]
+        fee_r = MagicMock()
+        fee_r.all.return_value = []
+        override_r = MagicMock()
+        override_r.all.return_value = [(100, True)]
         mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
 
-        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        result = get_version_realized_pnl(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
         entry = result["items"][0]
-        assert entry.taxable is False   # raw unchanged
+        assert entry.taxable is False  # raw unchanged
         assert entry.fr_tax_effective is True  # overridden
 
-    def test_override_only_applies_to_matching_transaction(self, mock_session, mock_version, no_filters):
+    def test_override_only_applies_to_matching_transaction(
+        self, mock_session, mock_version, no_filters
+    ):
         """Override for tx 200 doesn't affect tx 100."""
         from backend.api.routes.pnl import get_version_realized_pnl
 
         entry1 = MagicMock()
-        entry1.pnl_id = 1; entry1.asset_id = 2; entry1.transaction_id = 100
-        entry1.qty = Decimal("1"); entry1.proceeds_in_base = Decimal("2000")
-        entry1.cost_basis_in_base = Decimal("1000"); entry1.pnl_in_base = Decimal("1000")
-        entry1.disposal_taxable = True; entry1.origin_unit_id = 1
-        entry1.realized_at = datetime.utcnow(); entry1.holding_period_days = 10
-        entry1.proceeds_source = None; entry1.proceeds_price = None
-        entry1.proceeds_price_source = None; entry1.proceeds_price_timestamp = None
+        entry1.pnl_id = 1
+        entry1.asset_id = 2
+        entry1.transaction_id = 100
+        entry1.qty = Decimal("1")
+        entry1.proceeds_in_base = Decimal("2000")
+        entry1.cost_basis_in_base = Decimal("1000")
+        entry1.pnl_in_base = Decimal("1000")
+        entry1.disposal_taxable = True
+        entry1.origin_unit_id = 1
+        entry1.realized_at = datetime.utcnow()
+        entry1.holding_period_days = 10
+        entry1.proceeds_source = None
+        entry1.proceeds_price = None
+        entry1.proceeds_price_source = None
+        entry1.proceeds_price_timestamp = None
         entry1.related_asset_symbol = None
         entry1.attributed_asset = None
-        entry1.asset = MagicMock(); entry1.asset.asset_id = 2
-        entry1.asset.symbol = "BTC"; entry1.asset.label = "Bitcoin"
-        entry1.transaction = MagicMock(); entry1.transaction.account_id = 1
-        entry1.transaction.account_rel = MagicMock(); entry1.transaction.account_rel.name = "Acc"
+        entry1.asset = MagicMock()
+        entry1.asset.asset_id = 2
+        entry1.asset.symbol = "BTC"
+        entry1.asset.label = "Bitcoin"
+        entry1.transaction = MagicMock()
+        entry1.transaction.account_id = 1
+        entry1.transaction.account_rel = MagicMock()
+        entry1.transaction.account_rel.name = "Acc"
 
         entry2 = MagicMock()
-        entry2.pnl_id = 2; entry2.asset_id = 2; entry2.transaction_id = 200
-        entry2.qty = Decimal("2"); entry2.proceeds_in_base = Decimal("4000")
-        entry2.cost_basis_in_base = Decimal("2000"); entry2.pnl_in_base = Decimal("2000")
-        entry2.disposal_taxable = True; entry2.origin_unit_id = 1
-        entry2.realized_at = datetime.utcnow(); entry2.holding_period_days = 20
-        entry2.proceeds_source = None; entry2.proceeds_price = None
-        entry2.proceeds_price_source = None; entry2.proceeds_price_timestamp = None
+        entry2.pnl_id = 2
+        entry2.asset_id = 2
+        entry2.transaction_id = 200
+        entry2.qty = Decimal("2")
+        entry2.proceeds_in_base = Decimal("4000")
+        entry2.cost_basis_in_base = Decimal("2000")
+        entry2.pnl_in_base = Decimal("2000")
+        entry2.disposal_taxable = True
+        entry2.origin_unit_id = 1
+        entry2.realized_at = datetime.utcnow()
+        entry2.holding_period_days = 20
+        entry2.proceeds_source = None
+        entry2.proceeds_price = None
+        entry2.proceeds_price_source = None
+        entry2.proceeds_price_timestamp = None
         entry2.related_asset_symbol = None
         entry2.attributed_asset = None
-        entry2.asset = MagicMock(); entry2.asset.asset_id = 2
-        entry2.asset.symbol = "BTC"; entry2.asset.label = "Bitcoin"
-        entry2.transaction = MagicMock(); entry2.transaction.account_id = 1
-        entry2.transaction.account_rel = MagicMock(); entry2.transaction.account_rel.name = "Acc"
+        entry2.asset = MagicMock()
+        entry2.asset.asset_id = 2
+        entry2.asset.symbol = "BTC"
+        entry2.asset.label = "Bitcoin"
+        entry2.transaction = MagicMock()
+        entry2.transaction.account_id = 1
+        entry2.transaction.account_rel = MagicMock()
+        entry2.transaction.account_rel.name = "Acc"
 
         mock_session.get.return_value = mock_version
 
-        count_r = MagicMock(); count_r.one.return_value = 2
-        entries_r = MagicMock(); entries_r.all.return_value = [entry1, entry2]
-        fee_r = MagicMock(); fee_r.all.return_value = []
+        count_r = MagicMock()
+        count_r.one.return_value = 2
+        entries_r = MagicMock()
+        entries_r.all.return_value = [entry1, entry2]
+        fee_r = MagicMock()
+        fee_r.all.return_value = []
         # Only tx 200 has an override
-        override_r = MagicMock(); override_r.all.return_value = [(200, False)]
+        override_r = MagicMock()
+        override_r.all.return_value = [(200, False)]
         mock_session.exec.side_effect = [count_r, entries_r, fee_r, override_r]
 
-        result = get_version_realized_pnl(version_id=1, tx_filters=no_filters, session=mock_session)
+        result = get_version_realized_pnl(
+            version_id=1, tx_filters=no_filters, session=mock_session
+        )
         items = result["items"]
 
         # entry1 (tx 100): no override → fr_tax_effective = disposal_taxable = True

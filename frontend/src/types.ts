@@ -900,6 +900,10 @@ export interface BalanceEntry {
     lot_count?: number;  // Number of lots for this balance
     income_total_in_base?: number;  // Gross income from dividends/interest
     income_event_count?: number;  // Number of income events
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
 }
 
 // Price API types
@@ -919,6 +923,10 @@ export interface PriceResponse {
     actual_price_date?: string;  // The actual date of the price used
     staleness_days?: number;  // Days between requested and actual price date
     warning?: string;  // Warning message for stale prices
+    price_fetch_eligible?: boolean;
+    valuation_status?: string | null;
+    valuation_note?: string | null;
+    skipped?: boolean;
     // Last known price (returned on error so the UI can display it)
     last_known_price?: number | null;
     last_known_price_date?: string | null;

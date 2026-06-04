@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.timeout(30)]
 # Polling config — test_mode uses local fixtures, so jobs finish fast
 POLL_INTERVAL = 0.1  # seconds between polls
 MAX_WAIT_NORMAL = 15  # seconds for normal job completion
-MAX_WAIT_ABORT = 5    # seconds for abort to finish
+MAX_WAIT_ABORT = 5  # seconds for abort to finish
 
 
 def _wait_for_completion(service, max_wait=MAX_WAIT_NORMAL):
@@ -30,6 +30,22 @@ def _wait_for_completion(service, max_wait=MAX_WAIT_NORMAL):
     while service.is_running() and waited < max_wait:
         time.sleep(POLL_INTERVAL)
         waited += POLL_INTERVAL
+
+
+@pytest.fixture(autouse=True)
+def isolated_e2e_database(monkeypatch):
+    test_db_url = os.getenv("TEST_DATABASE_URL", "")
+    if "trades_db_integ" not in test_db_url:
+        pytest.skip(
+            "E2E sync tests require TEST_DATABASE_URL pointing to trades_db_integ"
+        )
+
+    monkeypatch.setenv("DATABASE_URL", test_db_url)
+    from backend.db import database
+
+    database._engine = None
+    yield
+    database._engine = None
 
 
 @pytest.fixture

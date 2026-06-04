@@ -174,6 +174,10 @@ export interface AggregatedBalanceItem {
     unsettled_negative_count: number;  // Count of unsettled negative lots (excluded when filter active)
     total_fees_in_base?: number;  // Total fees at FMV (proceeds from fee disposals)
     category_ids: number[];  // Category IDs assigned to this asset (for client-side filtering)
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
 }
 
 // ============================================================================
@@ -234,6 +238,10 @@ export interface AssetPnLRow {
 
     // Whether this asset has cost lots in the P&L calculation
     has_lots?: boolean;
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
 
     // Whether this asset is unmapped (appears in live balance but has no DB entry)
     is_unmapped?: boolean;
@@ -1208,6 +1216,10 @@ export interface PerAccountBalanceItem {
     unsettled_negative_count: number;
     total_fees_in_base?: number;
     category_ids: number[];
+    has_open_position?: boolean;
+    price_fetch_eligible?: boolean;
+    valuation_status?: string;
+    valuation_note?: string | null;
 }
 
 // ============================================================================

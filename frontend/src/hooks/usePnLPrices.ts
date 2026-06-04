@@ -38,7 +38,8 @@ export function usePnLPrices() {
     const fetchPrices = useCallback(async (balances: BalanceEntry[], baseCurrency: string) => {
         if (!balances || balances.length === 0) return;
 
-        const assetIds = balances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
+        const priceableBalances = balances.filter(b => b.price_fetch_eligible !== false);
+        const assetIds = priceableBalances.map(b => b.asset.id).filter((id): id is number => id !== undefined);
         if (assetIds.length === 0) return;
 
         dispatch({ type: 'SET_IS_REFRESHING_PRICES', value: true });
@@ -75,7 +76,7 @@ export function usePnLPrices() {
                     last_known_price_date: lastKnownDate,
                     last_known_source: lastKnownSource,
                 };
-                const balance = balances.find(b => b.asset.id === assetId);
+                const balance = priceableBalances.find(b => b.asset.id === assetId);
                 if (balance) errorItem.asset.symbol = balance.asset.symbol;
 
                 dispatch({ type: 'UPSERT_PRICE', assetId, price: errorItem });
@@ -155,7 +156,7 @@ export function usePnLPrices() {
         if (assets && assets.length > 0) {
             // Only refresh assets that have cost lots — DB-only assets with
             // has_lots=false have zero quantity and don't need pricing.
-            const priceable = assets.filter(a => a.has_lots !== false);
+            const priceable = assets.filter(a => a.has_lots !== false && a.price_fetch_eligible !== false);
             if (priceable.length === 0) return;
             const balanceEntries: BalanceEntry[] = priceable.map(a => ({
                 asset: a.asset,
@@ -163,6 +164,10 @@ export function usePnLPrices() {
                 cost_basis_in_base: a.cost_basis,
                 avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
                 lot_count: a.lot_count,
+                has_open_position: a.has_open_position,
+                price_fetch_eligible: a.price_fetch_eligible,
+                valuation_status: a.valuation_status,
+                valuation_note: a.valuation_note,
             }));
             await fetchPrices(balanceEntries, config.base_currency_symbol);
             versionMetrics.refetch();
@@ -178,7 +183,7 @@ export function usePnLPrices() {
             .filter((id): id is number => id !== undefined);
         if (failedIds.length === 0 || !assets || assets.length === 0) return;
 
-        const priceable = assets.filter(a => a.has_lots !== false && failedIds.includes(a.asset.id!));
+        const priceable = assets.filter(a => a.has_lots !== false && a.price_fetch_eligible !== false && failedIds.includes(a.asset.id!));
         if (priceable.length === 0) return;
         const balanceEntries: BalanceEntry[] = priceable.map(a => ({
             asset: a.asset,
@@ -186,6 +191,10 @@ export function usePnLPrices() {
             cost_basis_in_base: a.cost_basis,
             avg_unit_cost_in_base: a.quantity > 0 ? a.cost_basis / a.quantity : 0,
             lot_count: a.lot_count,
+            has_open_position: a.has_open_position,
+            price_fetch_eligible: a.price_fetch_eligible,
+            valuation_status: a.valuation_status,
+            valuation_note: a.valuation_note,
         }));
         await fetchPrices(balanceEntries, config.base_currency_symbol);
         versionMetrics.refetch();

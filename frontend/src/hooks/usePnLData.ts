@@ -111,6 +111,10 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
             realized_event_count: balance.realized_event_count,
             warning_count: balance.warning_count,
             has_lots: balance.lot_count > 0 || balance.realized_event_count > 0,
+            has_open_position: balance.has_open_position,
+            price_fetch_eligible: balance.price_fetch_eligible,
+            valuation_status: balance.valuation_status,
+            valuation_note: balance.valuation_note,
         }));
     }, []);
 
@@ -343,6 +347,10 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                     cost_basis_in_base: b.cost_basis_in_base,
                     avg_unit_cost_in_base: b.avg_unit_cost_in_base,
                     lot_count: b.lot_count,
+                    has_open_position: b.has_open_position,
+                    price_fetch_eligible: b.price_fetch_eligible,
+                    valuation_status: b.valuation_status,
+                    valuation_note: b.valuation_note,
                 }));
                 fetchPrices(balanceEntries, config.base_currency_symbol);
             }
@@ -428,6 +436,10 @@ export function usePnLData({ isActive, onOpenHealthCheck, fetchPrices }: UsePnLD
                     cost_basis_in_base: b.cost_basis_in_base,
                     avg_unit_cost_in_base: b.avg_unit_cost_in_base,
                     lot_count: b.lot_count,
+                    has_open_position: b.has_open_position,
+                    price_fetch_eligible: b.price_fetch_eligible,
+                    valuation_status: b.valuation_status,
+                    valuation_note: b.valuation_note,
                 }));
                 fetchPrices(balanceEntries, versionData.base_currency_symbol ?? config.base_currency_symbol);
             }
