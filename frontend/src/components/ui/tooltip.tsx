@@ -1,46 +1,60 @@
-import { Portal, Tooltip as ChakraTooltip } from "@chakra-ui/react"
+import * as RadixTooltip from "@radix-ui/react-tooltip"
 import * as React from "react"
+import { cn } from "../../lib/cn"
 
-export interface TooltipProps extends ChakraTooltip.RootProps {
-  showArrow?: boolean
-  portalled?: boolean
-  portalRef?: React.RefObject<HTMLElement | null>
+export interface TooltipProps {
   content: React.ReactNode
-  contentProps?: ChakraTooltip.ContentProps
+  children: React.ReactNode
+  showArrow?: boolean
   disabled?: boolean
+  portalled?: boolean
+  /** Open delay in ms (maps to Radix `delayDuration`). */
+  openDelay?: number
+  /** Accepted for API parity with the previous Chakra wrapper; not used by Radix. */
+  closeDelay?: number
+  side?: "top" | "right" | "bottom" | "left"
+  contentProps?: React.ComponentPropsWithoutRef<typeof RadixTooltip.Content>
 }
 
 export const Tooltip = React.forwardRef<HTMLDivElement, TooltipProps>(
   function Tooltip(props, ref) {
     const {
-      showArrow,
+      content,
       children,
+      showArrow,
       disabled,
       portalled = true,
-      content,
+      openDelay = 200,
+      side = "top",
       contentProps,
-      portalRef,
-      ...rest
     } = props
 
-    if (disabled) return children
+    if (disabled) return <>{children}</>
+
+    // Square corners by design system: no rounded utilities.
+    const body = (
+      <RadixTooltip.Content
+        ref={ref}
+        side={side}
+        sideOffset={4}
+        {...contentProps}
+        className={cn(
+          "z-50 max-w-xs whitespace-pre-line bg-slate-900 px-2 py-1 text-xs text-white shadow-md",
+          contentProps?.className,
+        )}
+      >
+        {content}
+        {showArrow && <RadixTooltip.Arrow className="fill-slate-900" />}
+      </RadixTooltip.Content>
+    )
 
     return (
-      <ChakraTooltip.Root {...rest}>
-        <ChakraTooltip.Trigger asChild>{children}</ChakraTooltip.Trigger>
-        <Portal disabled={!portalled} container={portalRef}>
-          <ChakraTooltip.Positioner>
-            <ChakraTooltip.Content ref={ref} {...contentProps}>
-              {showArrow && (
-                <ChakraTooltip.Arrow>
-                  <ChakraTooltip.ArrowTip />
-                </ChakraTooltip.Arrow>
-              )}
-              {content}
-            </ChakraTooltip.Content>
-          </ChakraTooltip.Positioner>
-        </Portal>
-      </ChakraTooltip.Root>
+      <RadixTooltip.Provider delayDuration={openDelay}>
+        <RadixTooltip.Root>
+          <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
+          {portalled ? <RadixTooltip.Portal>{body}</RadixTooltip.Portal> : body}
+        </RadixTooltip.Root>
+      </RadixTooltip.Provider>
     )
   },
 )

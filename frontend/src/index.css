@@ -1,0 +1,15 @@
+/*
+ * Tailwind CSS v4 entry.
+ *
+ * NOTE: Preflight (Tailwind's base reset) is intentionally NOT imported while
+ * Chakra UI still owns the global reset. Re-enable it in the final migration
+ * phase (after Chakra is removed) by adding:
+ *   @import "tailwindcss/preflight.css" layer(base);
+ */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Class-based dark mode to match next-themes (attribute="class" -> .dark on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
